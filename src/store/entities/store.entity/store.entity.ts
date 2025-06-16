@@ -24,8 +24,8 @@ export class StoreEntity {
   @Column({ type: 'int' })
   rejectedDemands: number;
 
-  @Column({ nullable: true })
-  createdBy: number;
+  // @Column({ nullable: true })
+  // createdBy: number;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'createdBy' })

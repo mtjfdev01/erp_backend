@@ -29,32 +29,32 @@ export class UsersSeeder {
     const users: SeedUser[] = [
       {
         email: 'store@example.com',
-        password: 'store123',
+        password: 'store%1123',
         department: Department.STORE,
         role: UserRole.USER,
       },
       {
         email: 'procurements@example.com',
-        password: 'procurements123',
+        password: 'procurements%1123',
         department: Department.PROCUREMENTS,
         role: UserRole.USER,
       },
       {
         email: 'program@example.com',
-        password: 'program123',
+        password: 'program%1123',
         department: Department.PROGRAM,
         role: UserRole.USER,
       },
       {
         email: 'finance@example.com',
-        password: 'finance123',
+        password: 'finance%1123',
         department: Department.ACCOUNTS_AND_FINANCE,
         role: UserRole.USER,
       },
       {
         email: 'admin@example.com',
-        password: 'admin123',
-        department: Department.STORE, // Admin can access all departments
+        password: 'admin%1123',
+        department: Department.ADMIN, // Admin can access all departments
         role: UserRole.ADMIN,
       },
     ];

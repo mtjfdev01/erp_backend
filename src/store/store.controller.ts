@@ -8,7 +8,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { User, UserRole } from '../users/user.entity';
 
 @Controller('store')
-@UseGuards(JwtGuard, RolesGuard)
+// @UseGuards(RolesGuard)
 export class StoreController {
   constructor(private readonly storeService: StoreService) {}
 

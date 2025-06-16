@@ -13,10 +13,7 @@ export class StoreService {
   ) {}
 
   async create(createDto: CreateStoreDto, user: User) {
-    const entity = this.storeRepository.create({
-      ...createDto,
-      createdBy: user.id,
-    });
+    const entity = this.storeRepository.create(createDto);
     return this.storeRepository.save(entity);
   }
 
@@ -24,7 +21,7 @@ export class StoreService {
     if (user.role === UserRole.ADMIN) {
       return this.storeRepository.find();
     }
-    return this.storeRepository.find({ where: { createdBy: user.id } });
+    return this.storeRepository.find();
   }
 
   async findOne(id: number, user: User) {
@@ -32,32 +29,17 @@ export class StoreService {
     if (!entity) {
       throw new NotFoundException('Store record not found');
     }
-    
-    if (user.role !== UserRole.ADMIN && entity.createdBy !== user.id) {
-      throw new ForbiddenException('You do not have access to this record');
-    }
-    
     return entity;
   }
 
   async update(id: number, updateDto: Partial<CreateStoreDto>, user: User) {
     const entity = await this.findOne(id, user);
-    
-    if (user.role !== UserRole.ADMIN && entity.createdBy !== user.id) {
-      throw new ForbiddenException('You do not have permission to update this record');
-    }
-    
     await this.storeRepository.update(id, updateDto);
     return this.findOne(id, user);
   }
 
   async remove(id: number, user: User) {
     const entity = await this.findOne(id, user);
-    
-    if (user.role !== UserRole.ADMIN && entity.createdBy !== user.id) {
-      throw new ForbiddenException('You do not have permission to delete this record');
-    }
-    
     return this.storeRepository.remove(entity);
   }
 }

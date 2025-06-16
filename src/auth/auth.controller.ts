@@ -18,52 +18,57 @@ export class AuthController {
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) response: Response,
   ) {
+    console.log('Login attempt for:', loginDto.email);
+    
     const user = await this.authService.validateUser(
       loginDto.email,
       loginDto.password,
     );
     
     const result = await this.authService.login(user);
+    console.log('Login successful, setting cookies...');
     
     // Set JWT in HTTP-only cookie
-    response.cookie('jwt', result.token, {
+    const jwtCookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: false,
+      sameSite: 'lax' as const,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    });
+      path: '/'
+    };
 
-    // Set user data in a separate non-httpOnly cookie for frontend access
-    response.cookie('user_data', JSON.stringify(result.user), {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    });
+    console.log('Setting JWT cookie with options:', jwtCookieOptions);
+    response.cookie('jwt', result.token, jwtCookieOptions);
 
-    return { message: 'Login successful', user: result.user };
+    console.log('Returning response with user data');
+    return { 
+      message: 'Login successful',
+      user: result.user // Include user data in response
+    };
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) response: Response) {
-    // Clear both JWT and user data cookies
-    response.clearCookie('jwt', {
+    console.log('Logout request received, clearing cookies...');
+    
+    const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-    response.clearCookie('user_data', {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
+      secure: false,
+      sameSite: 'lax' as const,
+      path: '/'
+    };
+
+    response.clearCookie('jwt', cookieOptions);
+    
+    console.log('Cookies cleared');
     return { message: 'Logged out successfully' };
   }
 
   @Get('me')
   @UseGuards(JwtGuard)
   async getProfile(@Req() request: Request) {
+    console.log('Profile request received, cookies:', request.cookies);
     const token = request.cookies?.jwt;
     const user = await this.authService.validateToken(token);
     return { user };
