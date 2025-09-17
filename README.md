@@ -97,3 +97,48 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Permissions Seeder: Assign Super Admin Permissions
+
+To assign all permissions to a super admin user, use the PermissionsSeeder service. This is useful for initializing your system with a super admin account that has full access to all modules and actions.
+
+### Running the Seeder from Terminal
+
+You can run the permissions seeder directly from the terminal using the provided script:
+
+```bash
+# Using npm script (recommended)
+npm run seed:permissions
+
+# Or with a specific user ID
+npm run seed:permissions -- 5
+
+# Alternative: Using ts-node directly
+npx ts-node -r tsconfig-paths/register seed-permissions.ts
+
+# Or with a specific user ID
+npx ts-node -r tsconfig-paths/register seed-permissions.ts 5
+```
+
+### Example Usage (NestJS Script or Service)
+
+```typescript
+import { PermissionsSeeder } from './src/permissions/seeder/permissions.seeder';
+
+// Assume you have access to NestJS DI context (e.g., in a script or service)
+const permissionsSeeder = app.get(PermissionsSeeder);
+const superAdminUserId = 1; // Replace with your super admin's user ID
+await permissionsSeeder.seedSuperAdminPermissions(superAdminUserId);
+```
+
+- This will assign all permissions (create, list_view, view, update, delete, etc.) to the specified user.
+- You can find and customize the default permissions structure in `src/permissions/utils/permissions.util.ts`.
+
+### When to Use
+- After creating your first super admin user
+- When resetting or initializing permissions for a new environment
+- When you need to quickly assign super admin permissions from the command line
+
+---
+
+
