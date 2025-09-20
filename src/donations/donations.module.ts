@@ -6,6 +6,7 @@ import { Donation } from './entities/donation.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions/permissions.module';
 import { EmailModule } from '../email/email.module';
+import { PayfastService } from './payfast.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { EmailModule } from '../email/email.module';
     EmailModule
 ], 
   controllers: [DonationsController],
-  providers: [DonationsService],
+  providers: [DonationsService, PayfastService],
   exports: [DonationsService],
 })
 export class DonationsModule {}

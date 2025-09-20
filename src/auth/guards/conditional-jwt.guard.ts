@@ -11,7 +11,7 @@ export class ConditionalJwtGuard implements CanActivate {
     
     // Allow requests from localhost:3001 without token
     if (request.headers.origin === 'http://localhost:3001') {
-      console.log('Bypassing authentication for localhost:3002');
+      console.log('Bypassing authentication for localhost:3001');
       // Set a default user for localhost:3001 requests
       request['user'] = {
         id: 0,

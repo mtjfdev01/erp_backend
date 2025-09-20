@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Donation } from './entities/donation.entity';
 import { EmailService } from '../email/email.service';
+import { PayfastService } from './payfast.service';
 import axios from 'axios';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class DonationsService {
     @InjectRepository(Donation)
     private donationRepository: Repository<Donation>,
     private emailService: EmailService,
+    private payfastService: PayfastService,
   ) {}
 
   async create(createDonationDto: CreateDonationDto) {
@@ -22,7 +24,7 @@ export class DonationsService {
      const donation = this.donationRepository.create(createDonationDto);
      const savedDonation = await this.donationRepository.save(donation);
 
-      // console.log("createDonationDto*****************************", createDonationDto);
+      console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
       // Determine which Meezan credentials to use based on donation type
@@ -45,7 +47,7 @@ export class DonationsService {
         orderNumber: savedDonation.id.toString(),
         amount: (savedDonation.amount * 100).toString(), // amount in minor units (PKR -> paisa)
         currency: '586',
-        returnUrl: `${process.env.BASE_Frontend_URL}/thanks`,
+        returnUrl: `${process.env.BASE_Frontend_URL}/thanks?donation_id=${savedDonation.id}`,
         description: savedDonation.item_name || (isZakat ? 'Zakat Donation' : 'Sadqa Donation'),
       });
 
@@ -166,6 +168,20 @@ export class DonationsService {
         throw new HttpException('Blinq Token is not valid', 400);
       }
     }
+    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'payfast') {
+      // Get complete response from Payfast
+      const payfastResponse = await this.payfastService.getAccessToken(
+        savedDonation.id.toString(),
+        savedDonation.amount
+      );
+
+      console.log("payfastResponse_____", payfastResponse);
+      // Return complete Payfast response
+      return {...payfastResponse, 
+        BASKET_ID: savedDonation.id.toString(),
+        TXNAMT: savedDonation.amount.toString(),
+      };
+    }
     else {
       throw new HttpException('Invalid donation method', 400);
     }
@@ -231,4 +247,119 @@ export class DonationsService {
       throw new Error(`Failed to delete donation: ${error.message}`);
     }
   }
+
+  async updateDonationStatus(payload: any) {
+    try {
+      console.log("Updating donation status with payload:", payload);
+      
+      let donationId: string;
+      let paymentMethod: string;
+      
+      // Determine payment method and extract donation ID
+      if (payload.transaction_id && payload.err_code !== undefined && payload.basket_id) {
+        // Payfast payload format
+        paymentMethod = 'payfast';
+        donationId = payload.basket_id;
+        console.log("Processing Payfast status update");
+      } else if (payload.payment_method && (payload.payment_method === 'meezan' || payload.payment_method === 'blinq')) {
+        
+        // Meezan or Blinq payload format
+        paymentMethod = payload.payment_method;
+        donationId = payload.donation_id || payload.orderId || payload.order_id;
+        console.log(`Processing ${paymentMethod} status update`);
+      } else {
+        throw new Error('Invalid payload format: Unable to determine payment method or donation ID');
+      }
+
+      if (!donationId) {
+        throw new Error('Donation ID not found in payload');
+      }
+
+      // Find the donation by ID
+      const donation = await this.donationRepository.findOne({ 
+        where: { id: parseInt(donationId) } 
+      });
+
+      if (!donation) {
+        throw new NotFoundException(`Donation with ID ${donationId} not found`);
+      }
+
+      // Update donation status based on payment method
+      let newStatus: string;
+      let updateData: any = {};
+
+      if (paymentMethod === 'payfast') {
+        // Payfast status logic
+        if (payload.err_code === '00' || payload.err_code === 0) {
+          newStatus = 'completed';
+        } else {
+          newStatus = 'failed';
+        }
+        
+        updateData = {
+          status: newStatus,
+          transaction_id: payload.transaction_id,
+          error_code: payload.err_code,
+          error_message: payload.err_msg,
+        };
+        
+      } else if (paymentMethod === 'meezan') {
+        // Meezan status logic
+        if (payload.status === 'completed' || payload.status === 'success') {
+          newStatus = 'completed';
+        } else {
+          newStatus = 'failed';
+        }
+        
+        updateData = {
+          status: newStatus,
+          transaction_id: payload.transaction_id,
+          error_code: payload.error_code,
+          error_message: payload.error_message,
+        };
+        
+      } else if (paymentMethod === 'blinq') {
+        // Blinq status logic
+        if (payload.status === 'completed' || payload.status === 'success') {
+          newStatus = 'completed';
+        } else {
+          newStatus = 'failed';
+        }
+        
+        updateData = {
+          status: newStatus,
+          transaction_id: payload.transaction_id,
+          error_code: payload.error_code,
+          error_message: payload.error_message,
+        };
+      }
+
+      // Update the donation
+      await this.donationRepository.update(parseInt(donationId), updateData);
+
+      // Get updated donation
+      const updatedDonation = await this.donationRepository.findOne({ 
+        where: { id: parseInt(donationId) } 
+      });
+
+      console.log(`Donation ${donationId} status updated to: ${newStatus}`);
+      
+      return {
+        donationId: parseInt(donationId),
+        paymentMethod,
+        newStatus,
+        // updatedDonation,
+      };
+      
+    } catch (error) {
+      console.error("Error in updateDonationStatus:", error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Failed to update donation status: ${error.message}`);
+    }
+  }
 }
+
+
+

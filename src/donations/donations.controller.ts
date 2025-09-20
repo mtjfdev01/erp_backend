@@ -122,4 +122,26 @@ export class DonationsController {
       });
     }
   }
+
+  @Post('status')
+  async updateDonationStatus(@Body() payload: any, @Res() res: Response) {
+    try {
+      console.log("Donation status update payload:", payload);
+      
+      const result = await this.donationsService.updateDonationStatus(payload);
+      
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Donation status updated successfully',
+        data: result,
+      });
+    } catch (error) {
+      console.error("Error updating donation status:", error);
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
 }
