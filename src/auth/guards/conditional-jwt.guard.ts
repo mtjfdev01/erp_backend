@@ -10,7 +10,7 @@ export class ConditionalJwtGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     
     // Allow requests from localhost:3001 without token
-    if (request.headers.origin == 'http://localhost:3001' || 'https://mtjf-donations.vercel.app') {
+    if (request.headers.origin == 'http://localhost:3000' || 'https://mtjf-donations.vercel.app') {
       console.log('Bypassing authentication for localhost:3001');
       // Set a default user for localhost:3001 requests
       request['user'] = {

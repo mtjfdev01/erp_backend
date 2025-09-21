@@ -72,19 +72,19 @@ export class DonationsService {
       await this.donationRepository.save(savedDonation);
 
       // Step 6: Send confirmation email to donor
-      if (savedDonation.donor_email) {
-        await this.emailService.sendDonationConfirmation({
-          donorName: savedDonation.donor_name || 'Valued Donor',
-          donorEmail: savedDonation.donor_email,
-          amount: savedDonation.amount,
-          currency: savedDonation.currency || 'PKR',
-          paymentUrl: data.formUrl,
-          donationMethod: 'meezan',
-          donationType: savedDonation.donation_type || 'sadqa',
-          orderId: data.orderId,
-        });
-      }
-
+      // if (savedDonation.donor_email) {
+      //   await this.emailService.sendDonationConfirmation({
+      //     donorName: savedDonation.donor_name || 'Valued Donor',
+      //     donorEmail: savedDonation.donor_email,
+      //     amount: savedDonation.amount,
+      //     currency: savedDonation.currency || 'PKR',
+      //     paymentUrl: data.formUrl,
+      //     donationMethod: 'meezan',
+      //     donationType: savedDonation.donation_type || 'sadqa',
+      //     orderId: data.orderId,
+      //   });
+      // }
+      
       // Step 7: Return donation and redirect URL
       return {
         paymentUrl: data.formUrl,
