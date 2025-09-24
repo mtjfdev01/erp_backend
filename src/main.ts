@@ -13,7 +13,8 @@ async function bootstrap() {
     'https://unique-kangaroo-920e66.netlify.app', // Your Netlify URL
     'https://29b8-103-131-212-77.ngrok-free.app', // Your specific ngrok URL
     'http://localhost:3001', // Special origin - bypasses JWT authentication (see ConditionalJwtGuard)
-    'https://mtjf-donations.vercel.app'
+    'https://mtjf-donations.vercel.app',
+    'https://donation.mtjfoundation.org'
   ];
 
   app.enableCors({
