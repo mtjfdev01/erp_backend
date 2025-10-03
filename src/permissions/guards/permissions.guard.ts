@@ -48,7 +48,7 @@ console.log("23456753424567", user);
         // Check if user has ANY of the permissions in the array
         for (const permission of requiredPermission) {
           const hasThisPermission = await this.permissionsService.hasPermission(
-            user.id,
+            Number(user.id),
             permission,
           );
           if (hasThisPermission) {
@@ -73,6 +73,7 @@ console.log("23456753424567", user);
 
       return true;
     } catch (error) {
+      console.log('error', error);
       if (error instanceof ForbiddenException) {
         throw error;
       }

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole, Department } from './user.entity';
 import { PermissionsEntity } from '../permissions/entities/permissions.entity';
+import { applyCommonFilters, FilterPayload } from '../utils/filters/common-filter.util';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,6 +22,9 @@ interface PaginationOptions {
 
 @Injectable()
 export class UsersService {
+  // Define searchable columns for user search
+  private readonly searchableColumns = ['first_name', 'last_name', 'email',];
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -148,25 +152,17 @@ export class UsersService {
     const queryBuilder = this.userRepository.createQueryBuilder('user')
       .leftJoinAndSelect('user.permissions', 'permissions');
     
-    // Apply search filter
-    if (search) {
-      queryBuilder.andWhere(
-        '(user.first_name ILIKE :search OR user.last_name ILIKE :search OR user.email ILIKE :search OR user.phone ILIKE :search)',
-        { search: `%${search}%` }
-      );
-    }
+    // Build filters object for common filter utility
+    const filters: FilterPayload = {
+      search,
+      department,
+      role,
+    };
     
-    // Apply department filter
-    if (department) {
-      queryBuilder.andWhere('user.department = :department', { department });
-    }
+    // Apply common filters using utility
+    applyCommonFilters(queryBuilder, filters, this.searchableColumns, 'user');
     
-    // Apply role filter
-    if (role) {
-      queryBuilder.andWhere('user.role = :role', { role });
-    }
-    
-    // Apply active status filter
+    // Apply active status filter separately (boolean handling)
     if (isActive !== undefined) {
       queryBuilder.andWhere('user.isActive = :isActive', { isActive });
     }

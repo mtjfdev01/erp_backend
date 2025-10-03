@@ -9,15 +9,16 @@ export class ConditionalJwtGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     
-    // Allow requests from localhost:3001 without token
-    if (request.headers.origin == 'http://localhost:3000' || 'https://donation.mtjfoundation.org') {
-      console.log('Bypassing authentication for localhost:3001');
-      // Set a default user for localhost:3001 requests
+    // Allow requests from localhost:3000 or donation domain without token
+    if (request.headers.origin === 'http://localhost:3000' || request.headers.origin === 'https://donation.mtjfoundation.org') {
+      console.log(`Bypassing authentication for ${request.headers.origin}`);
+      // Set a default user for public donation requests
       request['user'] = {
-        id: 0,
-        email: 'localhost@system',
-        role: 'super_admin',
-        department: 'system'
+        id: -1, // Use -1 to indicate a system/public user
+        email: 'public@system',
+        role: 'public_donor',
+        department: 'system',
+        permissions: [] // Public users have no permissions
       };
       return true;
     }

@@ -13,6 +13,7 @@ import { AdminModule } from './admin/admin.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DonationsModule } from './donations/donations.module';
+import { DmsModule } from './dms/dms.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { DonationsModule } from './donations/donations.module';
     PermissionsModule,
     EventEmitterModule.forRoot(),
     DonationsModule,
+    DmsModule,
     ],
   controllers: [AppController],
   providers: [AppService],

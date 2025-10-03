@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { Donation } from './entities/donation.entity';
 import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
+import { applyCommonFilters, FilterPayload } from '../utils/filters/common-filter.util';
 import axios from 'axios';
 
 @Injectable()
@@ -23,8 +24,8 @@ export class DonationsService {
      const blinq_url="https://api.blinq.pk/";
      const donation = this.donationRepository.create(createDonationDto);
      const savedDonation = await this.donationRepository.save(donation);
-
-      console.log("createDonationDto*****************************");
+      
+      // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
       // Determine which Meezan credentials to use based on donation type
@@ -176,6 +177,20 @@ export class DonationsService {
       );
 
       console.log("payfastResponse_____", payfastResponse);
+      
+      // // Send confirmation email to donor
+      // if (savedDonation.donor_email) {
+      //   await this.emailService.sendDonationConfirmation({
+      //     donorName: savedDonation.donor_name || 'Valued Donor',
+      //     donorEmail: savedDonation.donor_email,
+      //     amount: savedDonation.amount,
+      //     currency: savedDonation.currency || 'PKR',
+      //     paymentUrl: payfastResponse?.paymentUrl || payfastResponse?.url,
+      //     donationMethod: 'payfast',
+      //     donationType: savedDonation.donation_type || 'sadqa',
+      //     orderId: payfastResponse?.basketId || savedDonation.id.toString(),
+      //   });
+      // }
       // Return complete Payfast response
       return {...payfastResponse, 
         BASKET_ID: savedDonation.id.toString(),
@@ -191,9 +206,37 @@ export class DonationsService {
     }
   }
 
-  async findAll() {
+  async findAll(
+    page = 1, 
+    pageSize = 10, 
+    sortField = 'created_at', 
+    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    filters: FilterPayload = {}
+  ) {
     try {
-      return await this.donationRepository.find();
+      // Define searchable fields for donations
+      const searchFields = ['donor_name', 'donor_email', 'item_name', 'item_description'];
+      
+      // Create base query
+      const query = this.donationRepository.createQueryBuilder('donation');
+      
+      // Apply common filters
+      applyCommonFilters(query, filters, searchFields, 'donation');
+      
+      // Apply pagination
+      const skip = (page - 1) * pageSize;
+      query.skip(skip).take(pageSize);
+      
+      // Apply sorting
+      query.orderBy(`donation.${sortField}`, sortOrder);
+      
+      const [data, total] = await query.getManyAndCount();
+      const totalPages = Math.ceil(total / pageSize);
+      
+      return {
+        data,
+        pagination: { page, pageSize, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
+      };
     } catch (error) {
       throw new Error(`Failed to retrieve donations: ${error.message}`);
     }
@@ -357,6 +400,81 @@ export class DonationsService {
         throw error;
       }
       throw new Error(`Failed to update donation status: ${error.message}`);
+    }
+  }
+
+  // PayFast IPN Handler - Public endpoint logic
+  async handlePayfastIpn(query: any) {
+    try {
+      console.log("=== PAYFAST IPN RECEIVED ===");
+      console.log("Full IPN Query Parameters:", JSON.stringify(query, null, 2));
+      console.log("Timestamp:", new Date().toISOString());
+      
+      // Extract key parameters from PayFast IPN
+      const {
+        basket_id,
+        err_code,
+        validation_hash,
+        transaction_id,
+        order_date,
+        PaymentName,
+        transaction_amount,
+        merchant_amount,
+        // Add any other fields you want to log
+      } = query;
+
+      console.log("=== EXTRACTED PARAMETERS ===");
+      console.log("Basket ID:", basket_id);
+      console.log("Error Code:", err_code);
+      console.log("Validation Hash:", validation_hash);
+      console.log("Transaction ID:", transaction_id);
+      console.log("Order Date:", order_date);
+      console.log("Payment Name:", PaymentName);
+      console.log("Transaction Amount:", transaction_amount);
+      console.log("Merchant Amount:", merchant_amount);
+
+      // TODO: Implement hash verification
+      // const expectedHash = this.verifyPayfastHash(basket_id, err_code, validation_hash);
+      // console.log("Hash verification result:", expectedHash);
+
+      // TODO: Get donation by basket_id and update status
+      // const donation = await this.findDonationByBasketId(basket_id);
+      // console.log("Found donation:", donation);
+      
+      // TODO: Update donation status based on err_code
+      // if (err_code === '000' || err_code === '00') {
+      //   await this.updateDonationFromIpn({
+      //     basket_id: basket_id,
+      //     status: 'completed',
+      //     transaction_id: transaction_id,
+      //     payment_method: 'payfast'
+      //   });
+      //   console.log("Donation marked as completed");
+      // } else {
+      //   await this.updateDonationFromIpn({
+      //     basket_id: basket_id,
+      //     status: 'failed',
+      //     error_code: err_code,
+      //     payment_method: 'payfast'
+      //   });
+      //   console.log("Donation marked as failed");
+      // }
+
+      console.log("=== IPN PROCESSING COMPLETE ===");
+      
+      return {
+        basket_id: basket_id,
+        err_code: err_code,
+        transaction_id: transaction_id,
+        processed: true
+      };
+      
+    } catch (error) {
+      console.error("=== IPN PROCESSING ERROR ===");
+      console.error("Error:", error.message);
+      console.error("Stack:", error.stack);
+      
+      throw error;
     }
   }
 }

@@ -8,8 +8,10 @@ import {
   Delete, 
   HttpStatus, 
   Res, 
-  UseGuards 
+  UseGuards,
+  Query
 } from '@nestjs/common';
+import { FilterPayload } from '../utils/filters/common-filter.util';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
@@ -45,20 +47,48 @@ export class DonationsController {
   }
 
   @Get()
-  // @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager'])
-  async findAll(@Res() res: Response) {
+  @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  async findAll(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sortField') sortField?: string,
+    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('donation_type') donation_type?: string,
+    @Query('donation_method') donation_method?: string,
+    @Query('date') date?: string,
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+    @Res() res?: Response,
+  ) {
     try {
-      const result = await this.donationsService.findAll();
+      const pageNum = page ? parseInt(page) : 1;
+      const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
+      
+      // Build filters object from query parameters
+      const filters: FilterPayload = {
+        search,
+        status,
+        donation_type,
+        donation_method,
+        date,
+        start_date,
+        end_date,
+      };
+      
+      const result = await this.donationsService.findAll(pageNum, pageSizeNum, sortField, sortOrder, filters);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: 'Donations retrieved successfully',
-        data: result,
+        ...result,
       });
     } catch (error) {
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,
-        data: null,
+        data: [],
+        pagination: null,
       });
     }
   }
@@ -144,4 +174,5 @@ export class DonationsController {
       });
     }
   }
+
 }

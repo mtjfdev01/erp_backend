@@ -1,32 +1,79 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
-export class EmailService {
+export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter;
 
   constructor(private configService: ConfigService) {
     this.initializeTransporter();
+    this.validateConfiguration();
   }
 
   private initializeTransporter() {
+    const host = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com');
+    const port = Number(this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '587'));
+    const secure = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_SECURE', 'false')) === 'true';
+    const user = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+    const pass = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PASSWORD', '');
+    const rejectUnauthorized = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_TLS_REJECT_UNAUTHORIZED', 'true')) === 'true';
+
+    console.log(
+      "host", host,
+      "port", port,
+      "secure", secure,
+      "user", user,
+      "pass", pass,
+      "rejectUnauthorized", rejectUnauthorized
+    )
     this.transporter = nodemailer.createTransport({
-      host: this.configService.get('AWS_SES_SMTP_HOST', 'email-smtp.eu-north-1.amazonaws.com'),
-      port: this.configService.get('AWS_SES_SMTP_PORT', 587),
-      secure: false, // true for 465, false for other ports
-      auth: {
-        user: this.configService.get('AWS_SES_SMTP_USERNAME'), // Your AWS SES SMTP username
-        pass: this.configService.get('AWS_SES_SMTP_PASSWORD'), // Your AWS SES SMTP password
-      },
-      tls: {
-        rejectUnauthorized: false, // Allow self-signed certificates
-      },
-    });
+      host,
+      port,
+      secure, // false for 587 (STARTTLS), true for 465
+      auth: { user, pass },
+      tls: { rejectUnauthorized },
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 50,
+      // Optional hard timeouts
+      socketTimeout: 30_000,
+      connectionTimeout: 20_000,
+    } as nodemailer.TransportOptions);
   }
 
-  async sendDonationConfirmation(donationData: {
+  async onModuleInit() {
+    try {
+      await this.transporter.verify();
+      this.logger.log('SMTP connection verified');
+    } catch (e: any) {
+      this.logger.error(`SMTP verify failed: ${e?.message}`);
+    }
+  }
+
+  private validateConfiguration() {
+    const username = this.configService.get('GOOGLE_WORKSPACE_SMTP_USERNAME');
+    const password = this.configService.get('GOOGLE_WORKSPACE_SMTP_PASSWORD');
+    
+    if (!username || username === 'donations@mtjfoundation.com') {
+      this.logger.warn('GOOGLE_WORKSPACE_SMTP_USERNAME not configured, using default value');
+    }
+    
+    if (!password || password === '') {
+      this.logger.error('GOOGLE_WORKSPACE_SMTP_PASSWORD not configured - email sending will fail');
+    }
+    
+    this.logger.log('Email service configuration validated');
+  }
+
+  private donationLabel(type?: string) {
+    if (type === 'zakat') return 'Zakat';
+    if (type === 'sadqa' || type === 'sadaqah') return 'Sadqa';
+    return 'General';
+  }
+
+  async sendDonationConfirmation(d: {
     donorName: string;
     donorEmail: string;
     amount: number;
@@ -37,47 +84,30 @@ export class EmailService {
     orderId?: string;
   }): Promise<boolean> {
     try {
-      // Get verified sender email from environment
-      const verifiedSenderEmail = this.configService.get('VERIFIED_SENDER_EMAIL');
-      const senderName = this.configService.get('SENDER_NAME', 'Donation System');
-      
-      // Debug logging
-      this.logger.log(`VERIFIED_SENDER_EMAIL from config: ${verifiedSenderEmail}`);
-      this.logger.log(`SENDER_NAME from config: ${senderName}`);
-      
-      if (!verifiedSenderEmail) {
-        this.logger.error('VERIFIED_SENDER_EMAIL not configured');
-        return false;
-      }
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const typeLabel = this.donationLabel(d.donationType);
 
-      const mailOptions = {
-        from: {
-          name: senderName,
-          address: verifiedSenderEmail
-        },
-        to: donationData.donorEmail,
-        subject: `${donationData.donationType === 'zakat' ? 'Zakat' : 'Sadqa'} Donation Confirmation - ${donationData.orderId || 'Pending'}`,
-        html: this.generateDonationConfirmationTemplate(donationData),
-        text: this.generateDonationConfirmationText(donationData),
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress }, // must be allowed in Gmail
+        to: d.donorEmail,
+        subject: `${typeLabel} Donation Confirmation - ${d.orderId || 'Pending'}`,
+        html: this.generateDonationConfirmationTemplate({ ...d, donationType: typeLabel }),
+        text: this.generateDonationConfirmationText({ ...d, donationType: typeLabel }),
         headers: {
           'X-Mailer': 'MTJ Foundation Donation System',
-          'X-Priority': '3',
-          'X-MSMail-Priority': 'Normal',
-          'Importance': 'Normal',
-          'X-Report-Abuse': 'Please report abuse to abuse@mtjfoundation.com',
-          'List-Unsubscribe': '<mailto:unsubscribe@mtjfoundation.com>',
-          'Return-Path': verifiedSenderEmail,
-          'Reply-To': verifiedSenderEmail,
+          'List-Unsubscribe': `<mailto:unsubscribe@${fromAddress.split('@')[1]}>`,
+          'Reply-To': fromAddress,
         },
-        // Add message ID for better tracking
-        messageId: `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@mtjfoundation.com>`,
+        // envelope: { from: `bounces@${fromAddress.split('@')[1]}`, to: d.donorEmail }, // optional
+        messageId: `<${Date.now()}.${Math.random().toString(36).slice(2)}@${fromAddress.split('@')[1]}>`,
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Donation confirmation email sent to ${donationData.donorEmail}`);
+      this.logger.log(`Sent donation confirmation to ${d.donorEmail} (id: ${result.messageId})`);
       return true;
-    } catch (error) {
-      this.logger.error(`Failed to send donation confirmation email: ${error.message}`);
+    } catch (error: any) {
+      this.logger.error(`Email send failed: ${error?.message} code=${error?.code} resp=${error?.response}`);
       return false;
     }
   }
@@ -122,7 +152,7 @@ export class EmailService {
             
             <div class="donation-details">
               <h3>Donation Details</h3>
-              <p><strong>Type:</strong> ${donationData.donationType === 'zakat' ? 'Zakat' : 'Sadqa'}</p>
+              <p><strong>Type:</strong> ${donationData.donationType}</p>
               <p><strong>Amount:</strong> ${donationData.currency} ${donationData.amount}</p>
               <p><strong>Payment Method:</strong> ${donationData.donationMethod.toUpperCase()}</p>
               ${donationData.orderId ? `<p><strong>Transaction ID:</strong> ${donationData.orderId}</p>` : ''}
@@ -142,7 +172,7 @@ export class EmailService {
           
           <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; ${new Date().getFullYear()} Your Organization Name. All rights reserved.</p>
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -168,7 +198,7 @@ export class EmailService {
       Thank you for your generous donation. We truly appreciate your support for our cause.
       
       Donation Details:
-      - Type: ${donationData.donationType === 'zakat' ? 'Zakat' : 'Sadqa'}
+      - Type: ${donationData.donationType}
       - Amount: ${donationData.currency} ${donationData.amount}
       - Payment Method: ${donationData.donationMethod.toUpperCase()}
       ${donationData.orderId ? `- Transaction ID: ${donationData.orderId}` : ''}
@@ -182,36 +212,7 @@ export class EmailService {
       
       ---
       This is an automated message. Please do not reply to this email.
-      © ${new Date().getFullYear()} Your Organization Name. All rights reserved.
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
     `;
-  }
-
-  async sendTestEmail(to: string): Promise<boolean> {
-    try {
-      const verifiedSenderEmail = this.configService.get('VERIFIED_SENDER_EMAIL');
-      const senderName = this.configService.get('SENDER_NAME', 'Donation System');
-      
-      if (!verifiedSenderEmail) {
-        this.logger.error('VERIFIED_SENDER_EMAIL not configured');
-        return false;
-      }
-
-      const mailOptions = {
-        from: {
-          name: senderName,
-          address: verifiedSenderEmail
-        },
-        to,
-        subject: 'Test Email from Donation System',
-        html: '<h1>Test Email</h1><p>This is a test email from the donation system.</p>',
-      };
-
-      await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Test email sent to ${to}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`Failed to send test email: ${error.message}`);
-      return false;
-    }
   }
 }

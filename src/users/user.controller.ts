@@ -24,7 +24,7 @@ export class UsersController {
   }
 
   @Get()
-  @RequiredPermissions(['users.list_view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin'])
+  @RequiredPermissions(['users.list_view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin']) 
   async findAll(
     @Query('page') page: string = '1',
     @Query('pageSize') pageSize: string = '10',

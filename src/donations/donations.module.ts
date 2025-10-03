@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DonationsService } from './donations.service';
 import { DonationsController } from './donations.controller';
+import { PublicDonationsController } from './public-donations.controller';
 import { Donation } from './entities/donation.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions/permissions.module';
@@ -18,7 +19,7 @@ import { PayfastService } from './payfast.service';
     PermissionsModule,
     EmailModule
 ], 
-  controllers: [DonationsController],
+  controllers: [DonationsController, PublicDonationsController],
   providers: [DonationsService, PayfastService],
   exports: [DonationsService],
 })

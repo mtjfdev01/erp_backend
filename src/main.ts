@@ -16,7 +16,7 @@ async function bootstrap() {
     'https://mtjf-donations.vercel.app',
     'https://donation.mtjfoundation.org',
     'http://31.97.223.158:8081'
-  ];
+    ];
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -25,7 +25,7 @@ async function bootstrap() {
       
       // During development, allow all localhost origins
       if (process.env.NODE_ENV !== 'production' && 
-          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
+          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:') )) {
         console.log('Development mode: Allowing origin:', origin);
         return callback(null, true);
       }
