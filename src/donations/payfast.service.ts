@@ -13,7 +13,6 @@ export class PayfastService {
         headers: { }
       };
     const { data } = await axios.request(config);
-    console.log("data_____", data);
     
     // Return complete response from Payfast
     return data;

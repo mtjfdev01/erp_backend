@@ -12,6 +12,7 @@ export enum Department {
   PROGRAM = 'program',
   ACCOUNTS_AND_FINANCE = 'accounts_and_finance',
   ADMIN = 'admin',
+  FUND_RAISING = 'fund_raising',
 }
 
 @Entity()

@@ -8,6 +8,7 @@ import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
 import { applyCommonFilters, FilterPayload } from '../utils/filters/common-filter.util';
 import axios from 'axios';
+import { get } from 'http';
 
 @Injectable()
 export class DonationsService {
@@ -142,7 +143,54 @@ export class DonationsService {
           }
         );
 
+        console.log("blinqInvoice_____", blinqInvoice?.data);
+
+        // check invoice status ****************************
+        // const invoiceStatusData = await axios.get(
+        //   `${blinq_url}invoice/getstatus?PaymentCode=${blinqInvoice?.data?.ResponseDetail[0]?.PaymentCode}`,
+        //   {
+        //     headers: {
+        //       'Content-Type': 'application/json',
+        //       'token': authToken
+        //     }
+        //   }
+        // );
+        // const invoiceStatus = invoiceStatusData?.data?.ResponseDetail[0]?.InvoiceStatus;
+        // console.log("invoiceStatus_____", invoiceStatus);
+
+
+
+         // get All Paid  ***********************************************
+        //  This API allows you to get paid invoices details by providing startDate and endDate as URL parameter 
+        //  and secure token in request header. 
+  
+        // URL: https://{BaseURL}/invoice/getpaidinvoices?startDate={startDate}&endDate={endDate} 
+        // // Method: GET
+        // Request Parameters(URL) 
+ 
+        // Parameter Mandatory/Optional Data Type 
+        // startDate M String(yyyy-MM-dd) 
+        // endDate M String(yyyy-MM-dd) 
+
+        //       const formatDate = (date) => date.toISOString().split('T')[0];
+        // const startDate = formatDate(currentDate);
+        // const endDate = formatDate(dueDate);
+        // const paidInvoicesData = await axios.get(
+        //   `${blinq_url}invoice/getpaidinvoices?startDate=${startDate}&endDate=${endDate}`,
+        //   {
+        //     headers: {
+        //       'Content-Type': 'application/json',
+        //       'token': authToken
+        //     }
+        //   }
+        // );
+        // const paidInvoices = paidInvoicesData?.data?.ResponseDetail;
+        // console.log("paidInvoices_____", paidInvoices);
+
+
+
           savedDonation.status = 'registered';
+          savedDonation.orderId = blinqInvoice?.data?.ResponseDetail[0]?.PaymentCode;
           await this.donationRepository.save(savedDonation);
 
           // Send confirmation email to donor
@@ -176,7 +224,7 @@ export class DonationsService {
         savedDonation.amount
       );
 
-      console.log("payfastResponse_____", payfastResponse);
+      // console.log("payfastResponse_____", payfastResponse);
       
       // // Send confirmation email to donor
       // if (savedDonation.donor_email) {
@@ -475,6 +523,44 @@ export class DonationsService {
       console.error("Stack:", error.stack);
       
       throw error;
+    }
+  }
+
+  // Public endpoint to update donation status
+  async updateDonationFromPublic(id: string, order_id: string) {
+    try {
+      console.log(`Updating donation ID: ${id} with order_id: ${order_id}`);
+      
+      // Find donation by ID
+      const donation = await this.donationRepository.findOne({ 
+        where: { id: Number(id) } 
+      });
+
+      if (!donation) {
+        throw new NotFoundException(`Donation with ID ${id} not found`);
+      }
+
+      // Update only orderId and status
+      await this.donationRepository.update(parseInt(id), {
+        orderId: order_id,
+        status: 'completed'
+      });
+
+      console.log(`Donation ${id} updated successfully with order_id: ${order_id}`);
+      
+      return {
+        id: parseInt(id),
+        order_id: order_id,
+        status: 'completed',
+        updated: true
+      };
+      
+    } catch (error) {
+      console.error("Error updating donation from public:", error.message);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Failed to update donation: ${error.message}`);
     }
   }
 }

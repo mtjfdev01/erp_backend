@@ -16,12 +16,12 @@ import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
-import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
+// import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../permissions/decorators/require-permission.decorator';
 
 @Controller('donations')
-@UseGuards(ConditionalJwtGuard, PermissionsGuard)
+@UseGuards( PermissionsGuard)
 export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
@@ -47,7 +47,7 @@ export class DonationsController {
   }
 
   @Get()
-  @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  // @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -158,7 +158,7 @@ export class DonationsController {
     try {
       console.log("Donation status update payload:", payload);
       
-      const result = await this.donationsService.updateDonationStatus(payload);
+      const result = await this.donationsService.updateDonationFromPublic(payload.id, payload.order_id);
       
       return res.status(HttpStatus.OK).json({
         success: true,
