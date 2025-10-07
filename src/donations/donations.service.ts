@@ -551,8 +551,8 @@ export class DonationsService {
       const crypto = require('crypto');
       
       // Get PayFast credentials from environment
-      const merchant_secret_key = process.env.PAYFAST_SECURED_KEY;
-      const merchant_id = process.env.PAYFAST_MERCHANT_ID;
+      const merchant_secret_key = process.env.PF_SECURED_KEY; 
+      const merchant_id = process.env.PF_MERCHANT_ID;
       
       if (!merchant_secret_key || !merchant_id) {
         console.error('PayFast credentials not configured');
