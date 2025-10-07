@@ -4,7 +4,8 @@ import {
   Query, 
   HttpStatus, 
   Res, 
-  Post
+  Post,
+  Body
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
@@ -14,10 +15,10 @@ export class PublicDonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
   // Public PayFast IPN endpoint - NO GUARDS
-  @Get('payfast/ipn')
-  async handlePayfastIpn(@Query() query: any, @Res() res: Response) {
+  @Post('payfast/ipn')
+  async handlePayfastIpn(@Body() payload: any, @Res() res: Response) {
     try {
-      const result = await this.donationsService.handlePayfastIpn(query);
+      const result = await this.donationsService.handlePayfastIpn(payload);
       
       return res.status(HttpStatus.OK).json({ 
         success: true, 

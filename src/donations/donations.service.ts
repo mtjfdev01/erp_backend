@@ -452,10 +452,10 @@ export class DonationsService {
   }
 
   // PayFast IPN Handler - Public endpoint logic
-  async handlePayfastIpn(query: any) {
+  async handlePayfastIpn(payload: any) {
     try {
       console.log("=== PAYFAST IPN RECEIVED ===");
-      console.log("Full IPN Query Parameters:", JSON.stringify(query, null, 2));
+      console.log("Full IPN Payload:", JSON.stringify(payload, null, 2));
       console.log("Timestamp:", new Date().toISOString());
       
       // Extract key parameters from PayFast IPN
@@ -468,12 +468,16 @@ export class DonationsService {
         PaymentName,
         transaction_amount,
         merchant_amount,
-        // Add any other fields you want to log
-      } = query;
+        err_msg,
+        transaction_currency,
+        mobile_no,
+        masked_pan
+      } = payload;
 
       console.log("=== EXTRACTED PARAMETERS ===");
       console.log("Basket ID:", basket_id);
       console.log("Error Code:", err_code);
+      console.log("Error Message:", err_msg);
       console.log("Validation Hash:", validation_hash);
       console.log("Transaction ID:", transaction_id);
       console.log("Order Date:", order_date);
@@ -481,39 +485,54 @@ export class DonationsService {
       console.log("Transaction Amount:", transaction_amount);
       console.log("Merchant Amount:", merchant_amount);
 
-      // TODO: Implement hash verification
-      // const expectedHash = this.verifyPayfastHash(basket_id, err_code, validation_hash);
-      // console.log("Hash verification result:", expectedHash);
+      // Validate required parameters
+      if (!basket_id || !err_code || !validation_hash) {
+        throw new Error('Missing required PayFast parameters');
+      }
 
-      // TODO: Get donation by basket_id and update status
-      // const donation = await this.findDonationByBasketId(basket_id);
-      // console.log("Found donation:", donation);
-      
-      // TODO: Update donation status based on err_code
-      // if (err_code === '000' || err_code === '00') {
-      //   await this.updateDonationFromIpn({
-      //     basket_id: basket_id,
-      //     status: 'completed',
-      //     transaction_id: transaction_id,
-      //     payment_method: 'payfast'
-      //   });
-      //   console.log("Donation marked as completed");
-      // } else {
-      //   await this.updateDonationFromIpn({
-      //     basket_id: basket_id,
-      //     status: 'failed',
-      //     error_code: err_code,
-      //     payment_method: 'payfast'
-      //   });
-      //   console.log("Donation marked as failed");
-      // }
+      // Find donation by basket_id (which is the donation id)
+      const donation = await this.donationRepository.findOne({ 
+        where: { id: parseInt(basket_id) } 
+      });
 
+      if (!donation) {
+        throw new Error(`Donation with ID ${basket_id} not found`);
+      }
+
+      console.log("Found donation:", { id: donation.id, amount: donation.amount, status: donation.status });
+
+      // Verify PayFast hash
+      const hashValid = this.verifyPayfastHash(basket_id, err_code, validation_hash);
+      console.log("Hash verification result:", hashValid);
+
+      if (!hashValid) {
+        throw new Error('Invalid PayFast validation hash');
+      }
+
+      // Update donation status based on err_code
+      let newStatus: string;
+      if (err_code === '000' || err_code === '00') {
+        newStatus = 'completed';
+        console.log("Donation marked as completed");
+      } else {
+        newStatus = 'failed';
+        console.log("Donation marked as failed");
+      }
+
+      // Update donation
+      await this.donationRepository.update(parseInt(basket_id), {
+        orderId: transaction_id,
+        status: newStatus
+      });
+
+      console.log(`Donation ${basket_id} updated successfully with status: ${newStatus}`);
       console.log("=== IPN PROCESSING COMPLETE ===");
       
       return {
         basket_id: basket_id,
         err_code: err_code,
         transaction_id: transaction_id,
+        status: newStatus,
         processed: true
       };
       
@@ -523,6 +542,38 @@ export class DonationsService {
       console.error("Stack:", error.stack);
       
       throw error;
+    }
+  }
+
+  // Verify PayFast validation hash
+  private verifyPayfastHash(basket_id: string, err_code: string, received_hash: string): boolean {
+    try {
+      const crypto = require('crypto');
+      
+      // Get PayFast credentials from environment
+      const merchant_secret_key = process.env.PAYFAST_SECURED_KEY;
+      const merchant_id = process.env.PAYFAST_MERCHANT_ID;
+      
+      if (!merchant_secret_key || !merchant_id) {
+        console.error('PayFast credentials not configured');
+        return false;
+      }
+
+      // Create hash string: basket_id|merchant_secret_key|merchant_id|err_code
+      const hashString = `${basket_id}|${merchant_secret_key}|${merchant_id}|${err_code}`;
+      console.log("Hash string:", hashString);
+      
+      // Calculate SHA256 hash
+      const calculatedHash = crypto.createHash('sha256').update(hashString).digest('hex');
+      console.log("Calculated hash:", calculatedHash);
+      console.log("Received hash:", received_hash);
+      
+      // Compare hashes (case insensitive)
+      return calculatedHash.toLowerCase() === received_hash.toLowerCase();
+      
+    } catch (error) {
+      console.error("Hash verification error:", error.message);
+      return false;
     }
   }
 
