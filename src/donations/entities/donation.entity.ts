@@ -1,9 +1,18 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
-import { Column, Entity } from "typeorm";
+import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
+import { Donor } from "../../dms/donor/entities/donor.entity";
 
 //nullabe true to all column
 @Entity('donations')
 export class Donation extends BaseEntity {
+  // Foreign key relationship to Donor
+  @ManyToOne(() => Donor, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'donor_id' })
+  donor: Donor;
+
+  @Column({ nullable: true, default: null })
+  donor_id: number;
+  
   @Column({ nullable: true, default: null })
   project_id: string;
 

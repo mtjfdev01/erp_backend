@@ -11,7 +11,7 @@ import {
   UseGuards,
   Query
 } from '@nestjs/common';
-import { FilterPayload } from '../utils/filters/common-filter.util';
+import { FilterPayload, applyHybridFilters, HybridFilter } from '../utils/filters/common-filter.util';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
@@ -46,44 +46,42 @@ export class DonationsController {
     }
   }
 
-  @Get()
+  @Post('search')
   // @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
-  async findAll(
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-    @Query('sortField') sortField?: string,
-    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
-    @Query('search') search?: string,
-    @Query('status') status?: string,
-    @Query('donation_type') donation_type?: string,
-    @Query('donation_method') donation_method?: string,
-    @Query('date') date?: string,
-    @Query('start_date') start_date?: string,
-    @Query('end_date') end_date?: string,
-    @Res() res?: Response,
-  ) {
+  async findAll(@Body() payload: any, @Res() res: Response) {
     try {
-      const pageNum = page ? parseInt(page) : 1;
-      const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
+      console.log("Donations search payload:", JSON.stringify(payload, null, 2));
       
-      // Build filters object from query parameters
-      const filters: FilterPayload = {
-        search,
-        status,
-        donation_type,
-        donation_method,
-        date,
-        start_date,
-        end_date,
+      // Extract pagination and sorting
+      const pagination = payload.pagination || {};
+      const page = pagination.page || 1;
+      const pageSize = pagination.pageSize || 10;
+      const sortField = pagination.sortField || 'created_at';
+      const sortOrder = pagination.sortOrder || 'DESC';
+      
+      // Extract filters
+      const filters = payload.filters || {};
+      
+      // Extract hybrid filters and convert to new format
+      const hybridFilters = payload.hybrid_filters || [];
+      
+      // Build complete filters object
+      const completeFilters: FilterPayload = {
+        ...filters
       };
       
-      const result = await this.donationsService.findAll(pageNum, pageSizeNum, sortField, sortOrder, filters);
+      console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
+      console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
+      
+      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters);
+      
       return res.status(HttpStatus.OK).json({
         success: true,
         message: 'Donations retrieved successfully',
         ...result,
       });
     } catch (error) {
+      console.error("Donations search error:", error);
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,

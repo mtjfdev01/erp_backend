@@ -6,7 +6,8 @@ import { Repository } from 'typeorm';
 import { Donation } from './entities/donation.entity';
 import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
-import { applyCommonFilters, FilterPayload } from '../utils/filters/common-filter.util';
+import { DonorService } from '../dms/donor/donor.service';
+import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter } from '../utils/filters/common-filter.util';
 import axios from 'axios';
 import { get } from 'http';
 
@@ -17,14 +18,64 @@ export class DonationsService {
     private donationRepository: Repository<Donation>,
     private emailService: EmailService,
     private payfastService: PayfastService,
+    private donorService: DonorService,
   ) {}
 
   async create(createDonationDto: CreateDonationDto) {
     try {
      const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
      const blinq_url="https://api.blinq.pk/";
-     const donation = this.donationRepository.create(createDonationDto);
+     
+     // ============================================
+     // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
+     // ============================================
+     let donorId: number | null = null;
+     
+     if (createDonationDto.donor_email && createDonationDto.donor_phone) {
+       console.log(`🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`);
+       
+       // Check if donor already exists with this email AND phone
+       const existingDonor = await this.donorService.findByEmailAndPhone(
+         createDonationDto.donor_email,
+         createDonationDto.donor_phone
+       );
+       
+       if (existingDonor) {
+         console.log(`✅ Donor already exists: ${existingDonor.email} (ID: ${existingDonor.id})`);
+         donorId = existingDonor.id;
+       } else {
+         console.log(`❌ Donor not found. Auto-registering...`);
+         
+         // Auto-register the donor
+         const newDonor = await this.donorService.autoRegisterFromDonation({
+           donor_name: createDonationDto.donor_name,
+           donor_email: createDonationDto.donor_email,
+           donor_phone: createDonationDto.donor_phone,
+           city: createDonationDto.city,
+           country: createDonationDto.country,
+           address: createDonationDto.address,
+         });
+         
+         if (newDonor) {
+           console.log(`✅ Successfully auto-registered donor: ${newDonor.email} (ID: ${newDonor.id})`);
+           donorId = newDonor.id;
+         } else {
+           console.warn(`⚠️ Failed to auto-register donor, but continuing with donation...`);
+         }
+       }
+     } else {
+       console.log(`⚠️ Skipping donor auto-registration: missing email or phone`);
+     }
+     // ============================================
+     
+     // Create donation with donor_id if available
+     const donation = this.donationRepository.create({
+       ...createDonationDto,
+       donor_id: donorId, // ✅ Link donation to donor
+     });
      const savedDonation = await this.donationRepository.save(donation);
+     
+     console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
       
       // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
@@ -259,7 +310,8 @@ export class DonationsService {
     pageSize = 10, 
     sortField = 'created_at', 
     sortOrder: 'ASC' | 'DESC' = 'DESC',
-    filters: FilterPayload = {}
+    filters: FilterPayload = {},
+    hybridFilters: HybridFilter[] = []
   ) {
     try {
       // Define searchable fields for donations
@@ -270,6 +322,9 @@ export class DonationsService {
       
       // Apply common filters
       applyCommonFilters(query, filters, searchFields, 'donation');
+      
+      // Apply hybrid filters
+      applyHybridFilters(query, hybridFilters, 'donation');
       
       // Apply pagination
       const skip = (page - 1) * pageSize;
@@ -582,7 +637,7 @@ export class DonationsService {
     try {
       console.log(`Updating donation ID: ${id} with order_id: ${order_id}`);
       
-      // Find donation by ID
+      // Find donation by ID here add check if that donation is not completed already if completed then return success and not update the donation  
       const donation = await this.donationRepository.findOne({ 
         where: { id: Number(id) } 
       });
@@ -591,7 +646,16 @@ export class DonationsService {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
 
-      // Update only orderId and status
+      if (donation.status == 'completed') {
+        return {
+          id: parseInt(id),
+          order_id: order_id,
+          status: 'completed',
+          updated: true
+        };
+      }
+
+        // Update only orderId and status
       await this.donationRepository.update(parseInt(id), {
         orderId: order_id,
         status: 'completed'

@@ -42,8 +42,11 @@ export class DonorService {
         throw new ConflictException('Email already exists');
       }
 
-      // Hash the password
-      const hashedPassword = await bcrypt.hash(createDonorDto.password, 10);
+      // Hash the password only if provided
+      let hashedPassword = null;
+      if (createDonorDto.password) {
+        hashedPassword = await bcrypt.hash(createDonorDto.password, 10);
+      }
 
       // Create donor entity
       const donor = this.donorRepository.create({
@@ -164,6 +167,69 @@ export class DonorService {
   /**
    * Find one donor by ID
    */
+  /**
+   * Find donor by email AND phone (for auto-registration check)
+   */
+  async findByEmailAndPhone(email: string, phone: string): Promise<Donor | null> {
+    try {
+      const donor = await this.donorRepository.findOne({
+        where: { email, phone },
+      });
+      
+      return donor || null;
+    } catch (error) {
+      console.error('Error finding donor by email and phone:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Auto-register donor from donation data (without password)
+   */
+  async autoRegisterFromDonation(donationData: {
+    donor_name?: string;
+    donor_email?: string;
+    donor_phone?: string;
+    city?: string;
+    country?: string;
+    address?: string;
+  }): Promise<Donor | null> {
+    try {
+      const { donor_name, donor_email, donor_phone, city, country, address } = donationData;
+
+      // Validate required fields
+      if (!donor_email || !donor_phone) {
+        console.warn('Cannot auto-register donor: missing email or phone');
+        return null;
+      }
+
+      // Create donor entity WITHOUT password
+      // Password will be set when they explicitly register/login
+      const donor = this.donorRepository.create({
+        donor_type: DonorType.INDIVIDUAL,
+        email: donor_email,
+        password: null, // No password for auto-registered donors
+        phone: donor_phone,
+        name: donor_name || 'Anonymous Donor',
+        city: city || null,
+        country: country || null,
+        address: address || null,
+        is_active: true,
+        notes: 'Auto-registered from donation - Password not set',
+      });
+
+      // Save and return
+      const savedDonor = await this.donorRepository.save(donor);
+      
+      console.log(`✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`);
+      
+      return savedDonor;
+    } catch (error) {
+      console.error('Error auto-registering donor:', error.message);
+      return null;
+    }
+  }
+
   async findOne(id: number): Promise<Donor> {
     try {
       const donor = await this.donorRepository.findOne({ where: { id } });

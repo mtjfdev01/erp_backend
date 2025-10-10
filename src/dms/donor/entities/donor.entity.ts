@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, OneToMany } from 'typeorm';
 import { BaseEntity } from '../../../utils/base_utils/entities/baseEntity';
 
 export enum DonorType {
@@ -8,6 +8,9 @@ export enum DonorType {
 
 @Entity('donors')
 export class Donor extends BaseEntity {
+  // Relationship to Donations (one donor can have many donations)
+  @OneToMany('Donation', 'donor')
+  donations: any[];
   // Common fields for all donors
   @Column({
     type: 'enum',
@@ -19,7 +22,7 @@ export class Donor extends BaseEntity {
   @Column({ unique: true })
   email: string;
 
-  @Column()
+  @Column({ nullable: true })
   password: string;
 
   @Column()
@@ -28,10 +31,10 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true })
   address: string;
 
-  @Column()
+  @Column({ nullable: true })
   city: string;
 
-  @Column()
+  @Column({ nullable: true })
   country: string;
 
   @Column({ nullable: true })

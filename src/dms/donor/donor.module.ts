@@ -17,6 +17,6 @@ import { PermissionsModule } from '../../permissions/permissions.module';
   ],
   controllers: [DonorController],
   providers: [DonorService],
-  exports: [DonorService],
+  exports: [DonorService, TypeOrmModule], // Export TypeOrmModule for Donor repository
 })
 export class DonorModule {}
