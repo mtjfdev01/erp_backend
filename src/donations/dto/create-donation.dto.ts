@@ -75,4 +75,31 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  // ⭐ NEW: Cheque payment fields
+  @IsOptional()
+  @IsString()
+  cheque_number?: string;
+
+  @IsOptional()
+  @IsString()
+  bank_name?: string;
+
+  // ⭐ NEW: In-kind donation fields
+  @IsOptional()
+  @IsString()
+  in_kind_item_name?: string;
+
+  @IsOptional()
+  @IsString()
+  in_kind_description?: string;
+
+  @IsOptional()
+  @IsNumber()
+  in_kind_quantity?: number;
+
+  @IsOptional()
+  @IsNumber()
+  donor_id?: number;
+
 }

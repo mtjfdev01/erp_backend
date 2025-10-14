@@ -5,6 +5,8 @@ import { DonorModule } from './donor/donor.module';
 import { UserDonorsModule } from './user_donors/user_donors.module';
 import { PermissionsModule } from 'src/permissions';
 import { JwtModule } from '@nestjs/jwt';
+import { DonationBoxModule } from './donation_box/donation-box.module';
+import { DonationInKindModule } from './donation_in_kind/donation_in_kind.module';
 
 @Module({
   controllers: [DmsController],
@@ -15,6 +17,6 @@ import { JwtModule } from '@nestjs/jwt';
       signOptions: { expiresIn: '24h' },
     }),
     PermissionsModule,
-    DonorModule, UserDonorsModule],        
+    DonorModule, UserDonorsModule, DonationBoxModule, DonationInKindModule],        
 })
 export class DmsModule {}

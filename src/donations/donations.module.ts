@@ -14,10 +14,14 @@ import { DonorModule } from '../dms/donor/donor.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Donation]),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key',
-      signOptions: { expiresIn: '24h' },
-    }),
+    // JwtModule.register({
+    //   secret: process.env.JWT_SECRET || 'your-secret-key',
+    //   signOptions: { expiresIn: '24h' },
+    // }),
+    // JwtModule.register({
+    //   secret: process.env.JWT_SECRET || 'your-secret-key',
+    //   signOptions: { expiresIn: '24h' },
+    // }),
     PermissionsModule,
     EmailModule,
     DonorModule

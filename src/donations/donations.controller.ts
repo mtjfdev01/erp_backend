@@ -55,7 +55,11 @@ export class DonationsController {
       // Extract pagination and sorting
       const pagination = payload.pagination || {};
       const page = pagination.page || 1;
-      const pageSize = pagination.pageSize || 10;
+      let pageSize = pagination.pageSize || 10;
+      if (pagination.pageSize == 0) {
+        pageSize = 0
+      }
+
       const sortField = pagination.sortField || 'created_at';
       const sortOrder = pagination.sortOrder || 'DESC';
       

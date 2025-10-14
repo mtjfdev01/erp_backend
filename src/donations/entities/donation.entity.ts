@@ -56,6 +56,24 @@ export class Donation extends BaseEntity {
   item_price: number;
   @Column({ type: 'varchar', nullable: true, default: 'pending' })
   status: string;
+  
+  // ⭐ NEW: Cheque payment fields
+  @Column({ type: 'varchar', nullable: true, default: null })
+  cheque_number: string;
+
+  @Column({ type: 'varchar', nullable: true, default: null })
+  bank_name: string;
+
+  // ⭐ NEW: In-kind donation fields
+  @Column({ type: 'varchar', nullable: true, default: null })
+  in_kind_item_name: string;
+
+  @Column({ type: 'text', nullable: true, default: null })
+  in_kind_description: string;
+
+  @Column({ type: 'int', nullable: true, default: null })
+  in_kind_quantity: number;
+  
   // Order ID returned by the bank
   @Column({ type: 'varchar', nullable: true, default: null })
   orderId: string;

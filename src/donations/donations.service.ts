@@ -25,29 +25,39 @@ export class DonationsService {
     try {
      const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
      const blinq_url="https://api.blinq.pk/";
+     const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
+     const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
+     
      
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
      // ============================================
-     let donorId: number | null = null;
-     
-     if (createDonationDto.donor_email && createDonationDto.donor_phone) {
+     let donorId: number | null = createDonationDto.donor_id || null;
+     let donor:any;
+     //  findOne
+
+     if (createDonationDto.donor_email && createDonationDto.donor_phone || donorId) {
        console.log(`🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`);
        
        // Check if donor already exists with this email AND phone
-       const existingDonor = await this.donorService.findByEmailAndPhone(
-         createDonationDto.donor_email,
-         createDonationDto.donor_phone
-       );
+       if(createDonationDto.donor_email && createDonationDto.donor_phone){
+        donor = await this.donorService.findByEmailAndPhone(
+          createDonationDto.donor_email,
+          createDonationDto.donor_phone
+        );
+       }
+       else if(donorId){
+        donor = await this.donorService.findOne(donorId);
+       }
        
-       if (existingDonor) {
-         console.log(`✅ Donor already exists: ${existingDonor.email} (ID: ${existingDonor.id})`);
-         donorId = existingDonor.id;
+       if (donor) {
+         console.log(`✅ Donor already exists: ${donor.email} (ID: ${donor.id})`);
+         donorId = donor.id;
        } else {
          console.log(`❌ Donor not found. Auto-registering...`);
          
          // Auto-register the donor
-         const newDonor = await this.donorService.autoRegisterFromDonation({
+         donor = await this.donorService.autoRegisterFromDonation({
            donor_name: createDonationDto.donor_name,
            donor_email: createDonationDto.donor_email,
            donor_phone: createDonationDto.donor_phone,
@@ -56,9 +66,9 @@ export class DonationsService {
            address: createDonationDto.address,
          });
          
-         if (newDonor) {
-           console.log(`✅ Successfully auto-registered donor: ${newDonor.email} (ID: ${newDonor.id})`);
-           donorId = newDonor.id;
+         if (donor) {
+           console.log(`✅ Successfully auto-registered donor: ${donor.email} (ID: ${donor.id})`);
+           donorId = donor.id;
          } else {
            console.warn(`⚠️ Failed to auto-register donor, but continuing with donation...`);
          }
@@ -295,6 +305,10 @@ export class DonationsService {
         BASKET_ID: savedDonation.id.toString(),
         TXNAMT: savedDonation.amount.toString(),
       };
+    }
+    else if(manualDonationMethodOptions.includes(createDonationDto.donation_method))  {
+      // here we need to create a manual donation
+      console.log("Created manually");
     }
     else {
       throw new HttpException('Invalid donation method', 400);
