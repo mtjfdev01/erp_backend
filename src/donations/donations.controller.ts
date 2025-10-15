@@ -16,17 +16,17 @@ import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
-// import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../permissions/decorators/require-permission.decorator';
+import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donations')
-@UseGuards( PermissionsGuard)
+@UseGuards( JwtGuard,PermissionsGuard)
 export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
   @Post()
-  // @RequiredPermissions(['donations.create', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
   async create(@Body() createDonationDto: CreateDonationDto, @Res() res: Response) {
     try {
       console.log("donation api called________________________");
@@ -47,7 +47,7 @@ export class DonationsController {
   }
 
   @Post('search')
-  // @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions([ 'fund_raising.donations.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(@Body() payload: any, @Res() res: Response) {
     try {
       console.log("Donations search payload:", JSON.stringify(payload, null, 2));
@@ -96,7 +96,7 @@ export class DonationsController {
   }
 
   @Get(':id')
-  // @RequiredPermissions(['donations.view', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationsService.findOne(+id);
@@ -116,7 +116,7 @@ export class DonationsController {
   }
 
   @Patch(':id')
-  // @RequiredPermissions(['donations.update', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
   async update(@Param('id') id: string, @Body() updateDonationDto: UpdateDonationDto, @Res() res: Response) {
     try {
       const result = await this.donationsService.update(+id, updateDonationDto);
@@ -136,7 +136,7 @@ export class DonationsController {
   }
 
   @Delete(':id')
-  //  @RequiredPermissions(['donations.delete', 'super_admin', 'fund_raising_manager'])
+   @RequiredPermissions(['fund_raising.donations.delete', 'super_admin', 'fund_raising_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationsService.remove(+id);

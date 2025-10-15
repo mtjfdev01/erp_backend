@@ -9,10 +9,12 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
+import { DonorService } from 'src/dms/donor/donor.service';
+
 
 @Controller('donations/public')
 export class PublicDonationsController {
-  constructor(private readonly donationsService: DonationsService) {}
+  constructor(private readonly donationsService: DonationsService, private readonly donorService: DonorService) {}
 
   // Public PayFast IPN endpoint - NO GUARDS
   @Post('payfast/ipn')

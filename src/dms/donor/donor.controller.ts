@@ -26,7 +26,7 @@ export class DonorController {
   constructor(private readonly donorService: DonorService) {}
 
   @Post('register')
-  // Public registration - no permissions required
+  @RequiredPermissions(['fund_raising.donors.create', 'super_admin', 'fund_raising_manager'])
   async register(@Body() createDonorDto: CreateDonorDto, @Res() res: Response) {
     try {
       const result = await this.donorService.register(createDonorDto);
@@ -48,7 +48,7 @@ export class DonorController {
   }
 
   @Get()
-  @RequiredPermissions(['donors.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donors.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -97,7 +97,7 @@ export class DonorController {
   }
 
   @Get(':id')
-  @RequiredPermissions(['donors.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donors.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donorService.findOne(+id);
@@ -119,7 +119,7 @@ export class DonorController {
   }
 
   @Patch(':id')
-  @RequiredPermissions(['donors.update', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donors.update', 'super_admin', 'fund_raising_manager'])
   async update(
     @Param('id') id: string,
     @Body() updateDonorDto: UpdateDonorDto,
@@ -145,7 +145,7 @@ export class DonorController {
   }
 
   @Delete(':id')
-  @RequiredPermissions(['donors.delete', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donors.delete', 'super_admin', 'fund_raising_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donorService.remove(+id);
@@ -167,7 +167,7 @@ export class DonorController {
   }
 
   @Post(':id/change-password')
-  @RequiredPermissions(['donors.update', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donors.update', 'super_admin', 'fund_raising_manager'])
   async changePassword(
     @Param('id') id: string,
     @Body() changePasswordDto: any,

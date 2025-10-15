@@ -10,17 +10,18 @@ import {
   Res,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DonationBoxDonationService } from './donation_box_donation.service';
 import { CreateDonationBoxDonationDto } from './dto/create-donation_box_donation.dto';
 import { UpdateDonationBoxDonationDto } from './dto/update-donation_box_donation.dto';
-import { ConditionalJwtGuard } from '../../../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from '../../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../../permissions/decorators/require-permission.decorator';
+import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donation-box-donation')
-@UseGuards(ConditionalJwtGuard, PermissionsGuard)
+@UseGuards(JwtGuard, PermissionsGuard)
 export class DonationBoxDonationController {
   constructor(
     private readonly donationBoxDonationService: DonationBoxDonationService,
@@ -28,17 +29,18 @@ export class DonationBoxDonationController {
 
   @Post()
   @RequiredPermissions([
-    'donation_box_donations.create',
-    'super_admin',
-    'fund_raising_manager',
+    'fund_raising.donation_box_donations.create', 'super_admin','fund_raising_manager',
   ])
   async create(
     @Body() createDonationBoxDonationDto: CreateDonationBoxDonationDto,
+    @Request() req: any,
     @Res() res: Response,
   ) {
     try {
+      const currentUserId = req.user?.id;
       const result = await this.donationBoxDonationService.create(
         createDonationBoxDonationDto,
+        currentUserId,
       );
       return res.status(HttpStatus.CREATED).json({
         success: true,
@@ -58,12 +60,7 @@ export class DonationBoxDonationController {
   }
 
   @Get()
-  @RequiredPermissions([
-    'donation_box_donations.view',
-    'super_admin',
-    'fund_raising_manager',
-    'fund_raising_user',
-  ])
+  @RequiredPermissions(['fund_raising.donation_box_donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -110,12 +107,7 @@ export class DonationBoxDonationController {
   }
 
   @Get('box/:boxId')
-  @RequiredPermissions([
-    'donation_box_donations.view',
-    'super_admin',
-    'fund_raising_manager',
-    'fund_raising_user',
-  ])
+  @RequiredPermissions([ 'fund_raising.donation_box_donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findByDonationBox(@Param('boxId') boxId: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxDonationService.findByDonationBox(
@@ -136,12 +128,7 @@ export class DonationBoxDonationController {
   }
 
   @Get('box/:boxId/stats')
-  @RequiredPermissions([
-    'donation_box_donations.view',
-    'super_admin',
-    'fund_raising_manager',
-    'fund_raising_user',
-  ])
+  @RequiredPermissions([ 'fund_raising.donation_box_donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async getBoxCollectionStats(
     @Param('boxId') boxId: string,
     @Res() res: Response,
@@ -165,12 +152,7 @@ export class DonationBoxDonationController {
   }
 
   @Get(':id')
-  @RequiredPermissions([
-    'donation_box_donations.view',
-    'super_admin',
-    'fund_raising_manager',
-    'fund_raising_user',
-  ])
+  @RequiredPermissions([ 'fund_raising.donation_box_donations.view', 'super_admin','fund_raising_manager', 'fund_raising_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxDonationService.findOne(+id);
@@ -192,20 +174,19 @@ export class DonationBoxDonationController {
   }
 
   @Patch(':id')
-  @RequiredPermissions([
-    'donation_box_donations.update',
-    'super_admin',
-    'fund_raising_manager',
-  ])
+  @RequiredPermissions(['fund_raising.donation_box_donations.update', 'super_admin', 'fund_raising_manager',])
   async update(
     @Param('id') id: string,
     @Body() updateDonationBoxDonationDto: UpdateDonationBoxDonationDto,
+    @Request() req: any,
     @Res() res: Response,
   ) {
     try {
+      const currentUserId = req.user?.id;
       const result = await this.donationBoxDonationService.update(
         +id,
         updateDonationBoxDonationDto,
+        currentUserId,
       );
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -225,11 +206,7 @@ export class DonationBoxDonationController {
   }
 
   @Delete(':id')
-  @RequiredPermissions([
-    'donation_box_donations.delete',
-    'super_admin',
-    'fund_raising_manager',
-  ])
+  @RequiredPermissions([ 'fund_raising.donation_box_donations.delete', 'super_admin', 'fund_raising_manager',])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxDonationService.remove(+id);

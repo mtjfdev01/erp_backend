@@ -15,17 +15,17 @@ import { Response } from 'express';
 import { DonationBoxService } from './donation-box.service';
 import { CreateDonationBoxDto } from './dto/create-donation-box.dto';
 import { UpdateDonationBoxDto } from './dto/update-donation-box.dto';
-import { ConditionalJwtGuard } from '../../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from '../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../permissions/decorators/require-permission.decorator';
+import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donation-box')
-@UseGuards(ConditionalJwtGuard, PermissionsGuard)
+@UseGuards( JwtGuard,PermissionsGuard)
 export class DonationBoxController {
   constructor(private readonly donationBoxService: DonationBoxService) {}
 
   @Post()
-  @RequiredPermissions(['donation_boxes.create', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donation_box.create', 'super_admin', 'fund_raising_manager'])
   async create(@Body() createDonationBoxDto: CreateDonationBoxDto, @Res() res: Response) {
     try {
       const result = await this.donationBoxService.create(createDonationBoxDto);
@@ -47,7 +47,7 @@ export class DonationBoxController {
   }
 
   @Get()
-  @RequiredPermissions(['donation_boxes.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donation_box.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -84,7 +84,7 @@ export class DonationBoxController {
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donation boxes retrieved successfully',
+        message: 'Donation box retrieved successfully',
         ...result,
       });
     } catch (error) {
@@ -98,7 +98,7 @@ export class DonationBoxController {
   }
 
   @Get('by-box-id/:box_id_no')
-  @RequiredPermissions(['donation_boxes.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donation_box.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findByBoxIdNo(@Param('box_id_no') box_id_no: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxService.findByBoxIdNo(box_id_no);
@@ -126,13 +126,13 @@ export class DonationBoxController {
   }
 
   @Get('active-by-region/:region')
-  @RequiredPermissions(['donation_boxes.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donation_box.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findActiveByRegion(@Param('region') region: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxService.findActiveByRegion(region);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Active donation boxes retrieved successfully',
+        message: 'Active donation box retrieved successfully',
         data: result,
       });
     } catch (error) {
@@ -145,7 +145,7 @@ export class DonationBoxController {
   }
 
   @Get(':id')
-  @RequiredPermissions(['donation_boxes.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  @RequiredPermissions(['fund_raising.donation_box.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxService.findOne(+id);
@@ -167,7 +167,7 @@ export class DonationBoxController {
   }
 
   @Patch(':id')
-  @RequiredPermissions(['donation_boxes.update', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donation_box.update', 'super_admin', 'fund_raising_manager'])
   async update(
     @Param('id') id: string,
     @Body() updateDonationBoxDto: UpdateDonationBoxDto,
@@ -193,7 +193,7 @@ export class DonationBoxController {
   }
 
   @Delete(':id')
-  @RequiredPermissions(['donation_boxes.delete', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donation_box.delete', 'super_admin', 'fund_raising_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationBoxService.remove(+id);
@@ -215,7 +215,7 @@ export class DonationBoxController {
   }
 
   @Post(':id/collection')
-  @RequiredPermissions(['donation_boxes.update', 'super_admin', 'fund_raising_manager'])
+  @RequiredPermissions(['fund_raising.donation_box.update', 'super_admin', 'fund_raising_manager'])
   async updateCollection(
     @Param('id') id: string,
     @Body() collectionData: { amount: number },

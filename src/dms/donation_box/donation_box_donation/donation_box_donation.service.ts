@@ -16,6 +16,7 @@ import {
   applyHybridFilters,
   HybridFilter,
 } from '../../../utils/filters/common-filter.util';
+import { User } from '../../../users/user.entity';
 
 interface PaginationOptions {
   page: number;
@@ -37,13 +38,27 @@ export class DonationBoxDonationService {
     private readonly donationBoxDonationRepository: Repository<DonationBoxDonation>,
     @InjectRepository(DonationBox)
     private readonly donationBoxRepository: Repository<DonationBox>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
+
+  /**
+   * Get current user from request context
+   * This should be implemented based on your authentication system
+   */
+  private getCurrentUserId(): number | null {
+    // TODO: Implement based on your authentication system
+    // This could be from JWT token, session, or request context
+    // For now, returning null - you'll need to implement this
+    return null;
+  }
 
   /**
    * Create a new donation box collection record
    */
   async create(
     createDonationBoxDonationDto: CreateDonationBoxDonationDto,
+    currentUserId?: number,
   ): Promise<DonationBoxDonation> {
     try {
       // Validate that donation box exists
@@ -60,6 +75,12 @@ export class DonationBoxDonationService {
       // Validate collection amount
       if (createDonationBoxDonationDto.collection_amount < 0) {
         throw new BadRequestException('Collection amount cannot be negative');
+      }
+
+      // Auto-populate collected_by_id if not provided
+      const userId = currentUserId || this.getCurrentUserId();
+      if (!createDonationBoxDonationDto.collected_by_id && userId) {
+        createDonationBoxDonationDto.collected_by_id = userId;
       }
 
       // Create the collection record
@@ -245,53 +266,58 @@ export class DonationBoxDonationService {
   async update(
     id: number,
     updateDonationBoxDonationDto: UpdateDonationBoxDonationDto,
-  )
-  // : Promise<DonationBoxDonation> 
-  {
-    // try {
-    //   const collection = await this.donationBoxDonationRepository.findOne({
-    //     where: { id },
-    //   });
+    currentUserId?: number,
+  ): Promise<DonationBoxDonation> {
+    try {
+      const collection = await this.donationBoxDonationRepository.findOne({
+        where: { id },
+      });
 
-    //   if (!collection) {
-    //     throw new NotFoundException(
-    //       `Collection record with ID ${id} not found`,
-    //     );
-    //   }
+      if (!collection) {
+        throw new NotFoundException(
+          `Collection record with ID ${id} not found`,
+        );
+      }
 
-    //   // If donation_box_id is being changed, validate the new box exists
-    //   if (
-    //     updateDonationBoxDonationDto.donation_box_id &&
-    //     updateDonationBoxDonationDto.donation_box_id !== collection.donation_box_id
-    //   ) {
-    //     const newBox = await this.donationBoxRepository.findOne({
-    //       where: { id: updateDonationBoxDonationDto.donation_box_id },
-    //     });
+      // Auto-populate collected_by_id if not provided and current user is available
+      const userId = currentUserId || this.getCurrentUserId();
+      if (!updateDonationBoxDonationDto.collected_by_id && userId) {
+        updateDonationBoxDonationDto.collected_by_id = userId;
+      }
 
-    //     if (!newBox) {
-    //       throw new NotFoundException(
-    //         `Donation box with ID ${updateDonationBoxDonationDto.donation_box_id} not found`,
-    //       );
-    //     }
-    //   }
+      // If donation_box_id is being changed, validate the new box exists
+      if (
+        updateDonationBoxDonationDto.donation_box_id &&
+        updateDonationBoxDonationDto.donation_box_id !== collection.donation_box_id
+      ) {
+        const newBox = await this.donationBoxRepository.findOne({
+          where: { id: updateDonationBoxDonationDto.donation_box_id },
+        });
 
-    //   // Update the entity
-    //   await this.donationBoxDonationRepository.update(
-    //     id,
-    //     updateDonationBoxDonationDto,
-    //   );
+        if (!newBox) {
+          throw new NotFoundException(
+            `Donation box with ID ${updateDonationBoxDonationDto.donation_box_id} not found`,
+          );
+        }
+      }
 
-    //   // Return updated entity with relations
-    //   return await this.donationBoxDonationRepository.findOne({
-    //     where: { id },
-    //     relations: ['donation_box', 'collected_by', 'verified_by'],
-    //   });
-    // } catch (error) {
-    //   if (error instanceof NotFoundException) {
-    //     throw error;
-    //   }
-    //   throw new Error(`Failed to update collection record: ${error.message}`);
-    // }
+      // Update the entity
+      await this.donationBoxDonationRepository.update(
+        id,
+        updateDonationBoxDonationDto,
+      );
+
+      // Return updated entity with relations
+      return await this.donationBoxDonationRepository.findOne({
+        where: { id },
+        relations: ['donation_box', 'collected_by', 'verified_by'],
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Failed to update collection record: ${error.message}`);
+    }
   }
 
   /**

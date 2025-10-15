@@ -4,12 +4,13 @@ import { DonationBoxDonationController } from './donation_box_donation.controlle
 import { DonationBoxModule } from '../donation-box.module';
 import { DonationBoxDonation } from './entities/donation_box_donation.entity';
 import { DonationBox } from '../entities/donation-box.entity';
+import { User } from '../../../users/user.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DonationBox, DonationBoxDonation]),
+  imports: [TypeOrmModule.forFeature([DonationBox, DonationBoxDonation, User]),
   JwtModule.register({
     secret: process.env.JWT_SECRET || 'your-secret-key',
     signOptions: { expiresIn: '24h' },

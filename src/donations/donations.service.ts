@@ -583,6 +583,7 @@ export class DonationsService {
       if (err_code === '000' || err_code === '00') {
         newStatus = 'completed';
         console.log("Donation marked as completed");
+        // here call recurring utility 
       } else {
         newStatus = 'failed';
         console.log("Donation marked as failed");
