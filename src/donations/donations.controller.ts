@@ -21,7 +21,7 @@ import { RequiredPermissions } from '../permissions/decorators/require-permissio
 import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donations')
-@UseGuards( JwtGuard,PermissionsGuard)
+// @UseGuards( JwtGuard,PermissionsGuard)
 export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
@@ -47,7 +47,7 @@ export class DonationsController {
   }
 
   @Post('search')
-  @RequiredPermissions([ 'fund_raising.donations.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  // @RequiredPermissions([ 'fund_raising.donations.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(@Body() payload: any, @Res() res: Response) {
     try {
       console.log("Donations search payload:", JSON.stringify(payload, null, 2));
@@ -96,7 +96,7 @@ export class DonationsController {
   }
 
   @Get(':id')
-  @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
+  // @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationsService.findOne(+id);
@@ -116,7 +116,7 @@ export class DonationsController {
   }
 
   @Patch(':id')
-  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
+  // @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
   async update(@Param('id') id: string, @Body() updateDonationDto: UpdateDonationDto, @Res() res: Response) {
     try {
       const result = await this.donationsService.update(+id, updateDonationDto);
@@ -136,7 +136,7 @@ export class DonationsController {
   }
 
   @Delete(':id')
-   @RequiredPermissions(['fund_raising.donations.delete', 'super_admin', 'fund_raising_manager'])
+  //  @RequiredPermissions(['fund_raising.donations.delete', 'super_admin', 'fund_raising_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.donationsService.remove(+id);
