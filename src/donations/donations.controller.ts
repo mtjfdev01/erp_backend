@@ -26,7 +26,7 @@ export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
   @Post()
-  @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
+  // @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
   async create(@Body() createDonationDto: CreateDonationDto, @Res() res: Response) {
     try {
       console.log("donation api called________________________");
