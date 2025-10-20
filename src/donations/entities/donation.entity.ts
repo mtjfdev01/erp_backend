@@ -21,42 +21,57 @@ export class Donation extends BaseEntity {
 
   @Column({ type: 'decimal', nullable: true, default: null })
   amount: number;
-//   default current date and time
+
+  //default current date and time
   @Column({ type: 'date', default: () => 'CURRENT_DATE', nullable: true })
   date: Date;
-//   currency
+
+  //  currency
   @Column({ type: 'varchar', nullable: true, default: null })
   currency: string;
 
-//   donor section
+  //   donor section
   @Column({ type: 'varchar', nullable: true, default: null })
   donor_name: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   donor_email: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   donor_phone: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   donation_type: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   donation_method: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   donation_source: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   country: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   city: string;
+
   @Column({ type: 'varchar', nullable: true, default: null })
   address: string;
-//  donation item name and description and price
-  @Column({ type: 'varchar', nullable: true, default: null })
-  item_name: string;
+  
+  //  donation item name and description and price
+  
   @Column({ type: 'varchar', nullable: true, default: null })
   item_description: string;
+  
   @Column({ type: 'decimal', nullable: true, default: null })
   item_price: number;
+  
   @Column({ type: 'varchar', nullable: true, default: 'pending' })
   status: string;
   
+  @Column({ type: 'varchar', nullable: true, default: null })
+  err_msg: string;    
+
   // ⭐ NEW: Cheque payment fields
   @Column({ type: 'varchar', nullable: true, default: null })
   cheque_number: string;
@@ -77,7 +92,8 @@ export class Donation extends BaseEntity {
   // Order ID returned by the bank
   @Column({ type: 'varchar', nullable: true, default: null })
   orderId: string;
-//   recurrence id in case of recurring donation and is returned by meezan bank
+
+  //   recurrence id in case of recurring donation and is returned by meezan bank
   @Column({ type: 'varchar', nullable: true, default: null })
   recurrence_id: string;
 }

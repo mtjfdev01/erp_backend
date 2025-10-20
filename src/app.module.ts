@@ -14,6 +14,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DonationsModule } from './donations/donations.module';
 import { DmsModule } from './dms/dms.module';
+import { DmsCronsModule } from './crons/dms_crons/dms-crons.module';
 
 @Module({
   imports: [
@@ -22,13 +23,13 @@ import { DmsModule } from './dms/dms.module';
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT), 
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
+      // host: process.env.DB_HOST,
+      // port: parseInt(process.env.DB_PORT), 
+      // username: process.env.DB_USERNAME,
+      // password: process.env.DB_PASSWORD,
+      // database: process.env.DB_NAME,
 
-      // url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/ddr_db',
+      url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/ddr_db',
       // ssl: process.env.SSL === 'production',
       autoLoadEntities: true,
       synchronize: true 
@@ -44,6 +45,7 @@ import { DmsModule } from './dms/dms.module';
     EventEmitterModule.forRoot(),
     DonationsModule,
     DmsModule,
+    DmsCronsModule,
     ],
   controllers: [AppController],
   providers: [AppService],

@@ -11,14 +11,11 @@ import {
   UseGuards,
   Query
 } from '@nestjs/common';
-import { FilterPayload, applyHybridFilters, HybridFilter } from '../utils/filters/common-filter.util';
+import { FilterPayload } from '../utils/filters/common-filter.util';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
-import { PermissionsGuard } from '../permissions/guards/permissions.guard';
-import { RequiredPermissions } from '../permissions/decorators/require-permission.decorator';
-import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donations')
 // @UseGuards( JwtGuard,PermissionsGuard)

@@ -18,10 +18,10 @@ export enum PaymentMethod {
 }
 
 @Entity('donation_box_donations')
-@Index('idx_donation_box_id', ['donation_box_id'])
-@Index('idx_collection_date', ['collection_date'])
-@Index('idx_status', ['status'])
-@Index('idx_collected_by', ['collected_by_id'])
+// @Index('idx_donation_box_id', ['donation_box_id'])
+// // @Index('idx_collection_date', ['collection_date'])
+// @Index('idx_status', ['status'])
+// @Index('idx_collected_by', ['collected_by_id'])
 export class DonationBoxDonation extends BaseEntity {
   // Foreign key relationship to DonationBox
   @ManyToOne(() => DonationBox, { nullable: false, onDelete: 'CASCADE' })

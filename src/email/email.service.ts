@@ -215,4 +215,196 @@ export class EmailService implements OnModuleInit {
       © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
     `;
   }
+
+  // Send donation success notification to admin
+  async sendDonationSuccessNotification(donation: any, paymentDetails: any): Promise<boolean> {
+    try {
+      const staticEmailAddress = process.env.NOTIFICATION_EMAIL || 'dev@mtjfoundation.org';
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: staticEmailAddress,
+        subject: `✅ Donation Success - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+        html: this.generateDonationSuccessTemplate(donation, paymentDetails),
+        text: this.generateDonationSuccessText(donation, paymentDetails),
+        headers: {
+          'X-Mailer': 'MTJ Foundation Donation System',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Sent donation success notification to ${staticEmailAddress} (id: ${result.messageId})`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Donation success email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  // Send donation failure notification to admin
+  async sendDonationFailureNotification(donation: any, errorDetails: any): Promise<boolean> {
+    try {
+      const staticEmailAddress = process.env.NOTIFICATION_EMAIL || 'irfan.waheed@mtjfoundation.org';
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: staticEmailAddress,
+        subject: `❌ Donation Failed - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+        html: this.generateDonationFailureTemplate(donation, errorDetails),
+        text: this.generateDonationFailureText(donation, errorDetails),
+        headers: {
+          'X-Mailer': 'MTJ Foundation Donation System',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Sent donation failure notification to ${staticEmailAddress} (id: ${result.messageId})`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Donation failure email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  private generateDonationSuccessTemplate(donation: any, paymentDetails: any): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Donation Success Notification</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #28a745; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .donation-details { background-color: white; padding: 20px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #28a745; }
+          .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 Donation Successfully Processed</h1>
+          </div>
+          
+          <div class="content">
+            <div class="donation-details">
+              <h3>Donation Details</h3>
+              <p><strong>Donation ID:</strong> ${donation.id}</p>
+              <p><strong>Donor Name:</strong> ${donation.donor_name || 'Anonymous'}</p>
+              <p><strong>Donor Email:</strong> ${donation.donor_email || 'N/A'}</p>
+              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || 'PKR'}</p>
+              <p><strong>Transaction ID:</strong> ${paymentDetails.transaction_id}</p>
+              <p><strong>Payment Date:</strong> ${paymentDetails.order_date}</p>
+              <p><strong>Payment Method:</strong> ${paymentDetails.PaymentName || 'PayFast'}</p>
+              <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">Completed</span></p>
+            </div>
+            
+            <p><em>This is an automated notification from your donation system.</em></p>
+          </div>
+          
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private generateDonationSuccessText(donation: any, paymentDetails: any): string {
+    return `
+      🎉 Donation Successfully Processed
+      
+      Donation Details:
+      - Donation ID: ${donation.id}
+      - Donor Name: ${donation.donor_name || 'Anonymous'}
+      - Donor Email: ${donation.donor_email || 'N/A'}
+      - Amount: ${donation.amount} ${donation.currency || 'PKR'}
+      - Transaction ID: ${paymentDetails.transaction_id}
+      - Payment Date: ${paymentDetails.order_date}
+      - Payment Method: ${paymentDetails.PaymentName || 'PayFast'}
+      - Status: Completed
+      
+      This is an automated notification from your donation system.
+      
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+    `;
+  }
+
+  private generateDonationFailureTemplate(donation: any, errorDetails: any): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Donation Failure Notification</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #dc3545; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .donation-details { background-color: white; padding: 20px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #dc3545; }
+          .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>⚠️ Donation Processing Failed</h1>
+          </div>
+          
+          <div class="content">
+            <div class="donation-details">
+              <h3>Donation Details</h3>
+              <p><strong>Donation ID:</strong> ${donation.id}</p>
+              <p><strong>Donor Name:</strong> ${donation.donor_name || 'Anonymous'}</p>
+              <p><strong>Donor Email:</strong> ${donation.donor_email || 'N/A'}</p>
+              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || 'PKR'}</p>
+              <p><strong>Error Code:</strong> ${errorDetails.err_code}</p>
+              <p><strong>Error Message:</strong> ${errorDetails.err_msg || 'Unknown error'}</p>
+              <p><strong>Transaction ID:</strong> ${errorDetails.transaction_id || 'N/A'}</p>
+              <p><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">Failed</span></p>
+            </div>
+            
+            <p><em>This is an automated notification from your donation system.</em></p>
+          </div>
+          
+          <div class="footer">
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private generateDonationFailureText(donation: any, errorDetails: any): string {
+    return `
+      ⚠️ Donation Processing Failed
+      
+      Donation Details:
+      - Donation ID: ${donation.id}
+      - Donor Name: ${donation.donor_name || 'Anonymous'}
+      - Donor Email: ${donation.donor_email || 'N/A'}
+      - Amount: ${donation.amount} ${donation.currency || 'PKR'}
+      - Error Code: ${errorDetails.err_code}
+      - Error Message: ${errorDetails.err_msg || 'Unknown error'}
+      - Transaction ID: ${errorDetails.transaction_id || 'N/A'}
+      - Status: Failed
+      
+      This is an automated notification from your donation system.
+      
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+    `;
+  }
 }

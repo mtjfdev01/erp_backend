@@ -102,4 +102,23 @@ export class CreateDonationDto {
   @IsNumber()
   donor_id?: number;
 
+  // ⭐ NEW: In-kind items array
+  @IsOptional()
+  in_kind_items?: Array<{
+    name: string;
+    item_code?: string;
+    description?: string;
+    category?: string;
+    condition?: string;
+    quantity: number;
+    estimated_value?: number;
+    brand?: string;
+    model?: string;
+    size?: string;
+    color?: string;
+    collection_date: string;
+    collection_location?: string;
+    notes?: string;
+  }>;
+
 }

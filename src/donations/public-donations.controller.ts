@@ -66,4 +66,26 @@ export class PublicDonationsController {
       });
     }
   }
+
+  // Public Blinq callback endpoint - NO GUARDS
+  @Post('blinq/callback')
+  async handleBlinqCallback(@Body() payload: any, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.handleBlinqCallback(payload);
+      
+      // Always return 200 OK as per Blinq documentation
+      return res.status(HttpStatus.OK).json(result);
+      
+    } catch (error) {
+      console.error("Blinq callback error:", error.message);
+      
+      // Still return 200 OK to prevent Blinq retries
+      return res.status(HttpStatus.OK).json({ 
+        code: "01",
+        message: "Internal server error",
+        status: "failure",
+        invoice_number: payload.invoice_number || "unknown"
+      });
+    }
+  }
 }

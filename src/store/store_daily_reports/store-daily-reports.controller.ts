@@ -33,7 +33,6 @@ export class StoreDailyReportsController {
     @Query('sortField') sortField: string = 'created_at',
     @Query('sortOrder') sortOrder: 'ASC' | 'DESC' = 'DESC'
   ) {
-    console.log("HERER-----")
     const pageNum = parseInt(page, 10) || 1;
     const pageSizeNum = parseInt(pageSize, 10) || 10;
     

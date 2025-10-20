@@ -23,4 +23,5 @@ export class DonationInKindService {
   remove(id: number) {
     return `This action removes a #${id} donationInKind`;
   }
+
 }

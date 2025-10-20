@@ -5,6 +5,7 @@ import { DonationsController } from './donations.controller';
 import { PublicDonationsController } from './public-donations.controller';
 import { MigrationController } from './migration.controller';
 import { Donation } from './entities/donation.entity';
+import { DonationInKind } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions/permissions.module';
 import { EmailModule } from '../email/email.module';
@@ -13,7 +14,7 @@ import { DonorModule } from '../dms/donor/donor.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Donation]),
+    TypeOrmModule.forFeature([Donation, DonationInKind]),
     // JwtModule.register({
     //   secret: process.env.JWT_SECRET || 'your-secret-key',
     //   signOptions: { expiresIn: '24h' },
