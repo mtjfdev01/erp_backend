@@ -35,6 +35,12 @@ export class UserDonor {
   })
   assigned_by: number;
 
+  @Column({
+    nullable: true,
+    comment: 'ID of the user who referred this assignment'
+  })
+  referrer_id: number;
+
   @CreateDateColumn({ 
     name: 'assigned_at',
     comment: 'When the donor was assigned to the user'
@@ -59,4 +65,8 @@ export class UserDonor {
   @ManyToOne(() => User, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'assigned_by' })
   assignedByUser: User;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'referrer_id' })
+  referrer: User;
 }

@@ -364,4 +364,30 @@ export class UsersService {
       errors
     };
   }
+
+  async getUsersByDepartment(department: Department, page = 1, pageSize = 10): Promise<{ data: User[], pagination: any }> {
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('user')
+      .where('user.department = :department', { department })
+      .andWhere('user.isActive = :isActive', { isActive: true });
+
+    const skip = (page - 1) * pageSize;
+    queryBuilder.skip(skip).take(pageSize);
+    queryBuilder.orderBy('user.first_name', 'ASC');
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    const totalPages = Math.ceil(total / pageSize);
+
+    return {
+      data,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    };
+  }
 } 

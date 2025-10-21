@@ -19,7 +19,7 @@ export class Donation extends BaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   project_name: string;
 
-  @Column({ type: 'decimal', nullable: true, default: null })
+  @Column({ type: 'int', nullable: true, default: null })
   amount: number;
 
   //default current date and time

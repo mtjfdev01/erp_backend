@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, Ba
 import { UsersService } from './users.service';
 import { JwtGuard } from '../auth/jwt.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { User } from './user.entity';
+import { User, Department } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserWithPermissionsDto } from './dto/update-user-with-permissions.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -45,6 +45,29 @@ export class UsersController {
       role,
       isActive: isActive ? isActive === 'true' : undefined
     });
+  }
+
+  @Get('department/:department')
+  @RequiredPermissions(['users.list_view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin'])
+  async getUsersByDepartment(
+    @Param('department') department: string,
+    @Query('page') page: string = '1',
+    @Query('pageSize') pageSize: string = '10'
+  ) {
+    // Validate department parameter
+    const validDepartments = Object.values(Department);
+    if (!validDepartments.includes(department as Department)) {
+      throw new BadRequestException(`Invalid department. Must be one of: ${validDepartments.join(', ')}`);
+    }
+
+    const pageNum = parseInt(page, 10);
+    const pageSizeNum = parseInt(pageSize, 10);
+
+    if (isNaN(pageNum) || isNaN(pageSizeNum) || pageNum < 1 || pageSizeNum < 1) {
+      throw new BadRequestException('Page and pageSize must be valid positive numbers');
+    }
+
+    return this.usersService.getUsersByDepartment(department as Department, pageNum, pageSizeNum);
   }
 
   @Get(':id')

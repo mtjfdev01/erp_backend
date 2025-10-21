@@ -398,31 +398,48 @@ export class DonationsService {
     hybridFilters: HybridFilter[] = []
   ) {
     try {
-      // Define searchable fields for donations
       const searchFields = ['donor_name', 'donor_email', 'city'];
-      
-      // Create base query
       const query = this.donationRepository.createQueryBuilder('donation');
-      
-      // Apply common filters
+
+      // Apply filters
       applyCommonFilters(query, filters, searchFields, 'donation');
-      
-      // Apply hybrid filters
       applyHybridFilters(query, hybridFilters, 'donation');
-      
-      // Apply pagination
+
+      // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
-      
-      // Apply sorting
+
+      // Sorting
       query.orderBy(`donation.${sortField}`, sortOrder);
-      
+
+      // Get paginated data + total count
       const [data, total] = await query.getManyAndCount();
       const totalPages = Math.ceil(total / pageSize);
-      
+
+      // ✅ Get SUM(amount) with same filters
+      const sumQuery = this.donationRepository.createQueryBuilder('donation')
+        .select('SUM(donation.amount)', 'totalDonationAmount');
+
+      // Apply same filters to keep consistent
+      applyCommonFilters(sumQuery, filters, searchFields, 'donation');
+      applyHybridFilters(sumQuery, hybridFilters, 'donation');
+
+      const sumResult = await sumQuery.getRawOne();
+      const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;
+
+      console.log("totalDonationAmount", totalDonationAmount);
+
       return {
         data,
-        pagination: { page, pageSize, total, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+        totalDonationAmount, // 👈 extra key added here
       };
     } catch (error) {
       throw new Error(`Failed to retrieve donations: ${error.message}`);

@@ -12,6 +12,10 @@ export class UpdateUserDonorDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsNumber()
+  @IsOptional()
+  referrer_id?: number;
 }
 
 export class TransferDonorDto {

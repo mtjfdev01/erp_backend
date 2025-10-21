@@ -22,4 +22,8 @@ export class CreateUserDonorDto {
   @IsNumber()
   @IsNotEmpty()
   assigned_by: number;
+
+  @IsNumber()
+  @IsOptional()
+  referrer_id?: number;
 }
