@@ -67,8 +67,11 @@ export class DonationsService {
      // ============================================
      let donorId: number | null = createDonationDto.donor_id || null;
      let donor:any;
-     //  findOne
-
+     
+     if (Number(createDonationDto?.amount) < 50){
+      //  return with error that donation amount is less than 50
+      throw new HttpException('Donation amount is less than 50 PKR', 400);
+     }
      if (createDonationDto.donor_email && createDonationDto.donor_phone || donorId) {
        console.log(`🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`);
        
@@ -86,6 +89,10 @@ export class DonationsService {
        if (donor) {
          console.log(`✅ Donor already exists: ${donor.email} (ID: ${donor.id})`);
          donorId = donor.id;
+        //  return with error that donor is archived 
+        if(donor?.is_archived === true){
+          throw new HttpException('Donor is archived', 400);
+        }
        } else {
          console.log(`❌ Donor not found. Auto-registering...`);
          
@@ -144,7 +151,6 @@ export class DonationsService {
         amount: (savedDonation.amount * 100).toString(), // amount in minor units (PKR -> paisa)
         currency: '586',
         returnUrl: `${process.env.BASE_Frontend_URL}/thanks?donation_id=${savedDonation.id}`,
-        description: savedDonation.item_description || (isZakat ? 'Zakat Donation' : 'Sadqa Donation'),
       });
 
       // Step 3: Call Meezan register.do
@@ -222,7 +228,8 @@ export class DonationsService {
         "ValidityDate": formatDate(validityDate),
         "InvoiceType": "Service",
         "IssueDate": formatDate(currentDate),
-        "CustomerName": savedDonation.donor_name,
+        "CustomerName": donor?.name || null,
+        
       }]
 
         //  create invoice on blinq

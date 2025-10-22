@@ -1,5 +1,6 @@
-import { Entity, Column, OneToMany } from 'typeorm';
+import { Entity, Column, OneToMany, JoinColumn, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../utils/base_utils/entities/baseEntity';
+import { User } from 'src/users/user.entity';
 
 export enum DonorType {
   INDIVIDUAL = 'individual',
@@ -11,6 +12,23 @@ export class Donor extends BaseEntity {
   // Relationship to Donations (one donor can have many donations)
   @OneToMany('Donation', 'donor')
   donations: any[];
+
+  @ManyToOne(() => User, (user) => user.id, {
+    nullable: true,
+    eager: false,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'assigned_to' })
+  assigned_to: User;
+
+  @ManyToOne(() => User, (user) => user.id, {
+    nullable: true,
+    eager: false,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'referred_by' })
+  referred_by: User;
+  
   // Common fields for all donors
   @Column({
     type: 'enum',

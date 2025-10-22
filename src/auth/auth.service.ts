@@ -45,6 +45,7 @@ export class AuthService {
         joining_date: user.joining_date,
         emergency_contact: user.emergency_contact,
         blood_group: user.blood_group,
+        is_archived: user?.is_archived,
       },
       permissions // Include permissions in login response
     };
@@ -54,8 +55,8 @@ export class AuthService {
     try {
       const payload = await this.jwtService.verifyAsync(token);
       const user = await this.usersService.findByEmail(payload.email);
-      if (!user || !user.isActive) {
-        throw new UnauthorizedException('User not found or inactive');
+      if (!user || !user.isActive || user?.is_archived) {
+        throw new UnauthorizedException('User not found or inactive or archived');
       }
       return user;
     } catch {

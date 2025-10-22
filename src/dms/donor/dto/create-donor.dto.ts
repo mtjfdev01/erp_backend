@@ -6,7 +6,8 @@ import {
   MinLength, 
   IsNotEmpty,
   ValidateIf,
-  IsPhoneNumber
+  IsPhoneNumber,
+  IsNumber
 } from 'class-validator';
 import { DonorType } from '../entities/donor.entity';
 
@@ -100,4 +101,11 @@ export class CreateDonorDto {
   @IsEmail()
   @IsOptional()
   company_email?: string;
+
+  @IsOptional()
+  @IsNumber()
+  referrer_user_id?: number;
+
+  @IsNumber()
+  assigned_to_user_id?: number;
 }

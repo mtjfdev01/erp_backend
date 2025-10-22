@@ -251,7 +251,6 @@ export class BlinqService {
         "ValidityDate": formatDate(validityDate),
         "InvoiceType": "Service",
         "IssueDate": formatDate(currentDate),
-        "CustomerName": donation.donor_name,
       }];
 
       const blinqInvoice = await axios.post(

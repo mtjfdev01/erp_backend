@@ -9,6 +9,7 @@ import {
   Query,
   HttpStatus,
   Res,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
@@ -25,11 +26,12 @@ import { RequiredPermissions } from '../../permissions/decorators/require-permis
 export class DonorController {
   constructor(private readonly donorService: DonorService) {}
 
-  @Post('register')
+  @Post('register') 
   @RequiredPermissions(['fund_raising.donors.create', 'super_admin', 'fund_raising_manager'])
-  async register(@Body() createDonorDto: CreateDonorDto, @Res() res: Response) {
+  async register(@Body() createDonorDto: CreateDonorDto, @Req() req: any, @Res() res: Response) {
     try {
-      const result = await this.donorService.register(createDonorDto);
+      const user = req?.user ?? null;
+      const result = await this.donorService.register(createDonorDto, user);
       return res.status(HttpStatus.CREATED).json({
         success: true,
         message: 'Donor registered successfully',
@@ -146,9 +148,10 @@ export class DonorController {
 
   @Delete(':id')
   @RequiredPermissions(['fund_raising.donors.delete', 'super_admin', 'fund_raising_manager'])
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Req() req: any, @Res() res: Response) {
     try {
-      const result = await this.donorService.remove(+id);
+       
+      const result = await this.donorService.remove(+id, req.user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

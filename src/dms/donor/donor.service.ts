@@ -6,6 +6,8 @@ import { CreateDonorDto } from './dto/create-donor.dto';
 import { UpdateDonorDto } from './dto/update-donor.dto';
 import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
 import * as bcrypt from 'bcrypt';
+import { User } from 'src/users/user.entity';
+import { UsersService } from 'src/users/users.service';
 
 interface PaginationOptions {
   page: number;
@@ -26,12 +28,15 @@ export class DonorService {
   constructor(
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
-  ) {}
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    private readonly usersService: UsersService,
+    ) {}
 
   /**
    * Create a new donor (individual or CSR)
    */
-  async register(createDonorDto: CreateDonorDto): Promise<Donor> {
+  async register(createDonorDto: CreateDonorDto, user: any): Promise<Donor> {
     try {
       // Check if email already exists
       const existingDonor = await this.donorRepository.findOne({
@@ -41,7 +46,23 @@ export class DonorService {
       if (existingDonor) {
         throw new ConflictException('Email already exists');
       }
+      let assigned_to = null;
+      let referred_by = null;
+      if(createDonorDto?.referrer_user_id){
+      // Check if referrer user exists
+      referred_by = await this.userRepository.findOne({ where: { id: createDonorDto.referrer_user_id } });
+      if (!referred_by) {
+        throw new NotFoundException('Referrer user not found');
+      }
+    }
 
+    if(createDonorDto?.assigned_to_user_id){
+      // Check if assigned to user exists
+      assigned_to = await this.usersService.findOne(createDonorDto.assigned_to_user_id);
+      if (!assigned_to) {
+        throw new NotFoundException('Assigned to user not found');
+      }
+    }
       // Hash the password only if provided
       let hashedPassword = null;
       if (createDonorDto.password) {
@@ -52,6 +73,9 @@ export class DonorService {
       const donor = this.donorRepository.create({
         ...createDonorDto,
         password: hashedPassword,
+        assigned_to,
+        referred_by,
+        created_by: user
       });
 
       // Save and return
@@ -118,6 +142,9 @@ export class DonorService {
 
       applyCommonFilters(queryBuilder, filters, searchFields, 'donor');
 
+      queryBuilder.andWhere('donor.is_archived = :is_archived', { is_archived: false });
+
+
       // Apply is_active filter
       if (is_active !== undefined) {
         queryBuilder.andWhere('donor.is_active = :is_active', { is_active });
@@ -173,7 +200,7 @@ export class DonorService {
   async findByEmailAndPhone(email: string, phone: string): Promise<Donor | null> {
     try {
       const donor = await this.donorRepository.findOne({
-        where: { email, phone },
+        where: { email, phone, is_archived: false },
       });
       
       return donor || null;
@@ -232,7 +259,7 @@ export class DonorService {
 
   async findOne(id: number): Promise<Donor> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id } });
+      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
       
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
@@ -254,7 +281,7 @@ export class DonorService {
    * Find donor by email (for authentication)
    */
   async findByEmail(email: string): Promise<Donor | null> {
-    return await this.donorRepository.findOne({ where: { email } });
+    return await this.donorRepository.findOne({ where: { email, is_archived: false } });
   }
 
   /**
@@ -284,7 +311,7 @@ export class DonorService {
    */
   async update(id: number, updateDonorDto: UpdateDonorDto): Promise<Donor> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id } });
+      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
       
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
@@ -320,7 +347,7 @@ export class DonorService {
     newPassword: string,
   ): Promise<{ message: string }> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id: donorId } });
+      const donor = await this.donorRepository.findOne({ where: { id: donorId, is_archived: false } });
       
       if (!donor) {
         throw new NotFoundException('Donor not found');
@@ -358,9 +385,9 @@ export class DonorService {
   /**
    * Soft delete (deactivate) donor
    */
-  async remove(id: number): Promise<{ message: string }> {
+  async remove(id: number, user:any): Promise<{ message: string }> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id } });
+      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
       
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
@@ -368,7 +395,9 @@ export class DonorService {
 
       // Soft delete - set is_active to false
       donor.is_active = false;
-      await this.donorRepository.save(donor);
+      donor.is_archived = true;
+      donor.updated_by = user;
+      await this.donorRepository.save(donor); 
 
       return { message: 'Donor deactivated successfully' };
     } catch (error) {
@@ -387,7 +416,7 @@ export class DonorService {
     amount: number,
   ): Promise<void> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id: donorId } });
+      const donor = await this.donorRepository.findOne({ where: { id: donorId, is_archived: false } });
       
       if (donor) {
         donor.total_donated = Number(donor.total_donated) + amount;

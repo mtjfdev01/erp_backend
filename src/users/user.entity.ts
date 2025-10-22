@@ -89,4 +89,7 @@ export class User {
   // One-to-One relationship with permissions
   @OneToOne(() => PermissionsEntity, (permissions) => permissions.user)
   permissions: PermissionsEntity;
+
+  @Column({ name: 'is_archived', type: 'boolean', default: false })
+  is_archived: boolean;
 } 
