@@ -3,7 +3,7 @@ import axios from 'axios';
 export class PayfastService {
   private base = 'https://ipg1.apps.net.pk';
 
-  async getAccessToken(basketId: string, amount: number | string) {
+  async getAccessToken(basketId: string, amount: number | string) { 
     try {   
     // Build URL with query parameters (matching Postman format)
     let config = {

@@ -21,7 +21,7 @@ import { DonorModule } from '../dms/donor/donor.module';
     // }),
     // PermissionsModule,
     EmailModule,
-    DonorModule
+    DonorModule,
 ], 
   controllers: [DonationsController, PublicDonationsController, MigrationController],
   providers: [DonationsService, PayfastService],

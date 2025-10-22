@@ -22,6 +22,8 @@ export class Donation extends BaseEntity {
   @Column({ type: 'int', nullable: true, default: null })
   amount: number;
 
+  @Column({ type: 'int', nullable: true, default: null })
+  paid_amount: number;
   //default current date and time
   @Column({ type: 'date', default: () => 'CURRENT_DATE', nullable: true })
   date: Date;
