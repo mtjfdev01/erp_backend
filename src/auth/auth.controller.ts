@@ -28,13 +28,14 @@ export class AuthController {
     const result = await this.authService.login(user);
     console.log('Login successful, setting cookies...');
     
-    // Set JWT in HTTP-only cookie
+    // Set JWT in HTTP-only cookie (no domain sharing - separate cookies per domain)
     const jwtCookieOptions = {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax' as const,
+      secure: process.env.NODE_ENV === 'production', // true for HTTPS, false for HTTP
+      sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin HTTPS
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: '/'
+      // No domain set = cookie only works for the exact domain that set it
     };
 
     console.log('Setting JWT cookie with options:', jwtCookieOptions);
@@ -53,13 +54,14 @@ export class AuthController {
   async logout(@Res({ passthrough: true }) response: Response) {
     console.log('Logout request received, clearing cookies...');
     
+    // Clear JWT cookie (no domain sharing - separate cookies per domain)
     const cookieOptions = {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax' as const,
+      secure: process.env.NODE_ENV === 'production', // true for HTTPS, false for HTTP
+      sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax', // 'none' for cross-origin HTTPS
       path: '/'
+      // No domain set = cookie only works for the exact domain that set it
     };
-
     response.clearCookie('jwt', cookieOptions);
     
     console.log('Cookies cleared');

@@ -24,7 +24,7 @@ async function bootstrap() {
       
       // During development, allow all localhost origins
       if (process.env.NODE_ENV !== 'production' && 
-          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:') )) {
+          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:') || origin.startsWith('https://mtjf-erp.vercel.app') )) {
         console.log('Development mode: Allowing origin:', origin);
         return callback(null, true);
       }
