@@ -406,8 +406,13 @@ export class DonationsService {
   ) {
     try {
       const searchFields = ['donor_name', 'donor_email', 'city'];
-      const query = this.donationRepository.createQueryBuilder('donation');
-
+      const query = this.donationRepository.createQueryBuilder('donation')
+      .leftJoin('donation.donor', 'donor')
+      .addSelect('donor.name', 'donor_name')
+      .addSelect('donor.email', 'donor_email')
+      .addSelect('donor.id', 'donor_id')
+      .addSelect('donor.phone', 'donor_phone')
+      ;
       // Apply filters
       applyCommonFilters(query, filters, searchFields, 'donation');
       applyHybridFilters(query, hybridFilters, 'donation');

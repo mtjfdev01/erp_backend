@@ -47,6 +47,12 @@ export class Donor extends BaseEntity {
   phone: string;
 
   @Column({ nullable: true })
+  cnic: string;
+
+  @Column({ nullable: true, default: 'website' })
+  source: string;
+
+  @Column({ nullable: true })
   address: string;
 
   @Column({ nullable: true })

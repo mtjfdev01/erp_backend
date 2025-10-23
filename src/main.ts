@@ -29,7 +29,18 @@ async function bootstrap() {
         return callback(null, true);
       }
       
-      if (allowedOrigins.includes(origin)) {
+      // Check if origin matches any allowed base domains (including subpaths)
+      const isAllowedOrigin = allowedOrigins.some(allowedOrigin => {
+        // Exact match
+        if (origin === allowedOrigin) return true;
+        
+        // Check if origin starts with allowed origin (for subpaths)
+        if (origin.startsWith(allowedOrigin + '/')) return true;
+        
+        return false;
+      });
+      
+      if (isAllowedOrigin) {
         console.log('Allowed origin:', origin);
         callback(null, true);
       } else {
