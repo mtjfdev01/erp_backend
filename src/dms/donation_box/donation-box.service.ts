@@ -1,10 +1,12 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { DonationBox } from './entities/donation-box.entity';
 import { CreateDonationBoxDto } from './dto/create-donation-box.dto';
 import { UpdateDonationBoxDto } from './dto/update-donation-box.dto';
 import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
+import { Route } from '../geographic/routes/entities/route.entity';
+import { User } from '../../users/user.entity';
 
 interface PaginationOptions {
   page: number;
@@ -27,34 +29,54 @@ export class DonationBoxService {
   constructor(
     @InjectRepository(DonationBox)
     private readonly donationBoxRepository: Repository<DonationBox>,
+    @InjectRepository(Route)
+    private readonly routeRepository: Repository<Route>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   /**
    * Create a new donation box
    */
-  async create(createDonationBoxDto: CreateDonationBoxDto): Promise<DonationBox> {
+  async create(createDonationBoxDto: CreateDonationBoxDto, currentUser: any): Promise<DonationBox> {
     try {
-      // Check if box_id_no already exists
-      const existingBox = await this.donationBoxRepository.findOne({
-        where: { box_id_no: createDonationBoxDto.box_id_no },
+      // Validate that route exists
+      const route = await this.routeRepository.findOne({
+        where: { id: createDonationBoxDto.route_id }
       });
 
-      if (existingBox) {
-        throw new ConflictException('Box ID already exists');
+      if (!route) {
+        throw new NotFoundException(`Route with ID ${createDonationBoxDto.route_id} not found`);
+      }
+
+
+      // Validate assigned users if provided
+      let assignedUsers: User[] = [];
+      if (createDonationBoxDto.assigned_user_ids && createDonationBoxDto.assigned_user_ids.length > 0) {
+        assignedUsers = await this.userRepository.findBy({ id: In(createDonationBoxDto.assigned_user_ids) });
+        
+        if (assignedUsers.length !== createDonationBoxDto.assigned_user_ids.length) {
+          const foundIds = assignedUsers.map(user => user.id);
+          const missingIds = createDonationBoxDto.assigned_user_ids.filter(id => !foundIds.includes(id));
+          throw new NotFoundException(`Users with IDs ${missingIds.join(', ')} not found`);
+        }
       }
 
       // Create donation box entity
-      const donationBox = this.donationBoxRepository.create(createDonationBoxDto);
+      const { assigned_user_ids, ...boxData } = createDonationBoxDto;
+      const donationBox = this.donationBoxRepository.create({
+        ...boxData,
+        created_by: currentUser?.id == -1 ? null : currentUser?.id,
+        assignedUsers: assignedUsers,
+      });
 
       // Save and return
       const savedBox = await this.donationBoxRepository.save(donationBox);
       
       return savedBox;
     } catch (error) {
-      if (error instanceof ConflictException) {
-        throw error;
-      }
-      throw new ConflictException(`Failed to create donation box: ${error.message}`);
+      console.error('Error creating donation box:', error);
+      throw new Error(`Failed to create donation box: ${error.message}`);
     }
   }
 
@@ -81,21 +103,24 @@ export class DonationBoxService {
 
       const skip = (page - 1) * pageSize;
 
-      // Define searchable fields
+      // Define searchable fields (only string fields that can be used with LOWER())
       const searchFields = [
-        'box_id_no',
         'key_no',
         'shop_name',
         'shopkeeper',
         'cell_no',
         'landmark_marketplace',
-        'route',
-        'frd_officer_reference',
+        'route.name', // Search in route name from joined table
       ];
 
-      // Build query with filters
-      const query = this.donationBoxRepository.createQueryBuilder('donation_box');
-
+      // Build query with filters and relations
+      const query = this.donationBoxRepository.createQueryBuilder('donation_box')
+        .leftJoinAndSelect('donation_box.route', 'route')
+        .leftJoinAndSelect('route.cities', 'cities')
+        .leftJoinAndSelect('route.region', 'region')
+        .leftJoinAndSelect('route.country', 'country')
+        .leftJoinAndSelect('donation_box.assignedUsers', 'assignedUsers');
+        
       // Apply common filters
       const filters: FilterPayload = {
         search,
@@ -136,6 +161,7 @@ export class DonationBoxService {
         },
       };
     } catch (error) {
+      console.error('Error retrieving donation boxes:', error);
       throw new Error(`Failed to retrieve donation boxes: ${error.message}`);
     }
   }
@@ -145,7 +171,10 @@ export class DonationBoxService {
    */
   async findOne(id: number): Promise<DonationBox> {
     try {
-      const donationBox = await this.donationBoxRepository.findOne({ where: { id } });
+      const donationBox = await this.donationBoxRepository.findOne({ 
+        where: { id },
+        relations: ['route', 'route.cities', 'route.region', 'route.country', 'assignedUsers']
+      });
       
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
@@ -156,30 +185,15 @@ export class DonationBoxService {
       if (error instanceof NotFoundException) {
         throw error;
       }
+      console.error('Error retrieving donation box:', error.message);
       throw new NotFoundException(`Failed to retrieve donation box: ${error.message}`);
-    }
-  }
-
-  /**
-   * Find donation box by box_id_no
-   */
-  async findByBoxIdNo(box_id_no: string): Promise<DonationBox | null> {
-    try {
-      const donationBox = await this.donationBoxRepository.findOne({
-        where: { box_id_no },
-      });
-      
-      return donationBox || null;
-    } catch (error) {
-      console.error('Error finding donation box by box_id_no:', error);
-      return null;
     }
   }
 
   /**
    * Update a donation box
    */
-  async update(id: number, updateDonationBoxDto: UpdateDonationBoxDto): Promise<DonationBox> {
+  async update(id: number, updateDonationBoxDto: any): Promise<DonationBox> {
     try {
       const donationBox = await this.donationBoxRepository.findOne({ where: { id } });
       
@@ -187,15 +201,55 @@ export class DonationBoxService {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
 
-      // Update the entity
-      await this.donationBoxRepository.update(id, updateDonationBoxDto);
+      // Validate route if it's being updated
+      if (updateDonationBoxDto.route_id) {
+        const route = await this.routeRepository.findOne({
+          where: { id: updateDonationBoxDto.route_id }
+        });
+
+        if (!route) {
+          throw new NotFoundException(`Route with ID ${updateDonationBoxDto.route_id} not found`);
+        }
+      }
+
+      // Handle user assignments if provided
+      if (updateDonationBoxDto.assigned_user_ids !== undefined) {
+        let assignedUsers: User[] = [];
+        if (updateDonationBoxDto.assigned_user_ids && updateDonationBoxDto.assigned_user_ids.length > 0) {
+          assignedUsers = await this.userRepository.findBy({ id: In(updateDonationBoxDto.assigned_user_ids) });
+          
+          if (assignedUsers.length !== updateDonationBoxDto.assigned_user_ids.length) {
+            const foundIds = assignedUsers.map(user => user.id);
+            const missingIds = updateDonationBoxDto.assigned_user_ids.filter(id => !foundIds.includes(id));
+            throw new NotFoundException(`Users with IDs ${missingIds.join(', ')} not found`);
+          }
+        }
+
+        // Update user assignments
+        const donationBox = await this.donationBoxRepository.findOne({ 
+          where: { id },
+          relations: ['assignedUsers']
+        });
+        donationBox.assignedUsers = assignedUsers;
+        await this.donationBoxRepository.save(donationBox);
+      }
+
+      // Update other entity properties
+      const { assigned_user_ids, ...updateData } = updateDonationBoxDto;
+      if (Object.keys(updateData).length > 0) {
+        await this.donationBoxRepository.update(id, updateData);
+      }
       
-      // Return updated entity
-      return await this.donationBoxRepository.findOne({ where: { id } });
+      // Return updated entity with relations
+      return await this.donationBoxRepository.findOne({ 
+        where: { id },
+        relations: ['route', 'route.cities', 'route.region', 'route.country', 'assignedUsers']
+      });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
+      console.error('Error updating donation box:', error.message);
       throw new Error(`Failed to update donation box: ${error.message}`);
     }
   }
@@ -219,6 +273,7 @@ export class DonationBoxService {
       if (error instanceof NotFoundException) {
         throw error;
       }
+      console.error('Error archiving donation box:', error.message);
       throw new Error(`Failed to archive donation box: ${error.message}`);
     }
   }
@@ -243,6 +298,7 @@ export class DonationBoxService {
       
       return donationBox;
     } catch (error) {
+      console.error('Error updating collection statistics:', error.message);
       throw new Error(`Failed to update collection statistics: ${error.message}`);
     }
   }
@@ -254,14 +310,29 @@ export class DonationBoxService {
     try {
       return await this.donationBoxRepository.find({
         where: {
-          region,
+          route: {
+            region: {
+              name: region,
+            },
+          },
           is_active: true,
           is_archived: false,
         },
-        order: { city: 'ASC', shop_name: 'ASC' },
+        order: { shop_name: 'ASC' },
       });
     } catch (error) {
+      console.error('Error retrieving active boxes:', error.message);
       throw new Error(`Failed to retrieve active boxes: ${error.message}`);
+    }
+  }
+
+  // i want to get by key number
+  async findByKeyNumber(key_number: string): Promise<DonationBox> {
+    try {
+      return await this.donationBoxRepository.findOne({ where: { key_no: key_number } });
+    } catch (error) {
+      console.error('Error retrieving donation box by key number:', error);
+      throw new Error(`Failed to retrieve donation box by key number: ${error.message}`);
     }
   }
 }

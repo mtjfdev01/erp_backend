@@ -6,10 +6,12 @@ import { DonationBoxController } from './donation-box.controller';
 import { DonationBox } from './entities/donation-box.entity';
 import { PermissionsModule } from '../../permissions/permissions.module';
 import { DonationBoxDonationModule } from './donation_box_donation/donation_box_donation.module';
+import { Route } from '../geographic/routes/entities/route.entity';
+import { User } from '../../users/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DonationBox]),
+    TypeOrmModule.forFeature([DonationBox, Route, User]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
       signOptions: { expiresIn: '24h' },

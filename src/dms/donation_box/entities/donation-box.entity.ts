@@ -1,5 +1,7 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, ManyToOne, ManyToMany, JoinColumn, JoinTable, Index } from 'typeorm';
 import { BaseEntity } from '../../../utils/base_utils/entities/baseEntity';
+import { Route } from '../../geographic/routes/entities/route.entity';
+import { User } from '../../../users/user.entity';
 
 export enum BoxType {
   SMALL = 'small',
@@ -25,23 +27,18 @@ export enum CollectionFrequency {
 }
 
 @Entity('donation_boxes')
+@Index('idx_donation_box_route', ['route_id'])
 export class DonationBox extends BaseEntity {
-  // Box Identification
-  @Column({ unique: true })
-  box_id_no: string;
 
   @Column({ nullable: true })
   key_no: string;
 
-  // Location Details
+  // Location Details - Foreign Key
   @Column()
-  region: string;
+  route_id: number;
 
-  @Column()
-  city: string;
-
-  @Column({ nullable: true })
-  route: string;
+  @Column({ nullable: false })
+  city_id: number;
 
   // Shop Details
   @Column()
@@ -78,10 +75,6 @@ export class DonationBox extends BaseEntity {
   })
   frequency: CollectionFrequency;
 
-  // Reference & Dates
-  @Column({ nullable: true })
-  frd_officer_reference: string;
-
   @Column({ type: 'date' })
   active_since: Date;
 
@@ -101,5 +94,18 @@ export class DonationBox extends BaseEntity {
 
   @Column({ default: true })
   is_active: boolean;
+
+  // Relationships
+  @ManyToOne(() => Route, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'route_id' })
+  route: Route;
+
+  @ManyToMany(() => User, user => user.donationBoxes, { cascade: true })
+  @JoinTable({
+    name: 'donation_box_users',
+    joinColumn: { name: 'donation_box_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'user_id', referencedColumnName: 'id' }
+  })
+  assignedUsers: User[];
 }
 

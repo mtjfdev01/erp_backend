@@ -15,6 +15,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DonationsModule } from './donations/donations.module';
 import { DmsModule } from './dms/dms.module';
 import { DmsCronsModule } from './crons/dms_crons/dms-crons.module';
+import { GeographicModule } from './dms/geographic/geographic.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { DmsCronsModule } from './crons/dms_crons/dms-crons.module';
     DonationsModule,
     DmsModule,
     DmsCronsModule,
+    GeographicModule,
     ],
   controllers: [AppController],
   providers: [AppService],

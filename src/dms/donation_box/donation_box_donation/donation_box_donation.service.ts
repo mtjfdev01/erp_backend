@@ -109,6 +109,7 @@ export class DonationBoxDonationService {
         relations: ['donation_box', 'collected_by', 'verified_by'],
       });
     } catch (error) {
+      console.log("error", error);
       if (
         error instanceof NotFoundException ||
         error instanceof BadRequestException
@@ -148,15 +149,14 @@ export class DonationBoxDonationService {
         'cheque_number',
         'bank_name',
       ];
-
-      console.log("HJEREROOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO 1231231")
-
+      
       // Build query with relations
       const query = this.donationBoxDonationRepository
         .createQueryBuilder('donation_box_donation')
         .leftJoinAndSelect('donation_box_donation.donation_box', 'donation_box')
         .leftJoinAndSelect('donation_box_donation.collected_by', 'collected_by')
-        .leftJoinAndSelect('donation_box_donation.verified_by', 'verified_by');
+        .leftJoinAndSelect('donation_box_donation.verified_by', 'verified_by')
+        .leftJoinAndSelect('donation_box.route', 'route');
 
       // Apply common filters
       const filters: FilterPayload = {
@@ -210,6 +210,7 @@ export class DonationBoxDonationService {
         },
       };
     } catch (error) {
+      console.log("error", error);
       throw new Error(
         `Failed to retrieve collection records: ${error.message}`,
       );
@@ -234,6 +235,7 @@ export class DonationBoxDonationService {
 
       return collection;
     } catch (error) {
+      console.log("error", error);
       if (error instanceof NotFoundException) {
         throw error;
       }
@@ -254,6 +256,7 @@ export class DonationBoxDonationService {
         order: { collection_date: 'DESC' },
       });
     } catch (error) {
+      console.log("error", error);
       throw new Error(
         `Failed to retrieve collections for box: ${error.message}`,
       );
@@ -313,6 +316,7 @@ export class DonationBoxDonationService {
         relations: ['donation_box', 'collected_by', 'verified_by'],
       });
     } catch (error) {
+      console.log("error", error);
       if (error instanceof NotFoundException) {
         throw error;
       }
@@ -342,6 +346,7 @@ export class DonationBoxDonationService {
 
       return { message: 'Collection record archived successfully' };
     } catch (error) {
+      console.log("error", error);
       if (error instanceof NotFoundException) {
         throw error;
       }
@@ -403,6 +408,7 @@ export class DonationBoxDonationService {
         collections,
       };
     } catch (error) {
+      console.log("error", error);
       throw new Error(`Failed to get collection stats: ${error.message}`);
     }
   }

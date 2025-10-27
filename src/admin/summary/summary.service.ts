@@ -14,7 +14,7 @@ export class SummaryService {
   async findAll(saal: any) {
     try {
       let year = Number(saal);
-      console.log("summaryData called ______________________", typeof year);
+      // console.log("summaryData called ______________________", typeof year);
       // return;
       const summaryData: any = {};
       

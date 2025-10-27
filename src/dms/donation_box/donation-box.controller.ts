@@ -18,6 +18,7 @@ import { UpdateDonationBoxDto } from './dto/update-donation-box.dto';
 import { PermissionsGuard } from '../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../permissions/decorators/require-permission.decorator';
 import { JwtGuard } from 'src/auth/jwt.guard';
+import { CurrentUser } from 'src/auth/current-user.decorator';
 
 @Controller('donation-box')
 @UseGuards( JwtGuard,PermissionsGuard)
@@ -26,9 +27,9 @@ export class DonationBoxController {
 
   @Post()
   @RequiredPermissions(['fund_raising.donation_box.create', 'super_admin', 'fund_raising_manager'])
-  async create(@Body() createDonationBoxDto: CreateDonationBoxDto, @Res() res: Response) {
+  async create(@Body() createDonationBoxDto: CreateDonationBoxDto, @Res() res: Response, @CurrentUser() currentUser: any) {
     try {
-      const result = await this.donationBoxService.create(createDonationBoxDto);
+      const result = await this.donationBoxService.create(createDonationBoxDto, currentUser);
       return res.status(HttpStatus.CREATED).json({
         success: true,
         message: 'Donation box created successfully',
@@ -93,34 +94,6 @@ export class DonationBoxController {
         message: error.message,
         data: [],
         pagination: null,
-      });
-    }
-  }
-
-  @Get('by-box-id/:box_id_no')
-  @RequiredPermissions(['fund_raising.donation_box.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
-  async findByBoxIdNo(@Param('box_id_no') box_id_no: string, @Res() res: Response) {
-    try {
-      const result = await this.donationBoxService.findByBoxIdNo(box_id_no);
-      
-      if (!result) {
-        return res.status(HttpStatus.NOT_FOUND).json({
-          success: false,
-          message: 'Donation box not found',
-          data: null,
-        });
-      }
-      
-      return res.status(HttpStatus.OK).json({
-        success: true,
-        message: 'Donation box retrieved successfully',
-        data: result,
-      });
-    } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
-        success: false,
-        message: error.message,
-        data: null,
       });
     }
   }
@@ -239,5 +212,28 @@ export class DonationBoxController {
       });
     }
   }
-}
 
+  // i want to get by key number
+  @Get('by-key-number/:key_number')
+  @RequiredPermissions(['fund_raising.donation_box.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  async findByKeyNumber(@Param('key_number') key_number: string, @Res() res: Response) {
+    try {
+      const result = await this.donationBoxService.findByKeyNumber(key_number);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Donation box retrieved successfully',
+        data: result,
+      });
+    } catch (error) {
+      console.error('Error retrieving donation box by key number:', error);
+      const status = error.message.includes('not found')
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+}

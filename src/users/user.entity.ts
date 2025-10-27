@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryGeneratedColumn, OneToOne, UpdateDateColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, OneToOne, ManyToMany, UpdateDateColumn } from 'typeorm';
 import { PermissionsEntity } from '../permissions/entities/permissions.entity';
+import { DonationBox } from '../dms/donation_box/entities/donation-box.entity';
 
 export enum UserRole {
   ADMIN = 'admin',
@@ -89,6 +90,10 @@ export class User {
   // One-to-One relationship with permissions
   @OneToOne(() => PermissionsEntity, (permissions) => permissions.user)
   permissions: PermissionsEntity;
+
+  // Many-to-Many relationship with donation boxes
+  @ManyToMany(() => DonationBox, donationBox => donationBox.assignedUsers)
+  donationBoxes: DonationBox[];
 
   @Column({ name: 'is_archived', type: 'boolean', default: false })
   is_archived: boolean;

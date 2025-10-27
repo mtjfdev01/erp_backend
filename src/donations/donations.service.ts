@@ -54,14 +54,14 @@ export class DonationsService {
     return conditionMap[condition.toLowerCase()] || DonationInKindCondition.GOOD;
   }
 
-  async create(createDonationDto: CreateDonationDto) {
+  async create(createDonationDto: CreateDonationDto, user: any) {
     try {
      const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
      const blinq_url="https://api.blinq.pk/";
      const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
      const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
      
-     
+      
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
      // ============================================
@@ -122,11 +122,11 @@ export class DonationsService {
      const donation = this.donationRepository.create({
        ...createDonationDto,
        donor_id: donorId, // ✅ Link donation to donor
+       created_by: user?.id == -1 ? null : user?.id,
      });
      const savedDonation = await this.donationRepository.save(donation);
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
-      
       // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
@@ -398,7 +398,7 @@ export class DonationsService {
 
   async findAll(
     page = 1, 
-    pageSize = 10, 
+    pageSize = 10,  
     sortField = 'created_at', 
     sortOrder: 'ASC' | 'DESC' = 'DESC',
     filters: FilterPayload = {},

@@ -10,6 +10,7 @@ import { DonationInKindModule } from './donation_in_kind/donation_in_kind.module
 import { BlinqModule } from './payment_gateways/blinq/blinq.module';
 import { PayfastModule } from './payment_gateways/payfast/payfast.module';
 import { MeezanModule } from './payment_gateways/meezan/meezan.module';
+import { GeographicModule } from './geographic/geographic.module';
 
 @Module({
   controllers: [DmsController],
@@ -20,6 +21,6 @@ import { MeezanModule } from './payment_gateways/meezan/meezan.module';
       signOptions: { expiresIn: '24h' },
     }),
     PermissionsModule,
-    DonorModule, UserDonorsModule, DonationBoxModule, DonationInKindModule, BlinqModule, PayfastModule, MeezanModule ],        
+    DonorModule, UserDonorsModule, DonationBoxModule, DonationInKindModule, BlinqModule, PayfastModule, MeezanModule, GeographicModule ],        
 })
 export class DmsModule {}

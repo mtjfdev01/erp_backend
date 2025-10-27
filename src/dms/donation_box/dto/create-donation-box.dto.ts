@@ -4,32 +4,23 @@ import {
   IsEnum, 
   IsNotEmpty,
   IsDateString,
-  IsPhoneNumber
+  IsPhoneNumber,
+  IsNumber,
+  IsArray
 } from 'class-validator';
 import { BoxType, BoxStatus, CollectionFrequency } from '../entities/donation-box.entity';
 
 export class CreateDonationBoxDto {
   // Box Identification (Required)
-  @IsString()
-  @IsNotEmpty({ message: 'Box ID number is required' })
-  box_id_no: string;
 
   @IsString()
   @IsOptional()
   key_no?: string;
 
-  // Location Details (Required)
-  @IsString()
-  @IsNotEmpty({ message: 'Region is required' })
-  region: string;
-
-  @IsString()
-  @IsNotEmpty({ message: 'City is required' })
-  city: string;
-
-  @IsString()
-  @IsOptional()
-  route?: string;
+  // Location Details (Required) - Geographic Reference
+  @IsNumber()
+  @IsNotEmpty({ message: 'Route ID is required' })
+  route_id: number;
 
   // Shop Details (Required shop_name)
   @IsString()
@@ -73,5 +64,11 @@ export class CreateDonationBoxDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  // User Assignment (Optional)
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsOptional()
+  assigned_user_ids?: number[];
 }
 

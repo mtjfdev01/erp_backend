@@ -9,25 +9,31 @@ import {
   HttpStatus, 
   Res, 
   UseGuards,
-  Query
+  Query,
+  Req
 } from '@nestjs/common';
 import { FilterPayload } from '../utils/filters/common-filter.util';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
+import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
+import { RequiredPermissions } from 'src/permissions';
 
 @Controller('donations')
-// @UseGuards( JwtGuard,PermissionsGuard)
+@UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonationsController {
   constructor(private readonly donationsService: DonationsService) {}
 
   @Post()
-  // @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
-  async create(@Body() createDonationDto: CreateDonationDto, @Res() res: Response) {
+  @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
+  async create(@Body() createDonationDto: CreateDonationDto, @Res() res: Response, @Req() req: any) {
     try {
       console.log("donation api called________________________");
-      const result = await this.donationsService.create(createDonationDto);
+      const user = req?.user ?? null;
+      const result = await this.donationsService.create(createDonationDto, user);
       return res.status(HttpStatus.CREATED).json({
         success: true,
         message: 'Donation created successfully',

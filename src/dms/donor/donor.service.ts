@@ -259,7 +259,8 @@ export class DonorService {
 
   async findOne(id: number): Promise<Donor> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
+      // i want donations also here 
+      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false }, relations: ['donations'] });
       
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);

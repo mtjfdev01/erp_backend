@@ -14,7 +14,8 @@ async function bootstrap() {
     'https://donation.mtjfoundation.org',
     'http://31.97.223.158:8081',
     'https://mtjf-erp.vercel.app',
-    'http://localhost:3002'
+    'http://localhost:3002',
+    'http://192.168.0.106:5173'
     ];
 
   app.enableCors({
