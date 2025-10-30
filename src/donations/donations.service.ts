@@ -8,7 +8,7 @@ import { DonationInKind, DonationInKindCategory, DonationInKindCondition } from 
 import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
 import { DonorService } from '../dms/donor/donor.service';
-import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter } from '../utils/filters/common-filter.util';
+import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters } from '../utils/filters/common-filter.util';
 import axios from 'axios';
 import { get } from 'http';
 import { DonationMethod } from 'src/utils/enums';
@@ -397,15 +397,17 @@ export class DonationsService {
   }
 
   async findAll(
-    page = 1, 
-    pageSize = 10,  
-    sortField = 'created_at', 
+    page = 1,
+    pageSize = 10,
+    sortField = 'created_at',
     sortOrder: 'ASC' | 'DESC' = 'DESC',
     filters: FilterPayload = {},
-    hybridFilters: HybridFilter[] = []
+    hybridFilters: HybridFilter[] = [],
+    relationsFilters?: Record<string, Record<string, any>>
   ) {
     try {
-      const searchFields = ['donor_name', 'donor_email', 'city'];
+      const entitySearchFields = ['city'];
+      
       const query = this.donationRepository.createQueryBuilder('donation')
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
@@ -414,9 +416,29 @@ export class DonationsService {
       .addSelect('donor.phone', 'donor_phone')
       ;
       // Apply filters
-      applyCommonFilters(query, filters, searchFields, 'donation');
-      applyHybridFilters(query, hybridFilters, 'donation');
+      // 1) Main entity search/equality/date/range
+      applyCommonFilters(query, filters, entitySearchFields, 'donation');
+      // applyHybridFilters(query, hybridFilters, 'donation');
 
+      // 2) Relation search (const config) using top-level search
+      const RELATIONS_SEARCH: RelationsFilterConfig = { donor: ['name', 'email', 'phone'] };
+      applyRelationsSearch(query, filters.search as any, RELATIONS_SEARCH, 'donation');
+
+      // 2b) Per-relation search terms via relationsFilters.{alias}.search
+      if (relationsFilters) {
+        Object.entries(relationsFilters).forEach(([alias, cols]) => {
+          const term = (cols as any)?.search;
+          if (term && typeof term === 'string') {
+            const singleAliasCfg: RelationsFilterConfig = { [alias]: RELATIONS_SEARCH[alias] || [] } as any;
+            applyRelationsSearch(query, term, singleAliasCfg, 'donation');
+          }
+        });
+      }
+
+      // 3) Relation equality: normalize nested relationsFilters -> namespaced keys and apply
+      const RELATIONS_EQ: RelationsFilterConfig = { donor: ['name', 'email', 'phone'] };
+      const normalizedRelationFilters = normalizeRelationsFilters(relationsFilters, RELATIONS_EQ);
+      applyRelationsFilter(query, normalizedRelationFilters, RELATIONS_EQ, 'donation');
       // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
@@ -430,11 +452,23 @@ export class DonationsService {
 
       // ✅ Get SUM(amount) with same filters
       const sumQuery = this.donationRepository.createQueryBuilder('donation')
-        .select('SUM(donation.amount)', 'totalDonationAmount');
+        .select('SUM(donation.amount)', 'totalDonationAmount')
+        .leftJoin('donation.donor', 'donor');
 
       // Apply same filters to keep consistent
-      applyCommonFilters(sumQuery, filters, searchFields, 'donation');
-      applyHybridFilters(sumQuery, hybridFilters, 'donation');
+      applyCommonFilters(sumQuery, filters, entitySearchFields, 'donation');
+      // applyHybridFilters(sumQuery, hybridFilters, 'donation');
+      applyRelationsSearch(sumQuery, filters.search as any, RELATIONS_SEARCH, 'donation');
+      if (relationsFilters) {
+        Object.entries(relationsFilters).forEach(([alias, cols]) => {
+          const term = (cols as any)?.search;
+          if (term && typeof term === 'string') {
+            const singleAliasCfg: RelationsFilterConfig = { [alias]: RELATIONS_SEARCH[alias] || [] } as any;
+            applyRelationsSearch(sumQuery, term, singleAliasCfg, 'donation');
+          }
+        });
+      }
+      applyRelationsFilter(sumQuery, normalizedRelationFilters, RELATIONS_EQ, 'donation');
 
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;

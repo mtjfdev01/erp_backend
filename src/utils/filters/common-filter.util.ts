@@ -26,6 +26,11 @@ export interface HybridFilter {
   [key: string]: any; // Allow additional properties
 }
 
+// Relations filter config: relation alias -> list of filterable columns
+export interface RelationsFilterConfig {
+  [relationAlias: string]: string[];
+}
+
 /**
  * Applies common filtering logic to a TypeORM QueryBuilder
  * @param queryBuilder - The existing QueryBuilder to modify
@@ -103,6 +108,97 @@ function applyEqualityFilter(
   queryBuilder.andWhere(`${fieldPath} = :${paramName}`, {
     [paramName]: value
   });
+}
+
+/**
+ * Applies equality filters for related entities (relations) based on provided config.
+ * - relationsFilter: map of relation alias to array of column names to check in filters payload
+ * - filters: plain payload; keys can be either column (e.g., 'email') or namespaced 'relation.column' (e.g., 'donor.email')
+ *
+ * NOTE: Ensure the calling query has already joined these relations with the same aliases.
+ */
+export function applyRelationsFilter(
+  queryBuilder: SelectQueryBuilder<any>,
+  filters: FilterPayload,
+  relationsFilter: RelationsFilterConfig,
+  entityAlias: string = 'entity'
+): void {
+  if (!filters || !relationsFilter) return;
+
+  // Exclude standard keys handled elsewhere
+  const excluded = new Set(['search', 'date', 'start_date', 'end_date', 'range_filters']);
+
+  Object.entries(relationsFilter).forEach(([relationAlias, columns]) => {
+    if (!Array.isArray(columns) || columns.length === 0) return;
+
+    columns.forEach((column) => {
+      // Support both plain key ('email') and namespaced key ('donor.email')
+      const namespacedKey = `${relationAlias}.${column}`;
+
+      const hasNamespaced = Object.prototype.hasOwnProperty.call(filters, namespacedKey) &&
+        filters[namespacedKey] !== undefined && filters[namespacedKey] !== '';
+
+      const hasPlain = !excluded.has(column) &&
+        Object.prototype.hasOwnProperty.call(filters, column) &&
+        filters[column] !== undefined && filters[column] !== '';
+
+      if (hasNamespaced) {
+        applyEqualityFilter(queryBuilder, namespacedKey, (filters as any)[namespacedKey], entityAlias);
+      } else if (hasPlain) {
+        applyEqualityFilter(queryBuilder, namespacedKey, (filters as any)[column], entityAlias);
+      }
+    });
+  });
+}
+
+/**
+ * Applies search filtering across related entity columns using existing search logic.
+ * Provide relation alias -> columns map; this will generate dotted paths (e.g., donor.name)
+ * and reuse applySearchFilter for the provided search term.
+ */
+export function applyRelationsSearch(
+  queryBuilder: SelectQueryBuilder<any>,
+  searchTerm: string,
+  relationsSearch: RelationsFilterConfig,
+  entityAlias: string = 'entity'
+): void {
+  if (!searchTerm || !relationsSearch) return;
+
+  const relationSearchFields: string[] = [];
+  Object.entries(relationsSearch).forEach(([relationAlias, columns]) => {
+    if (!Array.isArray(columns) || columns.length === 0) return;
+    columns.forEach((column) => {
+      relationSearchFields.push(`${relationAlias}.${column}`);
+    });
+  });
+
+  if (relationSearchFields.length > 0) {
+    applySearchFilter(queryBuilder, searchTerm, relationSearchFields, entityAlias);
+  }
+}
+
+/**
+ * Normalizes nested relations filters into namespaced flat map, e.g.:
+ * { donor: { name: 'Ali', email: 'a@b.com' } } -> { 'donor.name': 'Ali', 'donor.email': 'a@b.com' }
+ * If relationsConfig is provided, only whitelisted columns per relation are included.
+ */
+export function normalizeRelationsFilters(
+  relationsFilters?: Record<string, Record<string, any>>,
+  relationsConfig?: RelationsFilterConfig
+): Record<string, any> {
+  const normalized: Record<string, any> = {};
+  if (!relationsFilters) return normalized;
+
+  Object.entries(relationsFilters).forEach(([alias, cols]) => {
+    const allowed = relationsConfig ? new Set(relationsConfig[alias] || []) : undefined;
+    Object.entries(cols || {}).forEach(([col, val]) => {
+      if (val === undefined || val === '') return;
+      if (allowed && !allowed.has(col)) return;
+      normalized[`${alias}.${col}`] = val;
+    });
+  });
+
+  return normalized;
 }
 
 /**

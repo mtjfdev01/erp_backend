@@ -72,6 +72,9 @@ export class DonationsController {
       // Extract hybrid filters and convert to new format
       const hybridFilters = payload.hybrid_filters || [];
       
+      // Extract Relations filters
+      const relationsFilters = payload.relationsFilters || [];
+      console.log("Relations filters:", JSON.stringify(relationsFilters, null, 2));
       // Build complete filters object
       const completeFilters: FilterPayload = {
         ...filters
@@ -79,8 +82,8 @@ export class DonationsController {
       
       console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
       console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
-      
-      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters);
+
+      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, relationsFilters);
       
       return res.status(HttpStatus.OK).json({
         success: true,
