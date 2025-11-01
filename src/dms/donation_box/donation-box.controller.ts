@@ -47,6 +47,18 @@ export class DonationBoxController {
     }
   }
 
+  @Get('options')
+  @UseGuards(JwtGuard)
+  async getDonationBoxOptions(
+    @Query('active') activeOnly?: string,
+    @Query('status') status?: string
+  ) {
+    return this.donationBoxService.getDonationBoxListForDropdown({
+      activeOnly: activeOnly === 'true',
+      status: status || undefined
+    });
+  }
+
   @Get()
   @RequiredPermissions(['fund_raising.donation_box.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(

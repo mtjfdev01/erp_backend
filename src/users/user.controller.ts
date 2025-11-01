@@ -47,6 +47,20 @@ export class UsersController {
     });
   }
 
+  @Get('options')
+  @UseGuards(JwtGuard)
+  async getUserOptions(
+    @Query('active') activeOnly?: string,
+    @Query('department') department?: string,
+    @Query('search') search?: string
+  ) {
+    return this.usersService.getUserListForDropdown({
+      activeOnly: activeOnly === 'true',
+      department: department || undefined,
+      search: search || undefined
+    });
+  }
+
   @Get('department/:department')
   @RequiredPermissions(['users.list_view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin'])
   async getUsersByDepartment(

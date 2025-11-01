@@ -412,4 +412,36 @@ export class DonationBoxDonationService {
       throw new Error(`Failed to get collection stats: ${error.message}`);
     }
   }
+
+  async getDonationBoxDonationListForDropdown(options?: { donationBoxId?: number; status?: string }) {
+    const queryBuilder = this.donationBoxDonationRepository
+      .createQueryBuilder('collection')
+      .select([
+        'collection.id',
+        'collection.collection_amount',
+        'collection.collection_date',
+        'collection.status',
+        'collection.donation_box_id'
+      ]);
+
+    if (options?.donationBoxId) {
+      queryBuilder.andWhere('collection.donation_box_id = :donationBoxId', { donationBoxId: options.donationBoxId });
+    }
+
+    if (options?.status) {
+      queryBuilder.andWhere('collection.status = :status', { status: options.status });
+    }
+
+    queryBuilder.orderBy('collection.collection_date', 'DESC');
+
+    const collections = await queryBuilder.getMany();
+
+    return collections.map(collection => ({
+      id: collection.id,
+      collection_amount: collection.collection_amount,
+      collection_date: collection.collection_date,
+      status: collection.status,
+      donation_box_id: collection.donation_box_id,
+    }));
+  }
 }

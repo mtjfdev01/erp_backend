@@ -59,6 +59,18 @@ export class DonationBoxDonationController {
     }
   }
 
+  @Get('options')
+  @UseGuards(JwtGuard)
+  async getDonationBoxDonationOptions(
+    @Query('donation_box_id') donationBoxId?: string,
+    @Query('status') status?: string
+  ) {
+    return this.donationBoxDonationService.getDonationBoxDonationListForDropdown({
+      donationBoxId: donationBoxId ? parseInt(donationBoxId) : undefined,
+      status: status || undefined
+    });
+  }
+
   @Get()
   @RequiredPermissions(['fund_raising.donation_box_donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(

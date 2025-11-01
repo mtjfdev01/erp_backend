@@ -35,7 +35,7 @@ export class CitiesController {
   }
 
   @Get()
-  @RequiredPermissions(['geographic.cities.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.cities.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findAll(@Query('region_id') regionId?: string, @Query('country_id') countryId?: string, @Res() res?: Response) {
     try {
       let result;
@@ -62,7 +62,7 @@ export class CitiesController {
   }
 
   @Get(':id')
-  @RequiredPermissions(['geographic.cities.view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.cities.view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.citiesService.findOne(+id);

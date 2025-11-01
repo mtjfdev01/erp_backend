@@ -21,6 +21,7 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
 import { RequiredPermissions } from 'src/permissions';
+import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donations')
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -47,6 +48,18 @@ export class DonationsController {
         data: null,
       });
     }
+  }
+
+  @Get('options')
+  @UseGuards(JwtGuard)
+  async getDonationOptions(
+    @Query('status') status?: string,
+    @Query('payment_method') paymentMethod?: string
+  ) {
+    return this.donationsService.getDonationListForDropdown({
+      status: status || undefined,
+      paymentMethod: paymentMethod || undefined
+    });
   }
 
   @Post('search')

@@ -35,7 +35,7 @@ export class RoutesController {
   }
 
   @Get()
-  @RequiredPermissions(['geographic.routes.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.routes.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findAll(@Query('city_id') cityId?: string, @Query('region_id') regionId?: string, @Query('country_id') countryId?: string, @Res() res?: Response) {
     try {
       let result;
@@ -64,7 +64,7 @@ export class RoutesController {
   }
 
   @Get(':id')
-  @RequiredPermissions(['geographic.routes.view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.routes.view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
       const result = await this.routesService.findOne(+id);

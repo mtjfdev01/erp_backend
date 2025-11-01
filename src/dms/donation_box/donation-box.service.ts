@@ -335,5 +335,42 @@ export class DonationBoxService {
       throw new Error(`Failed to retrieve donation box by key number: ${error.message}`);
     }
   }
+
+  async getDonationBoxListForDropdown(options?: { activeOnly?: boolean; status?: string }) {
+    const queryBuilder = this.donationBoxRepository
+      .createQueryBuilder('box')
+      .leftJoin('box.route', 'route')
+      .select([
+        'box.id',
+        'box.key_no',
+        'box.shop_name',
+        'box.status',
+        'box.is_active',
+        'route.id',
+        'route.name'
+      ]);
+
+    if (options?.activeOnly !== undefined) {
+      queryBuilder.andWhere('box.is_active = :isActive', { isActive: options.activeOnly });
+    }
+
+    if (options?.status) {
+      queryBuilder.andWhere('box.status = :status', { status: options.status });
+    }
+
+    queryBuilder.orderBy('box.shop_name', 'ASC');
+
+    const boxes = await queryBuilder.getMany();
+
+    return boxes.map(box => ({
+      id: box.id,
+      key_no: box.key_no,
+      shop_name: box.shop_name,
+      status: box.status,
+      is_active: box.is_active,
+      route_id: box.route?.id || null,
+      route_name: box.route?.name || null,
+    }));
+  }
 }
 

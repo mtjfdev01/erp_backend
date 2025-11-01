@@ -1040,5 +1040,40 @@ export class DonationsService {
     }
   }
 
-  // 
+  async getDonationListForDropdown(options?: { status?: string; paymentMethod?: string }) {
+    const queryBuilder = this.donationRepository
+      .createQueryBuilder('donation')
+      .leftJoin('donation.donor', 'donor')
+      .select([
+        'donation.id',
+        'donation.amount',
+        'donation.status',
+        'donation.payment_method',
+        'donation.created_at',
+        'donor.id',
+        'donor.name'
+      ]);
+
+    if (options?.status) {
+      queryBuilder.andWhere('donation.status = :status', { status: options.status });
+    }
+
+    if (options?.paymentMethod) {
+      queryBuilder.andWhere('donation.payment_method = :paymentMethod', { paymentMethod: options.paymentMethod });
+    }
+
+    queryBuilder.orderBy('donation.created_at', 'DESC');
+
+    const donations = await queryBuilder.getMany();
+
+    return donations.map(donation => ({
+      id: donation.id,
+      amount: donation.amount,
+      status: donation.status,
+      // payment_method: donation.paymentMethod,
+      created_at: donation.created_at,
+      donor_id: donation.donor?.id || null,
+      donor_name: donation.donor?.name || null,
+    }));
+  }
 }

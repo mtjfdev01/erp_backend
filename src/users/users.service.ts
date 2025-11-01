@@ -390,4 +390,57 @@ export class UsersService {
       },
     };
   }
+
+  async getUserListForDropdown(options?: { activeOnly?: boolean; department?: string; search?: string }): Promise<any> {
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('user')
+      .select([
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name',
+        'user.department',
+        'user.role',
+        'user.isActive'
+      ]);
+
+    // // Filter by active status if specified
+    // if (options?.activeOnly !== undefined) {
+    //   queryBuilder.andWhere('user.isActive = :isActive', { isActive: options.activeOnly });
+    // }
+
+    // Filter by department if specified
+    if (options?.department) {
+      queryBuilder.andWhere('user.department = :department', { department: options.department });
+    }
+
+    // Search functionality - search across name and email fields
+    if (options?.search && options.search.trim() !== '') {
+      const searchTerm = `%${options.search.trim()}%`;
+      queryBuilder.andWhere(
+        '(COALESCE(user.first_name, \'\') ILIKE :searchTerm OR COALESCE(user.last_name, \'\') ILIKE :searchTerm OR user.email ILIKE :searchTerm)',
+        { searchTerm }
+      );
+    }
+
+    // Exclude archived users
+    queryBuilder.andWhere('user.is_archived = :archived', { archived: false });
+
+    // Order by name
+    queryBuilder.orderBy('user.first_name', 'ASC').addOrderBy('user.last_name', 'ASC');
+    const users = await queryBuilder.getMany();
+
+    console.log("querybuilder results", queryBuilder.getQueryAndParameters());
+    // Transform to include full_name
+    return users.map(user => ({
+      id: user.id,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      full_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email,
+      department: user.department,
+      role: user.role,
+      isActive: user.isActive,
+    }));
+  }
 } 

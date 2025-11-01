@@ -35,7 +35,7 @@ export class RegionsController {
   }
 
   @Get()
-  @RequiredPermissions(['geographic.regions.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.regions.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findAll(@Query('country_id') countryId?: string, @Res() res?: Response) {
     try {
       let result;
