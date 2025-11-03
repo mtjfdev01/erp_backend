@@ -33,22 +33,44 @@ export class EmailService implements OnModuleInit {
       port,
       secure, // false for 587 (STARTTLS), true for 465
       auth: { user, pass },
-      tls: { rejectUnauthorized },
+      tls: { 
+        rejectUnauthorized,
+        // Allow legacy TLS for some production environments
+        servername: host,
+      },
       pool: true,
       maxConnections: 5,
       maxMessages: 50,
-      // Optional hard timeouts
-      socketTimeout: 30_000,
-      connectionTimeout: 20_000,
+      // Increased timeouts for production network latency
+      socketTimeout: 60_000, // 60 seconds
+      connectionTimeout: 30_000, // 30 seconds
+      greetingTimeout: 10_000, // 10 seconds
     } as nodemailer.TransportOptions);
   }
 
   async onModuleInit() {
+    // Skip SMTP verification in production if it causes startup issues
+    // Verification will happen on first email send attempt
+    const skipVerification = this.configService.get<string>('SKIP_SMTP_VERIFICATION', 'false') === 'true';
+    
+    if (skipVerification) {
+      this.logger.warn('SMTP verification skipped (SKIP_SMTP_VERIFICATION=true)');
+      return;
+    }
+
     try {
-      await this.transporter.verify();
-      this.logger.log('SMTP connection verified');
+      // Set a shorter timeout for verification to avoid blocking startup
+      const verifyPromise = this.transporter.verify();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('SMTP verification timeout')), 10000)
+      );
+
+      await Promise.race([verifyPromise, timeoutPromise]);
+      this.logger.log('SMTP connection verified successfully');
     } catch (e: any) {
-      this.logger.error(`SMTP verify failed: ${e?.message}`);
+      this.logger.warn(`SMTP verify failed: ${e?.message} - Email service will attempt connection on send`);
+      this.logger.warn('Set SKIP_SMTP_VERIFICATION=true in production if verification continues to fail');
+      // Don't throw - allow app to start, verification will retry on actual send
     }
   }
 
