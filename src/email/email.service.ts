@@ -219,7 +219,7 @@ export class EmailService implements OnModuleInit {
   // Send donation success notification to admin
   async sendDonationSuccessNotification(donation: any, paymentDetails: any): Promise<boolean> {
     try {
-      const staticEmailAddress = process.env.NOTIFICATION_EMAIL || 'dev@mtjfoundation.org';
+      const staticEmailAddress = 'dev@mtjfoundation.org';
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 

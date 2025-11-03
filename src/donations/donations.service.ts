@@ -68,7 +68,7 @@ export class DonationsService {
      let donorId: number | null = createDonationDto.donor_id || null;
      let donor:any;
      
-     if (Number(createDonationDto?.amount) < 50){
+     if (Number(createDonationDto?.amount) < 5){
       //  return with error that donation amount is less than 50
       throw new HttpException('Donation amount is less than 50 PKR', 400);
      }
@@ -127,6 +127,8 @@ export class DonationsService {
      const savedDonation = await this.donationRepository.save(donation);
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
+    //  send email and return;
+    
       // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
