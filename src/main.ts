@@ -62,8 +62,8 @@ async function bootstrap() {
     console.log('Incoming request:', {
       method: req.method,
       url: req.url,
-      origin: req.headers.origin,
-      headers: req.headers
+      // origin: req.headers.origin,
+      // headers: req.headers
     });
     next();
   });

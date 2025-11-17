@@ -4,6 +4,7 @@ import { DonationsService } from './donations.service';
 import { DonationsController } from './donations.controller';
 import { PublicDonationsController } from './public-donations.controller';
 import { MigrationController } from './migration.controller';
+import { DonationsSummaryController } from './donations-summary.controller';
 import { Donation } from './entities/donation.entity';
 import { DonationInKind } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
 import { JwtModule } from '@nestjs/jwt';
@@ -23,7 +24,7 @@ import { DonorModule } from '../dms/donor/donor.module';
     EmailModule,
     DonorModule,
 ], 
-  controllers: [DonationsController, PublicDonationsController, MigrationController],
+  controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController],
   providers: [DonationsService, PayfastService],
   exports: [DonationsService],
 })

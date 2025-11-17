@@ -9,6 +9,7 @@ import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
 import { DonorService } from '../dms/donor/donor.service';
 import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters } from '../utils/filters/common-filter.util';
+import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } from '../utils/summary/date-range.util';
 import axios from 'axios';
 import { get } from 'http';
 import { DonationMethod } from 'src/utils/enums';
@@ -103,7 +104,7 @@ export class DonationsService {
            donor_phone: createDonationDto.donor_phone,
            city: createDonationDto.city,
            country: createDonationDto.country,
-           address: createDonationDto.address,
+           address: createDonationDto?.address,
          });
          
          if (donor) {
@@ -410,18 +411,22 @@ export class DonationsService {
     sortOrder: 'ASC' | 'DESC' = 'DESC',
     filters: FilterPayload = {},
     hybridFilters: HybridFilter[] = [],
-    relationsFilters?: Record<string, Record<string, any>>
+    relationsFilters?: Record<string, Record<string, any>>,
+    user?: any
   ) {
     try {
       const entitySearchFields = ['city'];
-      
+      // if user.email is test@gmail.com then delete donor_email  and phone 
+
       const query = this.donationRepository.createQueryBuilder('donation')
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
-      .addSelect('donor.email', 'donor_email')
       .addSelect('donor.id', 'donor_id')
-      .addSelect('donor.phone', 'donor_phone')
-      ;
+      if(user?.email !== 'agency@example.com') {
+        query.addSelect('donor.email', 'donor_email')
+        query.addSelect('donor.phone', 'donor_phone')
+      }
+      query.getRawMany();
       // Apply filters
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, 'donation');
@@ -1082,5 +1087,246 @@ export class DonationsService {
       donor_id: donation.donor?.id || null,
       donor_name: donation.donor?.name || null,
     }));
+  }
+
+
+  /**
+   * Get donation summary for a specific date range in Chart.js format
+   * Supports: year, month, week, day, custom
+   */
+  async getSummary(options: DateRangeOptions = {}) {
+    try {
+      // Calculate date range
+      DateRangeUtil.validateOptions(options);
+      const dateRange = DateRangeUtil.calculateDateRange(options);
+
+      // Extract date-only parts (YYYY-MM-DD) to match donation.date column format
+      // The dateRange dates are timestamps (2023-12-31T19:00:00.000Z)
+      // But donation.date is DATE type (2025-09-24), so we need to extract just the date part
+      const startDateOnly = dateRange.startDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      const endDateOnly = dateRange.endDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+      // Generate labels based on duration type using common utility
+      const labels = DateRangeUtil.generateLabels(dateRange.durationType, dateRange.startDate, dateRange.endDate);
+
+      // Helper to create base query builder
+      // Using date column (DATE type) instead of created_at (TIMESTAMP)
+      // Compare DATE types with date strings (YYYY-MM-DD format)
+      const createBaseQuery = () => {
+        return this.donationRepository
+          .createQueryBuilder('donation')
+          .where('donation.date >= :startDate', { startDate: startDateOnly })
+          .andWhere('donation.date <= :endDate', { endDate: endDateOnly });
+      };
+
+      // Get time-series data based on duration type
+      let timeSeriesData: any[] = [];
+
+      switch (dateRange.durationType) {
+        case 'year':
+          // Group by month
+          timeSeriesData = await createBaseQuery()
+            .select("TO_CHAR(donation.date, 'Mon')", 'period')
+            .addSelect('COUNT(donation.id)', 'count')
+            .addSelect('SUM(donation.amount)', 'totalAmount')
+            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .groupBy("TO_CHAR(donation.date, 'Mon')")
+            .addGroupBy("EXTRACT(MONTH FROM donation.date)")
+            .orderBy("EXTRACT(MONTH FROM donation.date)", 'ASC')
+            .getRawMany();
+          break;
+
+        case 'month':
+          // Group by day
+          timeSeriesData = await createBaseQuery()
+            .select("EXTRACT(DAY FROM donation.date)", 'period')
+            .addSelect('COUNT(donation.id)', 'count')
+            .addSelect('SUM(donation.amount)', 'totalAmount')
+            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .groupBy("EXTRACT(DAY FROM donation.date)")
+            .orderBy("EXTRACT(DAY FROM donation.date)", 'ASC')
+            .getRawMany();
+          break;
+
+        case 'week':
+          // Group by day of week
+          timeSeriesData = await createBaseQuery()
+            .select("TO_CHAR(donation.date, 'Dy')", 'period')
+            .addSelect("EXTRACT(DOW FROM donation.date)", 'dayNum')
+            .addSelect('COUNT(donation.id)', 'count')
+            .addSelect('SUM(donation.amount)', 'totalAmount')
+            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .groupBy("TO_CHAR(donation.date, 'Dy')")
+            .addGroupBy("EXTRACT(DOW FROM donation.date)")
+            .orderBy("EXTRACT(DOW FROM donation.date)", 'ASC')
+            .getRawMany();
+          break;
+
+        case 'custom':
+          // Determine grouping based on range length
+          const daysDiff = Math.ceil((dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          
+          if (daysDiff <= 31) {
+            // Group by day - date column is already DATE type
+            timeSeriesData = await createBaseQuery()
+              .select("donation.date", 'period')
+              .addSelect('COUNT(donation.id)', 'count')
+              .addSelect('SUM(donation.amount)', 'totalAmount')
+              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .groupBy("donation.date")
+              .orderBy("donation.date", 'ASC')
+              .getRawMany();
+          } else if (daysDiff <= 365) {
+            // Group by week
+            timeSeriesData = await createBaseQuery()
+              .select("DATE_TRUNC('week', donation.date)", 'period')
+              .addSelect('COUNT(donation.id)', 'count')
+              .addSelect('SUM(donation.amount)', 'totalAmount')
+              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .groupBy("DATE_TRUNC('week', donation.date)")
+              .orderBy("DATE_TRUNC('week', donation.date)", 'ASC')
+              .getRawMany();
+          } else {
+            // Group by month
+            timeSeriesData = await createBaseQuery()
+              .select("DATE_TRUNC('month', donation.date)", 'period')
+              .addSelect('COUNT(donation.id)', 'count')
+              .addSelect('SUM(donation.amount)', 'totalAmount')
+              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .groupBy("DATE_TRUNC('month', donation.date)")
+              .orderBy("DATE_TRUNC('month', donation.date)", 'ASC')
+              .getRawMany();
+          }
+          break;
+      }
+
+      // Map data to labels
+      const mapDataToLabels = (dataKey: string, defaultValue: number = 0): number[] => {
+        const dataMap = new Map<string, number>();
+        
+        timeSeriesData.forEach(item => {
+          const period = item.period?.toString() || '';
+          // Handle null values - convert to 0 if null/undefined
+          const rawValue = item[dataKey];
+          const value = rawValue === null || rawValue === undefined ? 0 : Number(rawValue || 0);
+          
+          // Handle different period formats based on duration type
+          if (dateRange.durationType === 'year') {
+            // Period is already month abbreviation (e.g., 'Sep', 'Oct')
+            // Use it directly to match with MONTH_NAMES_SHORT
+            if (period && MONTH_NAMES_SHORT.includes(period)) {
+              dataMap.set(period, value);
+            }
+          } else if (dateRange.durationType === 'week') {
+            // Period is day abbreviation (e.g., 'Mon', 'Tue')
+            const dayNum = parseInt(item.dayNum || '0', 10);
+            if (!isNaN(dayNum) && dayNum >= 0 && dayNum <= 6) {
+              // PostgreSQL DOW: 0=Sunday, 1=Monday, ..., 6=Saturday
+              // We want Monday=0, so adjust: Sunday (0) -> 6, others -> dayNum-1
+              const adjustedDay = (dayNum === 0 ? 6 : dayNum - 1);
+              // DAY_NAMES_SHORT starts with Monday, so use adjustedDay directly
+              if (adjustedDay >= 0 && adjustedDay < DAY_NAMES_SHORT.length) {
+                dataMap.set(DAY_NAMES_SHORT[adjustedDay], value);
+              }
+            }
+          } else if (dateRange.durationType === 'month') {
+            // For month, period is day number as string (e.g., '1', '15', '31')
+            const dayNum = parseInt(period || '0', 10);
+            if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
+              dataMap.set(dayNum.toString(), value);
+            }
+          } else {
+            // For custom ranges, use the period as-is
+            dataMap.set(period, value);
+          }
+        });
+
+        return labels.map(label => {
+          // For custom ranges, try to match date formats more precisely
+          if (dateRange.durationType === 'custom') {
+            // Convert database date to label format for matching
+            for (const [key, value] of dataMap.entries()) {
+              if (key && typeof key === 'string') {
+                try {
+                  // If key is a date string, parse it
+                  const keyDate = new Date(key);
+                  if (!isNaN(keyDate.getTime())) {
+                    // Match based on date format
+                    const labelDate = label.includes('/') 
+                      ? this.parseLabelDate(label, dateRange.startDate)
+                      : null;
+                    
+                    if (labelDate && keyDate.toDateString() === labelDate.toDateString()) {
+                      return value;
+                    }
+                  }
+                  // Fallback: simple string matching
+                  if (key.includes(label) || label.includes(key)) {
+                    return value;
+                  }
+                } catch (e) {
+                  // If parsing fails, use simple string matching
+                  if (key.includes(label) || label.includes(key)) {
+                    return value;
+                  }
+                }
+              }
+            }
+          }
+          return dataMap.get(label) || defaultValue;
+        });
+      };
+
+      // Build datasets
+      const datasets = [
+        {
+          label: 'Total Amount',
+          data: mapDataToLabels('totalAmount', 0).map(val => Math.round(val * 100) / 100),
+        },
+        {
+          label: 'Total Count',
+          data: mapDataToLabels('count', 0),
+        },
+        {
+          label: 'Paid Amount',
+          data: mapDataToLabels('totalPaidAmount', 0).map(val => Math.round(val * 100) / 100),
+        },
+      ];
+
+      return {
+        dateRange: {
+          startDate: dateRange.startDate.toISOString(),
+          endDate: dateRange.endDate.toISOString(),
+          durationType: dateRange.durationType,
+          description: dateRange.description,
+        },
+        // Main time-series chart data
+        chart: {
+          labels,
+          datasets,
+        },
+      };
+    } catch (error) {
+      throw new Error(`Failed to retrieve donation summary: ${error.message}`);
+    }
+  }
+
+  /**
+   * Helper to parse label date format (e.g., "15/3" -> Date object)
+   */
+  private parseLabelDate(label: string, referenceDate: Date): Date | null {
+    try {
+      const parts = label.split('/');
+      if (parts.length === 2) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+        if (!isNaN(day) && !isNaN(month) && day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+          return new Date(referenceDate.getFullYear(), month, day);
+        }
+      }
+    } catch (e) {
+      // Ignore parsing errors
+    }
+    return null;
   }
 }
