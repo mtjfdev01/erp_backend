@@ -416,13 +416,12 @@ export class DonationsService {
   ) {
     try {
       const entitySearchFields = ['city'];
-      // if user.email is test@gmail.com then delete donor_email  and phone 
 
       const query = this.donationRepository.createQueryBuilder('donation')
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
       .addSelect('donor.id', 'donor_id')
-      if(user?.email !== 'agency@example.com') {
+      if(user?.email != 'agency@example.com') {  
         query.addSelect('donor.email', 'donor_email')
         query.addSelect('donor.phone', 'donor_phone')
       }
