@@ -421,7 +421,7 @@ export class DonationsService {
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
       .addSelect('donor.id', 'donor_id')
-      if(user?.email != 'agency@example.com') {  
+      if(user?.email != 'mtjf_agency@example.com') {  
         query.addSelect('donor.email', 'donor_email')
         query.addSelect('donor.phone', 'donor_phone')
       }
