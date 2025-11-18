@@ -10,7 +10,7 @@ export class ConditionalJwtGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     
     // Allow requests from localhost:3000 or donation domain without token
-    if (request.headers.origin === 'http://localhost:3001' || request.headers.origin === 'https://donation.mtjfoundation.org' || request.headers.origin.startsWith('https://mtjf-erp.vercel.app')) {
+    if (request.headers.origin === 'http://localhost:3001' || request.headers.origin === 'https://donation.mtjfoundation.org') {
       console.log(`Bypassing authentication for ${request.headers.origin}`);
       // Set a default user for public donation requests
       request['user'] = {
