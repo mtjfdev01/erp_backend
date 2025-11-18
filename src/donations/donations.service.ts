@@ -415,8 +415,8 @@ export class DonationsService {
     user?: any
   ) {
     try {
+      console.log("user email in donation listing", user?.email);
       const entitySearchFields = ['city'];
-
       const query = this.donationRepository.createQueryBuilder('donation')
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
@@ -460,6 +460,7 @@ export class DonationsService {
       // Get paginated data + total count
       const [data, total] = await query.getManyAndCount();
       const totalPages = Math.ceil(total / pageSize);
+
 
       // ✅ Get SUM(amount) with same filters
       const sumQuery = this.donationRepository.createQueryBuilder('donation')
