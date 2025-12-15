@@ -429,4 +429,344 @@ export class EmailService implements OnModuleInit {
       © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
     `;
   }
+
+  // ============================================
+  // JOB APPLICATION EMAIL METHODS
+  // ============================================
+
+  /**
+   * Send job application confirmation email to applicant
+   */
+  async sendJobApplicationConfirmation(data: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    applicationId: number;
+  }): Promise<boolean> {
+    try {
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: data.applicantEmail,
+        subject: `Application Received - ${data.jobTitle}`,
+        html: this.generateJobApplicationConfirmationTemplate(data),
+        text: this.generateJobApplicationConfirmationText(data),
+        headers: {
+          'X-Mailer': 'MTJ Foundation Career Portal',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Sent job application confirmation to ${data.applicantEmail} (id: ${result.messageId})`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Job application confirmation email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Send new job application notification to admin
+   */
+  async sendNewJobApplicationNotification(data: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    applicationId: number;
+  }): Promise<boolean> {
+    try {
+      const staticEmailAddress = 'dev@mtjfoundation.org';
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: staticEmailAddress,
+        subject: `New Job Application - ${data.jobTitle}`,
+        html: this.generateNewJobApplicationNotificationTemplate(data),
+        text: this.generateNewJobApplicationNotificationText(data),
+        headers: {
+          'X-Mailer': 'MTJ Foundation Career Portal',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Sent new job application notification to ${staticEmailAddress} (id: ${result.messageId})`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`New job application notification email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Send job application status update email to applicant
+   */
+  async sendJobApplicationStatusUpdate(data: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    oldStatus: string;
+    newStatus: string;
+  }): Promise<boolean> {
+    try {
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: data.applicantEmail,
+        subject: `Application Update - ${data.jobTitle}`,
+        html: this.generateJobApplicationStatusUpdateTemplate(data),
+        text: this.generateJobApplicationStatusUpdateText(data),
+        headers: {
+          'X-Mailer': 'MTJ Foundation Career Portal',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Sent job application status update to ${data.applicantEmail} (id: ${result.messageId})`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Job application status update email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  private generateJobApplicationConfirmationTemplate(data: {
+    applicantName: string;
+    jobTitle: string;
+    applicationId: number;
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Application Received</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div class="container" style="background-color: #f9f9f9; padding: 30px; border-radius: 10px;">
+          <div class="header" style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #2c3e50;">Application Received</h1>
+          </div>
+          
+          <div class="content" style="background-color: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
+            <p>Dear ${data.applicantName},</p>
+            
+            <p>Thank you for your interest in joining the MTJ Foundation team!</p>
+            
+            <p>We have successfully received your application for the position of <strong>${data.jobTitle}</strong>.</p>
+            
+            <div style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <p style="margin: 0;"><strong>Application ID:</strong> ${data.applicationId}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Status:</strong> Pending Review</p>
+            </div>
+            
+            <p>Our HR team will review your application and get back to you soon. We appreciate your patience during this process.</p>
+            
+            <p>If you have any questions, please feel free to contact us.</p>
+            
+            <p>Best regards,<br>MTJ Foundation HR Team</p>
+          </div>
+          
+          <div class="footer" style="text-align: center; color: #666; font-size: 12px;">
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private generateJobApplicationConfirmationText(data: {
+    applicantName: string;
+    jobTitle: string;
+    applicationId: number;
+  }): string {
+    return `
+      Application Received
+
+      Dear ${data.applicantName},
+
+      Thank you for your interest in joining the MTJ Foundation team!
+
+      We have successfully received your application for the position of ${data.jobTitle}.
+
+      Application ID: ${data.applicationId}
+      Status: Pending Review
+
+      Our HR team will review your application and get back to you soon. We appreciate your patience during this process.
+
+      If you have any questions, please feel free to contact us.
+
+      Best regards,
+      MTJ Foundation HR Team
+
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+    `;
+  }
+
+  private generateNewJobApplicationNotificationTemplate(data: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    applicationId: number;
+  }): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Job Application</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div class="container" style="background-color: #f9f9f9; padding: 30px; border-radius: 10px;">
+          <div class="header" style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #2c3e50;">New Job Application</h1>
+          </div>
+          
+          <div class="content" style="background-color: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
+            <p>A new job application has been submitted:</p>
+            
+            <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <p style="margin: 0;"><strong>Application ID:</strong> ${data.applicationId}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Applicant Name:</strong> ${data.applicantName}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Applicant Email:</strong> ${data.applicantEmail}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Job Title:</strong> ${data.jobTitle}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Status:</strong> Pending Review</p>
+            </div>
+            
+            <p>Please review the application in the admin panel.</p>
+          </div>
+          
+          <div class="footer" style="text-align: center; color: #666; font-size: 12px;">
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private generateNewJobApplicationNotificationText(data: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    applicationId: number;
+  }): string {
+    return `
+      New Job Application
+
+      A new job application has been submitted:
+
+      Application ID: ${data.applicationId}
+      Applicant Name: ${data.applicantName}
+      Applicant Email: ${data.applicantEmail}
+      Job Title: ${data.jobTitle}
+      Status: Pending Review
+
+      Please review the application in the admin panel.
+
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+    `;
+  }
+
+  private generateJobApplicationStatusUpdateTemplate(data: {
+    applicantName: string;
+    jobTitle: string;
+    oldStatus: string;
+    newStatus: string;
+  }): string {
+    const statusMessages: { [key: string]: string } = {
+      reviewed: 'Your application has been reviewed by our team.',
+      shortlisted: 'Congratulations! You have been shortlisted for this position.',
+      rejected: 'Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.',
+      hired: 'Congratulations! We are pleased to offer you this position.',
+    };
+
+    const message = statusMessages[data.newStatus] || 'Your application status has been updated.';
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Application Update</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div class="container" style="background-color: #f9f9f9; padding: 30px; border-radius: 10px;">
+          <div class="header" style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #2c3e50;">Application Update</h1>
+          </div>
+          
+          <div class="content" style="background-color: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
+            <p>Dear ${data.applicantName},</p>
+            
+            <p>We are writing to update you on the status of your application for the position of <strong>${data.jobTitle}</strong>.</p>
+            
+            <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <p style="margin: 0;"><strong>Previous Status:</strong> ${data.oldStatus}</p>
+              <p style="margin: 5px 0 0 0;"><strong>New Status:</strong> ${data.newStatus}</p>
+            </div>
+            
+            <p>${message}</p>
+            
+            <p>If you have any questions, please feel free to contact us.</p>
+            
+            <p>Best regards,<br>MTJ Foundation HR Team</p>
+          </div>
+          
+          <div class="footer" style="text-align: center; color: #666; font-size: 12px;">
+            <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private generateJobApplicationStatusUpdateText(data: {
+    applicantName: string;
+    jobTitle: string;
+    oldStatus: string;
+    newStatus: string;
+  }): string {
+    const statusMessages: { [key: string]: string } = {
+      reviewed: 'Your application has been reviewed by our team.',
+      shortlisted: 'Congratulations! You have been shortlisted for this position.',
+      rejected: 'Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.',
+      hired: 'Congratulations! We are pleased to offer you this position.',
+    };
+
+    const message = statusMessages[data.newStatus] || 'Your application status has been updated.';
+
+    return `
+      Application Update
+
+      Dear ${data.applicantName},
+
+      We are writing to update you on the status of your application for the position of ${data.jobTitle}.
+
+      Previous Status: ${data.oldStatus}
+      New Status: ${data.newStatus}
+
+      ${message}
+
+      If you have any questions, please feel free to contact us.
+
+      Best regards,
+      MTJ Foundation HR Team
+
+      © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+    `;
+  }
 }

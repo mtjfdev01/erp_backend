@@ -1,1 +1,78 @@
-export class CreateJobDto {}
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsArray,
+  IsOptional,
+  IsBoolean,
+  IsDateString,
+  MinLength,
+  MaxLength,
+  ArrayMinSize,
+} from 'class-validator';
+import { JobType, JobStatus, Department } from '../entities/job.entity';
+
+export class CreateJobDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Title is required' })
+  @MinLength(3, { message: 'Title must be at least 3 characters' })
+  @MaxLength(255, { message: 'Title must not exceed 255 characters' })
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string; // Auto-generated if not provided
+
+  @IsOptional()
+  @IsString()
+  icon?: string;
+
+  @IsEnum(Department, { message: 'Department must be IT, Marketing, Design, or Operations' })
+  @IsNotEmpty({ message: 'Department is required' })
+  department: Department;
+
+  @IsEnum(JobType, { message: 'Type must be Full Time, Part Time, or Contract' })
+  @IsNotEmpty({ message: 'Type is required' })
+  type: JobType;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Location is required' })
+  location: string;
+
+  @IsOptional()
+  @IsString()
+  experience?: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'About is required' })
+  @MinLength(50, { message: 'About must be at least 50 characters' })
+  about: string;
+
+  @IsArray()
+  @IsNotEmpty({ message: 'Qualifications are required' })
+  @ArrayMinSize(1, { message: 'At least one qualification is required' })
+  @IsString({ each: true })
+  qualifications: string[];
+
+  @IsArray()
+  @IsNotEmpty({ message: 'Responsibilities are required' })
+  @ArrayMinSize(1, { message: 'At least one responsibility is required' })
+  @IsString({ each: true })
+  responsibilities: string[];
+
+  @IsOptional()
+  @IsEnum(JobStatus)
+  status?: JobStatus;
+
+  @IsOptional()
+  @IsBoolean()
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  posted_date?: Date;
+
+  @IsOptional()
+  @IsDateString()
+  closing_date?: Date;
+}

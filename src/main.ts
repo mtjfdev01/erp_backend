@@ -11,11 +11,14 @@ async function bootstrap() {
     'http://localhost:5173', // Local development
     'http://127.0.0.1:5173', // Local development alternative
     'http://localhost:3001', // Special origin - bypasses JWT authentication (see ConditionalJwtGuard)
+    'http://localhost:3000', 
     'https://donation.mtjfoundation.org',
     'http://31.97.223.158:8081',
     'https://mtjf-erp.vercel.app',
     'http://localhost:3002',
-    'http://192.168.0.106:5173'
+    'http://192.168.0.106:5173',
+    'https://mtjf-site.vercel.app',
+    '18.143.123.75' // EOceans IP
     ];
 
   app.enableCors({
