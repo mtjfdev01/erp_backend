@@ -19,10 +19,9 @@ export class ApplicationsService {
         applicant_name: createApplicationDto.applicant_name,
         email: createApplicationDto.email,
         phone_number: createApplicationDto.phone_number,
-        resume_url: createApplicationDto.resume_url,
+        resume_url: createApplicationDto.resume_url || 'https://dummy-resume-url.com/resume.pdf', // Dummy URL for now
         cover_letter: createApplicationDto.cover_letter,
-        project_id: createApplicationDto.project_id || null,
-        department_id: createApplicationDto.department_id || null
+        job_id: createApplicationDto.job_id || null
       });
 
       // Save to database
@@ -30,6 +29,7 @@ export class ApplicationsService {
       
       return savedApplication;
     } catch (error) {
+      console.log("error 2134", error)
       if (error.code === '23505') { // PostgreSQL unique constraint violation
         throw new BadRequestException('An application with this email already exists');
       }
@@ -38,14 +38,14 @@ export class ApplicationsService {
     }
   }
 
-  async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'created_at', sortOrder: string = 'DESC', department_id?: number) {
+  async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'created_at', sortOrder: string = 'DESC', job_id?: number) {
     try {
       const skip = (page - 1) * pageSize;
       
       // Build where clause for filtering
       const whereClause: any = {};
-      if (department_id) {
-        whereClause.department_id = department_id;
+      if (job_id) {
+        whereClause.job_id = job_id;
       }
 
       const [applications, total] = await this.applicationRepository.findAndCount({
@@ -68,7 +68,7 @@ export class ApplicationsService {
           totalPages
         },
         filters: {
-          department_id: department_id || null
+          job_id: job_id || null
         }
       };
     } catch (error) {

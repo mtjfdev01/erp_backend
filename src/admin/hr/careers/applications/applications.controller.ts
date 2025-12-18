@@ -1,16 +1,23 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, HttpCode, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, HttpCode, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
 
-@Controller('applications')
+@Controller('job_applications')
 export class ApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createApplicationDto: CreateApplicationDto) {
+  @UseInterceptors(FileInterceptor('cvResume'))
+  async create(
+    @Body() createApplicationDto: CreateApplicationDto,
+    @UploadedFile() file?: Express.Multer.File
+  ) {
     try {
+      // For now, ignore the file since we're using dummy URL
+      // File will be handled when Google Drive is implemented
       const application = await this.applicationsService.create(createApplicationDto);
       return {
         success: true,
@@ -32,13 +39,13 @@ export class ApplicationsController {
     @Query('pageSize') pageSize: string = '10',
     @Query('sortField') sortField: string = 'created_at',
     @Query('sortOrder') sortOrder: 'ASC' | 'DESC' = 'DESC',
-    @Query('department_id') department_id?: string
+    @Query('job_id') job_id?: string
   ) {
     const pageNum = parseInt(page, 10) || 1;
     const pageSizeNum = parseInt(pageSize, 10) || 10;
-    const departmentId = department_id ? parseInt(department_id, 10) : undefined;
+    const jobId = job_id ? parseInt(job_id, 10) : undefined;
     
-    return this.applicationsService.findAll(pageNum, pageSizeNum, sortField, sortOrder, departmentId);
+    return this.applicationsService.findAll(pageNum, pageSizeNum, sortField, sortOrder, jobId);
   }
 
   @Get(':id')

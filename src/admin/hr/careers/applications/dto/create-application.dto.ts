@@ -15,9 +15,10 @@ export class CreateApplicationDto {
   @MaxLength(20)
   phone_number: string;
 
+  @IsOptional()
   @IsUrl()
   @MaxLength(500)
-  resume_url: string;
+  resume_url?: string;
 
   @IsString()
   @MinLength(100)
@@ -25,9 +26,5 @@ export class CreateApplicationDto {
 
   @IsOptional()
   @IsNumber()
-  project_id?: number;
-
-  @IsOptional()
-  @IsNumber()
-  department_id?: number;
+  job_id?: number;
 }

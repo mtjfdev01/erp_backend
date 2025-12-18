@@ -18,9 +18,6 @@ export class Application extends BaseEntity {
   @Column({ name: 'cover_letter', type: 'text', nullable: false })
   cover_letter: string;
 
-  @Column({ name: 'project_id', type: 'int', nullable: true })
-  project_id: number;
-
-  @Column({ name: 'department_id', type: 'int', nullable: true })
-  department_id: number;
+  @Column({ name: 'job_id', type: 'int', nullable: false })
+  job_id: number;
 }

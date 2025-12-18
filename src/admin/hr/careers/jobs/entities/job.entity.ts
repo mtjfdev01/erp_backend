@@ -1,6 +1,6 @@
 import { BaseEntity } from 'src/utils/base_utils/entities/baseEntity';
 import { Entity, Column, Index, OneToMany } from 'typeorm';
-import { JobApplication } from '../job-applications/entities/job-application.entity';
+import { Application } from '../../applications/entities/application.entity';
 
 export enum JobType {
   FULL_TIME = 'Full Time',
@@ -82,6 +82,6 @@ export class Job extends BaseEntity {
   closing_date: Date;
 
   // Relationships
-  @OneToMany(() => JobApplication, (application) => application.job)
-  applications: JobApplication[];
+  @OneToMany(() => Application, (application) => application.job_id, { eager: true })
+  applications: Application[];
 }

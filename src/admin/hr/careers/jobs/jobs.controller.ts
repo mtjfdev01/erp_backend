@@ -17,10 +17,9 @@ import { Response } from 'express';
 import { JobsService } from './jobs.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
-import { CreateJobApplicationDto } from './job-applications/dto/create-job-application.dto';
-import { UpdateApplicationStatusDto } from './job-applications/dto/update-application-status.dto';
+  import { CreateApplicationDto } from '../applications/dto/create-application.dto';
+import { UpdateApplicationDto } from '../applications/dto/update-application.dto';
 import { JobStatus, Department, JobType } from './entities/job.entity';
-import { ApplicationStatus } from './job-applications/entities/job-application.entity';
 
 @Controller('jobs')
 export class JobsController {
@@ -174,71 +173,36 @@ export class JobsController {
    * POST /jobs/:jobId/apply - Submit a job application
    * Public endpoint (no auth required)
    */
-  @Post(':jobId/apply')
-  @UseInterceptors(FileInterceptor('cvResume'))
-  async apply(
-    @Param('jobId') jobId: string,
-    @Body() createApplicationDto: CreateJobApplicationDto,
-    @UploadedFile() file: Express.Multer.File,
-    @Res() res: Response,
-  ) {
-    try {
-      const application = await this.jobsService.createApplication(
-        +jobId,
-        createApplicationDto,
-        file,
-      );
+  // @Post(':jobId/apply')
+  // @UseInterceptors(FileInterceptor('cvResume'))
+  // async apply(
+  //   @Param('jobId') jobId: string,
+  //   @Body() createApplicationDto: CreateJobApplicationDto,
+  //   @UploadedFile() file: Express.Multer.File,
+  //   @Res() res: Response,
+  // ) {
+  //   try {
+  //     const application = await this.jobsService.createApplication(
+  //       +jobId,
+  //       createApplicationDto,
+  //       file,
+  //     );
 
-      return res.status(HttpStatus.CREATED).json({
-        success: true,
-        message: 'Application submitted successfully',
-        data: {
-          applicationId: application.id,
-          status: application.status,
-        },
-      });
-    } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
-        success: false,
-        message: error.message,
-        data: null,
-      });
-    }
-  }
+  //     return res.status(HttpStatus.CREATED).json({
+  //       success: true,
+  //       message: 'Application submitted successfully',
+  //       data: {
+  //         applicationId: application.id,
+  //         status: application.status,
+  //       },
+  //     });
+  //   } catch (error) {
+  //     return res.status(HttpStatus.BAD_REQUEST).json({
+  //       success: false,
+  //       message: error.message,
+  //       data: null,
+  //     });
+  //   }
+  // }
 
-  /**
-   * GET /jobs/:jobId/applications - Get all applications for a specific job
-   */
-  @Get(':jobId/applications')
-  async getJobApplications(
-    @Param('jobId') jobId: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Res() res?: Response,
-  ) {
-    try {
-      const pageNum = page ? parseInt(page, 10) : 1;
-      const limitNum = limit ? parseInt(limit, 10) : 10;
-
-      const result = await this.jobsService.findApplicationsByJob(+jobId, pageNum, limitNum);
-
-      if (res) {
-        return res.status(HttpStatus.OK).json({
-          success: true,
-          data: result,
-        });
-      }
-
-      return result;
-    } catch (error) {
-      if (res) {
-        return res.status(HttpStatus.BAD_REQUEST).json({
-          success: false,
-          message: error.message,
-          data: null,
-        });
-      }
-      throw error;
-    }
-  }
 }

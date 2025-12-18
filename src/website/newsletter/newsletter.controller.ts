@@ -3,7 +3,7 @@ import { NewsletterService } from './newsletter.service';
 import { CreateNewsletterDto } from './dto/create-newsletter.dto';
 import { UpdateNewsletterDto } from './dto/update-newsletter.dto';
 
-@Controller('newsletter')
+@Controller('website_news_letter')
 export class NewsletterController {
   constructor(private readonly newsletterService: NewsletterService) {}
 
