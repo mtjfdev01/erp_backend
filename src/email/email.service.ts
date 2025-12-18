@@ -14,28 +14,24 @@ export class EmailService implements OnModuleInit {
 
   private initializeTransporter() {
     const host = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com');
-    const port = Number(this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '587'));
-    const secure = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_SECURE', 'false')) === 'true';
+    // Default to port 465 for Railway (more likely to work when 587 is blocked)
+    const port = Number(this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '465'));
+    // Default to secure=true for port 465, false for 587
+    const defaultSecure = port === 465 ? 'true' : 'false';
+    const secure = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_SECURE', defaultSecure)) === 'true';
     const user = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
     const pass = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PASSWORD', '');
     const rejectUnauthorized = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_TLS_REJECT_UNAUTHORIZED', 'true')) === 'true';
 
-    console.log(
-      "host", host, 
-      "port", port,
-      "secure", secure,
-      "user", user,
-      "pass", pass,
-      "rejectUnauthorized", rejectUnauthorized
-    )
+    this.logger.log(`Initializing SMTP transporter: ${host}:${port} (secure: ${secure})`);
+    
     this.transporter = nodemailer.createTransport({
       host,
       port,
-      secure, // false for 587 (STARTTLS), true for 465
+      secure, // true for 465 (SSL), false for 587 (STARTTLS)
       auth: { user, pass },
       tls: { 
         rejectUnauthorized,
-        // Allow legacy TLS for some production environments
         servername: host,
       },
       pool: true,
@@ -813,7 +809,7 @@ export class EmailService implements OnModuleInit {
   /**
    * Send test email - for debugging SMTP configuration
    */
-  async sendTestEmail(to: string = 'dev@mtjfoundation.org'): Promise<{ success: boolean; message: string; details?: any; error?: any; timestamp?: string }> {
+  async sendTestEmail(to: string = 'dev@mtjfoundation.org'): Promise<{ success: boolean; message: string; details?: any; error?: any; troubleshooting?: any; timestamp?: string }> {
     try {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
@@ -888,16 +884,31 @@ export class EmailService implements OnModuleInit {
       };
     } catch (error: any) {
       this.logger.error(`Test email send failed: ${error?.message}`);
-      this.logger.error(`Error code: ${error?.code || 'N/A'}, Response: ${error?.response || 'N/A'}`);
+      this.logger.error(`Error code: ${error?.code || 'N/A'}, Command: ${error?.command || 'N/A'}, Response: ${error?.response || 'N/A'}`);
+      
+      // Provide helpful error messages based on error type
+      let helpfulMessage = 'Failed to send test email';
+      if (error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED') {
+        helpfulMessage = 'Connection timeout or refused. Railway may be blocking SMTP ports. Try port 465 or contact Railway support.';
+      } else if (error?.code === 'EAUTH') {
+        helpfulMessage = 'Authentication failed. Check your App Password.';
+      } else if (error?.code === 'EENVELOPE') {
+        helpfulMessage = 'Email address error. Check recipient address.';
+      }
       
       return {
         success: false,
-        message: 'Failed to send test email',
+        message: helpfulMessage,
         error: {
           message: error?.message,
           code: error?.code,
           command: error?.command,
           response: error?.response
+        },
+        troubleshooting: {
+          port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '465'),
+          host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com'),
+          suggestion: error?.code === 'ETIMEDOUT' ? 'Railway may block SMTP. Try: 1) Use port 465, 2) Contact Railway support about SMTP access, 3) Use email service like SendGrid/Resend' : 'Check SMTP credentials and network connectivity'
         },
         timestamp: new Date().toISOString()
       };
