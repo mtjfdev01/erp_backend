@@ -21,7 +21,7 @@ export class EmailService implements OnModuleInit {
     const rejectUnauthorized = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_TLS_REJECT_UNAUTHORIZED', 'true')) === 'true';
 
     console.log(
-      "host", host,
+      "host", host, 
       "port", port,
       "secure", secure,
       "user", user,
@@ -41,35 +41,40 @@ export class EmailService implements OnModuleInit {
       pool: true,
       maxConnections: 5,
       maxMessages: 50,
-      // Increased timeouts for production network latency
-      socketTimeout: 60_000, // 60 seconds
-      connectionTimeout: 30_000, // 30 seconds
-      greetingTimeout: 10_000, // 10 seconds
+      // Increased timeouts for production network latency (Railway)
+      socketTimeout: 120_000, // 120 seconds - increased for Railway
+      connectionTimeout: 60_000, // 60 seconds - increased for Railway
+      greetingTimeout: 30_000, // 30 seconds - increased for Railway
+      debug: process.env.NODE_ENV === 'development', // Enable debug in dev
+      logger: process.env.NODE_ENV === 'development', // Enable logger in dev
     } as nodemailer.TransportOptions);
   }
 
   async onModuleInit() {
     // Skip SMTP verification in production if it causes startup issues
     // Verification will happen on first email send attempt
-    const skipVerification = this.configService.get<string>('SKIP_SMTP_VERIFICATION', 'false') === 'true';
+    const skipVerification = this.configService.get<string>('SKIP_SMTP_VERIFICATION',  'false') === 'true';
     
     if (skipVerification) {
       this.logger.warn('SMTP verification skipped (SKIP_SMTP_VERIFICATION=true)');
+      this.logger.warn('Connection will be tested on first email send');
       return;
     }
 
     try {
-      // Set a shorter timeout for verification to avoid blocking startup
+      // Increased timeout for Railway/production networks (30 seconds)
       const verifyPromise = this.transporter.verify();
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('SMTP verification timeout')), 10000)
+        setTimeout(() => reject(new Error('SMTP verification timeout after 30 seconds')), 30000)
       );
 
       await Promise.race([verifyPromise, timeoutPromise]);
       this.logger.log('SMTP connection verified successfully');
     } catch (e: any) {
-      this.logger.warn(`SMTP verify failed: ${e?.message} - Email service will attempt connection on send`);
-      this.logger.warn('Set SKIP_SMTP_VERIFICATION=true in production if verification continues to fail');
+      this.logger.error(`SMTP verify failed: ${e?.message}`);
+      this.logger.error(`Error code: ${e?.code || 'N/A'}, Error response: ${e?.response || 'N/A'}`);
+      this.logger.warn('Email service will attempt connection on first send');
+      this.logger.warn('To skip verification on startup, set SKIP_SMTP_VERIFICATION=true');
       // Don't throw - allow app to start, verification will retry on actual send
     }
   }
@@ -129,7 +134,12 @@ export class EmailService implements OnModuleInit {
       this.logger.log(`Sent donation confirmation to ${d.donorEmail} (id: ${result.messageId})`);
       return true;
     } catch (error: any) {
-      this.logger.error(`Email send failed: ${error?.message} code=${error?.code} resp=${error?.response}`);
+      this.logger.error(`Email send failed: ${error?.message}`);
+      this.logger.error(`Error code: ${error?.code || 'N/A'}, Response: ${error?.response || 'N/A'}`);
+      this.logger.error(`Command: ${error?.command || 'N/A'}`);
+      if (error?.code === 'ECONNREFUSED' || error?.code === 'ETIMEDOUT') {
+        this.logger.error('Connection issue - check port, firewall, or network');
+      }
       return false;
     }
   }
@@ -768,5 +778,129 @@ export class EmailService implements OnModuleInit {
 
       © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
     `;
+  }
+
+  /**
+   * Test SMTP connection - for debugging
+   */
+  async testConnection(): Promise<{ success: boolean; message: string; details?: any }> {
+    try {
+      await this.transporter.verify();
+      return {
+        success: true,
+        message: 'SMTP connection successful',
+        details: {
+          host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
+          port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
+          secure: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_SECURE'),
+        }
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `SMTP connection failed: ${error?.message}`,
+        details: {
+          code: error?.code,
+          command: error?.command,
+          response: error?.response,
+          host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
+          port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
+        }
+      };
+    }
+  }
+
+  /**
+   * Send test email - for debugging SMTP configuration
+   */
+  async sendTestEmail(to: string = 'dev@mtjfoundation.org'): Promise<{ success: boolean; message: string; details?: any; error?: any; timestamp?: string }> {
+    try {
+      const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: { name: senderName, address: fromAddress },
+        to: to,
+        subject: 'Test Email - Hello from MTJ ERP',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Test Email</title>
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background-color: #2c5aa0; color: white; padding: 20px; text-align: center; }
+              .content { padding: 20px; background-color: #f9f9f9; }
+              .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>Hello from MTJ ERP!</h1>
+              </div>
+              <div class="content">
+                <p>This is a test email from your MTJ ERP backend.</p>
+                <p>If you received this email, your SMTP configuration is working correctly!</p>
+                <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+                <p><strong>Server:</strong> Railway Production</p>
+              </div>
+              <div class="footer">
+                <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Hello from MTJ ERP!
+          
+          This is a test email from your MTJ ERP backend.
+          
+          If you received this email, your SMTP configuration is working correctly!
+          
+          Timestamp: ${new Date().toISOString()}
+          Server: Railway Production
+          
+          © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+        `,
+        headers: {
+          'X-Mailer': 'MTJ Foundation ERP Test',
+          'Reply-To': fromAddress,
+        },
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Test email sent to ${to} (id: ${result.messageId})`);
+      
+      return {
+        success: true,
+        message: 'Test email sent successfully',
+        details: {
+          to: to,
+          messageId: result.messageId,
+          response: result.response,
+          timestamp: new Date().toISOString()
+        }
+      };
+    } catch (error: any) {
+      this.logger.error(`Test email send failed: ${error?.message}`);
+      this.logger.error(`Error code: ${error?.code || 'N/A'}, Response: ${error?.response || 'N/A'}`);
+      
+      return {
+        success: false,
+        message: 'Failed to send test email',
+        error: {
+          message: error?.message,
+          code: error?.code,
+          command: error?.command,
+          response: error?.response
+        },
+        timestamp: new Date().toISOString()
+      };
+    }
   }
 }

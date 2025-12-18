@@ -19,6 +19,7 @@ import { GeographicModule } from './dms/geographic/geographic.module';
 import { MessagesModule } from './website/messages/messages.module';
 import { NewsletterModule } from './website/newsletter/newsletter.module';
 import { VolunteerModule } from './volunteer/volunteer.module';
+import { EmailModule } from './email/email.module';
 
 
 @Module({
@@ -54,7 +55,8 @@ import { VolunteerModule } from './volunteer/volunteer.module';
     GeographicModule,
     MessagesModule,
     NewsletterModule,
-    VolunteerModule
+    VolunteerModule,
+    EmailModule
     ],
   controllers: [AppController],
   providers: [AppService],

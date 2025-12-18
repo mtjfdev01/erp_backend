@@ -1,9 +1,13 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
+import { EmailService } from './email/email.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly emailService: EmailService
+  ) {}
 
   @Get()
   getHello(): string {
@@ -29,5 +33,15 @@ export class AppController {
         message: error?.message || 'Unknown error'
       };
     }
+  }
+
+  @Get('test-smtp-connection')
+  async testSMTPConnection() {
+    return await this.emailService.testConnection();
+  }
+
+  @Get('test-send-email')
+  async testSendEmail() {
+    return await this.emailService.sendTestEmail('dev@mtjfoundation.org');
   }
 }
