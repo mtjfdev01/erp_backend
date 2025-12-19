@@ -1,90 +1,93 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Resend } from 'resend';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: nodemailer.Transporter;
+  private resend?: Resend;
+  private transporter?: nodemailer.Transporter;
 
   constructor(private configService: ConfigService) {
+    this.initializeResend();
     this.initializeTransporter();
     this.validateConfiguration();
   }
 
-  private initializeTransporter() {
-    const host = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com');
-    // Default to port 465 for Railway (more likely to work when 587 is blocked)
-    const port = Number(this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '465'));
-    // Default to secure=true for port 465, false for 587
-    const defaultSecure = port === 465 ? 'true' : 'false';
-    const secure = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_SECURE', defaultSecure)) === 'true';
-    const user = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
-    const pass = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PASSWORD', '');
-    const rejectUnauthorized = String(this.configService.get('GOOGLE_WORKSPACE_SMTP_TLS_REJECT_UNAUTHORIZED', 'true')) === 'true';
-
-    this.logger.log(`Initializing SMTP transporter: ${host}:${port} (secure: ${secure})`);
+  private initializeResend() {
+    const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
     
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure, // true for 465 (SSL), false for 587 (STARTTLS)
-      auth: { user, pass },
-      tls: { 
-        rejectUnauthorized,
-        servername: host,
-      },
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 50,
-      // Increased timeouts for production network latency (Railway)
-      socketTimeout: 120_000, // 120 seconds - increased for Railway
-      connectionTimeout: 60_000, // 60 seconds - increased for Railway
-      greetingTimeout: 30_000, // 30 seconds - increased for Railway
-      debug: process.env.NODE_ENV === 'development', // Enable debug in dev
-      logger: process.env.NODE_ENV === 'development', // Enable logger in dev
-    } as nodemailer.TransportOptions);
+    if (!apiKey) {
+      this.logger.warn('RESEND_API_KEY not configured - will fallback to SMTP if available');
+    } else {
+      this.resend = new Resend(apiKey);
+      this.logger.log('Resend client initialized successfully');
+    }
+  }
+
+  private initializeTransporter() {
+    // Initialize nodemailer transporter as fallback
+    const host = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com');
+    const port = parseInt(this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '465'), 10);
+    const secure = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_SECURE', 'true') === 'true';
+    const username = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', '');
+    const password = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PASSWORD', '');
+    const rejectUnauthorized = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_REJECT_UNAUTHORIZED', 'true') === 'true';
+
+    if (username && password) {
+      this.transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: {
+          user: username,
+          pass: password,
+        },
+        tls: {
+          rejectUnauthorized,
+        },
+        socketTimeout: 60000,
+        connectionTimeout: 60000,
+        greetingTimeout: 30000,
+      });
+      this.logger.log('Nodemailer transporter initialized as fallback');
+    } else {
+      this.logger.warn('SMTP credentials not configured - nodemailer fallback unavailable');
+    }
   }
 
   async onModuleInit() {
-    // Skip SMTP verification in production if it causes startup issues
-    // Verification will happen on first email send attempt
-    const skipVerification = this.configService.get<string>('SKIP_SMTP_VERIFICATION',  'false') === 'true';
+    // Resend doesn't need connection verification like SMTP
+    // API key validation happens on first send
+    const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
     
-    if (skipVerification) {
-      this.logger.warn('SMTP verification skipped (SKIP_SMTP_VERIFICATION=true)');
-      this.logger.warn('Connection will be tested on first email send');
-      return;
-    }
-
-    try {
-      // Increased timeout for Railway/production networks (30 seconds)
-      const verifyPromise = this.transporter.verify();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('SMTP verification timeout after 30 seconds')), 30000)
-      );
-
-      await Promise.race([verifyPromise, timeoutPromise]);
-      this.logger.log('SMTP connection verified successfully');
-    } catch (e: any) {
-      this.logger.error(`SMTP verify failed: ${e?.message}`);
-      this.logger.error(`Error code: ${e?.code || 'N/A'}, Error response: ${e?.response || 'N/A'}`);
-      this.logger.warn('Email service will attempt connection on first send');
-      this.logger.warn('To skip verification on startup, set SKIP_SMTP_VERIFICATION=true');
-      // Don't throw - allow app to start, verification will retry on actual send
+    if (!apiKey) {
+      this.logger.warn('RESEND_API_KEY not set - email service will not work');
+      this.logger.warn('Set RESEND_API_KEY in environment variables');
+    } else {
+      this.logger.log('Resend email service ready');
     }
   }
 
   private validateConfiguration() {
-    const username = this.configService.get('GOOGLE_WORKSPACE_SMTP_USERNAME');
-    const password = this.configService.get('GOOGLE_WORKSPACE_SMTP_PASSWORD');
+    const resendApiKey = this.configService.get<string>('RESEND_API_KEY', '');
+    const smtpUsername = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', '');
+    const smtpPassword = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PASSWORD', '');
     
-    if (!username || username === 'donations@mtjfoundation.com') {
-      this.logger.warn('GOOGLE_WORKSPACE_SMTP_USERNAME not configured, using default value');
-    }
-    
-    if (!password || password === '') {
-      this.logger.error('GOOGLE_WORKSPACE_SMTP_PASSWORD not configured - email sending will fail');
+    if (resendApiKey) {
+      this.logger.log('Resend email service configured');
+      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', '');
+      if (!fromEmail) {
+        this.logger.warn('RESEND_FROM_EMAIL not configured, will use GOOGLE_WORKSPACE_SMTP_USERNAME');
+        this.logger.warn('Make sure the from email domain is verified in Resend dashboard');
+      }
+    } else if (smtpUsername && smtpPassword) {
+      this.logger.log('SMTP email service configured (fallback)');
+      this.logger.warn('Consider using Resend for better reliability on cloud platforms');
+    } else {
+      this.logger.error('No email service configured - neither RESEND_API_KEY nor SMTP credentials found');
+      this.logger.warn('Get Resend API key from https://resend.com/api-keys');
     }
     
     this.logger.log('Email service configuration validated');
@@ -108,33 +111,49 @@ export class EmailService implements OnModuleInit {
   }): Promise<boolean> {
     try {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
+      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', fromAddress);
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
       const typeLabel = this.donationLabel(d.donationType);
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress }, // must be allowed in Gmail
-        to: d.donorEmail,
-        subject: `${typeLabel} Donation Confirmation - ${d.orderId || 'Pending'}`,
-        html: this.generateDonationConfirmationTemplate({ ...d, donationType: typeLabel }),
-        text: this.generateDonationConfirmationText({ ...d, donationType: typeLabel }),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'List-Unsubscribe': `<mailto:unsubscribe@${fromAddress.split('@')[1]}>`,
-          'Reply-To': fromAddress,
-        },
-        // envelope: { from: `bounces@${fromAddress.split('@')[1]}`, to: d.donorEmail }, // optional
-        messageId: `<${Date.now()}.${Math.random().toString(36).slice(2)}@${fromAddress.split('@')[1]}>`,
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent donation confirmation to ${d.donorEmail} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromEmail}>`,
+          to: [d.donorEmail],
+          subject: `${typeLabel} Donation Confirmation - ${d.orderId || 'Pending'}`,
+          html: this.generateDonationConfirmationTemplate({ ...d, donationType: typeLabel }),
+          text: this.generateDonationConfirmationText({ ...d, donationType: typeLabel }),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
+            'Reply-To': fromEmail,
+          },
+        });
+        this.logger.log(`Sent donation confirmation via Resend to ${d.donorEmail} (id: ${result.data?.id})`);
+        return true;
+      } else if (this.transporter) {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: d.donorEmail,
+          subject: `${typeLabel} Donation Confirmation - ${d.orderId || 'Pending'}`,
+          html: this.generateDonationConfirmationTemplate({ ...d, donationType: typeLabel }),
+          text: this.generateDonationConfirmationText({ ...d, donationType: typeLabel }),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'List-Unsubscribe': `<mailto:unsubscribe@${fromAddress.split('@')[1]}>`,
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent donation confirmation via Nodemailer to ${d.donorEmail} (id: ${result.messageId})`);
+        return true;
+      } else {
+        this.logger.error('Neither Resend nor SMTP transporter is configured');
+        return false;
+      }
     } catch (error: any) {
       this.logger.error(`Email send failed: ${error?.message}`);
-      this.logger.error(`Error code: ${error?.code || 'N/A'}, Response: ${error?.response || 'N/A'}`);
-      this.logger.error(`Command: ${error?.command || 'N/A'}`);
-      if (error?.code === 'ECONNREFUSED' || error?.code === 'ETIMEDOUT') {
-        this.logger.error('Connection issue - check port, firewall, or network');
+      if (error?.response) {
+        this.logger.error(`Resend API error: ${JSON.stringify(error.response)}`);
       }
       return false;
     }
@@ -251,21 +270,36 @@ export class EmailService implements OnModuleInit {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: staticEmailAddress,
-        subject: `✅ Donation Success - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
-        html: this.generateDonationSuccessTemplate(donation, paymentDetails),
-        text: this.generateDonationSuccessText(donation, paymentDetails),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'Reply-To': fromAddress,
-        },
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent donation success notification to ${staticEmailAddress} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [staticEmailAddress],
+          subject: `✅ Donation Success - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+          html: this.generateDonationSuccessTemplate(donation, paymentDetails),
+          text: this.generateDonationSuccessText(donation, paymentDetails),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Sent donation success notification via Resend to ${staticEmailAddress} (id: ${result.data?.id})`);
+        return true;
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: staticEmailAddress,
+          subject: `✅ Donation Success - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+          html: this.generateDonationSuccessTemplate(donation, paymentDetails),
+          text: this.generateDonationSuccessText(donation, paymentDetails),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent donation success notification via Nodemailer to ${staticEmailAddress} (id: ${result.messageId})`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`Donation success email send failed: ${error?.message}`);
       return false;
@@ -279,21 +313,36 @@ export class EmailService implements OnModuleInit {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: staticEmailAddress,
-        subject: `❌ Donation Failed - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
-        html: this.generateDonationFailureTemplate(donation, errorDetails),
-        text: this.generateDonationFailureText(donation, errorDetails),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'Reply-To': fromAddress,
-        },
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent donation failure notification to ${staticEmailAddress} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [staticEmailAddress],
+          subject: `❌ Donation Failed - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+          html: this.generateDonationFailureTemplate(donation, errorDetails),
+          text: this.generateDonationFailureText(donation, errorDetails),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Sent donation failure notification via Resend to ${staticEmailAddress} (id: ${result.data?.id})`);
+        return true;
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: staticEmailAddress,
+          subject: `❌ Donation Failed - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+          html: this.generateDonationFailureTemplate(donation, errorDetails),
+          text: this.generateDonationFailureText(donation, errorDetails),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Donation System',
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent donation failure notification via Nodemailer to ${staticEmailAddress} (id: ${result.messageId})`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`Donation failure email send failed: ${error?.message}`);
       return false;
@@ -453,21 +502,36 @@ export class EmailService implements OnModuleInit {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: data.applicantEmail,
-        subject: `Application Received - ${data.jobTitle}`,
-        html: this.generateJobApplicationConfirmationTemplate(data),
-        text: this.generateJobApplicationConfirmationText(data),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromAddress,
-        },
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent job application confirmation to ${data.applicantEmail} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [data.applicantEmail],
+          subject: `Application Received - ${data.jobTitle}`,
+          html: this.generateJobApplicationConfirmationTemplate(data),
+          text: this.generateJobApplicationConfirmationText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Sent job application confirmation via Resend to ${data.applicantEmail} (id: ${result.data?.id})`);
+        return true;
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: data.applicantEmail,
+          subject: `Application Received - ${data.jobTitle}`,
+          html: this.generateJobApplicationConfirmationTemplate(data),
+          text: this.generateJobApplicationConfirmationText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent job application confirmation via Nodemailer to ${data.applicantEmail} (id: ${result.messageId})`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`Job application confirmation email send failed: ${error?.message}`);
       return false;
@@ -488,21 +552,36 @@ export class EmailService implements OnModuleInit {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: staticEmailAddress,
-        subject: `New Job Application - ${data.jobTitle}`,
-        html: this.generateNewJobApplicationNotificationTemplate(data),
-        text: this.generateNewJobApplicationNotificationText(data),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromAddress,
-        },
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent new job application notification to ${staticEmailAddress} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [staticEmailAddress],
+          subject: `New Job Application - ${data.jobTitle}`,
+          html: this.generateNewJobApplicationNotificationTemplate(data),
+          text: this.generateNewJobApplicationNotificationText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Sent new job application notification via Resend to ${staticEmailAddress} (id: ${result.data?.id})`);
+        return true;
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: staticEmailAddress,
+          subject: `New Job Application - ${data.jobTitle}`,
+          html: this.generateNewJobApplicationNotificationTemplate(data),
+          text: this.generateNewJobApplicationNotificationText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent new job application notification via Nodemailer to ${staticEmailAddress} (id: ${result.messageId})`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`New job application notification email send failed: ${error?.message}`);
       return false;
@@ -523,21 +602,36 @@ export class EmailService implements OnModuleInit {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'careers@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: data.applicantEmail,
-        subject: `Application Update - ${data.jobTitle}`,
-        html: this.generateJobApplicationStatusUpdateTemplate(data),
-        text: this.generateJobApplicationStatusUpdateText(data),
-        headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromAddress,
-        },
-      };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Sent job application status update to ${data.applicantEmail} (id: ${result.messageId})`);
-      return true;
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [data.applicantEmail],
+          subject: `Application Update - ${data.jobTitle}`,
+          html: this.generateJobApplicationStatusUpdateTemplate(data),
+          text: this.generateJobApplicationStatusUpdateText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Sent job application status update via Resend to ${data.applicantEmail} (id: ${result.data?.id})`);
+        return true;
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
+          to: data.applicantEmail,
+          subject: `Application Update - ${data.jobTitle}`,
+          html: this.generateJobApplicationStatusUpdateTemplate(data),
+          text: this.generateJobApplicationStatusUpdateText(data),
+          headers: {
+            'X-Mailer': 'MTJ Foundation Career Portal',
+            'Reply-To': fromAddress,
+          },
+        };
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Sent job application status update via Nodemailer to ${data.applicantEmail} (id: ${result.messageId})`);
+        return true;
+      }
     } catch (error: any) {
       this.logger.error(`Job application status update email send failed: ${error?.message}`);
       return false;
@@ -777,123 +871,185 @@ export class EmailService implements OnModuleInit {
   }
 
   /**
-   * Test SMTP connection - for debugging
+   * Test email service connection - for debugging
    */
   async testConnection(): Promise<{ success: boolean; message: string; details?: any }> {
-    try {
-      await this.transporter.verify();
+    if (this.resend) {
+      // Resend doesn't have a connection test endpoint, but we can verify API key by checking if it's set
+      const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
       return {
-        success: true,
-        message: 'SMTP connection successful',
+        success: !!apiKey,
+        message: apiKey ? 'Resend API key configured' : 'Resend API key not configured',
         details: {
-          host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
-          port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
-          secure: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_SECURE'),
+          service: 'Resend',
+          apiKeyConfigured: !!apiKey,
+          fromEmail: this.configService.get<string>('RESEND_FROM_EMAIL', 'not configured'),
         }
       };
-    } catch (error: any) {
+    } else if (this.transporter) {
+      try {
+        await this.transporter.verify();
+        return {
+          success: true,
+          message: 'SMTP connection successful',
+          details: {
+            service: 'Nodemailer (SMTP)',
+            host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
+            port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
+            secure: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_SECURE'),
+          }
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: `SMTP connection failed: ${error?.message}`,
+          details: {
+            service: 'Nodemailer (SMTP)',
+            code: error?.code,
+            command: error?.command,
+            response: error?.response,
+            host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
+            port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
+          }
+        };
+      }
+    } else {
       return {
         success: false,
-        message: `SMTP connection failed: ${error?.message}`,
+        message: 'No email service configured (neither Resend nor SMTP)',
         details: {
-          code: error?.code,
-          command: error?.command,
-          response: error?.response,
-          host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST'),
-          port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT'),
+          resendConfigured: !!this.resend,
+          smtpConfigured: !!this.transporter,
         }
       };
     }
   }
 
   /**
-   * Send test email - for debugging SMTP configuration
+   * Send test email - for debugging email configuration
    */
   async sendTestEmail(to: string = 'dev@mtjfoundation.org'): Promise<{ success: boolean; message: string; details?: any; error?: any; troubleshooting?: any; timestamp?: string }> {
     try {
       const fromAddress = this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_USERNAME', 'donations@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
 
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: { name: senderName, address: fromAddress },
-        to: to,
-        subject: 'Test Email - Hello from MTJ ERP',
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Test Email</title>
-            <style>
-              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-              .header { background-color: #2c5aa0; color: white; padding: 20px; text-align: center; }
-              .content { padding: 20px; background-color: #f9f9f9; }
-              .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header">
-                <h1>Hello from MTJ ERP!</h1>
-              </div>
-              <div class="content">
-                <p>This is a test email from your MTJ ERP backend.</p>
-                <p>If you received this email, your SMTP configuration is working correctly!</p>
-                <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
-                <p><strong>Server:</strong> Railway Production</p>
-              </div>
-              <div class="footer">
-                <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
-              </div>
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Test Email</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #2c5aa0; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f9f9f9; }
+            .footer { text-align: center; padding: 20px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Hello from MTJ ERP!</h1>
             </div>
-          </body>
-          </html>
-        `,
-        text: `
-          Hello from MTJ ERP!
-          
-          This is a test email from your MTJ ERP backend.
-          
-          If you received this email, your SMTP configuration is working correctly!
-          
-          Timestamp: ${new Date().toISOString()}
-          Server: Railway Production
-          
-          © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
-        `,
-        headers: {
-          'X-Mailer': 'MTJ Foundation ERP Test',
-          'Reply-To': fromAddress,
-        },
-      };
+            <div class="content">
+              <p>This is a test email from your MTJ ERP backend.</p>
+              <p>If you received this email, your email configuration is working correctly!</p>
+              <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+              <p><strong>Server:</strong> Railway Production</p>
+              <p><strong>Email Service:</strong> ${this.resend ? 'Resend' : 'Nodemailer (SMTP)'}</p>
+            </div>
+            <div class="footer">
+              <p>&copy; ${new Date().getFullYear()} MTJ Foundation. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
 
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Test email sent to ${to} (id: ${result.messageId})`);
-      
-      return {
-        success: true,
-        message: 'Test email sent successfully',
-        details: {
+      const textContent = `
+        Hello from MTJ ERP!
+        
+        This is a test email from your MTJ ERP backend.
+        
+        If you received this email, your email configuration is working correctly!
+        
+        Timestamp: ${new Date().toISOString()}
+        Server: Railway Production
+        Email Service: ${this.resend ? 'Resend' : 'Nodemailer (SMTP)'}
+        
+        © ${new Date().getFullYear()} MTJ Foundation. All rights reserved.
+      `;
+
+      if (this.resend) {
+        const result = await this.resend.emails.send({
+          from: `${senderName} <${fromAddress}>`,
+          to: [to],
+          subject: 'Test Email - Hello from MTJ ERP',
+          html: htmlContent,
+          text: textContent,
+          headers: {
+            'X-Mailer': 'MTJ Foundation ERP Test',
+            'Reply-To': fromAddress,
+          },
+        });
+        this.logger.log(`Test email sent via Resend to ${to} (id: ${result.data?.id})`);
+        
+        return {
+          success: true,
+          message: 'Test email sent successfully via Resend',
+          details: {
+            to: to,
+            messageId: result.data?.id,
+            service: 'Resend',
+            timestamp: new Date().toISOString()
+          }
+        };
+      } else {
+        const mailOptions: nodemailer.SendMailOptions = {
+          from: { name: senderName, address: fromAddress },
           to: to,
-          messageId: result.messageId,
-          response: result.response,
-          timestamp: new Date().toISOString()
-        }
-      };
+          subject: 'Test Email - Hello from MTJ ERP',
+          html: htmlContent,
+          text: textContent,
+          headers: {
+            'X-Mailer': 'MTJ Foundation ERP Test',
+            'Reply-To': fromAddress,
+          },
+        };
+
+        const result = await this.transporter.sendMail(mailOptions);
+        this.logger.log(`Test email sent via Nodemailer to ${to} (id: ${result.messageId})`);
+        
+        return {
+          success: true,
+          message: 'Test email sent successfully via Nodemailer',
+          details: {
+            to: to,
+            messageId: result.messageId,
+            response: result.response,
+            service: 'Nodemailer (SMTP)',
+            timestamp: new Date().toISOString()
+          }
+        };
+      }
     } catch (error: any) {
       this.logger.error(`Test email send failed: ${error?.message}`);
       this.logger.error(`Error code: ${error?.code || 'N/A'}, Command: ${error?.command || 'N/A'}, Response: ${error?.response || 'N/A'}`);
       
       // Provide helpful error messages based on error type
       let helpfulMessage = 'Failed to send test email';
-      if (error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED') {
-        helpfulMessage = 'Connection timeout or refused. Railway may be blocking SMTP ports. Try port 465 or contact Railway support.';
-      } else if (error?.code === 'EAUTH') {
-        helpfulMessage = 'Authentication failed. Check your App Password.';
-      } else if (error?.code === 'EENVELOPE') {
-        helpfulMessage = 'Email address error. Check recipient address.';
+      if (this.resend) {
+        helpfulMessage = error?.message || 'Resend API error. Check your RESEND_API_KEY.';
+      } else {
+        if (error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED') {
+          helpfulMessage = 'Connection timeout or refused. Railway may be blocking SMTP ports. Consider using Resend instead.';
+        } else if (error?.code === 'EAUTH') {
+          helpfulMessage = 'Authentication failed. Check your App Password.';
+        } else if (error?.code === 'EENVELOPE') {
+          helpfulMessage = 'Email address error. Check recipient address.';
+        }
       }
       
       return {
@@ -906,9 +1062,10 @@ export class EmailService implements OnModuleInit {
           response: error?.response
         },
         troubleshooting: {
+          service: this.resend ? 'Resend' : 'Nodemailer (SMTP)',
           port: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_PORT', '465'),
           host: this.configService.get<string>('GOOGLE_WORKSPACE_SMTP_HOST', 'smtp.gmail.com'),
-          suggestion: error?.code === 'ETIMEDOUT' ? 'Railway may block SMTP. Try: 1) Use port 465, 2) Contact Railway support about SMTP access, 3) Use email service like SendGrid/Resend' : 'Check SMTP credentials and network connectivity'
+          suggestion: this.resend ? 'Check RESEND_API_KEY configuration' : 'Railway may block SMTP. Consider using Resend email service instead.'
         },
         timestamp: new Date().toISOString()
       };

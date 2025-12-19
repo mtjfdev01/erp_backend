@@ -18,6 +18,7 @@ async function bootstrap() {
     'http://localhost:3002',
     'http://192.168.0.106:5173',
     'https://mtjf-site.vercel.app',
+    'https://www.mtjfoundation.org',
     '18.143.123.75' // EOceans IP
     ];
 
