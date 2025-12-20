@@ -129,12 +129,12 @@ export class DonationsService {
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
     //  send email and return;
-    this.emailService.sendDonationSuccessNotification(savedDonation, {
-      transaction_id: savedDonation.id.toString(),
-      transaction_amount: savedDonation.amount,
-      order_date: new Date().toISOString(),
-      PaymentName: createDonationDto.donation_method,
-    });
+    // this.emailService.sendDonationSuccessNotification(savedDonation, {
+    //   transaction_id: savedDonation.id.toString(),
+    //   transaction_amount: savedDonation.amount,
+    //   order_date: new Date().toISOString(),
+    //   PaymentName: createDonationDto.donation_method,
+    // });
       // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
@@ -769,24 +769,24 @@ export class DonationsService {
         console.log("Donation marked as completed");
         
         // Send success email
-        await this.emailService.sendDonationSuccessNotification(donation, {
-          transaction_id,
-          transaction_amount,
-          order_date,
-          PaymentName
-        });
+        // await this.emailService.sendDonationSuccessNotification(donation, {
+        //   transaction_id,
+        //   transaction_amount,
+        //   order_date,
+        //   PaymentName
+        // });
         
         // here call recurring utility 
       } else {
         newStatus = 'failed';
         console.log("Donation marked as failed");
         
-        // Send failure email
-        await this.emailService.sendDonationFailureNotification(donation, {
-          err_code,
-          err_msg,
-          transaction_id
-        });
+        // // Send failure email
+        // await this.emailService.sendDonationFailureNotification(donation, {
+        //   err_code,
+        //   err_msg,
+        //   transaction_id
+        // });
       }
 
       // Update donation
@@ -986,12 +986,12 @@ export class DonationsService {
       });
 
       // Send success email
-      await this.emailService.sendDonationSuccessNotification(donation, {
-        transaction_id: payment_code,
-        transaction_amount: amount_paid,
-        order_date: paid_on,
-        PaymentName: paid_via
-      });
+      // await this.emailService.sendDonationSuccessNotification(donation, {
+      //   transaction_id: payment_code,
+      //   transaction_amount: amount_paid,
+      //   order_date: paid_on,
+      //   PaymentName: paid_via
+      // });
 
       console.log(`Donation ${invoice_number} updated successfully with status: completed`);
       console.log("=== BLINQ CALLBACK PROCESSING COMPLETE ===");
