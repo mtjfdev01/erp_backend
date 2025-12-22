@@ -23,7 +23,7 @@ export class Application extends BaseEntity {
   job_id: number;
 
   // Relationship
-  @ManyToOne(() => Job, (job) => job.applications, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'job_id' })
-  job: Job;
+  // @ManyToOne(() => Job, (job) => job.applications, { nullable: false, onDelete: 'CASCADE' })
+  // @JoinColumn({ name: 'job_id' })
+  // job: Job;
 }

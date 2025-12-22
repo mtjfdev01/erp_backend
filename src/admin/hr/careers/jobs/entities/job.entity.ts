@@ -81,7 +81,7 @@ export class Job extends BaseEntity {
   @Column({ type: 'timestamp', nullable: true })
   closing_date: Date;
 
-  // Relationships
-  @OneToMany(() => Application, (application) => application.job, { eager: false })
-  applications: Application[];
+  // // Relationships
+  // @OneToMany(() => Application, (application) => application.job, { eager: false })
+  // applications: Application[];
 }
