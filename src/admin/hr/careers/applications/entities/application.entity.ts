@@ -1,5 +1,6 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { BaseEntity } from 'src/utils/base_utils/entities/baseEntity';
+import { Job } from '../../jobs/entities/job.entity';
 
 @Entity('job_applications')
 export class Application extends BaseEntity {
@@ -20,4 +21,9 @@ export class Application extends BaseEntity {
 
   @Column({ name: 'job_id', type: 'int', nullable: false })
   job_id: number;
+
+  // Relationship
+  @ManyToOne(() => Job, (job) => job.applications, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'job_id' })
+  job: Job;
 }

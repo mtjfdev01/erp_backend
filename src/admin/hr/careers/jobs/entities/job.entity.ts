@@ -82,6 +82,6 @@ export class Job extends BaseEntity {
   closing_date: Date;
 
   // Relationships
-  @OneToMany(() => Application, (application) => application.job_id, { eager: true })
+  @OneToMany(() => Application, (application) => application.job, { eager: false })
   applications: Application[];
 }
