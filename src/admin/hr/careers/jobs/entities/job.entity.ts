@@ -14,16 +14,8 @@ export enum JobStatus {
   DRAFT = 'draft',
 }
 
-export enum Department {
-  IT = 'IT',
-  MARKETING = 'Marketing',
-  DESIGN = 'Design',
-  OPERATIONS = 'Operations',
-}
-
 @Entity('jobs')
 @Index('idx_jobs_status', ['status'])
-@Index('idx_jobs_department', ['department'])
 @Index('idx_jobs_type', ['type'])
 @Index('idx_jobs_location', ['location'])
 @Index('idx_jobs_posted_date', ['posted_date'])
@@ -38,11 +30,8 @@ export class Job extends BaseEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   icon: string;
 
-  @Column({
-    type: 'enum',
-    enum: Department,
-  })
-  department: Department;
+  @Column({ type: 'varchar', length: 255 })
+  department: string;
 
   @Column({
     type: 'enum',

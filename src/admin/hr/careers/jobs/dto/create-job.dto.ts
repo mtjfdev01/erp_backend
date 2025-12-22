@@ -10,7 +10,7 @@ import {
   MaxLength,
   ArrayMinSize,
 } from 'class-validator';
-import { JobType, JobStatus, Department } from '../entities/job.entity';
+  import { JobType, JobStatus } from '../entities/job.entity';
 
 export class CreateJobDto {
   @IsString()
@@ -27,9 +27,9 @@ export class CreateJobDto {
   @IsString()
   icon?: string;
 
-  @IsEnum(Department, { message: 'Department must be IT, Marketing, Design, or Operations' })
+  @IsString()
   @IsNotEmpty({ message: 'Department is required' })
-  department: Department;
+  department: string;
 
   @IsEnum(JobType, { message: 'Type must be Full Time, Part Time, or Contract' })
   @IsNotEmpty({ message: 'Type is required' })

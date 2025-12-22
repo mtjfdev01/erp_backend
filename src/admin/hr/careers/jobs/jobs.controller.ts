@@ -19,7 +19,7 @@ import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
   import { CreateApplicationDto } from '../applications/dto/create-application.dto';
 import { UpdateApplicationDto } from '../applications/dto/update-application.dto';
-import { JobStatus, Department, JobType } from './entities/job.entity';
+import { JobStatus } from './entities/job.entity';
 
 @Controller('jobs')
 export class JobsController {
@@ -33,8 +33,6 @@ export class JobsController {
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('department') department?: Department,
-    @Query('type') type?: JobType,
     @Query('location') location?: string,
     @Query('search') search?: string,
     @Query('status') status?: JobStatus,
@@ -48,8 +46,6 @@ export class JobsController {
         pageNum,
         limitNum,
         {
-          department,
-          type,
           location,
           search,
           status,

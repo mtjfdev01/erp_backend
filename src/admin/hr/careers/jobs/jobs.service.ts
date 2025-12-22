@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, LessThan, Not } from 'typeorm';
-import { Job, JobType, JobStatus, Department } from './entities/job.entity';
+import { Job, JobType, JobStatus } from './entities/job.entity';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
 
@@ -120,19 +120,16 @@ export class JobsService {
     page: number = 1,
     limit: number = 10,
     filters: {
-      department?: Department;
-      type?: JobType;
+      department?: string;
       location?: string;
       search?: string;
       status?: JobStatus;
-    } = {},
+    } = {
+      status: JobStatus.ACTIVE,
+    },
     user?: any,
   ) {
     try {
-
-      // Auto-close expired jobs
-      // await this.autoCloseExpiredJobs();
-
       const skip = (page - 1) * limit;
       const queryBuilder = this.jobRepository.createQueryBuilder('job');
 
@@ -145,13 +142,9 @@ export class JobsService {
       // Apply filters
       const filterPayload: FilterPayload = {
         ...(filters.department && { department: filters.department }),
-        ...(filters.type && { type: filters.type }),
-        ...(filters.location && { location: filters.location }),
         ...(filters.search && { search: filters.search }),
       };
-
-      const searchFields = ['title', 'about', 'location'];
-      applyCommonFilters(queryBuilder, filterPayload, searchFields, 'job');
+      applyCommonFilters(queryBuilder, filterPayload, ['title', 'about'], 'job');
 
       // Search in qualifications and responsibilities (JSON fields)
       if (filters.search) {
