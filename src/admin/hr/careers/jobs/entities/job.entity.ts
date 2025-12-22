@@ -30,22 +30,23 @@ export class Job extends BaseEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   icon: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 255, nullable: true  })
   department: string;
 
   @Column({
     type: 'enum',
     enum: JobType,
+    nullable: true,
   })
   type: JobType;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   location: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   experience: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', nullable: true })
   about: string;
 
   @Column({ type: 'json', nullable: true })
@@ -58,6 +59,7 @@ export class Job extends BaseEntity {
     type: 'enum',
     enum: JobStatus,
     default: JobStatus.ACTIVE,
+    nullable: true,
   })
   status: JobStatus;
 
