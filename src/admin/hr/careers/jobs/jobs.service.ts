@@ -115,18 +115,15 @@ export class JobsService {
 
   /**
    * Find all jobs with filtering and pagination
+   * Filters: department, type
    */
   async findAll(
     page: number = 1,
     limit: number = 10,
     filters: {
       department?: string;
-      location?: string;
-      search?: string;
-      status?: JobStatus;
-    } = {
-      status: JobStatus.ACTIVE,
-    },
+      type?: JobType;
+    } = {},
     user?: any,
   ) {
     try {
@@ -134,31 +131,37 @@ export class JobsService {
       const queryBuilder = this.jobRepository.createQueryBuilder('job');
 
       // Default to active jobs for public access
-      const status = filters.status || (user ? undefined : JobStatus.ACTIVE);
-      if (status) {
-        queryBuilder.andWhere('job.status = :status', { status });
+      // if (!user) {
+      //   queryBuilder.andWhere('job.status = :status', { status: JobStatus.ACTIVE });
+      // }
+
+      // Apply department filter
+      if (filters.department) {
+        queryBuilder.andWhere('job.department = :department', { department: filters.department });
       }
 
-      // Apply filters
-      const filterPayload: FilterPayload = {
-        ...(filters.department && { department: filters.department }),
-        ...(filters.search && { search: filters.search }),
-      };
-      applyCommonFilters(queryBuilder, filterPayload, ['title', 'about'], 'job');
-
-      // Search in qualifications and responsibilities (JSON fields)
-      if (filters.search) {
-        queryBuilder.orWhere(
-          "CAST(job.qualifications AS TEXT) ILIKE :search OR CAST(job.responsibilities AS TEXT) ILIKE :search",
-          { search: `%${filters.search}%` },
-        );
+      // Apply type filter
+      if (filters.type) {
+        queryBuilder.andWhere('job.type = :type', { type: filters.type });
       }
 
       // Exclude archived jobs
       queryBuilder.andWhere('job.is_archived = :is_archived', { is_archived: false });
 
-      // Order by featured first, then by posted_date (newest first)
-      queryBuilder.orderBy('job.is_featured', 'DESC');
+      // Order by priority:
+      // 1. Featured + Active (priority 0)
+      // 2. Active only (non-featured, priority 1)
+      // 3. Closed (priority 2)
+      // 4. Within each group, newest posted_date first
+      queryBuilder.orderBy(
+        `CASE 
+          WHEN job.is_featured = true AND job.status = '${JobStatus.ACTIVE}' THEN 0
+          WHEN job.status = '${JobStatus.ACTIVE}' THEN 1
+          WHEN job.status = '${JobStatus.CLOSED}' THEN 2
+          ELSE 3
+        END`,
+        'ASC'
+      );
       queryBuilder.addOrderBy('job.posted_date', 'DESC');
 
       // Get total count

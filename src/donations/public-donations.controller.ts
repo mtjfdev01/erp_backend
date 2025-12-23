@@ -5,7 +5,8 @@ import {
   HttpStatus, 
   Res, 
   Post,
-  Body
+  Body,
+  Param
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DonationsService } from './donations.service';
@@ -85,6 +86,33 @@ export class PublicDonationsController {
         message: "Internal server error",
         status: "failure",
         invoice_number: payload.invoice_number || "unknown"
+      });
+    }
+  }
+
+  // Public endpoint to get failed transaction with donor information - NO GUARDS
+  @Get('failed-transaction/:id')
+  async getFailedTransaction(
+    @Param('id') id: string,
+    @Res() res: Response
+  ) {
+    try {
+      const donation = await this.donationsService.findOne(+id);
+      
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Failed transaction retrieved successfully',
+        data: donation,
+      });
+    } catch (error) {
+      const status = error.message.includes('not found') 
+        ? HttpStatus.NOT_FOUND 
+        : HttpStatus.BAD_REQUEST;
+      
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
       });
     }
   }

@@ -19,7 +19,7 @@ import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
   import { CreateApplicationDto } from '../applications/dto/create-application.dto';
 import { UpdateApplicationDto } from '../applications/dto/update-application.dto';
-import { JobStatus } from './entities/job.entity';
+import { JobStatus, JobType } from './entities/job.entity';
 
 @Controller('jobs')
 export class JobsController {
@@ -28,27 +28,49 @@ export class JobsController {
   /**
    * GET /jobs - Get all jobs with filtering and pagination
    * Public endpoint (no auth required)
+   * 
+   * Query Parameters:
+   * - page: number (default: 1)
+   * - limit: number (default: 10)
+   * - department: string (optional)
+   * - type: string - 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' (optional, URL-safe enum keys)
    */
   @Get()
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('location') location?: string,
-    @Query('search') search?: string,
-    @Query('status') status?: JobStatus,
+    @Query('department') department?: string,
+    @Query('type') type?: string,
     @Res() res?: Response,
   ) {
     try {
       const pageNum = page ? parseInt(page, 10) : 1;
       const limitNum = limit ? parseInt(limit, 10) : 10;
 
+      // Convert type string to JobType enum if provided
+      let jobType: JobType | undefined;
+      if (type) {
+        const typeMap: { [key: string]: JobType } = {
+          'FULL_TIME': JobType.FULL_TIME,
+          'PART_TIME': JobType.PART_TIME,
+          'CONTRACT': JobType.CONTRACT,
+        };
+        jobType = typeMap[type.toUpperCase()];
+        if (!jobType) {
+          return res.status(HttpStatus.BAD_REQUEST).json({
+            success: false,
+            message: `Invalid type. Must be one of: FULL_TIME, PART_TIME, CONTRACT`,
+            data: null,
+          });
+        }
+      }
+
       const result = await this.jobsService.findAll(
         pageNum,
         limitNum,
         {
-          location,
-          search,
-          status,
+          department,
+          type: jobType,
         },
         null,
       );
