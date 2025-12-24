@@ -62,7 +62,6 @@ export class DonationsService {
      const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
      const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
      
-      
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
      // ============================================
@@ -78,9 +77,8 @@ export class DonationsService {
        
        // Check if donor already exists with this email AND phone
        if(createDonationDto.donor_email && createDonationDto.donor_phone){
-        donor = await this.donorService.findByEmailAndPhone(
-          createDonationDto.donor_email,
-          createDonationDto.donor_phone
+        donor = await this.donorService.findByEmail(
+          createDonationDto.donor_email
         );
        }
        else if(donorId){
@@ -120,7 +118,7 @@ export class DonationsService {
      // ============================================
      
      // Create donation with donor_id if available
-     const donation = this.donationRepository.create({
+     const donation =  this.donationRepository.create({
        ...createDonationDto,
        donor_id: donorId, // ✅ Link donation to donor
        created_by: user?.id == -1 ? null : user?.id,
@@ -201,6 +199,7 @@ export class DonationsService {
       };
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'blinq') {
+
       //  get auth from blinq 
       let authPayload = { 
         ClientID: process.env.BLINQ_ID.toString(), 
@@ -236,8 +235,7 @@ export class DonationsService {
         "ValidityDate": formatDate(validityDate),
         "InvoiceType": "Service",
         "IssueDate": formatDate(currentDate),
-        "CustomerName": donor?.name || null,
-        
+        "CustomerName": donor?.name || 'Anonymous',
       }]
 
         //  create invoice on blinq
