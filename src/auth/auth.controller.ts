@@ -44,6 +44,7 @@ export class AuthController {
     console.log('Returning response with user data and permissions');
     return { 
       message: 'Login successful',
+      token: result.token, // Include token for WebSocket connection
       user: result.user, // Include user data in response
       permissions: result.permissions // Include permissions in response
     };

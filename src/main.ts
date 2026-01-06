@@ -1,12 +1,21 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as cookieParser from 'cookie-parser';
 import * as bodyParser from 'body-parser';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  
+  // Configure WebSocket adapter for Socket.IO
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔌 Initializing Socket.IO WebSocket adapter...');
+  app.useWebSocketAdapter(new IoAdapter(app));
+  console.log('✅ Socket.IO adapter configured successfully');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  // Define allowed origins
+  // Define allowed origins (normalized - no trailing slashes, lowercase)
   const allowedOrigins = [
     'http://localhost:5173', // Local development
     'http://127.0.0.1:5173', // Local development alternative
@@ -19,38 +28,48 @@ async function bootstrap() {
     'http://192.168.0.106:5173',
     'https://mtjf-site.vercel.app',
     'https://www.mtjfoundation.org',
-    '18.143.123.75' // EOceans IP
-    ];
-    app.use(bodyParser.json({ limit: '10mb' }));
-    app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+    "http://192.168.2.131:3001",
+    'https://mtjfoundation.org', // Add non-www version
+    'http://18.143.123.75', // EOceans IP - add protocol
+    'https://18.143.123.75' // EOceans IP - HTTPS version
+  ];
+
+  // Normalize origin for comparison (remove trailing slash, convert to lowercase)
+  const normalizeOrigin = (origin: string): string => {
+    return origin.toLowerCase().replace(/\/$/, '');
+  };
+
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+  
   app.enableCors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true);
+      if (!origin) {
+        console.log('No origin header - allowing request');
+        return callback(null, true);
+      }
+      
+      // Normalize the incoming origin
+      const normalizedOrigin = normalizeOrigin(origin);
       
       // During development, allow all localhost origins
       if (process.env.NODE_ENV !== 'production' && 
-          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:') )) {
+          (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('http://127.0.0.1:') || normalizedOrigin.startsWith('http://192.168.2.131:') )) {
         console.log('Development mode: Allowing origin:', origin);
         return callback(null, true);
       }
       
-      // Check if origin matches any allowed base domains (including subpaths)
-      const isAllowedOrigin = allowedOrigins.some(allowedOrigin => {
-        // Exact match
-        if (origin === allowedOrigin) return true;
-        
-        // Check if origin starts with allowed origin (for subpaths)
-        if (origin.startsWith(allowedOrigin + '/')) return true;
-        
-        return false;
-      });
+      // Check if normalized origin matches any allowed origin (normalized)
+      const normalizedAllowedOrigins = allowedOrigins.map(normalizeOrigin);
+      const isAllowedOrigin = normalizedAllowedOrigins.includes(normalizedOrigin);
       
       if (isAllowedOrigin) {
-        console.log('Allowed origin:', origin);
+        console.log('✅ Allowed origin:', origin, '(normalized:', normalizedOrigin + ')');
         callback(null, true);
       } else {
-        console.log('Blocked by CORS:', origin);
+        console.log('❌ Blocked by CORS:', origin, '(normalized:', normalizedOrigin + ')');
+        console.log('Allowed origins:', normalizedAllowedOrigins);
         callback(new Error('Not allowed by CORS'));
       }
     },

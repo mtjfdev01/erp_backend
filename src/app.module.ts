@@ -20,6 +20,9 @@ import { MessagesModule } from './website/messages/messages.module';
 import { NewsletterModule } from './website/newsletter/newsletter.module';
 import { VolunteerModule } from './volunteer/volunteer.module';
 import { EmailModule } from './email/email.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { GoldSilverPriceModule } from './zakat/gold_silver_price/gold_silver_price.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 
 @Module({
@@ -40,6 +43,7 @@ import { EmailModule } from './email/email.module';
       autoLoadEntities: true,
       synchronize: true 
     }),
+    ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,
     ProcurementsModule,
     ProgramModule,
@@ -56,7 +60,9 @@ import { EmailModule } from './email/email.module';
     MessagesModule,
     NewsletterModule,
     VolunteerModule,
-    EmailModule
+    EmailModule,
+    NotificationsModule,
+    GoldSilverPriceModule
     ],
   controllers: [AppController],
   providers: [AppService],

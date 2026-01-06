@@ -5,9 +5,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Donation } from './entities/donation.entity';
 import { DonationInKind, DonationInKindCategory, DonationInKindCondition } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
+import { User, Department, UserRole } from '../users/user.entity';
 import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
 import { DonorService } from '../dms/donor/donor.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
 import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters } from '../utils/filters/common-filter.util';
 import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } from '../utils/summary/date-range.util';
 import axios from 'axios';
@@ -21,10 +24,55 @@ export class DonationsService {
     private donationRepository: Repository<Donation>,
     @InjectRepository(DonationInKind)
     private donationInKindRepository: Repository<DonationInKind>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private emailService: EmailService,
     private payfastService: PayfastService,
     private donorService: DonorService,
+    private notificationsService: NotificationsService,
   ) {}
+
+  // Get users who should receive donation notifications
+  private async getDonationUsers(): Promise<number[]> {
+    try {
+      const userIds: number[] = [];
+
+      // Always include user ID 5 (validate it exists first)
+      const user5 = await this.userRepository.findOne({
+        where: { id: 5, isActive: true, is_archived: false },
+        select: ['id'],
+      });
+      if (user5) {
+        userIds.push(5);
+      }
+
+      // Also get users from FUND_RAISING department or ADMIN role (including user ID 5 if they match)
+      const additionalUsers = await this.userRepository
+        .createQueryBuilder('user')
+        .select('user.id', 'id')
+        .where('user.isActive = :isActive', { isActive: true })
+        .andWhere('user.is_archived = :is_archived', { is_archived: false })
+        .orWhere({
+          department: Department.FUND_RAISING,
+        })
+        .orWhere({
+          id:5
+        })
+        .getRawMany();
+
+      additionalUsers.forEach(user => {
+        if (!userIds.includes(user.id)) {
+          userIds.push(user.id);
+        }
+      });
+
+      return userIds;
+    } catch (error) {
+      console.error('Error getting donation users:', error.message);
+      // Return empty array if query fails (don't create notifications for invalid users)
+      return [];
+    }
+  }
 
   // Helper method to map category string to enum
   private mapCategoryToEnum(category: string): DonationInKindCategory {
@@ -126,6 +174,47 @@ export class DonationsService {
      const savedDonation = await this.donationRepository.save(donation);
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
+
+     // Create notification for donation users (one notification, multiple user_notification records)
+     try {
+       const donationUsers = await this.getDonationUsers();
+       
+       // Filter to only valid, active users
+       const validUserIds: number[] = [];
+       for (const userId of donationUsers) {
+         const userExists = await this.userRepository.findOne({
+           where: { id: userId, isActive: true, is_archived: false },
+           select: ['id'],
+         });
+         if (userExists) {
+           validUserIds.push(userId);
+         }
+       }
+
+       // Create one notification and assign it to all valid users
+       if (validUserIds.length > 0) {
+         await this.notificationsService.create(
+           {
+             title: 'New Donation Received',
+             message: `A new donation of ${savedDonation.amount} ${savedDonation.currency || 'PKR'} has been received${donor?.name ? ` from ${donor.name}` : ''}.`,
+             type: NotificationType.DONATION,
+             link: `/donations/online_donations/view/${savedDonation.id}`,
+             metadata: {
+               donation_id: savedDonation.id,
+               amount: savedDonation.amount,
+               donation_type: savedDonation.donation_type,
+               donation_method: savedDonation.donation_method,
+             },
+           },
+           validUserIds, // Pass array of user IDs
+           user
+         );
+       }
+     } catch (error) {
+       console.error('Failed to create notifications:', error.message);
+     }
+
+    //  return;
     //  send email and return;
     // this.emailService.sendDonationSuccessNotification(savedDonation, {
     //   transaction_id: savedDonation.id.toString(),
@@ -274,7 +363,7 @@ export class DonationsService {
         // URL: https://{BaseURL}/invoice/getpaidinvoices?startDate={startDate}&endDate={endDate} 
         // // Method: GET
         // Request Parameters(URL) 
- 
+
         // Parameter Mandatory/Optional Data Type 
         // startDate M String(yyyy-MM-dd) 
         // endDate M String(yyyy-MM-dd) 
@@ -296,26 +385,42 @@ export class DonationsService {
 
 
 
-          savedDonation.status = 'registered';
-          savedDonation.orderId = blinqInvoice?.data?.ResponseDetail[0]?.PaymentCode;
-          await this.donationRepository.save(savedDonation);
+        // Strict validation: Extract and validate payment URL
+        const detail = blinqInvoice?.data?.ResponseDetail?.[0];
+        const paymentUrl = detail?.ClickToPayUrl;
 
-          // Send confirmation email to donor
-          // if (savedDonation.donor_email) {
-          //   await this.emailService.sendDonationConfirmation({
-          //     donorName: savedDonation.donor_name || 'Valued Donor',
-          //     donorEmail: savedDonation.donor_email,
-          //     amount: savedDonation.amount,
-          //     currency: savedDonation.currency || 'PKR',
-          //     paymentUrl: blinqInvoice?.data?.ResponseDetail[0]?.ClickToPayUrl,
-          //     donationMethod: 'blinq',
-          //     orderId: blinqInvoice?.data?.ResponseDetail[0]['1BillID'],
-          //   });
-          // }
+        if (!paymentUrl) {
+          // Log full response for debugging
+          console.log("Blinq invoice unexpected response:", blinqInvoice?.data);
+          throw new HttpException(
+            {
+              message: "Blinq invoice created but ClickToPayUrl missing",
+              provider: "blinq",
+              donationId: savedDonation.id,
+              providerResponse: blinqInvoice?.data,
+            },
+            502,
+          );
+        }
 
-          return {
-            paymentUrl: blinqInvoice?.data?.ResponseDetail[0]?.ClickToPayUrl,
-          };        
+        savedDonation.status = 'registered';
+        savedDonation.orderId = detail?.PaymentCode || null;
+        await this.donationRepository.save(savedDonation);
+
+        // Send confirmation email to donor
+        // if (savedDonation.donor_email) {
+        //   await this.emailService.sendDonationConfirmation({
+        //     donorName: savedDonation.donor_name || 'Valued Donor',
+        //     donorEmail: savedDonation.donor_email,
+        //     amount: savedDonation.amount,
+        //     currency: savedDonation.currency || 'PKR',
+        //     paymentUrl: blinqInvoice?.data?.ResponseDetail[0]?.ClickToPayUrl,
+        //     donationMethod: 'blinq',
+        //     orderId: blinqInvoice?.data?.ResponseDetail[0]['1BillID'],
+        //   });
+        // }
+
+        return { paymentUrl }; // guaranteed string here
         // }
 
       }

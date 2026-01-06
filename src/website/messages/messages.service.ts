@@ -25,6 +25,17 @@ export class MessagesService {
   }
 
   async findOne(id: number): Promise<WebMessage> {
+    try {
+      const message = await this.messageRepository.findOne({
+        where: { id, is_archived: false },
+      });
+      if (!message) {
+        throw new NotFoundException(`Message with ID ${id} not found`);
+      }
+      return message;
+    } catch (error) {
+      console.log("error 2143ew", error);
+    }
     const message = await this.messageRepository.findOne({
       where: { id, is_archived: false },
     });

@@ -66,7 +66,7 @@ export class DonationsController {
   // @RequiredPermissions([ 'fund_raising.donations.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(@Body() payload: any, @Res() res: Response, @Req() req: any) {
     try {
-      console.log("Donations search payload:", JSON.stringify(payload, null, 2));
+      // console.log("Donations search payload:", JSON.stringify(payload, null, 2));
       const user = req?.user ?? null;
       // Extract pagination and sorting
       const pagination = payload.pagination || {};
@@ -87,14 +87,14 @@ export class DonationsController {
       
       // Extract Relations filters
       const relationsFilters = payload.relationsFilters || [];
-      console.log("Relations filters:", JSON.stringify(relationsFilters, null, 2));
+      // console.log("Relations filters:", JSON.stringify(relationsFilters, null, 2));
       // Build complete filters object
       const completeFilters: FilterPayload = {
         ...filters
       };
       
-      console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
-      console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
+      // console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
+      // console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
 
       const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, relationsFilters, user);
       
