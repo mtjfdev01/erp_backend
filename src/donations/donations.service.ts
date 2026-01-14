@@ -111,25 +111,15 @@ export class DonationsService {
      const blinq_url="https://api.blinq.pk/";
      const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
      const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
-
-    //  send Message
-    // this.whatsAppService.sendPaymentConfirmation({
-    //   phoneNumber: createDonationDto.donor_phone,
-    //   userName: createDonationDto.donor_name,
-    //   amount: createDonationDto.amount,
-    // });
-
-    // await this.whatsAppService.sendAbandonMessage({
-    //   phoneNumber: createDonationDto.donor_phone,
-    //   userName: createDonationDto.donor_name,
-    //   amount: createDonationDto.amount,
-    //   donationId: "#213",
-    // });
+    console.log("createDonationDto", createDonationDto);
+    
+    let donorId: number | null = createDonationDto.donor_id || null;
+    let donor:any;
+    let savedDonation:any;
+    if(!createDonationDto?.previous_donation_id){ // if previous donation id is not provided, then we need to create a new donation and register donor if not exists then skip this
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
      // ============================================
-     let donorId: number | null = createDonationDto.donor_id || null;
-     let donor:any;
      
      if (Number(createDonationDto?.amount) < 50){
       //  return with error that donation amount is less than 50
@@ -186,10 +176,20 @@ export class DonationsService {
        donor_id: donorId, // ✅ Link donation to donor
        created_by: user?.id == -1 ? null : user?.id,
      });
-     const savedDonation = await this.donationRepository.save(donation);
+      savedDonation = await this.donationRepository.save(donation);
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
+    }
 
+    else{
+      savedDonation = await this.donationRepository.findOne({
+        where: { id: parseInt(createDonationDto.previous_donation_id) },
+        relations: ['donor']
+      });
+      if(!savedDonation){
+        throw new HttpException('Previous donation not found', 404);
+      }
+    }
     //  await this.emailService.sendDonationFailureNotification(savedDonation);
      // Create notification for donation users (one notification, multiple user_notification records)
      try {
@@ -1091,9 +1091,15 @@ export class DonationsService {
       }
 
       // Find donation by invoice_number (which should match our donation ID)
-      const donation = await this.donationRepository.findOne({ 
-        where: { id: parseInt(invoice_number) } 
-      });
+      // const donation = await this.donationRepository.findOne({ 
+      //   where: { id: parseInt(invoice_number) } 
+      // });
+
+      const donation = await this.donationRepository
+        .createQueryBuilder('donation')
+        .leftJoinAndSelect('donation.donor', 'donor')
+        .where('donation.id = :id', { id: parseInt(invoice_number) })
+        .getOne();
 
       if (!donation) {
         return {

@@ -125,4 +125,8 @@ export class CreateDonationDto {
     notes?: string;
   }>;
 
+  @IsOptional()
+  @IsString()
+  previous_donation_id?: string;
+
 }
