@@ -852,12 +852,14 @@ export class DonationsService {
       }
 
       // Find donation by basket_id (which is the donation id)
-      const donation = await this.donationRepository.findOne({ 
-        where: { id: parseInt(basket_id) } 
-      });
+      const donation = await this.donationRepository
+        .createQueryBuilder('donation')
+        .leftJoinAndSelect('donation.donor', 'donor')
+        .where('donation.id = :id', { id: parseInt(basket_id) })
+        .getOne();
 
       if (!donation) {
-        throw new Error(`Donation with ID ${basket_id} not found`);
+        throw new Error(`Donation with ID ${basket_id} not found in handlePayfastIpn`);
       }
 
       console.log("Found donation:", { id: donation.id, amount: donation.amount, status: donation.status });
@@ -886,27 +888,29 @@ export class DonationsService {
         //   err_msg,
         //   transaction_id,
         //   donation_id: basket_id
-        // }});
+        // }}); 
       }
 
       let message_sent: boolean = false;
-      let send_message = false;
-      let email_sent = false;
-      let send_email = false;
-      if (donation?.amount >= 5000) send_message = true;
+      let email_sent: boolean = false;
+      let send_message = donation?.message_sent == false && donation?.amount >= 5000 ? true : false;
+      let send_email = donation?.email_sent == false && donation?.amount >= 5000 ? true : false;
       if (err_code === '000' || err_code === '00') {
         if(send_message){
+          message_sent = true;
           await this.whatsAppService.sendPaymentConfirmation({
           phoneNumber: donation.donor.phone,
             userName: donation.donor.name,
             amount: donation.amount,
           });
-          email_sent = true;
-          await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
+          if(send_email){
+            email_sent = true;
+            await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
+          }
         }
       }
       else{
-        if(!donation?.message_sent  && send_message){
+        if(send_message){
           message_sent = true;
           // send abandon message
           // need to finalize the  flow for this
@@ -916,8 +920,10 @@ export class DonationsService {
             amount: donation.amount,
             donationId: basket_id,
           });
-          email_sent = true;
-          await this.emailService.sendDonationFailureEmail(donation);
+          if(send_email){
+            email_sent = true;
+            await this.emailService.sendDonationFailureEmail(donation);
+          }
         }
       }
         // Update donation
@@ -925,7 +931,8 @@ export class DonationsService {
           orderId: transaction_id,
           status: newStatus,
           err_msg,
-          message_sent
+          message_sent,
+          email_sent
         });
       console.log(`Donation ${basket_id} updated successfully with status: ${newStatus}`);
       console.log("=== IPN PROCESSING COMPLETE ===");
