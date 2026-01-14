@@ -390,3 +390,38 @@ export function createFilteredQuery<T>(
   
   return queryBuilder;
 }
+
+
+
+//multiselect filters 
+export function applyMultiselectFilters(
+  queryBuilder: SelectQueryBuilder<any>,
+  multiselectFilters: any,
+  entityAlias: string = 'entity'
+): void {
+  try {
+    if (!multiselectFilters || Object.keys(multiselectFilters).length === 0) {
+      return;
+    }
+  
+    // multiselectFilters is an object where key is column name and value is an array of values
+    // Example: { columnName: ['1', '2', '3'] }
+    Object.keys(multiselectFilters).forEach((column, index) => {
+      const value = multiselectFilters[column];
+      
+      // Ensure value is an array
+      if (!Array.isArray(value) || value.length === 0) {
+        return;
+      }
+      
+      const fieldPath = column.includes('.') ? column : `${entityAlias}.${column}`;
+      const paramName = `multiselect_${column}_${index}`;
+      queryBuilder.andWhere(`${fieldPath} IN (:...${paramName})`, {
+        [paramName]: value
+      });
+    });
+  } catch (error) {
+    console.error("Error applying multiselect filters:", error);
+    throw error;
+  }
+}

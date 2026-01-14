@@ -96,7 +96,7 @@ export class DonationsController {
       // console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
       // console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
 
-      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, relationsFilters, user);
+      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, payload?.multiselectFilters || [], relationsFilters, user);
       
       return res.status(HttpStatus.OK).json({
         success: true,

@@ -17,6 +17,25 @@ import { DonorService } from 'src/dms/donor/donor.service';
 export class PublicDonationsController {
   constructor(private readonly donationsService: DonationsService, private readonly donorService: DonorService) {}
 
+  // Public endpoint for uptime monitoring - NO GUARDS
+  @Get('get-donation-apistatus')
+  async getDonationApiStatus(@Res() res: Response) {
+    try {
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        status: 'active',
+        message: 'Donations API is available',
+      });
+    } catch (error) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        status: 'error',
+        message: 'Donations API error',
+        error: error.message,
+      });
+    }
+  }
+
   // Public PayFast IPN endpoint - NO GUARDS
   @Post('payfast/ipn')
   async handlePayfastIpn(@Body() payload: any, @Res() res: Response) {

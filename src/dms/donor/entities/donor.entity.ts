@@ -118,4 +118,11 @@ export class Donor extends BaseEntity {
 
   @Column({ nullable: true, type: 'timestamp' })
   last_donation_date: Date;
+
+  @Column({ type: 'boolean', default: false, nullable: true })
+  is_archived: boolean;
+
+  @Column({ type: 'boolean', default: false, nullable: true })
+  recurring: boolean;
+
 }

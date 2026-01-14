@@ -41,7 +41,13 @@ import { ScheduleModule } from '@nestjs/schedule';
       url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/ddr_db',
       // ssl: process.env.SSL === 'production',
       autoLoadEntities: true,
-      synchronize: true 
+      synchronize: true,
+      extra: {
+        max: 5,
+        connectionTimeoutMillis: 15000,
+        query_timeout: 60000,
+        statement_timeout: 60000,
+      }      
     }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,

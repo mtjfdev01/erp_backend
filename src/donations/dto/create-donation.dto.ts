@@ -49,6 +49,10 @@ export class CreateDonationDto {
 
   @IsOptional()
   @IsString()
+  ref?: string;
+
+  @IsOptional()
+  @IsString()
   country?: string;
 
   @IsOptional()

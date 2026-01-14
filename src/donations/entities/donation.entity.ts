@@ -32,16 +32,6 @@ export class Donation extends BaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   currency: string;
 
-  // //   donor section
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // donor_name: string;
-
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // donor_email: string;
-
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // donor_phone: string;
-
   @Column({ type: 'varchar', nullable: true, default: null })
   donation_type: string;
 
@@ -57,16 +47,6 @@ export class Donation extends BaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   city: string;
 
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // address: string;
-  
-  //  donation item name and description and price
-  
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // item_description: string;
-  
-  // @Column({ type: 'decimal', nullable: true, default: null })
-  // item_price: number;
   
   @Column({ type: 'varchar', nullable: true, default: 'pending' })
   status: string;
@@ -80,16 +60,6 @@ export class Donation extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true, default: null })
   bank_name: string;
-
-  // // ⭐ NEW: In-kind donation fields
-  // @Column({ type: 'varchar', nullable: true, default: null })
-  // in_kind_item_name: string;
-
-  // @Column({ type: 'text', nullable: true, default: null })
-  // in_kind_description: string;
-
-  // @Column({ type: 'int', nullable: true, default: null })
-  // in_kind_quantity: number;
   
   // Order ID returned by the bank
   @Column({ type: 'varchar', nullable: true, default: null })
@@ -98,4 +68,15 @@ export class Donation extends BaseEntity {
   //   recurrence id in case of recurring donation and is returned by meezan bank
   @Column({ type: 'varchar', nullable: true, default: null })
   recurrence_id: string;
+
+  @Column({ type: 'boolean', nullable: true, default: false })
+  message_sent: boolean;
+
+  @Column({ type: 'boolean', nullable: true, default: false })
+  email_sent: boolean;
+  
+  // for campaign tracking and agency performance monitoring
+  @Column({ type: 'varchar', nullable: true, default: null })
+  ref: string;
+
 }

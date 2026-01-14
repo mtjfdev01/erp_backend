@@ -5,6 +5,7 @@ import { DonationsController } from './donations.controller';
 import { PublicDonationsController } from './public-donations.controller';
 import { MigrationController } from './migration.controller';
 import { DonationsSummaryController } from './donations-summary.controller';
+import { CommunicationController } from '../utils/controllers/communication.controller';
 import { Donation } from './entities/donation.entity';
 import { DonationInKind } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
 import { User } from '../users/user.entity';
@@ -14,6 +15,7 @@ import { EmailModule } from '../email/email.module';
 import { PayfastService } from './payfast.service';
 import { DonorModule } from '../dms/donor/donor.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 
 @Module({
   imports: [
@@ -27,8 +29,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     DonorModule,
     NotificationsModule,
 ], 
-  controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController],
-  providers: [DonationsService, PayfastService],
+  controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController, CommunicationController],
+  providers: [DonationsService, PayfastService, WhatsAppService],
   exports: [DonationsService],
 })
 export class DonationsModule {}

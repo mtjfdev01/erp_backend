@@ -11,11 +11,12 @@ import { PayfastService } from './payfast.service';
 import { DonorService } from '../dms/donor/donor.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/entities/notification.entity';
-import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters } from '../utils/filters/common-filter.util';
+import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters, applyMultiselectFilters } from '../utils/filters/common-filter.util';
 import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } from '../utils/summary/date-range.util';
 import axios from 'axios';
 import { get } from 'http';
 import { DonationMethod } from 'src/utils/enums';
+import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 
 @Injectable()
 export class DonationsService {
@@ -30,6 +31,7 @@ export class DonationsService {
     private payfastService: PayfastService,
     private donorService: DonorService,
     private notificationsService: NotificationsService,
+    private whatsAppService: WhatsAppService
   ) {}
 
   // Get users who should receive donation notifications
@@ -109,7 +111,20 @@ export class DonationsService {
      const blinq_url="https://api.blinq.pk/";
      const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
      const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
-     
+
+    //  send Message
+    // this.whatsAppService.sendPaymentConfirmation({
+    //   phoneNumber: createDonationDto.donor_phone,
+    //   userName: createDonationDto.donor_name,
+    //   amount: createDonationDto.amount,
+    // });
+
+    // await this.whatsAppService.sendAbandonMessage({
+    //   phoneNumber: createDonationDto.donor_phone,
+    //   userName: createDonationDto.donor_name,
+    //   amount: createDonationDto.amount,
+    //   donationId: "#213",
+    // });
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
      // ============================================
@@ -175,6 +190,7 @@ export class DonationsService {
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
 
+    //  await this.emailService.sendDonationFailureNotification(savedDonation);
      // Create notification for donation users (one notification, multiple user_notification records)
      try {
        const donationUsers = await this.getDonationUsers();
@@ -214,15 +230,6 @@ export class DonationsService {
        console.error('Failed to create notifications:', error.message);
      }
 
-    //  return;
-    //  send email and return;
-    // this.emailService.sendDonationSuccessNotification(savedDonation, {
-    //   transaction_id: savedDonation.id.toString(),
-    //   transaction_amount: savedDonation.amount,
-    //   order_date: new Date().toISOString(),
-    //   PaymentName: createDonationDto.donation_method,
-    // });
-      // console.log("createDonationDto*****************************");
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
 
       // Determine which Meezan credentials to use based on donation type
@@ -438,19 +445,6 @@ export class DonationsService {
 
       // console.log("payfastResponse_____", payfastResponse);
       
-      // // Send confirmation email to donor
-      // if (savedDonation.donor_email) {
-      //   await this.emailService.sendDonationConfirmation({
-      //     donorName: savedDonation.donor_name || 'Valued Donor',
-      //     donorEmail: savedDonation.donor_email,
-      //     amount: savedDonation.amount,
-      //     currency: savedDonation.currency || 'PKR',
-      //     paymentUrl: payfastResponse?.paymentUrl || payfastResponse?.url,
-      //     donationMethod: 'payfast',
-      //     donationType: savedDonation.donation_type || 'sadqa',
-      //     orderId: payfastResponse?.basketId || savedDonation.id.toString(),
-      //   });
-      // }
       // Return complete Payfast response
       return {...payfastResponse, 
         BASKET_ID: savedDonation.id.toString(),
@@ -514,11 +508,13 @@ export class DonationsService {
     sortOrder: 'ASC' | 'DESC' = 'DESC',
     filters: FilterPayload = {},
     hybridFilters: HybridFilter[] = [],
+    multiselectFilters: any[] = [],
     relationsFilters?: Record<string, Record<string, any>>,
     user?: any
   ) {
     try {
       console.log("user email in donation listing", user?.email);
+      console.log("multiselectFilters", multiselectFilters);
       const entitySearchFields = ['city'];
       const query = this.donationRepository.createQueryBuilder('donation')
       .leftJoin('donation.donor', 'donor')
@@ -553,6 +549,12 @@ export class DonationsService {
       const RELATIONS_EQ: RelationsFilterConfig = { donor: ['name', 'email', 'phone'] };
       const normalizedRelationFilters = normalizeRelationsFilters(relationsFilters, RELATIONS_EQ);
       applyRelationsFilter(query, normalizedRelationFilters, RELATIONS_EQ, 'donation');
+
+      // 4) Multiselect filters multi select is object and we need to apply it to the query here is the example { columnName: ['1', '2', '3'] }
+      // if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
+      //   console.log("here (multiselectFilters && multiselectFilters.length > 0", multiselectFilters)
+      //   applyMultiselectFilters(query, multiselectFilters, 'donation');
+      // }
       // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
@@ -584,7 +586,10 @@ export class DonationsService {
         });
       }
       applyRelationsFilter(sumQuery, normalizedRelationFilters, RELATIONS_EQ, 'donation');
-
+      if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
+        console.log("here (multiselectFilters && multiselectFilters.length > 0")
+        applyMultiselectFilters(sumQuery, multiselectFilters, 'donation');
+      }
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;
 
@@ -868,37 +873,60 @@ export class DonationsService {
       // Update donation status based on err_code
       let newStatus: string;
       if (err_code === '000' || err_code === '00') {
+        // end success message and email if not sent already
         newStatus = 'completed';
         console.log("Donation marked as completed");
-        
-        // Send success email
-        // await this.emailService.sendDonationSuccessNotification(donation, {
-        //   transaction_id,
-        //   transaction_amount,
-        //   order_date,
-        //   PaymentName
-        // });
-        
-        // here call recurring utility 
       } else {
         newStatus = 'failed';
         console.log("Donation marked as failed");
         
         // // Send failure email
-        // await this.emailService.sendDonationFailureNotification(donation, {
+        // await this.emailService.sendDonationFailureEmail(donation, {
         //   err_code,
         //   err_msg,
-        //   transaction_id
-        // });
+        //   transaction_id,
+        //   donation_id: basket_id
+        // }});
       }
 
-      // Update donation
-      await this.donationRepository.update(parseInt(basket_id), {
-        orderId: transaction_id,
-        status: newStatus,
-        err_msg
-      });
-
+      let message_sent: boolean = false;
+      let send_message = false;
+      let email_sent = false;
+      let send_email = false;
+      if (donation?.amount >= 5000) send_message = true;
+      if (err_code === '000' || err_code === '00') {
+        if(send_message){
+          await this.whatsAppService.sendPaymentConfirmation({
+          phoneNumber: donation.donor.phone,
+            userName: donation.donor.name,
+            amount: donation.amount,
+          });
+          email_sent = true;
+          await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
+        }
+      }
+      else{
+        if(!donation?.message_sent  && send_message){
+          message_sent = true;
+          // send abandon message
+          // need to finalize the  flow for this
+          await this.whatsAppService.sendAbandonMessage({
+            phoneNumber: donation.donor.phone,
+            userName: donation.donor.name,
+            amount: donation.amount,
+            donationId: basket_id,
+          });
+          email_sent = true;
+          await this.emailService.sendDonationFailureEmail(donation);
+        }
+      }
+        // Update donation
+        await this.donationRepository.update(parseInt(basket_id), {
+          orderId: transaction_id,
+          status: newStatus,
+          err_msg,
+          message_sent
+        });
       console.log(`Donation ${basket_id} updated successfully with status: ${newStatus}`);
       console.log("=== IPN PROCESSING COMPLETE ===");
       
@@ -1078,23 +1106,50 @@ export class DonationsService {
           invoice_number: invoice_number
         };
       }
+      let status:any ;
+      let message_sent = false;
+      let send_message = donation?.message_sent == false && donation?.amount >= 5000 ? true : false;
+      let email_sent = false;
+      let send_email = donation?.email_sent == false && donation?.amount >= 5000 ? true : false;
+      if (invoice_status == 'PAID' && send_message && send_email) {
+        status = 'completed';
+        // send success message
+        await this.whatsAppService.sendPaymentConfirmation({
+          phoneNumber: donation.donor.phone,
+          userName: donation.donor.name,
+          amount: donation.amount,
+        });
+        message_sent = true;
+        email_sent = true;
+        await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
+      }
+      else{
+        status = 'failed'
+        if(send_message){
+        await this.whatsAppService.sendAbandonMessage({
+          phoneNumber: donation.donor.phone,
+          userName: donation.donor.name,
+            amount: donation.amount,
+            donationId: invoice_number,
+          });
+        }
+        message_sent = true;
+        if (send_email){
+          email_sent = true;
+          await this.emailService.sendDonationFailureEmail(donation);
+        }
+      }
 
       console.log("Found donation:", { id: donation.id, amount: donation.amount, status: donation.status });
 
       // Update donation status
       await this.donationRepository.update(parseInt(invoice_number), {
         orderId: payment_code,
-        status: 'completed',
-        err_msg: `Paid via ${paid_via} - Bank: ${paid_bank}`
+        status: status,
+        err_msg: `Paid via ${paid_via} - Bank: ${paid_bank}`,
+        message_sent,
+        email_sent
       });
-
-      // Send success email
-      // await this.emailService.sendDonationSuccessNotification(donation, {
-      //   transaction_id: payment_code,
-      //   transaction_amount: amount_paid,
-      //   order_date: paid_on,
-      //   PaymentName: paid_via
-      // });
 
       console.log(`Donation ${invoice_number} updated successfully with status: completed`);
       console.log("=== BLINQ CALLBACK PROCESSING COMPLETE ===");
