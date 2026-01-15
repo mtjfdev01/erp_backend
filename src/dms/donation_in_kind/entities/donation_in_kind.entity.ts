@@ -38,6 +38,9 @@ export class DonationInKind extends BaseEntity {
   @Column()
   item_name: string;
 
+  @Column({ type: 'text', nullable: true })
+  category: string;
+
   @Column({
     type: 'enum',
     enum: DonationInKindCondition,

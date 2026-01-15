@@ -25,11 +25,7 @@ export class DonationInKindItem extends BaseEntity {
   description: string;
 
   // Category (Required - as requested)
-  @Column({
-    type: 'enum',
-    enum: ItemCategory,
-    nullable: false,
-  })
-  category: ItemCategory;
+  @Column({ type: 'text', nullable: true })
+  category: string;
  
 }

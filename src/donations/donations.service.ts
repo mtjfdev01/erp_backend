@@ -275,20 +275,6 @@ export class DonationsService {
       savedDonation.status = 'registered';
       await this.donationRepository.save(savedDonation);
 
-      // Step 6: Send confirmation email to donor
-      // if (savedDonation.donor_email) {
-      //   await this.emailService.sendDonationConfirmation({
-      //     donorName: savedDonation.donor_name || 'Valued Donor',
-      //     donorEmail: savedDonation.donor_email,
-      //     amount: savedDonation.amount,
-      //     currency: savedDonation.currency || 'PKR',
-      //     paymentUrl: data.formUrl,
-      //     donationMethod: 'meezan',
-      //     donationType: savedDonation.donation_type || 'sadqa',
-      //     orderId: data.orderId,
-      //   });
-      // }
-      
       // Step 7: Return donation and redirect URL
       return {
         paymentUrl: data.formUrl,
@@ -455,9 +441,6 @@ export class DonationsService {
       // here we need to create a manual donation
       console.log("Created manually");
       if(createDonationDto.donation_method === 'in_kind') {
-        // Create the main donation record first
-        const donation = this.donationRepository.create(createDonationDto);
-        const savedDonation = await this.donationRepository.save(donation);
         
         // Create DonationInKind records for each item in the array
         if (createDonationDto.in_kind_items && createDonationDto.in_kind_items.length > 0) {
@@ -469,6 +452,7 @@ export class DonationsService {
               item_name: item.name,
               item_id: item.item_code || null,
               description: item.description || null,
+              category: item.category ? this.mapCategoryToEnum(item.category) : DonationInKindCategory.OTHER,
               condition: item.condition ? this.mapConditionToEnum(item.condition) : DonationInKindCondition.GOOD,
               quantity: item.quantity,
               estimated_value: item.estimated_value || null,
