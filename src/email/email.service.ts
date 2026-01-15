@@ -274,8 +274,8 @@ export class EmailService implements OnModuleInit {
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
-        to: [staticEmailAddress],
-        subject: `❌ Donation Failed - ${donation.donor_name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+        to: [donation?.donor?.email || staticEmailAddress],
+        subject: `⚠️ Incomplete Donation - ${donation?.donor?.name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
         html: this.generateDonationFailureTemplate(donation),
         // text: this.generateDonationFailureText(donation, errorDetails),
         headers: {

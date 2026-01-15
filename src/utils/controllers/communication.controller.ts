@@ -171,7 +171,7 @@ export class CommunicationController {
       }
 
       // Fetch donation with donor relation
-      const donation = await this.donationsService.findOne(id);
+      const donation = await this.donationsService.findOne(id); 
       
       if (!donation) {
         throw new HttpException(
@@ -213,16 +213,8 @@ export class CommunicationController {
       if (shouldSendEmail) {
         if (donorEmail) {
           try {
-            const emailSent = await this.emailService.sendDonationConfirmation({
-              donorName,
-              donorEmail,
-              amount,
-              currency,
-              paymentUrl,
-              donationMethod: donation.donation_method || 'online',
-              donationType,
-              orderId: donation.orderId,
-            });
+            // send Failure Email here
+            const emailSent = await this.emailService.sendDonationFailureEmail(donation);
             
             results.email.sent = emailSent;
           } catch (error: any) {
