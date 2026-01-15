@@ -396,7 +396,7 @@ export class EmailService implements OnModuleInit {
   private generateDonationFailureTemplate(
     donation: any,
   ): string {
-    const donationURl= `https://mtjfoundation.org/checkout?donationID=${donation?.id}`
+    const donationURl= `https://mtjfoundation.org/checkout?donationId=${donation?.id}`
     return `
       <!DOCTYPE html>
       <html>

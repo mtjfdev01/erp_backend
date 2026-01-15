@@ -469,7 +469,6 @@ export class DonationsService {
               item_name: item.name,
               item_id: item.item_code || null,
               description: item.description || null,
-              category: item.category ? this.mapCategoryToEnum(item.category) : DonationInKindCategory.OTHER,
               condition: item.condition ? this.mapConditionToEnum(item.condition) : DonationInKindCondition.GOOD,
               quantity: item.quantity,
               estimated_value: item.estimated_value || null,

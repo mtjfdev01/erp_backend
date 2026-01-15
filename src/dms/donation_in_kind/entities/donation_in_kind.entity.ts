@@ -40,13 +40,6 @@ export class DonationInKind extends BaseEntity {
 
   @Column({
     type: 'enum',
-    enum: DonationInKindCategory,
-    nullable: false,
-  })
-  category: DonationInKindCategory;
-
-  @Column({
-    type: 'enum',
     enum: DonationInKindCondition,
     nullable: false,
   })

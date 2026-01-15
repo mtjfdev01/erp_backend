@@ -198,7 +198,7 @@ export class CommunicationController {
       
       // Generate payment URL
       const baseUrl = process.env.BASE_Frontend_URL || 'https://mtjfoundation.org';
-      const paymentUrl = `${baseUrl}/checkout?donationID=${id}`;
+      const paymentUrl = `${baseUrl}/checkout?donationId=${id}`;
 
       // Prepare results
       const results = {
