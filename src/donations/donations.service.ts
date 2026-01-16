@@ -212,7 +212,7 @@ export class DonationsService {
          await this.notificationsService.create(
            {
              title: 'New Donation Received',
-             message: `A new donation of ${savedDonation.amount} ${savedDonation.currency || 'PKR'} has been received${donor?.name ? ` from ${donor.name}` : ''}.`,
+             message: `A new donation attempt of ${savedDonation.amount} ${savedDonation.currency || 'PKR'} has been done ${donor?.name ? ` from ${donor.name}` : ''}.`,
              type: NotificationType.DONATION,
              link: `/donations/online_donations/view/${savedDonation.id}`,
              metadata: {
@@ -534,10 +534,10 @@ export class DonationsService {
       applyRelationsFilter(query, normalizedRelationFilters, RELATIONS_EQ, 'donation');
 
       // 4) Multiselect filters multi select is object and we need to apply it to the query here is the example { columnName: ['1', '2', '3'] }
-      // if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
-      //   console.log("here (multiselectFilters && multiselectFilters.length > 0", multiselectFilters)
-      //   applyMultiselectFilters(query, multiselectFilters, 'donation');
-      // }
+      if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
+        console.log("here (multiselectFilters && multiselectFilters.length > 0", multiselectFilters)
+        applyMultiselectFilters(query, multiselectFilters, 'donation');
+      }
       // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
@@ -663,6 +663,60 @@ export class DonationsService {
         throw error;
       }
       throw new Error(`Failed to update donation: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update donation status action
+   * Only updates if the status is different from the current status
+   * @param donationId - The donation ID to update
+   * @param newStatus - The new status to set
+   * @returns Updated donation object
+   */
+  async updateStatusAction(donationId: number, newStatus: string) {
+    try {
+      // Find the donation
+      const donation = await this.donationRepository.findOne({ 
+        where: { id: donationId },
+        relations: ['donor']
+      });
+
+      if (!donation) {
+        throw new NotFoundException(`Donation with ID ${donationId} not found`);
+      }
+
+      // Check if status is already the same
+      if (donation.status === newStatus) {
+        return {
+          donation,
+          updated: false,
+          message: `Donation status is already "${newStatus}". No update needed.`,
+        };
+      }
+
+      // Update the status
+      await this.donationRepository.update(donationId, { status: newStatus });
+
+      // Get updated donation
+      const updatedDonation = await this.donationRepository.findOne({ 
+        where: { id: donationId },
+        relations: ['donor']
+      });
+
+      console.log(`Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`);
+
+      return {
+        donation: updatedDonation,
+        updated: true,
+        previousStatus: donation.status,
+        newStatus: newStatus,
+        message: `Donation status updated successfully from "${donation.status}" to "${newStatus}"`,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Failed to update donation status: ${error.message}`);
     }
   }
 

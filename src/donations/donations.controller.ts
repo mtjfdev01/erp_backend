@@ -17,6 +17,7 @@ import { Response } from 'express';
 import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
+import { UpdateDonationStatusDto } from './dto/update-donation-status.dto';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
@@ -189,6 +190,38 @@ export class DonationsController {
     } catch (error) {
       console.error("Error updating donation status:", error);
       return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Post('status-action')
+  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
+  async updateStatusAction(@Body() updateStatusDto: UpdateDonationStatusDto, @Res() res: Response) {
+    try {
+      console.log("Donation status action payload:", updateStatusDto);
+      
+      const result = await this.donationsService.updateStatusAction(
+        updateStatusDto.donation_id,
+        updateStatusDto.status
+      );
+      
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: result.message,
+        data: {
+          donation: result.donation,
+          updated: result.updated,
+          previousStatus: result.previousStatus,
+          newStatus: result.newStatus,
+        },
+      });
+    } catch (error) {
+      console.error("Error updating donation status action:", error);
+      const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
         success: false,
         message: error.message,
         data: null,
