@@ -63,6 +63,7 @@ export class DonorController {
     @Query('is_active') is_active?: string,
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
+    @Query('multi_time_donors') multi_time_donor?: string,
     @Res() res?: Response,
   ) {
     try {
@@ -81,6 +82,7 @@ export class DonorController {
         is_active: is_active ? is_active === 'true' : undefined,
         start_date,
         end_date,
+        multi_time_donor: multi_time_donor ? multi_time_donor === 'true' : undefined,
       });
 
       return res.status(HttpStatus.OK).json({

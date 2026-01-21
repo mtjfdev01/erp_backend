@@ -17,6 +17,8 @@ import axios from 'axios';
 import { get } from 'http';
 import { DonationMethod } from 'src/utils/enums';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
+import { Donor } from 'src/dms/donor/entities/donor.entity';
+import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
 
 @Injectable()
 export class DonationsService {
@@ -29,6 +31,10 @@ export class DonationsService {
     private userRepository: Repository<User>,
     private emailService: EmailService,
     private payfastService: PayfastService,
+    @InjectRepository(Donor)
+    private donorRepository: Repository<Donor>,
+    @InjectRepository(RecurringDonation)
+    private recurringDonationRepository: Repository<RecurringDonation>,
     private donorService: DonorService,
     private notificationsService: NotificationsService,
     private whatsAppService: WhatsAppService
@@ -105,6 +111,253 @@ export class DonationsService {
     return conditionMap[condition.toLowerCase()] || DonationInKindCondition.GOOD;
   }
 
+  /**
+   * Create Meezan invoice - Reusable helper method
+   * @param orderNumber - Order number (usually donation ID)
+   * @param amount - Transaction amount (will be converted to paisa)
+   * @param savedDonation - Optional donation entity to update (if not provided, uses dummy data)
+   * @returns Promise with payment URL
+   */
+  async createMeezanInvoice(
+    orderNumber: string | number,
+    amount: number | string,
+    savedDonation?: Donation,
+  ): Promise<{
+    paymentUrl: string;
+    orderId: string;
+  }> {
+    try {
+      const meezanUser = process.env.MEEZAN_USER;
+      const meezanPass = process.env.MEEZAN_PASS;
+      const meezanUrl = process.env.MEEZAN_URL || 'https://acquiring.meezanbank.com/payment/rest/';
+      const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
+
+      // Validate that required credentials are present
+      if (!meezanUser || !meezanPass) {
+        throw new HttpException(
+          'Meezan credentials not configured. Please check environment variables.',
+          500,
+        );
+      }
+
+      // Use dummy return URL if no donation provided
+      const returnUrl = savedDonation
+        ? `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`
+        : `${baseFrontendUrl}/thanks?donation_id=${orderNumber}`;
+
+      const reqParams = new URLSearchParams({
+        userName: meezanUser,
+        password: meezanPass,
+        orderNumber: orderNumber.toString(),
+        amount: (Number(amount) * 100).toString(), // amount in minor units (PKR -> paisa)
+        currency: '586',
+        returnUrl: returnUrl,
+      });
+
+      // Call Meezan register.do
+      const response = await axios.post(
+        `${meezanUrl}/register.do`,
+        reqParams,
+      );
+      const data = response.data;
+
+      // Handle response
+      if (!data.orderId || !data.formUrl) {
+        throw new HttpException(
+          data.errorMessage || 'Meezan API error during order registration',
+          400,
+        );
+      }
+
+      // Update donation if provided
+      if (savedDonation) {
+        savedDonation.orderId = data.orderId;
+        savedDonation.status = 'registered';
+        await this.donationRepository.save(savedDonation);
+      }
+
+      return {
+        paymentUrl: data.formUrl,
+        orderId: data.orderId,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        `Failed to create Meezan invoice: ${error.message}`,
+        500,
+      );
+    }
+  }
+
+  /**
+   * Get PayFast access token - Reusable helper method
+   * @param basketId - Basket ID (usually donation ID)
+   * @param amount - Transaction amount
+   * @returns Promise with PayFast access token response
+   */
+  async getPayfastAccessToken(
+    basketId: string,
+    amount: number | string,
+  ): Promise<any> {
+    try {
+      const payfastResponse = await this.payfastService.getAccessToken(
+        basketId,
+        amount,
+      );
+      return payfastResponse;
+    } catch (error) {
+      throw new HttpException(
+        `Failed to get PayFast access token: ${error.message}`,
+        500,
+      );
+    }
+  }
+
+  /**
+   * Get Blinq access token - Reusable helper method
+   * @returns Promise<string> - Authentication token
+   */
+  async getBlinqAccessToken(): Promise<string> {
+    try {
+      const blinq_url = 'https://api.blinq.pk/';
+      const authPayload = {
+        ClientID: process.env.BLINQ_ID?.toString(),
+        ClientSecret: process.env.BLINQ_PASS?.toString(),
+      };
+
+      if (!authPayload.ClientID || !authPayload.ClientSecret) {
+        throw new HttpException('Blinq credentials not configured', 500);
+      }
+
+      const authResponse = await axios.post(
+        `${blinq_url}api/Auth`,
+        authPayload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      // Try multiple possible token locations (headers or body)
+      const authToken =
+        authResponse?.headers?.token ||
+        authResponse?.data?.token ||
+        authResponse?.data?.data?.token;
+
+      if (!authToken) {
+        console.error('Blinq auth response structure:', {
+          headers: authResponse?.headers,
+          data: authResponse?.data,
+        });
+        throw new HttpException('Failed to get Blinq authentication token', 401);
+      }
+
+      return authToken;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(`Blinq authentication failed: ${error.message}`, 500);
+    }
+  }
+
+  /**
+   * Generate Blinq invoice - Reusable helper method
+   * @param invoiceNumber - Invoice number (usually donation ID)
+   * @param amount - Invoice amount
+   * @param customerName - Customer name
+   * @param authToken - Optional auth token (will fetch if not provided)
+   * @returns Promise with invoice data including payment URL
+   */
+  async generateBlinqInvoice(
+    invoiceNumber: string,
+    amount: number | string,
+    customerName: string = 'Anonymous',
+    authToken?: string,
+  ): Promise<{
+    paymentUrl: string;
+    paymentCode: string | null;
+    invoiceData: any;
+  }> {
+    try {
+      const blinq_url = 'https://api.blinq.pk/';
+      const token = authToken || (await this.getBlinqAccessToken());
+
+      // Calculate dates
+      const currentDate = new Date();
+      const dueDate = new Date(currentDate.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 days later
+      const validityDate = new Date(
+        currentDate.getFullYear() + 1,
+        currentDate.getMonth(),
+        currentDate.getDate(),
+      ); // 1 year later
+
+      // Format dates to YYYY-MM-DD (local date, not UTC)
+      const formatDate = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      const invoicePayload = [
+        {
+          InvoiceNumber: invoiceNumber,
+          InvoiceAmount: amount.toString(),
+          InvoiceDueDate: formatDate(dueDate),
+          ValidityDate: formatDate(validityDate),
+          InvoiceType: 'Service',
+          IssueDate: formatDate(currentDate),
+          CustomerName: customerName,
+        },
+      ];
+
+      // Create invoice on Blinq
+      const blinqInvoice = await axios.post(
+        `${blinq_url}invoice/create`,
+        invoicePayload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            token: token,
+          },
+        },
+      );
+
+      // Extract and validate payment URL
+      const detail = blinqInvoice?.data?.ResponseDetail?.[0];
+      const paymentUrl = detail?.ClickToPayUrl;
+      const paymentCode = detail?.PaymentCode || null;
+
+      if (!paymentUrl) {
+        console.error('Blinq invoice unexpected response:', blinqInvoice?.data);
+        throw new HttpException(
+          {
+            message: 'Blinq invoice created but ClickToPayUrl missing',
+            provider: 'blinq',
+            invoiceNumber: invoiceNumber,
+            providerResponse: blinqInvoice?.data,
+          },
+          502,
+        );
+      }
+
+      return {
+        paymentUrl,
+        paymentCode,
+        invoiceData: blinqInvoice?.data,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(`Failed to create Blinq invoice: ${error.message}`, 500);
+    }
+  }
+
   async create(createDonationDto: CreateDonationDto, user: any) {
     try {
      const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
@@ -139,6 +392,12 @@ export class DonationsService {
        }
        
        if (donor) {
+         let alreadyMultiTimeDonor = donor?.multi_time_donor || false;
+         if(!alreadyMultiTimeDonor) {
+          donor.multi_time_donor = true;
+          await this.donorRepository.save(donor);
+          console.log(`✅ Donor is now a multi-time donor: ${donor.email} (ID: ${donor.id})`);
+         }
          console.log(`✅ Donor already exists: ${donor.email} (ID: ${donor.id})`);
          donorId = donor.id;
         //  return with error that donor is archived 
@@ -169,26 +428,38 @@ export class DonationsService {
        console.log(`⚠️ Skipping donor auto-registration: missing email or phone`);
      }
      // ============================================
-     
+    //   donation_frequency is monthly then insert record in recurring repository  also 
+    if(createDonationDto?.donation_frequency && createDonationDto?.donation_frequency === 'monthly') {
+      const recurringDonation = this.recurringDonationRepository.create({
+        ...createDonationDto,
+        donor_id: donorId,
+      });
+      savedDonation = await this.recurringDonationRepository.save(recurringDonation);
+      // mark donor as recurring donor
+      donor.recurring = true; 
+      await this.donorRepository.save(donor);
+    }
      // Create donation with donor_id if available
      const donation =  this.donationRepository.create({
        ...createDonationDto,
        donor_id: donorId, // ✅ Link donation to donor
        created_by: user?.id == -1 ? null : user?.id,
+       recurrence_id: savedDonation?.id || 0, 
      });
       savedDonation = await this.donationRepository.save(donation);
      
      console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
-    }
 
-    else{
+     if(createDonationDto?.previous_donation_id) {
       savedDonation = await this.donationRepository.findOne({
         where: { id: parseInt(createDonationDto.previous_donation_id) },
         relations: ['donor']
       });
+
       if(!savedDonation){
         throw new HttpException('Previous donation not found', 404);
       }
+    }
     }
     //  await this.emailService.sendDonationFailureNotification(savedDonation);
      // Create notification for donation users (one notification, multiple user_notification records)
@@ -231,196 +502,33 @@ export class DonationsService {
      }
 
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
-
-      // Determine which Meezan credentials to use based on donation type
-      const isZakat = createDonationDto.donation_type === 'zakat';
-      const meezanUser = isZakat ? process.env.MEEZAN_ZAKAT_USER : process.env.MEEZAN_USER;
-      const meezanPass = isZakat ? process.env.MEEZAN_ZAKAT_PASS : process.env.MEEZAN_PASS;
-
-      // Validate that required credentials are present
-      if (!meezanUser || !meezanPass) {
-        const credentialType = isZakat ? 'Zakat' : 'Sadqa';
-        throw new HttpException(
-          `${credentialType} Meezan credentials not configured. Please check environment variables.`,
-          500
-        );
-      }
-
-      const reqParams = new URLSearchParams({
-        userName: meezanUser,
-        password: meezanPass,
-        orderNumber: savedDonation.id.toString(),
-        amount: (savedDonation.amount * 100).toString(), // amount in minor units (PKR -> paisa)
-        currency: '586',
-        returnUrl: `${process.env.BASE_Frontend_URL}/thanks?donation_id=${savedDonation.id}`,
-      });
-
-      // Step 3: Call Meezan register.do
-      const response = await axios.post(
-        `${process.env.MEEZAN_URL}/register.do`,
-        reqParams,
+      // Use reusable helper method to create Meezan invoice
+      const meezanResult = await this.createMeezanInvoice(
+        savedDonation.id,
+        savedDonation.amount,
+        savedDonation,
       );
-      const data = response.data;
 
-      // Step 4: Handle response
-      if (!data.orderId || !data.formUrl) {
-        throw new HttpException(
-          data.errorMessage || 'Meezan API error during order registration',
-          400,
-        );
-      }
-
-      // Step 5: Update donation with Meezan orderId
-      savedDonation.orderId = data.orderId;
-      savedDonation.status = 'registered';
-      await this.donationRepository.save(savedDonation);
-
-      // Step 7: Return donation and redirect URL
+      // Return payment URL for user to complete payment
       return {
-        paymentUrl: data.formUrl,
+        paymentUrl: meezanResult.paymentUrl,
       };
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'blinq') {
-
-      //  get auth from blinq 
-      let authPayload = { 
-        ClientID: process.env.BLINQ_ID.toString(), 
-        ClientSecret:process.env.BLINQ_PASS.toString(),
-        }
-        console.log("authPayload", authPayload);
-      const authResponse = await axios.post(
-        `${blinq_url}api/Auth`,
-        authPayload,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
+      // Use reusable helper method to generate Blinq invoice
+      const blinqResult = await this.generateBlinqInvoice(
+        savedDonation.id.toString(),
+        savedDonation.amount,
+        donor?.name || 'Anonymous',
       );
-      // console.log("blinq auth resp", authResponse)
-      const authToken = await authResponse?.headers?.token;
-      // console.log("authToken", authResponse?.headers);
-      if(authToken) {
-        console.log("Blinq Token is valid")
-      // Calculate dates
-      const currentDate = new Date();
-      const dueDate = new Date(currentDate.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 days later
-      const validityDate = new Date(currentDate.getFullYear() + 1, currentDate.getMonth(), currentDate.getDate()); // 1 year later
 
-      // Format dates to YYYY-MM-DD
-      const formatDate = (date) => date.toISOString().split('T')[0];
+      // Update donation with Blinq payment code and status
+      savedDonation.status = 'registered';
+      savedDonation.orderId = blinqResult.paymentCode || null;
+      await this.donationRepository.save(savedDonation);
 
-      const invoicePayload = [{
-        "InvoiceNumber": savedDonation.id.toString(),
-        "InvoiceAmount": savedDonation.amount.toString(),
-        "InvoiceDueDate": formatDate(dueDate),
-        "ValidityDate": formatDate(validityDate),
-        "InvoiceType": "Service",
-        "IssueDate": formatDate(currentDate),
-        "CustomerName": donor?.name || 'Anonymous',
-      }]
-
-        //  create invoice on blinq
-        const blinqInvoice = await axios.post(
-          `${blinq_url}invoice/create`,
-          invoicePayload,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'token': authToken
-            }
-          }
-        );
-
-        console.log("blinqInvoice_____", blinqInvoice?.data);
-
-        // check invoice status ****************************
-        // const invoiceStatusData = await axios.get(
-        //   `${blinq_url}invoice/getstatus?PaymentCode=${blinqInvoice?.data?.ResponseDetail[0]?.PaymentCode}`,
-        //   {
-        //     headers: {
-        //       'Content-Type': 'application/json',
-        //       'token': authToken
-        //     }
-        //   }
-        // );
-        // const invoiceStatus = invoiceStatusData?.data?.ResponseDetail[0]?.InvoiceStatus;
-        // console.log("invoiceStatus_____", invoiceStatus);
-
-
-
-         // get All Paid  ***********************************************
-        //  This API allows you to get paid invoices details by providing startDate and endDate as URL parameter 
-        //  and secure token in request header. 
-  
-        // URL: https://{BaseURL}/invoice/getpaidinvoices?startDate={startDate}&endDate={endDate} 
-        // // Method: GET
-        // Request Parameters(URL) 
-
-        // Parameter Mandatory/Optional Data Type 
-        // startDate M String(yyyy-MM-dd) 
-        // endDate M String(yyyy-MM-dd) 
-
-        //       const formatDate = (date) => date.toISOString().split('T')[0];
-        // const startDate = formatDate(currentDate);
-        // const endDate = formatDate(dueDate);
-        // const paidInvoicesData = await axios.get(
-        //   `${blinq_url}invoice/getpaidinvoices?startDate=${startDate}&endDate=${endDate}`,
-        //   {
-        //     headers: {
-        //       'Content-Type': 'application/json',
-        //       'token': authToken
-        //     }
-        //   }
-        // );
-        // const paidInvoices = paidInvoicesData?.data?.ResponseDetail;
-        // console.log("paidInvoices_____", paidInvoices);
-
-
-
-        // Strict validation: Extract and validate payment URL
-        const detail = blinqInvoice?.data?.ResponseDetail?.[0];
-        const paymentUrl = detail?.ClickToPayUrl;
-
-        if (!paymentUrl) {
-          // Log full response for debugging
-          console.log("Blinq invoice unexpected response:", blinqInvoice?.data);
-          throw new HttpException(
-            {
-              message: "Blinq invoice created but ClickToPayUrl missing",
-              provider: "blinq",
-              donationId: savedDonation.id,
-              providerResponse: blinqInvoice?.data,
-            },
-            502,
-          );
-        }
-
-        savedDonation.status = 'registered';
-        savedDonation.orderId = detail?.PaymentCode || null;
-        await this.donationRepository.save(savedDonation);
-
-        // Send confirmation email to donor
-        // if (savedDonation.donor_email) {
-        //   await this.emailService.sendDonationConfirmation({
-        //     donorName: savedDonation.donor_name || 'Valued Donor',
-        //     donorEmail: savedDonation.donor_email,
-        //     amount: savedDonation.amount,
-        //     currency: savedDonation.currency || 'PKR',
-        //     paymentUrl: blinqInvoice?.data?.ResponseDetail[0]?.ClickToPayUrl,
-        //     donationMethod: 'blinq',
-        //     orderId: blinqInvoice?.data?.ResponseDetail[0]['1BillID'],
-        //   });
-        // }
-
-        return { paymentUrl }; // guaranteed string here
-        // }
-
-      }
-      else {
-        console.log("Blinq Token is not valid")
-        throw new HttpException('Blinq Token is not valid', 400);
-      }
+      // Return payment URL for user to complete payment
+      return { paymentUrl: blinqResult.paymentUrl };
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'payfast') {
       // Get complete response from Payfast

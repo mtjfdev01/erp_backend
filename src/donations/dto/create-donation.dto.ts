@@ -129,4 +129,8 @@ export class CreateDonationDto {
   @IsString()
   previous_donation_id?: string;
 
+  @IsOptional()
+  @IsString()
+  donation_frequency?: string;
+
 }

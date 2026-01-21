@@ -124,5 +124,7 @@ export class Donor extends BaseEntity {
 
   @Column({ type: 'boolean', default: false, nullable: true })
   recurring: boolean;
-
+  
+  @Column({ type: 'boolean', default: false, nullable: true })
+  multi_time_donor:boolean;
 }

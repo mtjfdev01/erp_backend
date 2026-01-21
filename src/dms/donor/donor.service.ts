@@ -96,7 +96,7 @@ export class DonorService {
   /**
    * Find all donors with pagination and filtering
    */
-  async findAll(options: PaginationOptions) {
+  async findAll(options: any) {
     try {
       const {
         page = 1,
@@ -110,6 +110,7 @@ export class DonorService {
         is_active,
         start_date,
         end_date,
+        multi_time_donor,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -138,6 +139,7 @@ export class DonorService {
         country,
         start_date,
         end_date,
+        multi_time_donor,
       };
 
       applyCommonFilters(queryBuilder, filters, searchFields, 'donor');
@@ -161,7 +163,7 @@ export class DonorService {
         'created_at',
         'total_donated',
         'donation_count',
-        'last_donation_date',
+        'last_donation_date'
       ];
       const sortFieldName = validSortFields.includes(sortField) ? sortField : 'created_at';
       queryBuilder.orderBy(`donor.${sortFieldName}`, sortOrder);

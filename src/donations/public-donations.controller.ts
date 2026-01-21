@@ -135,4 +135,162 @@ export class PublicDonationsController {
       });
     }
   }
+
+  // Public Blinq uptime status endpoint - NO GUARDS
+  // Tests Blinq API connectivity by getting access token and creating a test invoice
+  @Get('blinq/status')
+  async getBlinqStatus(@Res() res: Response) {
+    try {
+      // Use dummy data for uptime check (don't store in database)
+      const testInvoiceNumber = `TEST-${Date.now()}`;
+      const testAmount = 100; // Minimum test amount
+      const testCustomerName = 'MTJ Foundation Uptime Check';
+
+      // Test 1: Get access token
+      const authToken = await this.donationsService.getBlinqAccessToken();
+      
+      if (!authToken) {
+        return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+          success: false,
+          status: 'unavailable',
+          message: 'Blinq authentication failed',
+          details: {
+            authToken: false,
+            invoiceCreated: false,
+          },
+        });
+      }
+
+      // Test 2: Create test invoice
+      const invoiceResult = await this.donationsService.generateBlinqInvoice(
+        testInvoiceNumber,
+        testAmount,
+        testCustomerName,
+        authToken,
+      );
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        status: 'active',
+        message: 'Blinq API is operational',
+        details: {
+          authToken: true,
+          invoiceCreated: true,
+          testInvoiceNumber: testInvoiceNumber,
+          paymentUrl: invoiceResult.paymentUrl ? 'Generated' : 'Not available',
+          paymentCode: invoiceResult.paymentCode,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('Blinq status check error:', error.message);
+      
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        success: false,
+        status: 'unavailable',
+        message: 'Blinq API is not available',
+        error: error.message,
+        details: {
+          authToken: false,
+          invoiceCreated: false,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  // Public PayFast uptime status endpoint - NO GUARDS
+  // Tests PayFast API connectivity by getting access token
+  @Get('payfast/status')
+  async getPayfastStatus(@Res() res: Response) {
+    try {
+      // Use dummy data for uptime check (don't store in database)
+      const testBasketId = `TEST-${Date.now()}`;
+      const testAmount = 100; // Minimum test amount
+
+      // Test: Get access token from PayFast
+      const payfastResponse = await this.donationsService.getPayfastAccessToken(
+        testBasketId,
+        testAmount,
+      );
+
+      // Check if response contains access token or success indicator
+      const hasAccessToken = 
+        payfastResponse?.ACCESS_TOKEN ||
+        payfastResponse?.access_token ||
+        payfastResponse?.AccessToken ||
+        payfastResponse?.status === 'success' ||
+        payfastResponse?.success === true;
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        status: 'active',
+        message: 'PayFast API is operational',
+        details: {
+          accessToken: hasAccessToken,
+          testBasketId: testBasketId,
+          testAmount: testAmount,
+          responseReceived: !!payfastResponse,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('PayFast status check error:', error.message);
+      
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        success: false,
+        status: 'unavailable',
+        message: 'PayFast API is not available',
+        error: error.message,
+        details: {
+          accessToken: false,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  // Public Meezan uptime status endpoint - NO GUARDS
+  // Tests Meezan API connectivity by creating a test invoice
+  @Get('meezan/status')
+  async getMeezanStatus(@Res() res: Response) {
+    try {
+      // Use dummy data for uptime check (don't store in database)
+      const testOrderNumber = 20; // Dummy ID as specified
+      const testAmount = 100; // Dummy amount as specified
+
+      // Test: Create test invoice on Meezan (no savedDonation provided, so uses dummy values)
+      const meezanResult = await this.donationsService.createMeezanInvoice(
+        testOrderNumber,
+        testAmount,
+      );
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        status: 'active',
+        message: 'Meezan API is operational',
+        details: {
+          invoiceCreated: true,
+          testOrderNumber: testOrderNumber,
+          testAmount: testAmount,
+          paymentUrl: meezanResult.paymentUrl ? 'Generated' : 'Not available',
+          orderId: meezanResult.orderId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('Meezan status check error:', error.message);
+      
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        success: false,
+        status: 'unavailable',
+        message: 'Meezan API is not available',
+        error: error.message,
+        details: {
+          invoiceCreated: false,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  }
 }

@@ -16,10 +16,11 @@ import { PayfastService } from './payfast.service';
 import { DonorModule } from '../dms/donor/donor.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
+import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Donation, DonationInKind, User]),
+    TypeOrmModule.forFeature([Donation, DonationInKind, User, RecurringDonation]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
       signOptions: { expiresIn: '24h' },

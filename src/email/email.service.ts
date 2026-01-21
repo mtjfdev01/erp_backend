@@ -1015,4 +1015,56 @@ export class EmailService implements OnModuleInit {
       };
     }
   }
+
+  /**
+   * Send report email - generic method for sending any report
+   */
+  async sendReportEmail(data: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+  }): Promise<boolean> {
+    try {
+      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      if (!this.resend) {
+        this.logger.error('Resend is not configured - cannot send email');
+        return false;
+      }
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [data.to],
+        subject: data.subject,
+        html: data.html,
+        text: data.text,
+        headers: {
+          'X-Mailer': 'MTJ Foundation ERP System',
+          'Reply-To': fromEmail,
+        },
+      });
+
+      const messageId = result.data?.id || 'unknown';
+      this.logger.log(`Sent report email via Resend to ${data.to} (id: ${messageId})`);
+
+      if (result.error !== null) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+        return false;
+      }
+
+      if (!result.data?.id) {
+        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+      }
+
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Report email send failed: ${error?.message}`);
+      if (error?.response) {
+        this.logger.error(`Resend API error: ${JSON.stringify(error.response)}`);
+      }
+      return false;
+    }
+  }
 }

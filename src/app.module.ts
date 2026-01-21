@@ -15,6 +15,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DonationsModule } from './donations/donations.module';
 import { DmsModule } from './dms/dms.module';
 import { DmsCronsModule } from './crons/dms_crons/dms-crons.module';
+import { DonationsReportModule } from './crons/donations_report/donations-report.module';
 import { GeographicModule } from './dms/geographic/geographic.module';
 import { MessagesModule } from './website/messages/messages.module';
 import { NewsletterModule } from './website/newsletter/newsletter.module';
@@ -62,6 +63,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     DonationsModule,
     DmsModule,
     DmsCronsModule,
+    DonationsReportModule,
     GeographicModule,
     MessagesModule,
     NewsletterModule,

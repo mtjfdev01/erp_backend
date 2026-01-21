@@ -46,7 +46,6 @@ export class Donation extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true, default: null })
   city: string;
-
   
   @Column({ type: 'varchar', nullable: true, default: 'pending' })
   status: string;
@@ -66,8 +65,8 @@ export class Donation extends BaseEntity {
   orderId: string;
 
   //   recurrence id in case of recurring donation and is returned by meezan bank
-  @Column({ type: 'varchar', nullable: true, default: null })
-  recurrence_id: string;
+  @Column({ type: 'int', nullable: true, default: null })
+  recurrence_id: number; 
 
   @Column({ type: 'boolean', nullable: true, default: false })
   message_sent: boolean;
