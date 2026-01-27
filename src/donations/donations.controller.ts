@@ -18,6 +18,7 @@ import { DonationsService } from './donations.service';
 import { CreateDonationDto } from './dto/create-donation.dto';
 import { UpdateDonationDto } from './dto/update-donation.dto';
 import { UpdateDonationStatusDto } from './dto/update-donation-status.dto';
+import { UpdateDonationNoteDto } from './dto/update-donation-note.dto';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
@@ -155,6 +156,32 @@ export class DonationsController {
     }
   }
 
+  @Patch(':id/note')
+  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
+  async updateNote(
+    @Param('id') id: string,
+    @Body() updateDonationNoteDto: UpdateDonationNoteDto,
+    @Res() res: Response,
+    @Req() req: any
+  ) {
+    try {
+      const user = req?.user ?? null;
+      const result = await this.donationsService.updateNote(+id, updateDonationNoteDto.note ?? null, user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Donation note updated successfully',
+        data: result,
+      });
+    } catch (error) {
+      const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Delete(':id')
   //  @RequiredPermissions(['fund_raising.donations.delete', 'super_admin', 'fund_raising_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
@@ -180,7 +207,7 @@ export class DonationsController {
     try {
       console.log("Donation status update payload:", payload);
       
-      const result = await this.donationsService.updateDonationFromPublic(payload.id, payload.order_id);
+      const result = await this.donationsService.updateDonationFromPublic(payload.id, payload.order_id, payload.status);
       
       return res.status(HttpStatus.OK).json({
         success: true,

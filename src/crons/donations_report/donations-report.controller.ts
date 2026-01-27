@@ -28,7 +28,7 @@ export class DonationsReportController {
   @Post('daily')
   @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async generateDailyReport(
-    @Body() body: { recipientEmail?: string },
+    @Body() body: { recipientEmail?: string | string[] },
     @Res() res: Response,
   ) {
     try {
@@ -57,7 +57,7 @@ export class DonationsReportController {
   @Post('weekly')
   @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async generateWeeklyReport(
-    @Body() body: { recipientEmail?: string },
+    @Body() body: { recipientEmail?: string | string[] },
     @Res() res: Response,
   ) {
     try {
@@ -86,7 +86,7 @@ export class DonationsReportController {
   @Post('monthly')
   @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async generateMonthlyReport(
-    @Body() body: { recipientEmail?: string },
+    @Body() body: { recipientEmail?: string | string[] },
     @Res() res: Response,
   ) {
     try {
@@ -169,7 +169,7 @@ export class DonationsReportController {
       startDate: string;
       endDate: string;
       type?: 'daily' | 'weekly' | 'monthly';
-      recipientEmail?: string;
+      recipientEmail?: string | string[];
     },
     @Res() res: Response,
   ) {

@@ -65,10 +65,11 @@ export class PublicDonationsController {
   async updateDonationStatus(
     @Query('id') id: string,
     @Query('order_id') order_id: string,
+    @Query('status') status: string,
     @Res() res: Response
   ) {
     try {
-      const result = await this.donationsService.updateDonationFromPublic(id, order_id);
+      const result = await this.donationsService.updateDonationFromPublic(id, order_id, status);
       
       return res.status(HttpStatus.OK).json({ 
         success: true, 
@@ -138,7 +139,7 @@ export class PublicDonationsController {
 
   // Public Blinq uptime status endpoint - NO GUARDS
   // Tests Blinq API connectivity by getting access token and creating a test invoice
-  @Get('blinq/status')
+  // @Get('blinq/status')
   async getBlinqStatus(@Res() res: Response) {
     try {
       // Use dummy data for uptime check (don't store in database)
@@ -247,6 +248,140 @@ export class PublicDonationsController {
           timestamp: new Date().toISOString(),
         },
       });
+    }
+  }
+
+
+  // Public endpoint: update Meezan status ONLY from payload (no Meezan verification) - NO GUARDS
+  @Post('meezan/update-by-payload')
+  async updateMeezanDonationByPayload(
+    @Body() payload: {
+      donationId: number;
+      status?: string;
+      errorCode?: string;
+      errorMessage?: string;
+    },
+    @Res() res: Response,
+  ) {
+    try {
+      if (!payload.donationId) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: 'donationId is required',
+        });
+      }
+
+      const result = await this.donationsService.updateMeezanStatusFromPayload(
+        payload.donationId,
+        {
+          status: payload.status,
+          errorCode: payload.errorCode,
+          errorMessage: payload.errorMessage,
+        },
+      );
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: result.message,
+        data: {
+          donationId: payload.donationId,
+          status: result.donation.status,
+          updated: result.updated,
+        },
+      });
+    } catch (error) {
+      const status = error.message.includes('not found')
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  // Public endpoint: get ONLY donation status - NO GUARDS
+  @Get('meezan/status-only')
+  async getMeezanDonationStatusOnly(
+    @Query('donationId') donationId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const id = Number(donationId);
+      if (!donationId || Number.isNaN(id)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: 'donationId is required and must be a number',
+        });
+      }
+
+      const result = await this.donationsService.getDonationStatusOnly(id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      const status = error.message.includes('not found')
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  // Meezan returnUrl handler (browser redirect) - NO GUARDS
+  // Meezan redirects the user's browser here after payment attempt.
+  // We get current status (no Meezan verification) and redirect user to frontend with status param.
+  @Get('meezan/return')
+  async handleMeezanReturn(
+    @Query('donationId') donationId: string,
+    @Query() query: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const id = Number(donationId);
+      if (!donationId || Number.isNaN(id)) {
+        return res.status(HttpStatus.BAD_REQUEST).send('Invalid donationId');
+      }
+
+      // Get current donation status (no Meezan verification)
+      const donation = await this.donationsService.getDonationForRedirect(id);
+      const status = donation.status || 'pending';
+
+      const frontendBase = process.env.BASE_Frontend_URL || 'https://donation.mtjfoundation.org';
+
+      // Redirect paths per your spec
+      const successPath = '/thank-you';
+      const failedPath = '/payment-failed';
+      const pendingPath = '/pending';
+
+      let redirectPath = pendingPath;
+      let statusParam = 'pending';
+
+      if (status === 'completed') {
+        redirectPath = successPath;
+        statusParam = 'success';
+      } else if (status === 'failed' || status === 'cancelled' || status === 'refunded') {
+        redirectPath = failedPath;
+        statusParam = 'failed';
+      } else {
+        redirectPath = pendingPath;
+        statusParam = 'pending';
+      }
+
+      const redirectUrl = `${frontendBase}${redirectPath}?donationId=${id}&status=${statusParam}`;
+      return res.redirect(302, redirectUrl);
+    } catch (error) {
+      console.error('Meezan return handler error:', error.message);
+      const frontendBase = process.env.BASE_Frontend_URL || 'https://donation.mtjfoundation.org';
+      const redirectUrl = `${frontendBase}/pending?donationId=${donationId || ''}&status=pending`;
+      return res.redirect(302, redirectUrl);
     }
   }
 

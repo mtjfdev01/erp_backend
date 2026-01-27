@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Donation } from '../../donations/entities/donation.entity';
 import { EmailService } from '../../email/email.service';
 
@@ -83,7 +84,71 @@ export class DonationsReportService {
     @InjectRepository(Donation)
     private donationRepository: Repository<Donation>,
     private emailService: EmailService,
+    private configService: ConfigService,
   ) {}
+
+  /**
+   * Get default email recipients from environment variable or fallback to single default
+   * Supports:
+   * 1. Comma-separated emails: DONATIONS_REPORT_DEFAULT_EMAILS="dev@mtjfoundation.org,irfan.waheed@mtjfoundation.org"
+   * 2. JSON array string: DONATIONS_REPORT_DEFAULT_EMAILS='["dev@mtjfoundation.org", "irfan.waheed@mtjfoundation.org"]'
+   * 3. Array-like string: DONATIONS_REPORT_DEFAULT_EMAILS="['dev@mtjfoundation.org', 'irfan.waheed@mtjfoundation.org']"
+   */
+  private getDefaultEmails(): string[] {
+    const envEmails = this.configService.get<string>('DONATIONS_REPORT_DEFAULT_EMAILS', '');
+    
+    if (!envEmails || !envEmails.trim()) {
+      return ['dev@mtjfoundation.org'];
+    }
+
+    const trimmed = envEmails.trim();
+    let emails: string[] = [];
+
+    // Try to parse as JSON array first (handles both ["email"] and ['email'] formats)
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        // Replace single quotes with double quotes for JSON parsing
+        const jsonString = trimmed.replace(/'/g, '"');
+        const parsed = JSON.parse(jsonString);
+        if (Array.isArray(parsed)) {
+          emails = parsed.filter(email => email && typeof email === 'string');
+        }
+      } catch (error) {
+        // If JSON parsing fails, fall through to comma-separated parsing
+        this.logger.warn(`Failed to parse DONATIONS_REPORT_DEFAULT_EMAILS as JSON, trying comma-separated format`);
+      }
+    }
+
+    // If JSON parsing didn't work or didn't produce valid emails, try comma-separated
+    if (emails.length === 0) {
+      emails = trimmed
+        .split(',')
+        .map(email => email.trim())
+        .map(email => {
+          // Remove brackets and quotes if present
+          return email.replace(/^['"\[\]]+|['"\[\]]+$/g, '');
+        })
+        .filter(email => email && email.includes('@'));
+    }
+
+    // Filter and validate emails
+    const validEmails = emails
+      .map(email => email.trim())
+      .filter(email => {
+        // Basic email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return email && emailRegex.test(email);
+      });
+
+    if (validEmails.length > 0) {
+      this.logger.log(`Loaded ${validEmails.length} default email(s) from environment: ${validEmails.join(', ')}`);
+      return validEmails;
+    }
+    
+    // Fallback to single default email
+    this.logger.warn('No valid emails found in DONATIONS_REPORT_DEFAULT_EMAILS, using default');
+    return ['dev@mtjfoundation.org'];
+  }
 
   /**
    * Generate daily report for previous day
@@ -365,33 +430,57 @@ export class DonationsReportService {
 
   /**
    * Send report via email
+   * Supports single email (string) or multiple emails (string[])
    */
   async sendReportEmail(
     reportData: DonationReportData,
-    recipientEmail?: string,
+    recipientEmail?: string | string[],
   ): Promise<boolean> {
     try {
-      const defaultEmail = 'dev@mtjfoundation.org';
-      const toEmail = recipientEmail || defaultEmail;
+      const defaultEmails = this.getDefaultEmails();
+      
+      // Normalize to array: if string, convert to array; if array, use as-is; if undefined, use default
+      let recipients: string[];
+      if (!recipientEmail) {
+        recipients = defaultEmails;
+      } else if (Array.isArray(recipientEmail)) {
+        recipients = recipientEmail.length > 0 ? recipientEmail : defaultEmails;
+      } else {
+        recipients = [recipientEmail];
+      }
 
-      this.logger.log(`Sending ${reportData.period.type} report email to ${toEmail}`);
+      // Filter out any empty or invalid emails
+      const validRecipients = recipients.filter(email => email && typeof email === 'string' && email.includes('@'));
+
+      if (validRecipients.length === 0) {
+        this.logger.warn('No valid email recipients provided, using default emails');
+        validRecipients.push(...defaultEmails);
+      }
+
+      const recipientsList = validRecipients.join(', ');
+      this.logger.log(`Sending ${reportData.period.type} report email to ${validRecipients.length} recipient(s): ${recipientsList}`);
 
       // Generate HTML email
       const htmlContent = this.generateReportEmailHtml(reportData);
       const textContent = this.generateReportEmailText(reportData);
 
-      // Use email service to send
+      // Ensure validRecipients is a proper array (not stringified)
+      const emailRecipients: string[] = Array.isArray(validRecipients) 
+        ? [...validRecipients] // Create a new array copy
+        : [validRecipients as string];
+
+      // Use email service to send (pass array of recipients)
       const emailSent = await this.emailService.sendReportEmail({
-        to: toEmail,
+        to: emailRecipients,
         subject: `Donations ${reportData.period.type.charAt(0).toUpperCase() + reportData.period.type.slice(1)} Report - ${reportData.period.label}`,
         html: htmlContent,
         text: textContent,
       });
 
       if (emailSent) {
-        this.logger.log(`Report email sent successfully to ${toEmail}`);
+        this.logger.log(`Report email sent successfully to ${emailRecipients.length} recipient(s): ${recipientsList}`);
       } else {
-        this.logger.warn(`Failed to send report email to ${toEmail}`);
+        this.logger.warn(`Failed to send report email to ${recipientsList}`);
       }
 
       return emailSent;
@@ -403,8 +492,9 @@ export class DonationsReportService {
 
   /**
    * Generate and send daily report
+   * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendDailyReport(recipientEmail?: string): Promise<boolean> {
+  async generateAndSendDailyReport(recipientEmail?: string | string[]): Promise<boolean> {
     try {
       const reportData = await this.generateDailyReport();
       return await this.sendReportEmail(reportData, recipientEmail);
@@ -416,8 +506,9 @@ export class DonationsReportService {
 
   /**
    * Generate and send weekly report
+   * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendWeeklyReport(recipientEmail?: string): Promise<boolean> {
+  async generateAndSendWeeklyReport(recipientEmail?: string | string[]): Promise<boolean> {
     try {
       const reportData = await this.generateWeeklyReport();
       return await this.sendReportEmail(reportData, recipientEmail);
@@ -429,8 +520,9 @@ export class DonationsReportService {
 
   /**
    * Generate and send monthly report
+   * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendMonthlyReport(recipientEmail?: string): Promise<boolean> {
+  async generateAndSendMonthlyReport(recipientEmail?: string | string[]): Promise<boolean> {
     try {
       const reportData = await this.generateMonthlyReport();
       return await this.sendReportEmail(reportData, recipientEmail);

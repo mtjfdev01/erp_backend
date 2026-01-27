@@ -15,6 +15,8 @@ import {
   applyHybridFilters,
   HybridFilter,
 } from '../../../utils/filters/common-filter.util';
+import { ProcurementsService } from 'src/procurements/services/procurements.service';
+import { CreateProcurementsDto } from 'src/procurements/dto/create-procurements.dto/create-procurements.dto';
 
 interface PaginationOptions {
   page: number;
@@ -34,6 +36,7 @@ export class DonationInKindItemsService {
   constructor(
     @InjectRepository(DonationInKindItem)
     private readonly donationInKindItemRepository: Repository<DonationInKindItem>,
+    private readonly procurementsService: ProcurementsService,
   ) {}
 
   /**
@@ -68,6 +71,28 @@ export class DonationInKindItemsService {
       );
 
       const savedItem = await this.donationInKindItemRepository.save(item);
+
+      // Automatically create purchase (procurement) record
+      if (createDonationInKindItemDto.store_id) {
+        try {
+          const purchaseDto: CreateProcurementsDto = {
+            date: new Date(),
+            totalGeneratedPOs: 0,
+            pendingPOs: 0,
+            fulfilledPOs: 0,
+            totalGeneratedPIs: 0,
+            totalPaidAmount: 0,
+            unpaidAmount: 0,
+            unpaidPIs: 0,
+            tenders: 0,
+            storeId: createDonationInKindItemDto.store_id,
+          };
+          await this.procurementsService.create(purchaseDto);
+        } catch (error) {
+          console.error('Failed to create automatic purchase record:', error);
+          // Don't throw error - item creation should succeed even if purchase creation fails
+        }
+      }
 
       // Return the created item
       return await this.donationInKindItemRepository.findOne({

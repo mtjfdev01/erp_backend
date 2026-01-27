@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
 import { Donation } from '../../donations/entities/donation.entity';
 import { DonationsReportService } from './donations-report.service';
 import { DonationsReportCronService } from './donations-report-cron.service';
@@ -11,6 +12,7 @@ import { PermissionsModule } from 'src/permissions';
 @Module({ 
   imports: [
     TypeOrmModule.forFeature([Donation]),
+    ConfigModule,
     JwtModule.register({
         secret: process.env.JWT_SECRET || 'your-secret-key',
         signOptions: { expiresIn: '24h' },

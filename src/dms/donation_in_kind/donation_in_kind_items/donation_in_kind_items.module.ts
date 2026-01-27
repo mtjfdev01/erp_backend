@@ -5,6 +5,7 @@ import { DonationInKindItem } from './entities/donation_in_kind_item.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions';
+import { ProcurementsModule } from 'src/procurements/procurements.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PermissionsModule } from 'src/permissions';
       signOptions: { expiresIn: '24h' },
     }),
     PermissionsModule,
+    ProcurementsModule,
   ],
   controllers: [DonationInKindItemsController],
   providers: [DonationInKindItemsService],

@@ -1018,9 +1018,10 @@ export class EmailService implements OnModuleInit {
 
   /**
    * Send report email - generic method for sending any report
+   * Supports single email (string) or multiple emails (string[])
    */
   async sendReportEmail(data: {
-    to: string;
+    to: string | string[];
     subject: string;
     html: string;
     text: string;
@@ -1034,9 +1035,44 @@ export class EmailService implements OnModuleInit {
         return false;
       }
 
+      // Normalize to array: if string, convert to array; if already array, use as-is
+      let recipients: string[];
+      
+      // Handle case where data.to might be a stringified array
+      if (typeof data.to === 'string') {
+        // Check if it's a JSON array string
+        if (data.to.trim().startsWith('[') && data.to.trim().endsWith(']')) {
+          try {
+            recipients = JSON.parse(data.to);
+          } catch {
+            // If parsing fails, treat as single email
+            recipients = [data.to];
+          }
+        } else {
+          // Single email string
+          recipients = [data.to];
+        }
+      } else if (Array.isArray(data.to)) {
+        recipients = data.to;
+      } else {
+        this.logger.error(`Invalid email format: ${typeof data.to}`);
+        return false;
+      }
+      
+      // Filter out any empty or invalid emails and ensure they're strings
+      const validRecipients = recipients
+        .filter(email => email && typeof email === 'string' && email.includes('@'))
+        .map(email => email.trim());
+
+      if (validRecipients.length === 0) {
+        this.logger.error('No valid email recipients provided');
+        return false;
+      }
+
+      // Ensure we're passing a proper array to Resend
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
-        to: [data.to],
+        to: [...validRecipients], // Create a new array to ensure it's a proper array
         subject: data.subject,
         html: data.html,
         text: data.text,
@@ -1047,7 +1083,8 @@ export class EmailService implements OnModuleInit {
       });
 
       const messageId = result.data?.id || 'unknown';
-      this.logger.log(`Sent report email via Resend to ${data.to} (id: ${messageId})`);
+      const recipientsList = validRecipients.join(', ');
+      this.logger.log(`Sent report email via Resend to ${validRecipients.length} recipient(s): ${recipientsList} (id: ${messageId})`);
 
       if (result.error !== null) {
         this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);

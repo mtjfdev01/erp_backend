@@ -13,7 +13,10 @@ export class ProcurementsService {
 
   async create(createDto: CreateProcurementsDto) {
     try {
-      const entity = this.procurementsRepository.create(createDto);
+      const entity = this.procurementsRepository.create({
+        ...createDto,
+        store_id: createDto.storeId ?? null,
+      });
       return await this.procurementsRepository.save(entity);
     } catch (error) {
       throw new InternalServerErrorException('Failed to create procurement record');

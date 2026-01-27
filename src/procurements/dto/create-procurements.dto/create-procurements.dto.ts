@@ -1,4 +1,4 @@
-import { IsDate, IsNumber, IsNotEmpty } from 'class-validator';
+import { IsDate, IsNumber, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class CreateProcurementsDto {
   @IsDate()
@@ -36,4 +36,8 @@ export class CreateProcurementsDto {
   @IsNumber()
   @IsNotEmpty()
   tenders: number;
+
+  @IsNumber()
+  @IsOptional()
+  storeId?: number;
 }

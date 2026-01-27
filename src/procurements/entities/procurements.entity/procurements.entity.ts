@@ -32,6 +32,9 @@ export class ProcurementsEntity {
   @Column({ type: 'int' })
   tenders: number;
 
+  @Column({ type: 'int', nullable: true })
+  store_id: number | null;
+
   @CreateDateColumn()
   created_at: Date;
 

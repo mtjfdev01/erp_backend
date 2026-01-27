@@ -78,4 +78,11 @@ export class Donation extends BaseEntity {
   @Column({ type: 'varchar', nullable: true, default: null })
   ref: string;
 
+  // Add note column  and noted_by also default nullable and have default null value 
+  @Column({ type: 'text', nullable: true, default: null })
+  note: string;
+
+  @Column({ type: 'int', nullable: true, default: null })
+  noted_by: number;
+
 }

@@ -78,4 +78,9 @@ export class CreateDonationInKindItemDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  // Store/Shop ID for automatic purchase creation
+  @IsNumber()
+  @IsOptional()
+  store_id?: number;
 }

@@ -16,6 +16,7 @@ import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } f
 import axios from 'axios';
 import { get } from 'http';
 import { DonationMethod } from 'src/utils/enums';
+import * as crypto from 'crypto';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { Donor } from 'src/dms/donor/entities/donor.entity';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
@@ -149,23 +150,32 @@ export class DonationsService {
         userName: meezanUser,
         password: meezanPass,
         orderNumber: orderNumber.toString(),
-        amount: (Number(amount) * 100).toString(), // amount in minor units (PKR -> paisa)
-        currency: '586',
+        amount: Math.round(Number(amount) * 100).toString(), // amount in minor units (PKR -> paisa), fixed precision
+        currency: '586', // 586 = PKR (ISO 4217)
         returnUrl: returnUrl,
+        // failUrl: returnUrl,
       });
 
-      // Call Meezan register.do
+      // Call Meezan register.do with timeout
       const response = await axios.post(
         `${meezanUrl}/register.do`,
         reqParams,
       );
       const data = response.data;
 
-      // Handle response
-      if (!data.orderId || !data.formUrl) {
+      // Handle response - check for errors first
+      if (data.errorCode || data.error) {
         throw new HttpException(
-          data.errorMessage || 'Meezan API error during order registration',
+          data.errorMessage || data.error || 'Meezan API error',
           400,
+        );
+      }
+      
+      if (!data.orderId || !data.formUrl) {
+        console.error('Meezan API unexpected response:', data);
+        throw new HttpException(
+          'Meezan API returned invalid response',
+          502,
         );
       }
 
@@ -189,6 +199,110 @@ export class DonationsService {
         500,
       );
     }
+  }
+
+  /**
+   * Get Meezan order status extended - Verify payment status with Meezan API
+   * @param orderId - Meezan orderId (mdOrder) from registration
+   * @returns Promise with order status details
+   */
+  async getMeezanOrderStatusExtended(orderId: string): Promise<any> {
+    try {
+      const meezanUser = process.env.MEEZAN_USER;
+      const meezanPass = process.env.MEEZAN_PASS;
+      const meezanUrl = process.env.MEEZAN_URL || 'https://acquiring.meezanbank.com/payment/rest/';
+
+      if (!meezanUser || !meezanPass) {
+        throw new HttpException(
+          'Meezan credentials not configured. Please check environment variables.',
+          500,
+        );
+      }
+
+      const reqParams = new URLSearchParams({
+        userName: meezanUser,
+        password: meezanPass,
+        orderId: orderId,
+      });
+
+      const response = await axios.post(
+        `${meezanUrl}/getOrderStatusExtended.do`,
+        reqParams,
+        { timeout: 30000 },
+      );
+
+      const data = response.data;
+
+      if (data.errorCode || data.error) {
+        throw new HttpException(
+          data.errorMessage || data.error || 'Meezan API error',
+          400,
+        );
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      if (error.response) {
+        throw new HttpException(
+          `Meezan API error: ${error.response.data?.errorMessage || error.message}`,
+          error.response.status || 502,
+        );
+      }
+      if (error.request) {
+        throw new HttpException('Meezan API timeout or network error', 503);
+      }
+      throw new HttpException(`Failed to get Meezan order status: ${error.message}`, 500);
+    }
+  }
+
+  /**
+   * Map Meezan orderStatus to donation status
+   * @param orderStatus - Meezan orderStatus code
+   * @returns Donation status string
+   */
+  private mapMeezanStatusToDonationStatus(orderStatus: number): string {
+    // Meezan orderStatus mapping:
+    // 0 → Registered, not paid → pending
+    // 1 → Approved / Hold (two-phase preauth) → pending
+    // 2 → Deposited (paid) → completed
+    // 3 → Reversed → cancelled
+    // 4 → Refunded → refunded
+    // 6 → Declined → failed
+    switch (orderStatus) {
+      case 2:
+        return 'completed';
+      case 3:
+        return 'cancelled';
+      case 4:
+        return 'refunded';
+      case 6:
+        return 'failed';
+      case 0:
+      case 1:
+      default:
+        return 'pending';
+    }
+  }
+
+  /**
+   * Get donation by ID (for returnUrl redirect - no verification)
+   * @param donationId - Donation ID
+   * @returns Donation entity
+   */
+  async getDonationForRedirect(donationId: number): Promise<Donation> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+      relations: ['donor'],
+    });
+
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    return donation;
   }
 
   /**
@@ -355,6 +469,94 @@ export class DonationsService {
         throw error;
       }
       throw new HttpException(`Failed to create Blinq invoice: ${error.message}`, 500);
+    }
+  }
+
+  /**
+   * Update Meezan donation status ONLY from frontend payload (no Meezan verification).
+   * Use this only if you intentionally trust the frontend for status.
+   */
+  async updateMeezanStatusFromPayload(
+    donationId: number,
+    payload: { status?: string; errorCode?: string; errorMessage?: string },
+  ): Promise<{ donation: Donation; updated: boolean; message: string }> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+      relations: ['donor'],
+    });
+
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    // idempotent: don't overwrite final statuses
+    if (donation.status === 'completed' || donation.status === 'cancelled' || donation.status === 'refunded') {
+      return {
+        donation,
+        updated: false,
+        message: `Donation status is already "${donation.status}". No update needed.`,
+      };
+    }
+
+    const incoming = (payload?.status || '').toLowerCase();
+    const nextStatus =
+      incoming === 'success' || incoming === 'completed'
+        ? 'completed'
+        : incoming === 'failed' || incoming === 'cancelled'
+          ? 'failed'
+          : 'pending';
+
+    const updateData: any = {
+      status: nextStatus,
+    };
+
+    if (nextStatus === 'completed') {
+      updateData.paid_amount = donation.amount;
+    }
+
+    if (payload?.errorMessage || payload?.errorCode) {
+      updateData.err_msg = payload?.errorMessage || `Meezan errorCode: ${payload?.errorCode}`;
+    }
+
+    await this.donationRepository.update(donationId, updateData);
+    const updatedDonation = await this.donationRepository.findOne({
+      where: { id: donationId },
+      relations: ['donor'],
+    });
+
+    return {
+      donation: updatedDonation,
+      updated: true,
+      message: `Donation status updated to "${nextStatus}"`,
+    };
+  }
+
+  /**
+   * Get only donation status - Calls Meezan API to get real-time status
+   * This is the ONLY method that calls getMeezanOrderStatusExtended
+   */
+  async getDonationStatusOnly(donationId: number): Promise<{ donationId: number; status: string }> {
+    const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    // If no orderId, return current DB status
+    if (!donation.orderId) {
+      return { donationId, status: donation.status };
+    }
+
+    // Call Meezan API to get real-time status (ONLY place this is called)
+    try {
+      const meezanStatus = await this.getMeezanOrderStatusExtended(donation.orderId);
+      const orderStatus = meezanStatus.orderStatus;
+      const realTimeStatus = this.mapMeezanStatusToDonationStatus(orderStatus);
+      
+      return { donationId, status: realTimeStatus };
+    } catch (error) {
+      // If Meezan API fails, return current DB status
+      console.error(`Failed to get Meezan status for donation ${donationId}:`, error.message);
+      return { donationId, status: donation.status };
     }
   }
 
@@ -775,6 +977,30 @@ export class DonationsService {
   }
 
   /**
+   * Update donation internal note (and stamp noted_by)
+   */
+  async updateNote(id: number, note: string | null, user: any) {
+    try {
+      const donation = await this.donationRepository.findOne({ where: { id } });
+      if (!donation) {
+        throw new NotFoundException(`Donation with ID ${id} not found`);
+      }
+
+      await this.donationRepository.update(id, {
+        note: note,
+        noted_by: user?.id ?? null,
+      } as any);
+
+      return await this.donationRepository.findOne({ where: { id }, relations: ['donor'] });
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Failed to update donation note: ${error.message}`);
+    }
+  }
+
+  /**
    * Update donation status action
    * Only updates if the status is different from the current status
    * @param donationId - The donation ID to update
@@ -1132,9 +1358,9 @@ export class DonationsService {
   }
 
   // Public endpoint to update donation status
-  async updateDonationFromPublic(id: string, order_id: string) {
+  async updateDonationFromPublic(id: string, order_id: string, status: string) {
     try {
-      console.log(`Updating donation ID: ${id} with order_id: ${order_id}`);
+      console.log(`Updating donation ID: ${id} with order_id: ${order_id} with status: ${status}`);
       
       // Find donation by ID here add check if that donation is not completed already if completed then return success and not update the donation  
       const donation = await this.donationRepository.findOne({ 
@@ -1145,27 +1371,18 @@ export class DonationsService {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
 
-      if (donation.status == 'completed') {
-        return {
-          id: parseInt(id),
-          order_id: order_id,
-          status: 'completed',
-          updated: true
-        };
-      }
-
         // Update only orderId and status
       await this.donationRepository.update(parseInt(id), {
         orderId: order_id,
-        status: 'completed'
+        status: status
       });
 
-      console.log(`Donation ${id} updated successfully with order_id: ${order_id}`);
+      console.log(`Donation ${id} updated successfully with order_id: ${order_id} and status: ${status}`);
       
       return {
         id: parseInt(id),
         order_id: order_id,
-        status: 'completed',
+        status: status,
         updated: true
       };
       
