@@ -13,10 +13,13 @@ import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions/permissions.module';
 import { EmailModule } from '../email/email.module';
 import { PayfastService } from './payfast.service';
+import { StripeService } from './stripe.service';
 import { DonorModule } from '../dms/donor/donor.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
+import { CampaignsModule } from '../dms/campaigns/campaigns.module';
+import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -29,9 +32,11 @@ import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurrin
     EmailModule,
     DonorModule,
     NotificationsModule,
-], 
+    CampaignsModule,
+    DashboardModule,
+  ], 
   controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController, CommunicationController],
-  providers: [DonationsService, PayfastService, WhatsAppService],
+  providers: [DonationsService, PayfastService, StripeService, WhatsAppService],
   exports: [DonationsService],
 })
 export class DonationsModule {}

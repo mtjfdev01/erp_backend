@@ -6,9 +6,10 @@ import {
   Res, 
   Post,
   Body,
-  Param
+  Param,
+  Req
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { DonationsService } from './donations.service';
 import { DonorService } from 'src/dms/donor/donor.service';
 
@@ -84,6 +85,30 @@ export class PublicDonationsController {
         success: false, 
         message: 'Failed to update donation status',
         error: error.message 
+      });
+    }
+  }
+
+  // Public Stripe webhook - NO GUARDS (raw body set in main.ts for this route)
+  @Post('stripe/webhook')
+  async handleStripeWebhook(@Req() req: Request, @Res() res: Response) {
+    try {
+      const rawBody = req.body as Buffer;
+      const signature = req.headers['stripe-signature'] as string;
+      if (!rawBody || !signature) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: 'Missing raw body or stripe-signature header',
+        });
+      }
+      const result = await this.donationsService.handleStripeWebhook(rawBody, signature);
+      return res.status(HttpStatus.OK).json({ received: result.received, donationId: result.donationId });
+    } catch (error) {
+      console.error('Stripe webhook error:', error.message);
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: 'Webhook signature verification failed or processing error',
+        error: error.message,
       });
     }
   }

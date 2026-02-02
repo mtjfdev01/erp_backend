@@ -100,6 +100,29 @@ export class DonorController {
     }
   }
 
+  @Get('lookup')
+  @RequiredPermissions(['fund_raising.donors.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
+  async findByEmailOrPhone(
+    @Query('email') email?: string,
+    @Query('phone') phone?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const result = await this.donorService.findByEmailOrPhone(email, phone);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: result ? 'Donor retrieved successfully' : 'No donor found',
+        data: result,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(':id')
   @RequiredPermissions(['fund_raising.donors.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {

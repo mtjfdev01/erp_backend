@@ -213,6 +213,55 @@ export class DonorService {
   }
 
   /**
+   * Find donor by email OR phone (or both).
+   * - If only phone: find by phone.
+   * - If only email: find by email.
+   * - If both: find first donor where email or phone matches.
+   */
+  async findByEmailOrPhone(email?: string, phone?: string): Promise<Donor | null> {
+    try {
+      const hasEmail = email != null && String(email).trim() !== '';
+      const hasPhone = phone != null && String(phone).trim() !== '';
+
+      if (!hasEmail && !hasPhone) {
+        return null;
+      }
+
+      if (hasEmail && !hasPhone) {
+        const donor = await this.donorRepository.findOne({
+          where: { email: email!.trim(), is_archived: false },
+        });
+        if (donor) delete donor.password;
+        return donor ?? null;
+      }
+
+      if (hasPhone && !hasEmail) {
+        const donor = await this.donorRepository.findOne({
+          where: { phone: phone!.trim(), is_archived: false },
+        });
+        if (donor) delete donor.password;
+        return donor ?? null;
+      }
+
+      // Both provided: first donor where email OR phone matches
+      const donor = await this.donorRepository
+        .createQueryBuilder('donor')
+        .where('donor.is_archived = :is_archived', { is_archived: false })
+        .andWhere('(donor.email = :email OR donor.phone = :phone)', {
+          email: email!.trim(),
+          phone: phone!.trim(),
+        })
+        .getOne();
+
+      if (donor) delete donor.password;
+      return donor ?? null;
+    } catch (error) {
+      console.error('Error finding donor by email or phone:', error);
+      return null;
+    }
+  }
+
+  /**
    * Auto-register donor from donation data (without password)
    */
   async autoRegisterFromDonation(donationData: {

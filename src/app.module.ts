@@ -25,7 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { GoldSilverPriceModule } from './zakat/gold_silver_price/gold_silver_price.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { QrCodeModule } from './qr_code/qr_code.module';
-
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -72,8 +72,9 @@ import { QrCodeModule } from './qr_code/qr_code.module';
     EmailModule,
     NotificationsModule,
     GoldSilverPriceModule,
-    QrCodeModule
-    ],
+    QrCodeModule,
+    DashboardModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

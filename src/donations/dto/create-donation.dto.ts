@@ -40,7 +40,7 @@ export class CreateDonationDto {
   donation_type?: string;
 
   @IsOptional()
-  @IsEnum(DonationMethod, { message: 'donation_method must be either "meezan" or "blinq"' })
+  @IsEnum(DonationMethod, { message: 'donation_method must be one of: meezan, blinq, payfast, stripe, stripe_embed' })
   donation_method?: DonationMethod;
 
   @IsOptional()
@@ -105,6 +105,10 @@ export class CreateDonationDto {
   @IsOptional()
   @IsNumber()
   donor_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  campaign_id?: number;
 
   // ⭐ NEW: In-kind items array
   @IsOptional()

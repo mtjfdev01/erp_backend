@@ -8,6 +8,7 @@ import { DonationInKind, DonationInKindCategory, DonationInKindCondition } from 
 import { User, Department, UserRole } from '../users/user.entity';
 import { EmailService } from '../email/email.service';
 import { PayfastService } from './payfast.service';
+import { StripeService } from './stripe.service';
 import { DonorService } from '../dms/donor/donor.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/entities/notification.entity';
@@ -20,6 +21,8 @@ import * as crypto from 'crypto';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { Donor } from 'src/dms/donor/entities/donor.entity';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
+import { CampaignsService } from '../dms/campaigns/campaigns.service';
+import { DashboardAggregateService } from '../dashboard/dashboard-aggregate.service';
 
 @Injectable()
 export class DonationsService {
@@ -32,13 +35,16 @@ export class DonationsService {
     private userRepository: Repository<User>,
     private emailService: EmailService,
     private payfastService: PayfastService,
+    private stripeService: StripeService,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonation)
     private recurringDonationRepository: Repository<RecurringDonation>,
     private donorService: DonorService,
     private notificationsService: NotificationsService,
-    private whatsAppService: WhatsAppService
+    private whatsAppService: WhatsAppService,
+    private campaignsService: CampaignsService,
+    private dashboardAggregateService: DashboardAggregateService,
   ) {}
 
   // Get users who should receive donation notifications
@@ -565,7 +571,7 @@ export class DonationsService {
      const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
      const blinq_url="https://api.blinq.pk/";
      const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
-     const onlineDonationMethodOptions = ['meezan','blinq','payfast'];
+     const onlineDonationMethodOptions = ['meezan','blinq','payfast','stripe','stripe_embed'];
     console.log("createDonationDto", createDonationDto);
     
     let donorId: number | null = createDonationDto.donor_id || null;
@@ -641,10 +647,29 @@ export class DonationsService {
       donor.recurring = true; 
       await this.donorRepository.save(donor);
     }
-     // Create donation with donor_id if available
+     // Validate campaign if provided
+     let campaignId: number | null = createDonationDto?.campaign_id ?? null;
+     if (campaignId) {
+       try {
+         const campaign = await this.campaignsService.findOne(campaignId);
+         const isAdmin = user?.role === 'admin';
+         if (!this.campaignsService.canAcceptDonation(campaign, isAdmin)) {
+           throw new HttpException(
+             `Campaign "${campaign.title}" is not accepting donations (status: ${campaign.status})`,
+             400,
+           );
+         }
+       } catch (e) {
+         if (e instanceof HttpException) throw e;
+         throw new HttpException('Campaign not found', 404);
+       }
+     }
+
+     // Create donation with donor_id and campaign_id if available
      const donation =  this.donationRepository.create({
        ...createDonationDto,
        donor_id: donorId, // ✅ Link donation to donor
+       campaign_id: campaignId,
        created_by: user?.id == -1 ? null : user?.id,
        recurrence_id: savedDonation?.id || 0, 
      });
@@ -745,6 +770,42 @@ export class DonationsService {
       return {...payfastResponse, 
         BASKET_ID: savedDonation.id.toString(),
         TXNAMT: savedDonation.amount.toString(),
+      };
+    }
+    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe') {
+      const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
+      const stripeResult = await this.stripeService.createCheckoutSession({
+        donationId: savedDonation.id,
+        amount: savedDonation.amount,
+        currency: savedDonation.currency || 'pkr',
+        successUrl: `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`,
+        cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
+        donorEmail: donor?.email || createDonationDto.donor_email,
+        donorName: donor?.name || createDonationDto.donor_name,
+        isMonthly: createDonationDto.donation_frequency === 'monthly',
+      });
+      savedDonation.status = 'registered';
+      savedDonation.orderId = stripeResult.sessionId;
+      await this.donationRepository.save(savedDonation);
+      return { paymentUrl: stripeResult.paymentUrl };
+    }
+    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe_embed') {
+      const embedResult = await this.stripeService.createPaymentIntentForEmbed({
+        donationId: savedDonation.id,
+        amount: savedDonation.amount,
+        currency: savedDonation.currency || 'pkr',
+        donorEmail: donor?.email || createDonationDto.donor_email,
+        donorName: donor?.name || createDonationDto.donor_name,
+        isMonthly: createDonationDto.donation_frequency === 'monthly',
+      });
+      savedDonation.status = 'registered';
+      savedDonation.orderId = embedResult.subscriptionId ?? embedResult.paymentIntentId;
+      await this.donationRepository.save(savedDonation);
+      return {
+        clientSecret: embedResult.clientSecret,
+        paymentIntentId: embedResult.paymentIntentId,
+        donationId: savedDonation.id,
+        ...(embedResult.subscriptionId && { subscriptionId: embedResult.subscriptionId }),
       };
     }
     else if(manualDonationMethodOptions.includes(createDonationDto.donation_method))  {
@@ -1039,6 +1100,17 @@ export class DonationsService {
 
       console.log(`Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`);
 
+      // Dashboard aggregation: event-driven updates
+      if (newStatus === 'completed') {
+        this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
+          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+        );
+      } else if (['refunded', 'reversed'].includes(newStatus)) {
+        this.dashboardAggregateService.applyDonationReversed(donationId).catch((e) =>
+          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
+        );
+      }
+
       return {
         donation: updatedDonation,
         updated: true,
@@ -1090,6 +1162,10 @@ export class DonationsService {
         paymentMethod = payload.payment_method;
         donationId = payload.donation_id || payload.orderId || payload.order_id;
         console.log(`Processing ${paymentMethod} status update`);
+      } else if (payload.payment_method && payload.payment_method === 'stripe') {
+        paymentMethod = 'stripe';
+        donationId = payload.donation_id || payload.client_reference_id;
+        console.log('Processing Stripe status update');
       } else {
         throw new Error('Invalid payload format: Unable to determine payment method or donation ID');
       }
@@ -1155,10 +1231,32 @@ export class DonationsService {
           error_code: payload.error_code,
           error_message: payload.error_message,
         };
+      } else if (paymentMethod === 'stripe') {
+        if (payload.status === 'completed' || payload.status === 'success' || payload.payment_status === 'paid') {
+          newStatus = 'completed';
+        } else {
+          newStatus = 'failed';
+        }
+        updateData = {
+          status: newStatus,
+          orderId: payload.order_id || payload.session_id || payload.id,
+          err_msg: payload.error_message || payload.err_msg || null,
+        };
       }
 
       // Update the donation
       await this.donationRepository.update(parseInt(donationId), updateData);
+
+      // Dashboard aggregation: event-driven updates
+      if (newStatus === 'completed') {
+        this.dashboardAggregateService.applyDonationCompleted(parseInt(donationId)).catch((e) =>
+          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+        );
+      } else if (['refunded', 'reversed'].includes(newStatus)) {
+        this.dashboardAggregateService.applyDonationReversed(parseInt(donationId)).catch((e) =>
+          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
+        );
+      }
 
       // Get updated donation
       const updatedDonation = await this.donationRepository.findOne({ 
@@ -1395,6 +1493,63 @@ export class DonationsService {
     }
   }
 
+  /**
+   * Stripe webhook handler. Verifies signature, then updates donation on checkout.session.completed.
+   * Expects raw body (Buffer) and Stripe-Signature header.
+   */
+  async handleStripeWebhook(rawBody: Buffer | string, signature: string): Promise<{ received: boolean; donationId?: number }> {
+    const event = this.stripeService.constructWebhookEvent(rawBody, signature);
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as {
+        id?: string;
+        client_reference_id?: string;
+        payment_status?: string;
+        mode?: string;
+        subscription?: string;
+      };
+      const donationId = session.client_reference_id ? parseInt(session.client_reference_id, 10) : null;
+      if (donationId && !isNaN(donationId)) {
+        const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+        if (donation) {
+          const orderIdForDonation =
+            session.mode === 'subscription' && session.subscription
+              ? session.subscription
+              : session.id || donation.orderId;
+          await this.donationRepository.update(donationId, {
+            status: 'completed',
+            orderId: orderIdForDonation,
+          });
+          this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
+            console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+          );
+          console.log(
+            `Stripe webhook: Donation ${donationId} marked completed (${session.mode === 'subscription' ? 'subscription' : 'session'}: ${orderIdForDonation})`,
+          );
+          return { received: true, donationId };
+        }
+      }
+    }
+    if (event.type === 'payment_intent.succeeded') {
+      const paymentIntent = event.data.object as { id?: string; metadata?: { donation_id?: string } };
+      const donationIdStr = paymentIntent.metadata?.donation_id;
+      const donationId = donationIdStr ? parseInt(donationIdStr, 10) : null;
+      if (donationId && !isNaN(donationId)) {
+        const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+        if (donation) {
+          await this.donationRepository.update(donationId, {
+            status: 'completed',
+            orderId: paymentIntent.id || donation.orderId,
+          });
+          this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
+            console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+          );
+          console.log(`Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`);
+          return { received: true, donationId };
+        }
+      }
+    }
+    return { received: true };
+  }
 
   // Blinq IPN Handler - Public endpoint logic
   async handleBlinqCallback(payload: any) {
@@ -1525,6 +1680,12 @@ export class DonationsService {
         message_sent,
         email_sent
       });
+
+      if (status === 'completed') {
+        this.dashboardAggregateService.applyDonationCompleted(parseInt(invoice_number)).catch((e) =>
+          console.error(`Dashboard applyDonationCompleted failed for ${invoice_number}:`, e),
+        );
+      }
 
       console.log(`Donation ${invoice_number} updated successfully with status: completed`);
       console.log("=== BLINQ CALLBACK PROCESSING COMPLETE ===");

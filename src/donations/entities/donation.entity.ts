@@ -1,5 +1,5 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
-import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
+import { Column, Entity, ManyToOne, JoinColumn, Index } from "typeorm";
 import { Donor } from "../../dms/donor/entities/donor.entity";
 
 //nullabe true to all column
@@ -12,6 +12,12 @@ export class Donation extends BaseEntity {
 
   @Column({ nullable: true, default: null })
   donor_id: number;
+
+  @Column({ type: 'bigint', nullable: true, default: null })
+  campaign_id: number | null;
+
+  @Column({ type: 'bigint', nullable: true, default: null })
+  event_id: number | null;
   
   @Column({ nullable: true, default: null })
   project_id: string;

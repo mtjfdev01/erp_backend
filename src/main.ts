@@ -39,7 +39,13 @@ async function bootstrap() {
     return origin.toLowerCase().replace(/\/$/, '');
   };
 
-  app.use(bodyParser.json({ limit: '10mb' }));
+  // Stripe webhook needs raw body for signature verification; all other routes use JSON
+  app.use((req, res, next) => {
+    if (req.originalUrl === '/donations/public/stripe/webhook') {
+      return bodyParser.raw({ type: 'application/json' })(req, res, next);
+    }
+    return bodyParser.json({ limit: '10mb' })(req, res, next);
+  });
   app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
   
   app.enableCors({
