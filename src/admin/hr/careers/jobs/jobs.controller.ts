@@ -11,15 +11,19 @@ import {
   Res,
   UseInterceptors,
   UploadedFile,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { JobsService } from './jobs.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
-  import { CreateApplicationDto } from '../applications/dto/create-application.dto';
+import { CreateApplicationDto } from '../applications/dto/create-application.dto';
 import { UpdateApplicationDto } from '../applications/dto/update-application.dto';
 import { JobStatus, JobType } from './entities/job.entity';
+// import { ConditionalJwtGuard } from '../../../../auth/guards/conditional-jwt.guard';
+import { PermissionsGuard } from '../../../../permissions/guards/permissions.guard'; 
+import { RequiredPermissions } from '../../../../permissions';
 
 @Controller('jobs')
 export class JobsController {
@@ -122,6 +126,8 @@ export class JobsController {
    * POST /jobs - Create a new job posting
    */
   @Post()
+  @UseGuards( PermissionsGuard)
+  @RequiredPermissions(['hr.jobs.create', 'super_admin'])
   async create(@Body() createJobDto: CreateJobDto, @Res() res: Response) {
     try {
       const job = await this.jobsService.create(createJobDto, null);
@@ -143,6 +149,8 @@ export class JobsController {
    * PATCH /jobs/:id - Update existing job
    */
   @Patch(':id')
+  @UseGuards( PermissionsGuard)
+  @RequiredPermissions(['hr.jobs.update', 'super_admin'])
   async update(
     @Param('id') id: string,
     @Body() updateJobDto: UpdateJobDto,
@@ -167,9 +175,11 @@ export class JobsController {
   }
 
   /**
-   * DELETE /jobs/:id - Soft delete (archive) a job
+   * DELETE /jobs/:id - Soft delete (archive) a job 
    */
   @Delete(':id')
+  @UseGuards( PermissionsGuard)
+  @RequiredPermissions(['hr.jobs.delete', 'super_admin'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
       await this.jobsService.remove(+id, null);

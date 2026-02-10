@@ -5,6 +5,15 @@ import { DonationBox } from '../dms/donation_box/entities/donation-box.entity';
 export enum UserRole {
   ADMIN = 'admin',
   USER = 'user',
+  MANAGER = 'manager',
+  ASSISTANT_MANAGER = 'assistant_manager',
+  OFFICER = 'officer',
+  COORDINATOR = 'coordinator',
+  SUPPORT = 'support',
+  ANALYST = 'analyst',
+  DEVELOPER = 'developer',
+  SYSTEM_ADMIN = 'system_admin',
+  IT_SUPPORT = 'it_support',
 }
 
 export enum Department {
@@ -14,6 +23,10 @@ export enum Department {
   ACCOUNTS_AND_FINANCE = 'accounts_and_finance',
   ADMIN = 'admin',
   FUND_RAISING = 'fund_raising',
+  IT = 'it',
+  HR='hr',
+  MARKETING = 'marketing',
+  AUDIO_VIDEO = 'audio_video',
 }
 
 @Entity()

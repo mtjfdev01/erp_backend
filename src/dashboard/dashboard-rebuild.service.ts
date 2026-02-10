@@ -4,6 +4,10 @@ import { Repository, Between } from 'typeorm';
 import { Donation } from '../donations/entities/donation.entity';
 import { Donor } from '../dms/donor/entities/donor.entity';
 import {
+  DonationBoxDonation,
+  CollectionStatus,
+} from '../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity';
+import {
   DashboardMonthlyAgg,
   DashboardEventAgg,
   DashboardMonthDonorUnique,
@@ -16,11 +20,16 @@ const COMPLETED_STATUS = 'completed';
 /** Rebuild last N months of aggregates from raw donations. */
 const REBUILD_MONTHS = 18;
 
+/** Full rebuild: look back this many years for donations / donation box data. */
+const FULL_REBUILD_YEARS = 10;
+
 @Injectable()
 export class DashboardRebuildService {
   constructor(
     @InjectRepository(Donation)
     private readonly donationRepo: Repository<Donation>,
+    @InjectRepository(DonationBoxDonation)
+    private readonly donationBoxDonationRepo: Repository<DonationBoxDonation>,
     @InjectRepository(DashboardMonthlyAgg)
     private readonly monthlyAggRepo: Repository<DashboardMonthlyAgg>,
     @InjectRepository(DashboardEventAgg)
@@ -108,6 +117,8 @@ export class DashboardRebuildService {
           month_start_date: ms,
           ...totals,
           total_donors_count: uniqueDonors.size,
+          total_donation_box_raised: 0,
+          total_donation_box_count: 0,
         }),
       );
 
@@ -226,5 +237,138 @@ export class DashboardRebuildService {
       });
     }
     return result;
+  }
+
+  /**
+   * One-time full rebuild: empty all aggregation tables, then recalculate from
+   * donations (with donor), donation_box_donations (verified/deposited).
+   * Use this for initial backfill or to reset aggregates.
+   */
+  async fullRebuild(): Promise<void> {
+    // 1. Empty all aggregation tables (no FK between them; order does not matter)
+    await this.monthEventsRepo.createQueryBuilder().delete().execute();
+    await this.eventAggRepo.createQueryBuilder().delete().execute();
+    await this.monthDonorRepo.createQueryBuilder().delete().execute();
+    await this.monthlyAggRepo.createQueryBuilder().delete().execute();
+
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setUTCFullYear(startDate.getUTCFullYear() - FULL_REBUILD_YEARS);
+    startDate.setUTCDate(1);
+    startDate.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(now);
+    endDate.setUTCMonth(endDate.getUTCMonth() + 1);
+    endDate.setUTCDate(0);
+    endDate.setUTCHours(23, 59, 59, 999);
+
+    // 2. Load all completed donations in range (with donor)
+    const donations = await this.donationRepo.find({
+      where: {
+        status: COMPLETED_STATUS,
+        date: Between(startDate, endDate),
+      },
+      relations: ['donor'],
+      order: { date: 'ASC' },
+    });
+
+    // 3. Load donation box donations (verified/deposited) in range
+    const boxRows = await this.donationBoxDonationRepo
+      .createQueryBuilder('d')
+      .select("DATE_TRUNC('month', d.collection_date)", 'month_start')
+      .addSelect('SUM(d.collection_amount)', 'total')
+      .addSelect('COUNT(*)', 'count')
+      .where('d.collection_date >= :start', { start: startDate })
+      .andWhere('d.collection_date <= :end', { end: endDate })
+      .andWhere('d.status IN (:...statuses)', {
+        statuses: [CollectionStatus.VERIFIED, CollectionStatus.DEPOSITED],
+      })
+      .groupBy("DATE_TRUNC('month', d.collection_date)")
+      .getRawMany<{ month_start: string; total: string; count: string }>();
+
+    const donationBoxByMonth = new Map<string, { amount: number; count: number }>();
+    for (const row of boxRows) {
+      const ms = new Date(row.month_start);
+      const key = ms.toISOString().split('T')[0];
+      donationBoxByMonth.set(key, {
+        amount: Number(row.total ?? 0),
+        count: Number(row.count ?? 0),
+      });
+    }
+
+    // 4. All month keys from donations and donation box
+    const monthKeys = new Set<string>();
+    for (const d of donations) {
+      const ms = this.aggregateService.getMonthStart(
+        d.date ? new Date(d.date) : d.created_at,
+      );
+      monthKeys.add(ms.toISOString().split('T')[0]);
+    }
+    for (const key of donationBoxByMonth.keys()) monthKeys.add(key);
+    const monthsToProcess = Array.from(monthKeys).map((s) => new Date(s)).sort((a, b) => a.getTime() - b.getTime());
+
+    for (const ms of monthsToProcess) {
+      const nextMonth = new Date(ms);
+      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+      const monthKey = ms.toISOString().split('T')[0];
+
+      const monthDonations = donations.filter((d) => {
+        const dDate = d.date ? new Date(d.date) : d.created_at;
+        return dDate >= ms && dDate < nextMonth;
+      });
+
+      const totals = this.computeTotals(monthDonations);
+      const uniqueDonors = new Set(
+        monthDonations
+          .map((d) => d.donor_id)
+          .filter((id): id is number => id != null),
+      );
+      const eventIds = new Set(
+        monthDonations
+          .map((d) => d.event_id)
+          .filter((id): id is number => id != null),
+      );
+      const boxForMonth = donationBoxByMonth.get(monthKey) ?? { amount: 0, count: 0 };
+
+      await this.monthlyAggRepo.save(
+        this.monthlyAggRepo.create({
+          month_start_date: ms,
+          ...totals,
+          total_donors_count: uniqueDonors.size,
+          total_donation_box_raised: boxForMonth.amount,
+          total_donation_box_count: boxForMonth.count,
+        }),
+      );
+
+      for (const donorId of uniqueDonors) {
+        await this.monthDonorRepo.save(
+          this.monthDonorRepo.create({
+            month_start_date: ms,
+            donor_id: donorId,
+          }),
+        );
+      }
+
+      const eventTotals = this.computeEventTotals(monthDonations);
+      for (const [eventId, agg] of eventTotals) {
+        await this.eventAggRepo.save(
+          this.eventAggRepo.create({
+            event_id: eventId,
+            month_start_date: ms,
+            total_event_collection: agg.amount,
+            total_donations_count: agg.count,
+            total_donors_count: agg.uniqueDonors,
+          }),
+        );
+      }
+
+      for (const eventId of eventIds) {
+        await this.monthEventsRepo.save(
+          this.monthEventsRepo.create({
+            month_start_date: ms,
+            event_id: eventId,
+          }),
+        );
+      }
+    }
   }
 }

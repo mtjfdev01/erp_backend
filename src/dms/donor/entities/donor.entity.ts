@@ -127,4 +127,7 @@ export class Donor extends BaseEntity {
   
   @Column({ type: 'boolean', default: false, nullable: true })
   multi_time_donor:boolean;
+
+  @Column({ type: 'boolean', default: true, nullable: true })
+  notification_subscription: boolean;
 }

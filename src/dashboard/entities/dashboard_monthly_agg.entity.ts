@@ -42,4 +42,11 @@ export class DashboardMonthlyAgg {
 
   @Column({ type: 'bigint', default: 0, transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) } })
   total_donors_count: number;
+
+  /** Donation box (verified/deposited) totals per month */
+  @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
+  total_donation_box_raised: number;
+
+  @Column({ type: 'bigint', default: 0, transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) } })
+  total_donation_box_count: number;
 }

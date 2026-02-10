@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsDateString, IsEmail, IsPhoneNumber, IsEnum } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsDateString, IsEmail, IsPhoneNumber, IsEnum, IsBoolean } from 'class-validator';
 import { DonationMethod } from 'src/utils/enums';
 
 export class CreateDonationDto {
@@ -62,6 +62,10 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  notification_subscription?: boolean;
 
   // Item information
   @IsOptional()

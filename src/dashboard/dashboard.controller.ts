@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Query,
   HttpStatus,
   Res,
@@ -14,6 +15,7 @@ import {
   DashboardEventAgg,
 } from './entities';
 import { DashboardAggregateService } from './dashboard-aggregate.service';
+import { DashboardRebuildService } from './dashboard-rebuild.service';
 import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../permissions';
@@ -21,6 +23,7 @@ import {
   DashboardSummaryQueryDto,
   DashboardMonthlyQueryDto,
   DashboardEventsQueryDto,
+  DashboardFundraisingOverviewQueryDto,
 } from './dto/dashboard-query.dto';
 
 const MONTH_NAMES = [
@@ -42,6 +45,7 @@ export class DashboardController {
     @InjectRepository(DashboardEventAgg)
     private readonly eventAggRepo: Repository<DashboardEventAgg>,
     private readonly aggregateService: DashboardAggregateService,
+    private readonly rebuildService: DashboardRebuildService,
   ) {}
 
   /**
@@ -160,6 +164,34 @@ export class DashboardController {
   }
 
   /**
+   * GET /dashboard/fundraising-overview?months=12 | ?year=2024
+   * Returns cards (totals by category), cumulative series, and raised-per-month for charts.
+   */
+  @Get('fundraising-overview')
+  async getFundraisingOverview(
+    @Query() query: DashboardFundraisingOverviewQueryDto,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.aggregateService.getFundraisingOverview({
+        year: query.year,
+        months: query.months,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Fundraising overview retrieved',
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  /**
    * GET /dashboard/events?month=2025-06-01
    * Returns events for that month using dashboard_event_agg joined with events meta.
    */
@@ -206,6 +238,30 @@ export class DashboardController {
         success: false,
         message: error.message,
         data: [],
+      });
+    }
+  }
+
+  /**
+   * POST /dashboard/rebuild-aggregates
+   * One-time full rebuild: empties all aggregation tables, then recalculates from
+   * donations (with donor), donation_box_donations (verified/deposited).
+   * Call this once to backfill or reset dashboard aggregates.
+   */
+  @Post('rebuild-aggregates')
+  async rebuildAggregates(@Res() res: Response) {
+    try {
+      await this.rebuildService.fullRebuild();
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Dashboard aggregates rebuilt successfully',
+        data: null,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        message: error.message ?? 'Rebuild failed',
+        data: null,
       });
     }
   }

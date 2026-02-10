@@ -1,8 +1,11 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, HttpCode, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, HttpCode, Query, UseInterceptors, UploadedFile, UseGuards } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { UpdateApplicationDto } from './dto/update-application.dto';
+import { ConditionalJwtGuard } from '../../../../auth/guards/conditional-jwt.guard';
+import { PermissionsGuard } from '../../../../permissions/guards/permissions.guard';
+import { RequiredPermissions } from '../../../../permissions';
 
 @Controller('job_applications')
 export class ApplicationsController {
@@ -34,6 +37,8 @@ export class ApplicationsController {
   }
 
   @Get()
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(['hr.applications.list_view', 'super_admin'])
   findAll(
     @Query('page') page: string = '1',
     @Query('pageSize') pageSize: string = '10',
@@ -49,12 +54,16 @@ export class ApplicationsController {
   }
 
   @Get(':id')
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(['hr.applications.view', 'super_admin'])
   findOne(@Param('id') id: string) {
     return this.applicationsService.findOne(+id);
   }
 
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(['hr.applications.update', 'super_admin'])
   async update(@Param('id') id: string, @Body() updateApplicationDto: UpdateApplicationDto) {
     try {
       const result = await this.applicationsService.update(+id, updateApplicationDto);
@@ -70,6 +79,8 @@ export class ApplicationsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(['hr.applications.delete', 'super_admin'])
   async remove(@Param('id') id: string) {
     try {
       const result = await this.applicationsService.remove(+id);

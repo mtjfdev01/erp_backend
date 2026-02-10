@@ -606,6 +606,10 @@ export class DonationsService {
           await this.donorRepository.save(donor);
           console.log(`✅ Donor is now a multi-time donor: ${donor.email} (ID: ${donor.id})`);
          }
+         if (createDonationDto.notification_subscription !== undefined) {
+          donor.notification_subscription = createDonationDto.notification_subscription;
+          await this.donorRepository.save(donor);
+         }
          console.log(`✅ Donor already exists: ${donor.email} (ID: ${donor.id})`);
          donorId = donor.id;
         //  return with error that donor is archived 
@@ -623,6 +627,7 @@ export class DonationsService {
            city: createDonationDto.city,
            country: createDonationDto.country,
            address: createDonationDto?.address,
+           notification_subscription: createDonationDto.notification_subscription,
          });
          
          if (donor) {

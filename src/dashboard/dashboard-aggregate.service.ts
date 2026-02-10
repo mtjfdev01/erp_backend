@@ -1,8 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, Between } from 'typeorm';
 import { Donation } from '../donations/entities/donation.entity';
 import { Donor } from '../dms/donor/entities/donor.entity';
+import {
+  DonationBoxDonation,
+  CollectionStatus,
+} from '../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity';
 import {
   DashboardMonthlyAgg,
   DashboardEventAgg,
@@ -24,6 +28,8 @@ export class DashboardAggregateService {
   constructor(
     @InjectRepository(Donation)
     private readonly donationRepo: Repository<Donation>,
+    @InjectRepository(DonationBoxDonation)
+    private readonly donationBoxDonationRepo: Repository<DonationBoxDonation>,
     @InjectRepository(DashboardMonthlyAgg)
     private readonly monthlyAggRepo: Repository<DashboardMonthlyAgg>,
     @InjectRepository(DashboardEventAgg)
@@ -357,5 +363,253 @@ export class DashboardAggregateService {
         }
       }
     });
+  }
+
+  /**
+   * Get date range (start inclusive, end exclusive) for fundraising overview.
+   * If months is set, use last N months; else if year is set use that year; else last 12 months.
+   */
+  private getFundraisingDateRange(query: {
+    year?: number;
+    months?: number;
+  }): { start: Date; end: Date } {
+    const now = new Date();
+    let start: Date;
+    let end = new Date(now);
+    end.setUTCMonth(end.getUTCMonth() + 1);
+    end.setUTCDate(0);
+    end.setUTCHours(23, 59, 59, 999);
+
+    if (query.months != null) {
+      start = new Date(now);
+      start.setUTCMonth(start.getUTCMonth() - query.months);
+      start.setUTCDate(1);
+      start.setUTCHours(0, 0, 0, 0);
+    } else if (query.year != null) {
+      start = new Date(Date.UTC(query.year, 0, 1, 0, 0, 0, 0));
+      end = new Date(Date.UTC(query.year, 11, 31, 23, 59, 59, 999));
+    } else {
+      start = new Date(now);
+      start.setUTCMonth(start.getUTCMonth() - 12);
+      start.setUTCDate(1);
+      start.setUTCHours(0, 0, 0, 0);
+    }
+    return { start, end };
+  }
+
+  /**
+   * Fundraising overview: cards (totals by category), cumulative series, and raised-per-month for charts.
+   */
+  async getFundraisingOverview(query: {
+    year?: number;
+    months?: number;
+  }): Promise<{
+    cards: {
+      total_donations_amount: number;
+      total_donations_count: number;
+      total_donors_count: number;
+      online_donations_amount: number;
+      online_donations_count: number;
+      donation_box_amount: number;
+      donation_box_count: number;
+      csr_amount: number;
+      csr_count: number;
+      individual_amount: number;
+      individual_count: number;
+      events_amount: number;
+      events_count: number;
+      campaigns_amount: number;
+      campaigns_count: number;
+    };
+    cumulative: Array<{
+      month: string;
+      month_start_date: string;
+      total_cumulative: number;
+    }>;
+    raised_per_month: Array<{
+      month: string;
+      month_start_date: string;
+      online: number;
+      phone: number;
+      events: number;
+      corporate: number;
+      donation_box: number;
+      campaigns: number;
+      total: number;
+    }>;
+  }> {
+    const MONTH_NAMES = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    const formatMonth = (d: Date) =>
+      MONTH_NAMES[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+
+    const { start, end } = this.getFundraisingDateRange(query);
+
+    // Monthly agg rows in range (includes donation box totals after full rebuild)
+    const monthlyRows = await this.monthlyAggRepo.find({
+      where: {
+        month_start_date: Between(start, end),
+      },
+      order: { month_start_date: 'ASC' },
+    });
+
+    // Donation box: use aggregation table (populated by full rebuild) when available
+    const donationBoxByMonth = new Map<string, { amount: number; count: number }>();
+    let donationBoxTotalAmount = 0;
+    let donationBoxTotalCount = 0;
+    for (const r of monthlyRows) {
+      const key = new Date(r.month_start_date).toISOString().slice(0, 7);
+      const amount = Number(r.total_donation_box_raised ?? 0);
+      const count = Number(r.total_donation_box_count ?? 0);
+      if (amount > 0 || count > 0) {
+        donationBoxByMonth.set(key, { amount, count });
+        donationBoxTotalAmount += amount;
+        donationBoxTotalCount += count;
+      }
+    }
+
+    // Distinct donors in range (from donations only)
+    const totalDonorsResult = await this.donationRepo
+      .createQueryBuilder('d')
+      .select('COUNT(DISTINCT d.donor_id)', 'count')
+      .where('d.status = :status', { status: COMPLETED_STATUS })
+      .andWhere('d.date >= :start', { start })
+      .andWhere('d.date <= :end', { end })
+      .andWhere('d.donor_id IS NOT NULL')
+      .getRawOne<{ count: string }>();
+    const totalDonorsCount = Number(totalDonorsResult?.count ?? 0);
+
+    // Campaigns: completed donations with campaign_id, in range (amount + count, and by month)
+    const campaignDonations = await this.donationRepo
+      .createQueryBuilder('d')
+      .where('d.status = :status', { status: COMPLETED_STATUS })
+      .andWhere('d.campaign_id IS NOT NULL')
+      .andWhere('d.date >= :start', { start })
+      .andWhere('d.date <= :end', { end })
+      .leftJoinAndSelect('d.donor', 'donor')
+      .getMany();
+    let campaignsAmount = 0;
+    let campaignsCount = 0;
+    const campaignsByMonth = new Map<string, { amount: number; count: number }>();
+    for (const d of campaignDonations) {
+      const amt = this.getAmount(d);
+      campaignsAmount += amt;
+      campaignsCount += 1;
+      const ms = this.getMonthStart(this.getCompletionDate(d));
+      const key = ms.toISOString().slice(0, 7);
+      const cur = campaignsByMonth.get(key) ?? { amount: 0, count: 0 };
+      cur.amount += amt;
+      cur.count += 1;
+      campaignsByMonth.set(key, cur);
+    }
+
+    // Sum monthly agg for cards (excluding donation_box and campaigns which we have separately)
+    let totalRaised = 0;
+    let totalDonationsCount = 0;
+    let onlineAmount = 0;
+    let csrAmount = 0;
+    let individualAmount = 0;
+    let eventsAmount = 0;
+    let onlineCount = 0;
+    let csrCount = 0;
+    let individualCount = 0;
+    let eventsCount = 0;
+    for (const r of monthlyRows) {
+      const tr = Number(r.total_raised ?? 0);
+      const tc = Number(r.total_donations_count ?? 0);
+      totalRaised += tr;
+      totalDonationsCount += tc;
+      onlineAmount += Number(r.total_online_raised ?? 0);
+      csrAmount += Number(r.total_csr_raised ?? 0);
+      individualAmount += Number(r.total_individual_raised ?? 0);
+      eventsAmount += Number(r.total_events_raised ?? 0);
+      // We don't have per-category counts in agg; use shares of total as proxy or leave 0
+      // Better: compute from donations in range for counts. For simplicity we leave counts from agg as total only; category counts we can approximate by loading donations.
+    }
+    // Load donations in range with donor to get category counts
+    const allCompleted = await this.donationRepo.find({
+      where: { status: COMPLETED_STATUS },
+      relations: ['donor'],
+    });
+    const inRangeDonations = allCompleted.filter((d) => {
+      const dDate = this.getCompletionDate(d);
+      return dDate >= start && dDate <= end;
+    });
+    for (const d of inRangeDonations) {
+      const channel = this.deriveChannel(d);
+      const donorType = this.deriveDonorType(d);
+      if (channel === 'online') onlineCount += 1;
+      if (donorType === 'csr') csrCount += 1;
+      if (donorType === 'individual') individualCount += 1;
+      if (d.event_id != null) eventsCount += 1;
+    }
+
+    const cards = {
+      total_donations_amount: totalRaised,
+      total_donations_count: totalDonationsCount,
+      total_donors_count: totalDonorsCount,
+      online_donations_amount: onlineAmount,
+      online_donations_count: onlineCount,
+      donation_box_amount: donationBoxTotalAmount,
+      donation_box_count: donationBoxTotalCount,
+      csr_amount: csrAmount,
+      csr_count: csrCount,
+      individual_amount: individualAmount,
+      individual_count: individualCount,
+      events_amount: eventsAmount,
+      events_count: eventsCount,
+      campaigns_amount: campaignsAmount,
+      campaigns_count: campaignsCount,
+    };
+
+    // Build raised_per_month: merge monthly agg + donation_box + campaigns by month
+    const monthKeys = new Set<string>();
+    for (const r of monthlyRows) {
+      monthKeys.add(new Date(r.month_start_date).toISOString().slice(0, 7));
+    }
+    for (const key of donationBoxByMonth.keys()) monthKeys.add(key);
+    for (const key of campaignsByMonth.keys()) monthKeys.add(key);
+    const sortedMonths = Array.from(monthKeys).sort();
+
+    const raisedPerMonth = sortedMonths.map((key) => {
+      const monthStart = new Date(key + '-01');
+      const mr = monthlyRows.find(
+        (r) => new Date(r.month_start_date).toISOString().slice(0, 7) === key,
+      );
+      const db = donationBoxByMonth.get(key) ?? { amount: 0, count: 0 };
+      const camp = campaignsByMonth.get(key) ?? { amount: 0, count: 0 };
+      const online = mr ? Number(mr.total_online_raised ?? 0) : 0;
+      const phone = mr ? Number(mr.total_phone_raised ?? 0) : 0;
+      const events = mr ? Number(mr.total_event_channel_raised ?? 0) : 0;
+      const corporate = mr ? Number(mr.total_corporate_raised ?? 0) : 0;
+      const total =
+        (mr ? Number(mr.total_raised ?? 0) : 0) + db.amount;
+      return {
+        month: formatMonth(monthStart),
+        month_start_date: monthStart.toISOString().slice(0, 10),
+        online,
+        phone,
+        events,
+        corporate,
+        donation_box: db.amount,
+        campaigns: camp.amount,
+        total,
+      };
+    });
+
+    // Cumulative: running sum of total (main donations + donation_box per month)
+    let running = 0;
+    const cumulative = raisedPerMonth.map((row) => {
+      running += row.total;
+      return {
+        month: row.month,
+        month_start_date: row.month_start_date,
+        total_cumulative: running,
+      };
+    });
+
+    return { cards, cumulative, raised_per_month: raisedPerMonth };
   }
 }

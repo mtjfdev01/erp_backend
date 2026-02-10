@@ -271,9 +271,10 @@ export class DonorService {
     city?: string;
     country?: string;
     address?: string;
+    notification_subscription?: boolean;
   }): Promise<Donor | null> {
     try {
-      const { donor_name, donor_email, donor_phone, city, country, address } = donationData;
+      const { donor_name, donor_email, donor_phone, city, country, address, notification_subscription } = donationData;
 
       // Validate required fields
       if (!donor_email || !donor_phone) {
@@ -294,6 +295,7 @@ export class DonorService {
         address: address || null,
         is_active: true,
         notes: 'Auto-registered from donation - Password not set',
+        notification_subscription: notification_subscription !== false,
       });
 
       // Save and return
