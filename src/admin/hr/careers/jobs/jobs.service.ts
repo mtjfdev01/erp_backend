@@ -206,8 +206,7 @@ export class JobsService {
       }
 
       const job = await this.jobRepository.findOne({
-        where,
-        relations: ['applications'],
+        where
       });
 
       if (!job) {

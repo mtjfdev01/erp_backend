@@ -294,6 +294,332 @@ export class DonationsService {
   }
 
   /**
+   * Get PayFast transaction status - Verify payment status with PayFast API
+   * Supports lookup by basket_id (donation ID) or transaction_id
+   * @param basketId - Basket ID (donation ID) used during payment
+   * @param transactionId - Optional PayFast transaction ID for direct lookup
+   * @param orderDate - Optional order date string (for basket_id lookup)
+   * @returns Promise with PayFast transaction status details
+   */
+  async getPayfastOrderStatus(
+    basketId: string,
+    transactionId?: string,
+    orderDate?: string,
+  ): Promise<any> {
+    try {
+      const payfastBaseUrl = process.env.PF_BASE_URL || 'https://ipg1.apps.net.pk/Ecommerce/api/Transaction';
+      const merchantId = process.env.PF_MERCHANT_ID;
+      const securedKey = process.env.PF_SECURED_KEY;
+
+      if (!merchantId || !securedKey) {
+        throw new HttpException(
+          'PayFast credentials not configured. Please check environment variables.',
+          500,
+        );
+      }
+
+      // Step 1: Get a fresh access token for Bearer authorization
+      const tokenResponse = await this.payfastService.getAccessToken(
+        basketId,
+        '0', // amount is not relevant for status check, but required by getAccessToken
+      );
+
+      const accessToken = tokenResponse?.ACCESS_TOKEN;
+      if (!accessToken) {
+        console.error('PayFast token response structure:', tokenResponse);
+        throw new HttpException('Failed to obtain PayFast access token for status check', 401);
+      }
+
+      // Step 2: Call the appropriate status endpoint
+      let response;
+
+      if (transactionId) {
+        // Lookup by transaction ID: GET /transaction/<transaction_id>
+        response = await axios.get(
+          `${payfastBaseUrl}/${transactionId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            timeout: 30000,
+          },
+        );
+      } else {
+        // Lookup by basket ID: GET /transaction/basket_id/<basket_id>
+        const params: Record<string, string> = {};
+        if (orderDate) {
+          params.order_date = orderDate;
+        }
+
+        response = await axios.get(
+          `${payfastBaseUrl}/basket_id/${basketId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            params,
+            timeout: 30000,
+          },
+        );
+      }
+
+      const data = response.data;
+
+      if (!data) {
+        throw new HttpException('PayFast API returned empty response', 502);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      if (error.response) {
+        throw new HttpException(
+          `PayFast API error: ${error.response.data?.status_msg || error.message}`,
+          error.response.status || 502,
+        );
+      }
+      if (error.request) {
+        throw new HttpException('PayFast API timeout or network error', 503);
+      }
+      throw new HttpException(`Failed to get PayFast order status: ${error.message}`, 500);
+    }
+  }
+
+  /**
+   * Map PayFast status_code to donation status
+   * PayFast error codes:
+   *   00  → Processed OK         → completed
+   *   79  → Alternate Success     → completed
+   *   001 → Pending               → pending
+   *   002 → Timeout               → failed
+   *   54  → Card Expired          → failed
+   *   97  → Insufficient Balance  → failed
+   *   106 → Transaction Limit     → failed
+   *   9000→ Rejected by FRMS      → failed
+   *   All others                  → failed
+   * @param statusCode - PayFast status_code string
+   * @returns Donation status string
+   */
+  private mapPayfastStatusToDonationStatus(statusCode: string): string {
+    switch (statusCode) {
+      case '00':
+      case '79':
+        return 'completed';
+      case '001':
+        return 'pending';
+      case '002':  // timeout
+      case '54':   // card expired
+      case '97':   // insufficient balance
+      case '106':  // transaction limit exceeded
+      case '3':    // inactive account
+      case '14':   // incorrect details / inactive card
+      case '15':   // inactive card
+      case '42':   // invalid CNIC
+      case '55':   // invalid OTP/PIN
+      case '75':   // max PIN retries exceeded
+      case '13':   // invalid amount
+      case '126':  // invalid account details
+      case '423':  // unable to process
+      case '41':   // mismatched details
+      case '9000': // rejected by FRMS
+        return 'failed';
+      default:
+        return 'failed';
+    }
+  }
+
+  /**
+   * Get PayFast donation status only - Calls PayFast API to get real-time status
+   * Similar to getDonationStatusOnly for Meezan
+   * @param donationId - Donation ID (used as basket_id)
+   * @returns Promise with donation ID, status, and full PayFast response
+   */
+  async getDonationPayfastStatusOnly(donationId: number): Promise<{
+    donationId: number;
+    status: string;
+    statusCode: string;
+    statusMsg: string;
+  }> {
+    const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    try {
+      const payfastStatus = await this.getPayfastOrderStatus(
+        donationId.toString(),
+        donation.orderId || undefined, // use transaction_id if we have it
+      );
+
+      const statusCode = payfastStatus?.status_code || '';
+      const realTimeStatus = this.mapPayfastStatusToDonationStatus(statusCode);
+
+      return {
+        donationId,
+        status: realTimeStatus,
+        statusCode,
+        statusMsg: payfastStatus?.status_msg || '',
+      };
+    } catch (error) {
+      // If PayFast API fails, return current DB status
+      console.error(`Failed to get PayFast status for donation ${donationId}:`, error.message);
+      return {
+        donationId,
+        status: donation.status,
+        statusCode: '',
+        statusMsg: `Fallback to DB status: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * Unified provider status check - Detects the donation method and queries
+   * the correct payment provider (PayFast, Meezan, Stripe, Blinq) for real-time status.
+   * Also updates the donation record if the provider reports a different status.
+   * @param donationId - Donation ID
+   * @returns Provider status details + whether the DB was updated
+   */
+  async getProviderStatus(donationId: number): Promise<{
+    donationId: number;
+    provider: string;
+    providerStatus: string;
+    donationStatus: string;
+    dbUpdated: boolean;
+    details: any;
+  }> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+      relations: ['donor'],
+    });
+
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    const method = (donation.donation_method || '').toLowerCase();
+    let providerStatus = '';
+    let donationStatus = donation.status;
+    let details: any = {};
+    let provider = method;
+
+    try {
+      if (method === 'payfast') {
+        const pfResult = await this.getPayfastOrderStatus(
+          donationId.toString(),
+          donation.orderId || undefined,
+        );
+        providerStatus = pfResult?.status_code || '';
+        donationStatus = this.mapPayfastStatusToDonationStatus(providerStatus);
+        details = {
+          status_code: pfResult?.status_code,
+          status_msg: pfResult?.status_msg,
+          transaction_id: pfResult?.transaction_id,
+          basket_id: pfResult?.basket_id,
+          rdv_message_key: pfResult?.rdv_message_key,
+        };
+      } else if (method === 'meezan') {
+        if (!donation.orderId) {
+          return {
+            donationId,
+            provider,
+            providerStatus: 'no_order_id',
+            donationStatus: donation.status,
+            dbUpdated: false,
+            details: { message: 'No Meezan orderId found on this donation. Cannot query provider.' },
+          };
+        }
+        const meezanResult = await this.getMeezanOrderStatusExtended(donation.orderId);
+        providerStatus = String(meezanResult?.orderStatus ?? '');
+        donationStatus = this.mapMeezanStatusToDonationStatus(Number(meezanResult?.orderStatus));
+        details = {
+          orderStatus: meezanResult?.orderStatus,
+          actionCode: meezanResult?.actionCode,
+          actionCodeDescription: meezanResult?.actionCodeDescription,
+          amount: meezanResult?.amount,
+          currency: meezanResult?.currency,
+          date: meezanResult?.date,
+          orderNumber: meezanResult?.orderNumber,
+          errorCode: meezanResult?.errorCode,
+          errorMessage: meezanResult?.errorMessage,
+        };
+      } else if (method === 'stripe' || method === 'stripe_embed') {
+        // For Stripe, we don't have a direct status API here – return DB status
+        return {
+          donationId,
+          provider,
+          providerStatus: donation.status,
+          donationStatus: donation.status,
+          dbUpdated: false,
+          details: { message: 'Stripe status is updated via webhooks. Showing current DB status.' },
+        };
+      } else if (method === 'blinq') {
+        // Blinq status is callback-driven, no polling API available
+        return {
+          donationId,
+          provider,
+          providerStatus: donation.status,
+          donationStatus: donation.status,
+          dbUpdated: false,
+          details: { message: 'Blinq status is updated via callback. Showing current DB status.' },
+        };
+      } else {
+        // Manual methods (cash, bank_transfer, cheque, in_kind, etc.)
+        return {
+          donationId,
+          provider: method || 'unknown',
+          providerStatus: donation.status,
+          donationStatus: donation.status,
+          dbUpdated: false,
+          details: { message: 'Manual donation method – no external provider to query.' },
+        };
+      }
+    } catch (error) {
+      console.error(`Provider status check failed for donation ${donationId} (${method}):`, error.message);
+      return {
+        donationId,
+        provider,
+        providerStatus: 'error',
+        donationStatus: donation.status,
+        dbUpdated: false,
+        details: { error: error.message, message: 'Failed to reach payment provider. Showing current DB status.' },
+      };
+    }
+
+    // Auto-update DB if provider status differs from current DB status
+    let dbUpdated = false;
+    if (donationStatus !== donation.status) {
+      const updateData: any = { status: donationStatus };
+      if (donationStatus === 'completed') {
+        updateData.paid_amount = donation.amount;
+      }
+      await this.donationRepository.update(donationId, updateData);
+      dbUpdated = true;
+
+      // Dashboard aggregation
+      if (donationStatus === 'completed') {
+        this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
+          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+        );
+      } else if (['refunded', 'reversed'].includes(donationStatus)) {
+        this.dashboardAggregateService.applyDonationReversed(donationId).catch((e) =>
+          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
+        );
+      }
+    }
+
+    return {
+      donationId,
+      provider,
+      providerStatus,
+      donationStatus,
+      dbUpdated,
+      details,
+    };
+  }
+
+  /**
    * Get donation by ID (for returnUrl redirect - no verification)
    * @param donationId - Donation ID
    * @returns Donation entity

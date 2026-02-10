@@ -116,6 +116,26 @@ export class DonationsController {
     }
   }
 
+  @Get(':id/provider-status')
+  @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
+  async getProviderStatus(@Param('id') id: string, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.getProviderStatus(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Provider status retrieved successfully',
+        data: result,
+      });
+    } catch (error) {
+      const status = error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(':id')
   // @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
   async findOne(@Param('id') id: string, @Res() res: Response) {

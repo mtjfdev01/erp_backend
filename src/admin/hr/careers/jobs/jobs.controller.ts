@@ -126,7 +126,7 @@ export class JobsController {
    * POST /jobs - Create a new job posting
    */
   @Post()
-  @UseGuards( PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(['hr.jobs.create', 'super_admin'])
   async create(@Body() createJobDto: CreateJobDto, @Res() res: Response) {
     try {
@@ -149,7 +149,7 @@ export class JobsController {
    * PATCH /jobs/:id - Update existing job
    */
   @Patch(':id')
-  @UseGuards( PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(['hr.jobs.update', 'super_admin'])
   async update(
     @Param('id') id: string,
@@ -178,7 +178,7 @@ export class JobsController {
    * DELETE /jobs/:id - Soft delete (archive) a job 
    */
   @Delete(':id')
-  @UseGuards( PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(['hr.jobs.delete', 'super_admin'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
