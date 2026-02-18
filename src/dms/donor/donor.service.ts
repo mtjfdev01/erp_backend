@@ -6,8 +6,9 @@ import { CreateDonorDto } from './dto/create-donor.dto';
 import { UpdateDonorDto } from './dto/update-donor.dto';
 import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
 import * as bcrypt from 'bcrypt';
-import { User } from 'src/users/user.entity';
+import { User, Department } from 'src/users/user.entity';
 import { UsersService } from 'src/users/users.service';
+import { City } from '../geographic/cities/entities/city.entity';
 
 interface PaginationOptions {
   page: number;
@@ -30,8 +31,93 @@ export class DonorService {
     private readonly donorRepository: Repository<Donor>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(City)
+    private readonly cityRepository: Repository<City>,
     private readonly usersService: UsersService,
     ) {}
+
+  /**
+   * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
+   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
+   */
+  async resolveUserGeography(userId: number): Promise<string[] | null> {
+    try {
+      if (userId === -1) return null;
+
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) return null;
+
+      if (user.department !== Department.FUND_RAISING) return null;
+
+      const assignedCountries = user.assigned_countries || [];
+      const assignedRegions = user.assigned_regions || [];
+      const assignedDistricts = user.assigned_districts || [];
+      const assignedTehsils = user.assigned_tehsils || [];
+      const assignedCities = user.assigned_cities || [];
+
+      if (
+        !assignedCountries.length &&
+        !assignedRegions.length &&
+        !assignedDistricts.length &&
+        !assignedTehsils.length &&
+        !assignedCities.length
+      ) {
+        return null;
+      }
+
+      const allCityNames: Set<string> = new Set();
+
+      if (assignedCities.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.id IN (:...ids)', { ids: assignedCities })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      if (assignedTehsils.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      if (assignedDistricts.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      if (assignedRegions.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      if (assignedCountries.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      return allCityNames.size > 0 ? Array.from(allCityNames) : null;
+    } catch (error) {
+      console.error('Error resolving user geography:', error);
+      return null;
+    }
+  }
 
   /**
    * Create a new donor (individual or CSR)
@@ -96,7 +182,7 @@ export class DonorService {
   /**
    * Find all donors with pagination and filtering
    */
-  async findAll(options: any) {
+  async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: { online: boolean; offline: boolean }) {
     try {
       const {
         page = 1,
@@ -150,6 +236,23 @@ export class DonorService {
       // Apply is_active filter
       if (is_active !== undefined) {
         queryBuilder.andWhere('donor.is_active = :is_active', { is_active });
+      }
+
+      // Apply online/offline source filter based on user permissions
+      if (sourceAccess) {
+        if (!sourceAccess.online && sourceAccess.offline) {
+          // User can only see offline donors (source != 'website')
+          queryBuilder.andWhere("COALESCE(donor.source, '') != 'website'");
+        } else if (sourceAccess.online && !sourceAccess.offline) {
+          // User can only see online donors (source = 'website')
+          queryBuilder.andWhere("donor.source = 'website'");
+        }
+        // If both true, no source filter needed
+      }
+
+      // Geographic filter — restrict donors to user's assigned city names
+      if (assignedCityNames && assignedCityNames.length > 0) {
+        queryBuilder.andWhere('LOWER(TRIM(donor.city)) IN (:...assignedCityNames)', { assignedCityNames });
       }
 
       // Apply sorting

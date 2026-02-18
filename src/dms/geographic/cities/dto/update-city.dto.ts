@@ -13,6 +13,14 @@ export class UpdateCityDto {
 
   @IsNumber()
   @IsOptional()
+  tehsil_id?: number;
+
+  @IsNumber()
+  @IsOptional()
+  district_id?: number;
+
+  @IsNumber()
+  @IsOptional()
   region_id?: number;
 
   @IsNumber()

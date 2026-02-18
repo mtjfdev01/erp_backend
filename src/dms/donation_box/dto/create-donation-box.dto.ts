@@ -22,6 +22,10 @@ export class CreateDonationBoxDto {
   @IsNotEmpty({ message: 'Route ID is required' })
   route_id: number;
 
+  @IsNumber()
+  @IsOptional()
+  city_id?: number;
+
   // Shop Details (Required shop_name)
   @IsString()
   @IsNotEmpty({ message: 'Shop name is required' })

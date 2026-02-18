@@ -2,6 +2,7 @@ import { Entity, Column, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm
 import { BaseEntity } from '../../../../utils/base_utils/entities/baseEntity';
 import { Country } from '../../countries/entities/country.entity';
 import { City } from '../../cities/entities/city.entity';
+import { District } from '../../districts/entities/district.entity';
 
 @Entity('regions')
 @Index('idx_region_name', ['name'])
@@ -27,6 +28,9 @@ export class Region extends BaseEntity {
   @ManyToOne(() => Country, country => country.regions, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'country_id' })
   country: Country;
+
+  @OneToMany(() => District, district => district.region, { cascade: true })
+  districts: District[];
 
   @OneToMany(() => City, city => city.region, { cascade: true })
   cities: City[];

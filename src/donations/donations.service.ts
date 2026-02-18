@@ -21,6 +21,7 @@ import * as crypto from 'crypto';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { Donor } from 'src/dms/donor/entities/donor.entity';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
+import { City } from '../dms/geographic/cities/entities/city.entity';
 import { CampaignsService } from '../dms/campaigns/campaigns.service';
 import { DashboardAggregateService } from '../dashboard/dashboard-aggregate.service';
 
@@ -40,12 +41,124 @@ export class DonationsService {
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonation)
     private recurringDonationRepository: Repository<RecurringDonation>,
+    @InjectRepository(City)
+    private cityRepository: Repository<City>,
     private donorService: DonorService,
     private notificationsService: NotificationsService,
     private whatsAppService: WhatsAppService,
     private campaignsService: CampaignsService,
     private dashboardAggregateService: DashboardAggregateService,
   ) {}
+
+  /**
+   * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
+   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
+   * Returns an array of city name strings (lowercase trimmed) for WHERE IN filtering.
+   */
+  async resolveUserGeography(userId: number): Promise<string[] | null> {
+    try {
+      // Skip for system/public user
+      if (userId === -1) return null;
+
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) return null;
+
+      // If user is not fund_raising department, no geo filter
+      if (user.department !== Department.FUND_RAISING) return null;
+
+      const assignedCountries = user.assigned_countries || [];
+      const assignedRegions = user.assigned_regions || [];
+      const assignedDistricts = user.assigned_districts || [];
+      const assignedTehsils = user.assigned_tehsils || [];
+      const assignedCities = user.assigned_cities || [];
+
+      // If no geographic assignments at all, no filter needed (user sees everything they have permission for)
+      if (
+        !assignedCountries.length &&
+        !assignedRegions.length &&
+        !assignedDistricts.length &&
+        !assignedTehsils.length &&
+        !assignedCities.length
+      ) {
+        return null;
+      }
+
+      // Collect all city names from each level
+      const allCityNames: Set<string> = new Set();
+
+      // 1. Direct city IDs → get their names
+      if (assignedCities.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.id IN (:...ids)', { ids: assignedCities })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      // 2. Tehsil IDs → get all cities under those tehsils
+      if (assignedTehsils.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      // 3. District IDs → get all cities under those districts
+      if (assignedDistricts.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      // 4. Region IDs → get all cities under those regions
+      if (assignedRegions.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      // 5. Country IDs → get all cities under those countries
+      if (assignedCountries.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.name')
+          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .getMany();
+        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+      }
+
+      // Return unique city names array (or null if none resolved)
+      return allCityNames.size > 0 ? Array.from(allCityNames) : null;
+    } catch (error) {
+      console.error('Error resolving user geography:', error);
+      return null; // On error, don't block — just skip geo filtering
+    }
+  }
+
+  /**
+   * Get a donor's city by donor ID (for geographic access check on offline donations).
+   */
+  async getDonorCityById(donorId: number): Promise<string | null> {
+    try {
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId },
+        select: ['id', 'city'],
+      });
+      return donor?.city || null;
+    } catch (error) {
+      console.error('Error fetching donor city:', error);
+      return null;
+    }
+  }
 
   // Get users who should receive donation notifications
   private async getDonationUsers(): Promise<number[]> {
@@ -232,7 +345,7 @@ export class DonationsService {
       });
 
       const response = await axios.post(
-        `${meezanUrl}/getOrderStatusExtended.do`,
+        `${meezanUrl}/getOrderStatus.do`,
         reqParams,
         { timeout: 30000 },
       );
@@ -293,99 +406,6 @@ export class DonationsService {
     }
   }
 
-  /**
-   * Get PayFast transaction status - Verify payment status with PayFast API
-   * Supports lookup by basket_id (donation ID) or transaction_id
-   * @param basketId - Basket ID (donation ID) used during payment
-   * @param transactionId - Optional PayFast transaction ID for direct lookup
-   * @param orderDate - Optional order date string (for basket_id lookup)
-   * @returns Promise with PayFast transaction status details
-   */
-  async getPayfastOrderStatus(
-    basketId: string,
-    transactionId?: string,
-    orderDate?: string,
-  ): Promise<any> {
-    try {
-      const payfastBaseUrl = process.env.PF_BASE_URL || 'https://ipg1.apps.net.pk/Ecommerce/api/Transaction';
-      const merchantId = process.env.PF_MERCHANT_ID;
-      const securedKey = process.env.PF_SECURED_KEY;
-
-      if (!merchantId || !securedKey) {
-        throw new HttpException(
-          'PayFast credentials not configured. Please check environment variables.',
-          500,
-        );
-      }
-
-      // Step 1: Get a fresh access token for Bearer authorization
-      const tokenResponse = await this.payfastService.getAccessToken(
-        basketId,
-        '0', // amount is not relevant for status check, but required by getAccessToken
-      );
-
-      const accessToken = tokenResponse?.ACCESS_TOKEN;
-      if (!accessToken) {
-        console.error('PayFast token response structure:', tokenResponse);
-        throw new HttpException('Failed to obtain PayFast access token for status check', 401);
-      }
-
-      // Step 2: Call the appropriate status endpoint
-      let response;
-
-      if (transactionId) {
-        // Lookup by transaction ID: GET /transaction/<transaction_id>
-        response = await axios.get(
-          `${payfastBaseUrl}/${transactionId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            timeout: 30000,
-          },
-        );
-      } else {
-        // Lookup by basket ID: GET /transaction/basket_id/<basket_id>
-        const params: Record<string, string> = {};
-        if (orderDate) {
-          params.order_date = orderDate;
-        }
-
-        response = await axios.get(
-          `${payfastBaseUrl}/basket_id/${basketId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-            params,
-            timeout: 30000,
-          },
-        );
-      }
-
-      const data = response.data;
-
-      if (!data) {
-        throw new HttpException('PayFast API returned empty response', 502);
-      }
-
-      return data;
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      if (error.response) {
-        throw new HttpException(
-          `PayFast API error: ${error.response.data?.status_msg || error.message}`,
-          error.response.status || 502,
-        );
-      }
-      if (error.request) {
-        throw new HttpException('PayFast API timeout or network error', 503);
-      }
-      throw new HttpException(`Failed to get PayFast order status: ${error.message}`, 500);
-    }
-  }
 
   /**
    * Map PayFast status_code to donation status
@@ -430,49 +450,7 @@ export class DonationsService {
     }
   }
 
-  /**
-   * Get PayFast donation status only - Calls PayFast API to get real-time status
-   * Similar to getDonationStatusOnly for Meezan
-   * @param donationId - Donation ID (used as basket_id)
-   * @returns Promise with donation ID, status, and full PayFast response
-   */
-  async getDonationPayfastStatusOnly(donationId: number): Promise<{
-    donationId: number;
-    status: string;
-    statusCode: string;
-    statusMsg: string;
-  }> {
-    const donation = await this.donationRepository.findOne({ where: { id: donationId } });
-    if (!donation) {
-      throw new NotFoundException(`Donation with ID ${donationId} not found`);
-    }
 
-    try {
-      const payfastStatus = await this.getPayfastOrderStatus(
-        donationId.toString(),
-        donation.orderId || undefined, // use transaction_id if we have it
-      );
-
-      const statusCode = payfastStatus?.status_code || '';
-      const realTimeStatus = this.mapPayfastStatusToDonationStatus(statusCode);
-
-      return {
-        donationId,
-        status: realTimeStatus,
-        statusCode,
-        statusMsg: payfastStatus?.status_msg || '',
-      };
-    } catch (error) {
-      // If PayFast API fails, return current DB status
-      console.error(`Failed to get PayFast status for donation ${donationId}:`, error.message);
-      return {
-        donationId,
-        status: donation.status,
-        statusCode: '',
-        statusMsg: `Fallback to DB status: ${error.message}`,
-      };
-    }
-  }
 
   /**
    * Unified provider status check - Detects the donation method and queries
@@ -505,21 +483,8 @@ export class DonationsService {
     let provider = method;
 
     try {
-      if (method === 'payfast') {
-        const pfResult = await this.getPayfastOrderStatus(
-          donationId.toString(),
-          donation.orderId || undefined,
-        );
-        providerStatus = pfResult?.status_code || '';
-        donationStatus = this.mapPayfastStatusToDonationStatus(providerStatus);
-        details = {
-          status_code: pfResult?.status_code,
-          status_msg: pfResult?.status_msg,
-          transaction_id: pfResult?.transaction_id,
-          basket_id: pfResult?.basket_id,
-          rdv_message_key: pfResult?.rdv_message_key,
-        };
-      } else if (method === 'meezan') {
+ if (method === 'meezan') {
+        console.log('Getting Meezan status for donation:', donation.orderId);
         if (!donation.orderId) {
           return {
             donationId,
@@ -531,18 +496,19 @@ export class DonationsService {
           };
         }
         const meezanResult = await this.getMeezanOrderStatusExtended(donation.orderId);
-        providerStatus = String(meezanResult?.orderStatus ?? '');
-        donationStatus = this.mapMeezanStatusToDonationStatus(Number(meezanResult?.orderStatus));
+        console.log('Meezan response:', meezanResult);
+        // return;
+        providerStatus = String(meezanResult?.OrderStatus ?? '');
+        donationStatus = this.mapMeezanStatusToDonationStatus(Number(meezanResult?.OrderStatus));
         details = {
-          orderStatus: meezanResult?.orderStatus,
+          orderStatus: meezanResult?.OrderStatus,
           actionCode: meezanResult?.actionCode,
-          actionCodeDescription: meezanResult?.actionCodeDescription,
-          amount: meezanResult?.amount,
+          amount: meezanResult?.Amount,
           currency: meezanResult?.currency,
           date: meezanResult?.date,
-          orderNumber: meezanResult?.orderNumber,
-          errorCode: meezanResult?.errorCode,
-          errorMessage: meezanResult?.errorMessage,
+          orderNumber: meezanResult?.OrderNumber,
+          errorCode: meezanResult?.ErrorCode,
+          errorMessage: meezanResult?.ErrorMessage,
         };
       } else if (method === 'stripe' || method === 'stripe_embed') {
         // For Stripe, we don't have a direct status API here – return DB status
@@ -589,11 +555,18 @@ export class DonationsService {
 
     // Auto-update DB if provider status differs from current DB status
     let dbUpdated = false;
-    if (donationStatus !== donation.status) {
+    // if (donationStatus !== donation.status) {
+      if (true) {
       const updateData: any = { status: donationStatus };
       if (donationStatus === 'completed') {
         updateData.paid_amount = donation.amount;
       }
+      // Save error message from provider (e.g. Meezan ErrorMessage / actionCodeDescription)
+      if (['failed', 'cancelled', 'refunded'].includes(donationStatus)) {
+        updateData.err_msg = details.errorMessage || null;
+      }
+
+      console.log('Update data:', updateData);
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
@@ -880,6 +853,7 @@ export class DonationsService {
 
     // Call Meezan API to get real-time status (ONLY place this is called)
     try {
+      console.log('Getting Meezan status for donation:', donation.orderId);
       const meezanStatus = await this.getMeezanOrderStatusExtended(donation.orderId);
       const orderStatus = meezanStatus.orderStatus;
       const realTimeStatus = this.mapMeezanStatusToDonationStatus(orderStatus);
@@ -1195,7 +1169,8 @@ export class DonationsService {
     hybridFilters: HybridFilter[] = [],
     multiselectFilters: any[] = [],
     relationsFilters?: Record<string, Record<string, any>>,
-    user?: any
+    user?: any,
+    assignedCityNames?: string[] | null,
   ) {
     try {
       console.log("user email in donation listing", user?.email);
@@ -1240,6 +1215,23 @@ export class DonationsService {
         console.log("here (multiselectFilters && multiselectFilters.length > 0", multiselectFilters)
         applyMultiselectFilters(query, multiselectFilters, 'donation');
       }
+
+      // 5) Geographic filter — restrict donations to user's assigned city names
+      //    Online donations (website) → filter by donation.city
+      //    Offline donations (non-website) → filter by donor.city (since donation.city may be empty)
+      if (assignedCityNames && assignedCityNames.length > 0) {
+        query.andWhere(
+          `(
+            (donation.donation_source = 'website' AND LOWER(TRIM(donation.city)) IN (:...geoCityNames))
+            OR
+            (COALESCE(donation.donation_source, '') != 'website' AND donation.donor_id IN (
+              SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNames)
+            ))
+          )`,
+          { geoCityNames: assignedCityNames }
+        );
+      }
+
       // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
@@ -1274,6 +1266,19 @@ export class DonationsService {
       if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
         console.log("here (multiselectFilters && multiselectFilters.length > 0")
         applyMultiselectFilters(sumQuery, multiselectFilters, 'donation');
+      }
+      // Apply same geographic filter to sum query
+      if (assignedCityNames && assignedCityNames.length > 0) {
+        sumQuery.andWhere(
+          `(
+            (donation.donation_source = 'website' AND LOWER(TRIM(donation.city)) IN (:...geoCityNamesSum))
+            OR
+            (COALESCE(donation.donation_source, '') != 'website' AND donation.donor_id IN (
+              SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNamesSum)
+            ))
+          )`,
+          { geoCityNamesSum: assignedCityNames }
+        );
       }
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;

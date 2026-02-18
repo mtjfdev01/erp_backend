@@ -6,7 +6,8 @@ import { CreateDonationBoxDto } from './dto/create-donation-box.dto';
 import { UpdateDonationBoxDto } from './dto/update-donation-box.dto';
 import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
 import { Route } from '../geographic/routes/entities/route.entity';
-import { User } from '../../users/user.entity';
+import { City } from '../geographic/cities/entities/city.entity';
+import { User, Department } from '../../users/user.entity';
 
 interface PaginationOptions {
   page: number;
@@ -31,9 +32,95 @@ export class DonationBoxService {
     private readonly donationBoxRepository: Repository<DonationBox>,
     @InjectRepository(Route)
     private readonly routeRepository: Repository<Route>,
+    @InjectRepository(City)
+    private readonly cityRepository: Repository<City>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) {}
+
+  /**
+   * Resolve a user's geographic assignments (IDs) to a unique list of city IDs.
+   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
+   * Returns an array of city IDs for WHERE IN filtering.
+   */
+  async resolveUserGeographyCityIds(userId: number): Promise<number[] | null> {
+    try {
+      if (userId === -1) return null;
+
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) return null;
+
+      // If user is not fund_raising department, no geo filter
+      if (user.department !== Department.FUND_RAISING) return null;
+
+      const assignedCountries = user.assigned_countries || [];
+      const assignedRegions = user.assigned_regions || [];
+      const assignedDistricts = user.assigned_districts || [];
+      const assignedTehsils = user.assigned_tehsils || [];
+      const assignedCities = user.assigned_cities || [];
+
+      // If no geographic assignments at all, no filter needed
+      if (
+        !assignedCountries.length &&
+        !assignedRegions.length &&
+        !assignedDistricts.length &&
+        !assignedTehsils.length &&
+        !assignedCities.length
+      ) {
+        return null;
+      }
+
+      const allCityIds: Set<number> = new Set();
+
+      // 1. Direct city IDs
+      assignedCities.forEach(id => allCityIds.add(id));
+
+      // 2. Tehsil IDs → get all cities under those tehsils
+      if (assignedTehsils.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      // 3. District IDs → get all cities under those districts
+      if (assignedDistricts.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      // 4. Region IDs → get all cities under those regions
+      if (assignedRegions.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      // 5. Country IDs → get all cities under those countries
+      if (assignedCountries.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      return allCityIds.size > 0 ? Array.from(allCityIds) : null;
+    } catch (error) {
+      console.error('Error resolving user geography city IDs:', error);
+      return null;
+    }
+  }
 
   /**
    * Create a new donation box
@@ -83,7 +170,7 @@ export class DonationBoxService {
   /**
    * Find all donation boxes with pagination and filtering
    */
-  async findAll(options: PaginationOptions) {
+  async findAll(options: PaginationOptions, assignedCityIds?: number[] | null) {
     try {
       const {
         page = 1,
@@ -138,6 +225,11 @@ export class DonationBoxService {
       }
 
       applyCommonFilters(query, filters, searchFields, 'donation_box');
+
+      // Apply geographic restriction if user has assigned cities
+      if (assignedCityIds && assignedCityIds.length > 0) {
+        query.andWhere('donation_box.city_id IN (:...assignedCityIds)', { assignedCityIds });
+      }
 
       // Apply sorting
       query.orderBy(`donation_box.${sortField}`, sortOrder);

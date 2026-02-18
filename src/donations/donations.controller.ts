@@ -10,7 +10,8 @@ import {
   Res, 
   UseGuards,
   Query,
-  Req
+  Req,
+  ForbiddenException
 } from '@nestjs/common';
 import { FilterPayload } from '../utils/filters/common-filter.util';
 import { Response } from 'express';
@@ -23,19 +24,117 @@ import { CurrentUser } from 'src/auth/current-user.decorator';
 import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
 import { RequiredPermissions } from 'src/permissions';
+import { PermissionsService } from 'src/permissions/permissions.service';
 import { JwtGuard } from 'src/auth/jwt.guard';
 
 @Controller('donations')
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonationsController {
-  constructor(private readonly donationsService: DonationsService) {}
+  constructor(
+    private readonly donationsService: DonationsService,
+    private readonly permissionsService: PermissionsService,
+  ) {}
+
+  /**
+   * Determine if a donation is "online" based on donation_source.
+   * Online = 'website', everything else = offline.
+   */
+  private isOnlineDonation(donationSource: string | null | undefined): boolean {
+    return donationSource === 'website';
+  }
+
+  /**
+   * Runtime permission check for online/offline donations.
+   * Checks: super_admin OR fund_raising_manager OR the specific online/offline permission.
+   */
+  private async checkDonationPermission(userId: number, donationSource: string | null | undefined, action: string): Promise<void> {
+    // Super admin and user id -1 bypass
+    if (userId === -1) return;
+
+    const hasSuperAdmin = await this.permissionsService.hasPermission(userId, 'super_admin');
+    if (hasSuperAdmin) return;
+
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(userId, 'fund_raising_manager');
+    if (hasFundRaisingManager) return;
+
+    const submodule = this.isOnlineDonation(donationSource) ? 'online_donations' : 'offline_donations';
+    const permissionPath = `fund_raising.${submodule}.${action}`;
+
+    const hasPermission = await this.permissionsService.hasPermission(userId, permissionPath);
+    if (!hasPermission) {
+      throw new ForbiddenException(`Insufficient permissions for ${submodule.replace('_', ' ')}`);
+    }
+  }
+
+  /**
+   * Check if user has permission for at least one donation type (online or offline).
+   * Returns which types the user can access.
+   */
+  private async getDonationSourceAccess(userId: number, action: string): Promise<{ online: boolean; offline: boolean }> {
+    if (userId === -1) return { online: true, offline: true };
+
+    const hasSuperAdmin = await this.permissionsService.hasPermission(userId, 'super_admin');
+    if (hasSuperAdmin) return { online: true, offline: true };
+
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(userId, 'fund_raising_manager');
+    if (hasFundRaisingManager) return { online: true, offline: true };
+
+    const hasOnline = await this.permissionsService.hasPermission(userId, `fund_raising.online_donations.${action}`);
+    const hasOffline = await this.permissionsService.hasPermission(userId, `fund_raising.offline_donations.${action}`);
+
+    return { online: hasOnline, offline: hasOffline };
+  }
+
+  /**
+   * Check if a donation falls within the user's assigned geography.
+   * For online donations (website) → checks donation.city
+   * For offline donations → checks the donor's city
+   * Throws ForbiddenException if the user has geographic restrictions and the donation is outside their area.
+   */
+  private async checkGeographicAccess(
+    userId: number,
+    donation: { city?: string | null; donation_source?: string | null; donor_id?: number | null; donor?: any },
+  ): Promise<void> {
+    if (!userId || userId === -1) return;
+
+    const assignedCityNames = await this.donationsService.resolveUserGeography(userId);
+    // null means no geographic restrictions
+    if (assignedCityNames === null) return;
+
+    let cityToCheck: string | null | undefined = null;
+
+    if (donation.donation_source === 'website') {
+      // Online donation — check donation's own city
+      cityToCheck = donation.city;
+    } else {
+      // Offline donation — check the donor's city
+      cityToCheck = donation.donor?.city || null;
+
+      // If donor is not loaded/joined, fetch donor city by donor_id
+      if (!cityToCheck && donation.donor_id) {
+        const donorCity = await this.donationsService.getDonorCityById(donation.donor_id);
+        cityToCheck = donorCity;
+      }
+    }
+
+    // If no city to check (neither on donation nor donor), allow access
+    if (!cityToCheck) return;
+
+    const normalizedCity = cityToCheck.toLowerCase().trim();
+    if (!assignedCityNames.includes(normalizedCity)) {
+      throw new ForbiddenException('You do not have geographic access to this donation');
+    }
+  }
 
   @Post()
-  @RequiredPermissions(['fund_raising.donations.create', 'super_admin', 'fund_raising_manager'])
   async create(@Body() createDonationDto: CreateDonationDto, @Res() res: Response, @Req() req: any) {
     try {
-      console.log("donation api called________________________");
       const user = req?.user ?? null;
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, createDonationDto.donation_source, 'create');
+      }
+
+      console.log("donation api called________________________");
       const result = await this.donationsService.create(createDonationDto, user);
       return res.status(HttpStatus.CREATED).json({
         success: true,
@@ -43,6 +142,13 @@ export class DonationsController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -65,11 +171,24 @@ export class DonationsController {
   }
 
   @Post('search')
-  // @RequiredPermissions([ 'fund_raising.donations.list_view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
   async findAll(@Body() payload: any, @Res() res: Response, @Req() req: any) {
     try {
-      // console.log("Donations search payload:", JSON.stringify(payload, null, 2));
       const user = req?.user ?? null;
+
+      // Determine which donation sources the user can view
+      let sourceAccess = { online: true, offline: true };
+      if (user?.id) {
+        sourceAccess = await this.getDonationSourceAccess(user.id, 'list_view');
+        if (!sourceAccess.online && !sourceAccess.offline) {
+          return res.status(HttpStatus.FORBIDDEN).json({
+            success: false,
+            message: 'Insufficient permissions to view donations',
+            data: [],
+            pagination: null,
+          });
+        }
+      }
+
       // Extract pagination and sorting
       const pagination = payload.pagination || {};
       const page = pagination.page || 1;
@@ -83,22 +202,35 @@ export class DonationsController {
       
       // Extract filters
       const filters = payload.filters || {};
+
+      // Inject donation_source filter based on user permissions
+      if (!sourceAccess.online && sourceAccess.offline) {
+        // User can only see offline donations (everything except 'website')
+        filters._donation_source_not = 'website';
+      } else if (sourceAccess.online && !sourceAccess.offline) {
+        // User can only see online donations
+        filters.donation_source = 'website';
+      }
+      // If both are true, no filter needed (user can see everything)
+
+      // Resolve user's geographic assignments to city name strings for filtering
+      let assignedCityNames: string[] | null = null;
+      if (user?.id && user.id !== -1) {
+        assignedCityNames = await this.donationsService.resolveUserGeography(user.id);
+      }
       
       // Extract hybrid filters and convert to new format
       const hybridFilters = payload.hybrid_filters || [];
       
       // Extract Relations filters
       const relationsFilters = payload.relationsFilters || [];
-      // console.log("Relations filters:", JSON.stringify(relationsFilters, null, 2));
+
       // Build complete filters object
       const completeFilters: FilterPayload = {
         ...filters
       };
-      
-      // console.log("Processed filters:", JSON.stringify(completeFilters, null, 2));
-      // console.log("Hybrid filters:", JSON.stringify(hybridFilters, null, 2));
 
-      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, payload?.multiselectFilters || [], relationsFilters, user);
+      const result = await this.donationsService.findAll(page, pageSize, sortField, sortOrder, completeFilters, hybridFilters, payload?.multiselectFilters || [], relationsFilters, user, assignedCityNames);
       
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -117,9 +249,16 @@ export class DonationsController {
   }
 
   @Get(':id/provider-status')
-  @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
-  async getProviderStatus(@Param('id') id: string, @Res() res: Response) {
+  async getProviderStatus(@Param('id') id: string, @Res() res: Response, @Req() req: any) {
     try {
+      const user = req?.user ?? null;
+      // First fetch the donation to check its source
+      const donation = await this.donationsService.findOne(+id);
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, donation.donation_source, 'view');
+        await this.checkGeographicAccess(user.id, donation);
+      }
+
       const result = await this.donationsService.getProviderStatus(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -127,6 +266,9 @@ export class DonationsController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       const status = error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -137,16 +279,24 @@ export class DonationsController {
   }
 
   @Get(':id')
-  // @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
-  async findOne(@Param('id') id: string, @Res() res: Response) {
+  async findOne(@Param('id') id: string, @Res() res: Response, @Req() req: any) {
     try {
       const result = await this.donationsService.findOne(+id);
+      const user = req?.user ?? null;
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, result.donation_source, 'view');
+        await this.checkGeographicAccess(user.id, result);
+      }
+
       return res.status(HttpStatus.OK).json({
         success: true,
         message: 'Donation retrieved successfully',
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -157,9 +307,16 @@ export class DonationsController {
   }
 
   @Patch(':id')
-  // @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
-  async update(@Param('id') id: string, @Body() updateDonationDto: UpdateDonationDto, @Res() res: Response) {
+  async update(@Param('id') id: string, @Body() updateDonationDto: UpdateDonationDto, @Res() res: Response, @Req() req: any) {
     try {
+      const user = req?.user ?? null;
+      // Fetch existing donation to check its source
+      const existing = await this.donationsService.findOne(+id);
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, existing.donation_source, 'update');
+        await this.checkGeographicAccess(user.id, existing);
+      }
+
       const result = await this.donationsService.update(+id, updateDonationDto);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -167,6 +324,9 @@ export class DonationsController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -177,7 +337,6 @@ export class DonationsController {
   }
 
   @Patch(':id/note')
-  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
   async updateNote(
     @Param('id') id: string,
     @Body() updateDonationNoteDto: UpdateDonationNoteDto,
@@ -186,6 +345,12 @@ export class DonationsController {
   ) {
     try {
       const user = req?.user ?? null;
+      const existing = await this.donationsService.findOne(+id);
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, existing.donation_source, 'update');
+        await this.checkGeographicAccess(user.id, existing);
+      }
+
       const result = await this.donationsService.updateNote(+id, updateDonationNoteDto.note ?? null, user);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -193,6 +358,9 @@ export class DonationsController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -203,9 +371,15 @@ export class DonationsController {
   }
 
   @Delete(':id')
-  //  @RequiredPermissions(['fund_raising.donations.delete', 'super_admin', 'fund_raising_manager'])
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Res() res: Response, @Req() req: any) {
     try {
+      const user = req?.user ?? null;
+      const existing = await this.donationsService.findOne(+id);
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, existing.donation_source, 'delete');
+        await this.checkGeographicAccess(user.id, existing);
+      }
+
       const result = await this.donationsService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -213,6 +387,9 @@ export class DonationsController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
@@ -245,9 +422,16 @@ export class DonationsController {
   }
 
   @Post('status-action')
-  @RequiredPermissions(['fund_raising.donations.update', 'super_admin', 'fund_raising_manager'])
-  async updateStatusAction(@Body() updateStatusDto: UpdateDonationStatusDto, @Res() res: Response) {
+  async updateStatusAction(@Body() updateStatusDto: UpdateDonationStatusDto, @Res() res: Response, @Req() req: any) {
     try {
+      const user = req?.user ?? null;
+      // Fetch donation to check source
+      const existing = await this.donationsService.findOne(updateStatusDto.donation_id);
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, existing.donation_source, 'update');
+        await this.checkGeographicAccess(user.id, existing);
+      }
+
       console.log("Donation status action payload:", updateStatusDto);
       
       const result = await this.donationsService.updateStatusAction(
@@ -266,6 +450,9 @@ export class DonationsController {
         },
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
       console.error("Error updating donation status action:", error);
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({

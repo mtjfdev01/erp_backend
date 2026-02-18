@@ -1,25 +1,25 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpStatus, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
-import { CitiesService } from './cities.service';
-import { CreateCityDto } from './dto/create-city.dto';
-import { UpdateCityDto } from './dto/update-city.dto';
+import { DistrictsService } from './districts.service';
+import { CreateDistrictDto } from './dto/create-district.dto';
+import { UpdateDistrictDto } from './dto/update-district.dto';
 import { JwtGuard } from '../../../auth/jwt.guard';
 import { PermissionsGuard } from '../../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../../permissions/decorators/require-permission.decorator';
 
-@Controller('cities')
+@Controller('districts')
 @UseGuards(JwtGuard, PermissionsGuard)
-export class CitiesController {
-  constructor(private readonly citiesService: CitiesService) {}
+export class DistrictsController {
+  constructor(private readonly districtsService: DistrictsService) {}
 
   @Post()
-  @RequiredPermissions(['geographic.cities.create', 'super_admin', 'geographic_manager'])
-  async create(@Body() createCityDto: CreateCityDto, @Res() res: Response) {
+  @RequiredPermissions(['geographic.districts.create', 'super_admin', 'geographic_manager'])
+  async create(@Body() createDistrictDto: CreateDistrictDto, @Res() res: Response) {
     try {
-      const result = await this.citiesService.create(createCityDto);
+      const result = await this.districtsService.create(createDistrictDto);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'City created successfully',
+        message: 'District created successfully',
         data: result,
       });
     } catch (error) {
@@ -35,31 +35,21 @@ export class CitiesController {
   }
 
   @Get()
-  // @RequiredPermissions(['geographic.cities.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
-  async findAll(
-    @Query('tehsil_id') tehsilId?: string,
-    @Query('district_id') districtId?: string,
-    @Query('region_id') regionId?: string,
-    @Query('country_id') countryId?: string,
-    @Res() res?: Response,
-  ) {
+  // @RequiredPermissions(['geographic.districts.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  async findAll(@Query('region_id') regionId?: string, @Query('country_id') countryId?: string, @Res() res?: Response) {
     try {
       let result;
-      if (tehsilId) {
-        result = await this.citiesService.findByTehsil(+tehsilId);
-      } else if (districtId) {
-        result = await this.citiesService.findByDistrict(+districtId);
-      } else if (regionId) {
-        result = await this.citiesService.findByRegion(+regionId);
+      if (regionId) {
+        result = await this.districtsService.findByRegion(+regionId);
       } else if (countryId) {
-        result = await this.citiesService.findByCountry(+countryId);
+        result = await this.districtsService.findByCountry(+countryId);
       } else {
-        result = await this.citiesService.findAll();
+        result = await this.districtsService.findAll();
       }
       
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Cities retrieved successfully',
+        message: 'Districts retrieved successfully',
         data: result,
       });
     } catch (error) {
@@ -72,13 +62,13 @@ export class CitiesController {
   }
 
   @Get(':id')
-  // @RequiredPermissions(['geographic.cities.view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  @RequiredPermissions(['geographic.districts.view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
-      const result = await this.citiesService.findOne(+id);
+      const result = await this.districtsService.findOne(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'City retrieved successfully',
+        message: 'District retrieved successfully',
         data: result,
       });
     } catch (error) {
@@ -94,13 +84,13 @@ export class CitiesController {
   }
 
   @Patch(':id')
-  @RequiredPermissions(['geographic.cities.update', 'super_admin', 'geographic_manager'])
-  async update(@Param('id') id: string, @Body() updateCityDto: UpdateCityDto, @Res() res: Response) {
+  @RequiredPermissions(['geographic.districts.update', 'super_admin', 'geographic_manager'])
+  async update(@Param('id') id: string, @Body() updateDistrictDto: UpdateDistrictDto, @Res() res: Response) {
     try {
-      const result = await this.citiesService.update(+id, updateCityDto);
+      const result = await this.districtsService.update(+id, updateDistrictDto);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'City updated successfully',
+        message: 'District updated successfully',
         data: result,
       });
     } catch (error) {
@@ -116,10 +106,10 @@ export class CitiesController {
   }
 
   @Delete(':id')
-  @RequiredPermissions(['geographic.cities.delete', 'super_admin', 'geographic_manager'])
+  @RequiredPermissions(['geographic.districts.delete', 'super_admin', 'geographic_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
-      const result = await this.citiesService.remove(+id);
+      const result = await this.districtsService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

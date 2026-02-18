@@ -12,6 +12,14 @@ export class CreateCityDto {
   code?: string;
 
   @IsNumber()
+  @IsNotEmpty({ message: 'Tehsil ID is required' })
+  tehsil_id: number;
+
+  @IsNumber()
+  @IsNotEmpty({ message: 'District ID is required' })
+  district_id: number;
+
+  @IsNumber()
   @IsNotEmpty({ message: 'Region ID is required' })
   region_id: number;
 

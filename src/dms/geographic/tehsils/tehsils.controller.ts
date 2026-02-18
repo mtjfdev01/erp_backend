@@ -1,25 +1,25 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, HttpStatus, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
-import { CitiesService } from './cities.service';
-import { CreateCityDto } from './dto/create-city.dto';
-import { UpdateCityDto } from './dto/update-city.dto';
+import { TehsilsService } from './tehsils.service';
+import { CreateTehsilDto } from './dto/create-tehsil.dto';
+import { UpdateTehsilDto } from './dto/update-tehsil.dto';
 import { JwtGuard } from '../../../auth/jwt.guard';
 import { PermissionsGuard } from '../../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../../permissions/decorators/require-permission.decorator';
 
-@Controller('cities')
+@Controller('tehsils')
 @UseGuards(JwtGuard, PermissionsGuard)
-export class CitiesController {
-  constructor(private readonly citiesService: CitiesService) {}
+export class TehsilsController {
+  constructor(private readonly tehsilsService: TehsilsService) {}
 
   @Post()
-  @RequiredPermissions(['geographic.cities.create', 'super_admin', 'geographic_manager'])
-  async create(@Body() createCityDto: CreateCityDto, @Res() res: Response) {
+  @RequiredPermissions(['geographic.tehsils.create', 'super_admin', 'geographic_manager'])
+  async create(@Body() createTehsilDto: CreateTehsilDto, @Res() res: Response) {
     try {
-      const result = await this.citiesService.create(createCityDto);
+      const result = await this.tehsilsService.create(createTehsilDto);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'City created successfully',
+        message: 'Tehsil created successfully',
         data: result,
       });
     } catch (error) {
@@ -35,9 +35,8 @@ export class CitiesController {
   }
 
   @Get()
-  // @RequiredPermissions(['geographic.cities.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  // @RequiredPermissions(['geographic.tehsils.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findAll(
-    @Query('tehsil_id') tehsilId?: string,
     @Query('district_id') districtId?: string,
     @Query('region_id') regionId?: string,
     @Query('country_id') countryId?: string,
@@ -45,21 +44,19 @@ export class CitiesController {
   ) {
     try {
       let result;
-      if (tehsilId) {
-        result = await this.citiesService.findByTehsil(+tehsilId);
-      } else if (districtId) {
-        result = await this.citiesService.findByDistrict(+districtId);
+      if (districtId) {
+        result = await this.tehsilsService.findByDistrict(+districtId);
       } else if (regionId) {
-        result = await this.citiesService.findByRegion(+regionId);
+        result = await this.tehsilsService.findByRegion(+regionId);
       } else if (countryId) {
-        result = await this.citiesService.findByCountry(+countryId);
+        result = await this.tehsilsService.findByCountry(+countryId);
       } else {
-        result = await this.citiesService.findAll();
+        result = await this.tehsilsService.findAll();
       }
       
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Cities retrieved successfully',
+        message: 'Tehsils retrieved successfully',
         data: result,
       });
     } catch (error) {
@@ -72,13 +69,13 @@ export class CitiesController {
   }
 
   @Get(':id')
-  // @RequiredPermissions(['geographic.cities.view', 'super_admin', 'geographic_manager', 'geographic_user'])
+  @RequiredPermissions(['geographic.tehsils.view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findOne(@Param('id') id: string, @Res() res: Response) {
     try {
-      const result = await this.citiesService.findOne(+id);
+      const result = await this.tehsilsService.findOne(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'City retrieved successfully',
+        message: 'Tehsil retrieved successfully',
         data: result,
       });
     } catch (error) {
@@ -94,13 +91,13 @@ export class CitiesController {
   }
 
   @Patch(':id')
-  @RequiredPermissions(['geographic.cities.update', 'super_admin', 'geographic_manager'])
-  async update(@Param('id') id: string, @Body() updateCityDto: UpdateCityDto, @Res() res: Response) {
+  @RequiredPermissions(['geographic.tehsils.update', 'super_admin', 'geographic_manager'])
+  async update(@Param('id') id: string, @Body() updateTehsilDto: UpdateTehsilDto, @Res() res: Response) {
     try {
-      const result = await this.citiesService.update(+id, updateCityDto);
+      const result = await this.tehsilsService.update(+id, updateTehsilDto);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'City updated successfully',
+        message: 'Tehsil updated successfully',
         data: result,
       });
     } catch (error) {
@@ -116,10 +113,10 @@ export class CitiesController {
   }
 
   @Delete(':id')
-  @RequiredPermissions(['geographic.cities.delete', 'super_admin', 'geographic_manager'])
+  @RequiredPermissions(['geographic.tehsils.delete', 'super_admin', 'geographic_manager'])
   async remove(@Param('id') id: string, @Res() res: Response) {
     try {
-      const result = await this.citiesService.remove(+id);
+      const result = await this.tehsilsService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

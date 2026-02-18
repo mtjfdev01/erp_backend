@@ -100,6 +100,22 @@ export class User {
   @Column({ name: 'blood_group', nullable: true })
   blood_group: string;
 
+  // Geographic assignment fields (for fund_raising department)
+  @Column({ name: 'assigned_countries', type: 'jsonb', nullable: true, default: null })
+  assigned_countries: number[];
+
+  @Column({ name: 'assigned_regions', type: 'jsonb', nullable: true, default: null })
+  assigned_regions: number[];
+
+  @Column({ name: 'assigned_districts', type: 'jsonb', nullable: true, default: null })
+  assigned_districts: number[];
+
+  @Column({ name: 'assigned_tehsils', type: 'jsonb', nullable: true, default: null })
+  assigned_tehsils: number[];
+
+  @Column({ name: 'assigned_cities', type: 'jsonb', nullable: true, default: null })
+  assigned_cities: number[];
+
   // One-to-One relationship with permissions
   @OneToOne(() => PermissionsEntity, (permissions) => permissions.user)
   permissions: PermissionsEntity;

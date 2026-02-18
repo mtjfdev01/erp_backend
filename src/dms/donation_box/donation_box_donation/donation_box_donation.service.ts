@@ -10,13 +10,14 @@ import { DonationBoxDonation } from './entities/donation_box_donation.entity';
 import { CreateDonationBoxDonationDto } from './dto/create-donation_box_donation.dto';
 import { UpdateDonationBoxDonationDto } from './dto/update-donation_box_donation.dto';
 import { DonationBox } from '../entities/donation-box.entity';
+import { City } from '../../geographic/cities/entities/city.entity';
 import {
   applyCommonFilters,
   FilterPayload,
   applyHybridFilters,
   HybridFilter,
 } from '../../../utils/filters/common-filter.util';
-import { User } from '../../../users/user.entity';
+import { User, Department } from '../../../users/user.entity';
 
 interface PaginationOptions {
   page: number;
@@ -38,9 +39,87 @@ export class DonationBoxDonationService {
     private readonly donationBoxDonationRepository: Repository<DonationBoxDonation>,
     @InjectRepository(DonationBox)
     private readonly donationBoxRepository: Repository<DonationBox>,
+    @InjectRepository(City)
+    private readonly cityRepository: Repository<City>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) {}
+
+  /**
+   * Resolve a user's geographic assignments (IDs) to a unique list of city IDs.
+   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
+   */
+  async resolveUserGeographyCityIds(userId: number): Promise<number[] | null> {
+    try {
+      if (userId === -1) return null;
+
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) return null;
+
+      if (user.department !== Department.FUND_RAISING) return null;
+
+      const assignedCountries = user.assigned_countries || [];
+      const assignedRegions = user.assigned_regions || [];
+      const assignedDistricts = user.assigned_districts || [];
+      const assignedTehsils = user.assigned_tehsils || [];
+      const assignedCities = user.assigned_cities || [];
+
+      if (
+        !assignedCountries.length &&
+        !assignedRegions.length &&
+        !assignedDistricts.length &&
+        !assignedTehsils.length &&
+        !assignedCities.length
+      ) {
+        return null;
+      }
+
+      const allCityIds: Set<number> = new Set();
+
+      assignedCities.forEach(id => allCityIds.add(id));
+
+      if (assignedTehsils.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      if (assignedDistricts.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      if (assignedRegions.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      if (assignedCountries.length) {
+        const cities = await this.cityRepository
+          .createQueryBuilder('city')
+          .select('city.id')
+          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .getMany();
+        cities.forEach(c => allCityIds.add(c.id));
+      }
+
+      return allCityIds.size > 0 ? Array.from(allCityIds) : null;
+    } catch (error) {
+      console.error('Error resolving user geography city IDs:', error);
+      return null;
+    }
+  }
 
   /**
    * Get current user from request context
@@ -123,7 +202,7 @@ export class DonationBoxDonationService {
   /**
    * Find all collections with pagination and filtering
    */
-  async findAll(options: PaginationOptions) {
+  async findAll(options: PaginationOptions, assignedCityIds?: number[] | null) {
     try {
       const {
         page = 1,
@@ -177,6 +256,11 @@ export class DonationBoxDonationService {
         searchFields,
         'donation_box_donation',
       );
+
+      // Apply geographic restriction through parent donation box's city_id
+      if (assignedCityIds && assignedCityIds.length > 0) {
+        query.andWhere('donation_box.city_id IN (:...assignedCityIds)', { assignedCityIds });
+      }
 
       // Apply sorting (whitelist to prevent SQL injection)
       const allowedSortFields = [
@@ -411,6 +495,13 @@ export class DonationBoxDonationService {
       console.log("error", error);
       throw new Error(`Failed to get collection stats: ${error.message}`);
     }
+  }
+
+  /**
+   * Get a donation box by ID (for geographic access check in controller).
+   */
+  async getDonationBoxById(boxId: number): Promise<DonationBox | null> {
+    return this.donationBoxRepository.findOne({ where: { id: boxId } });
   }
 
   async getDonationBoxDonationListForDropdown(options?: { donationBoxId?: number; status?: string }) {

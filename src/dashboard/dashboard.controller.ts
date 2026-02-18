@@ -176,6 +176,12 @@ export class DashboardController {
       const data = await this.aggregateService.getFundraisingOverview({
         year: query.year,
         months: query.months,
+        donation_type: query.donation_type,
+        donation_method: query.donation_method,
+        ref: query.ref,
+        date: query.date,
+        start_date: query.start_date,
+        end_date: query.end_date,
       });
       return res.status(HttpStatus.OK).json({
         success: true,

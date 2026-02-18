@@ -9,6 +9,7 @@ import { CommunicationController } from '../utils/controllers/communication.cont
 import { Donation } from './entities/donation.entity';
 import { DonationInKind } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
 import { User } from '../users/user.entity';
+import { City } from '../dms/geographic/cities/entities/city.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions/permissions.module';
 import { EmailModule } from '../email/email.module';
@@ -23,7 +24,7 @@ import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Donation, DonationInKind, User, RecurringDonation]),
+    TypeOrmModule.forFeature([Donation, DonationInKind, User, RecurringDonation, City]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
       signOptions: { expiresIn: '24h' },

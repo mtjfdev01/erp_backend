@@ -11,6 +11,7 @@ import {
   UseGuards,
   Query,
   Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { DonationBoxDonationService } from './donation_box_donation.service';
@@ -19,6 +20,7 @@ import { UpdateDonationBoxDonationDto } from './dto/update-donation_box_donation
 import { PermissionsGuard } from '../../../permissions/guards/permissions.guard';
 import { RequiredPermissions } from '../../../permissions/decorators/require-permission.decorator';
 import { JwtGuard } from 'src/auth/jwt.guard';
+import { CurrentUser } from 'src/auth/current-user.decorator';
 
 @Controller('donation-box-donation')
 @UseGuards(JwtGuard, PermissionsGuard)
@@ -26,6 +28,21 @@ export class DonationBoxDonationController {
   constructor(
     private readonly donationBoxDonationService: DonationBoxDonationService,
   ) {}
+
+  /**
+   * Check if user has geographic access to a donation box donation via its parent box's city_id.
+   * Throws ForbiddenException if user doesn't have access.
+   */
+  private async checkGeographicAccessByBoxId(userId: number, donationBoxId: number): Promise<void> {
+    const assignedCityIds = await this.donationBoxDonationService.resolveUserGeographyCityIds(userId);
+    if (assignedCityIds === null) return; // no geo restriction
+
+    // Get the parent donation box to check its city_id
+    const box = await this.donationBoxDonationService.getDonationBoxById(donationBoxId);
+    if (box && box.city_id && !assignedCityIds.includes(box.city_id)) {
+      throw new ForbiddenException('You do not have geographic access to this donation box');
+    }
+  }
 
   @Post()
   @RequiredPermissions([
@@ -38,6 +55,12 @@ export class DonationBoxDonationController {
   ) {
     try {
       const currentUserId = req.user?.id;
+
+      // Geographic access check on the parent donation box
+      if (createDonationBoxDonationDto.donation_box_id) {
+        await this.checkGeographicAccessByBoxId(currentUserId, createDonationBoxDonationDto.donation_box_id);
+      }
+
       const result = await this.donationBoxDonationService.create(
         createDonationBoxDonationDto,
         currentUserId,
@@ -48,6 +71,13 @@ export class DonationBoxDonationController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       const status = error.message.includes('not found')
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
@@ -85,10 +115,14 @@ export class DonationBoxDonationController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
     @Res() res?: Response,
+    @CurrentUser() currentUser?: any,
   ) {
     try {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
+
+      // Resolve geographic restriction
+      const assignedCityIds = await this.donationBoxDonationService.resolveUserGeographyCityIds(currentUser?.id);
 
       const result = await this.donationBoxDonationService.findAll({
         page: pageNum,
@@ -101,7 +135,7 @@ export class DonationBoxDonationController {
         payment_method,
         start_date,
         end_date,
-      });
+      }, assignedCityIds);
 
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -120,8 +154,11 @@ export class DonationBoxDonationController {
 
   @Get('box/:boxId')
   @RequiredPermissions([ 'fund_raising.donation_box_donations.view', 'super_admin', 'fund_raising_manager', 'fund_raising_user'])
-  async findByDonationBox(@Param('boxId') boxId: string, @Res() res: Response) {
+  async findByDonationBox(@Param('boxId') boxId: string, @Res() res: Response, @CurrentUser() currentUser?: any) {
     try {
+      // Geographic access check on the parent donation box
+      await this.checkGeographicAccessByBoxId(currentUser?.id, +boxId);
+
       const result = await this.donationBoxDonationService.findByDonationBox(
         +boxId,
       );
@@ -131,6 +168,13 @@ export class DonationBoxDonationController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: [],
+        });
+      }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,
@@ -144,8 +188,12 @@ export class DonationBoxDonationController {
   async getBoxCollectionStats(
     @Param('boxId') boxId: string,
     @Res() res: Response,
+    @CurrentUser() currentUser?: any,
   ) {
     try {
+      // Geographic access check on the parent donation box
+      await this.checkGeographicAccessByBoxId(currentUser?.id, +boxId);
+
       const result = await this.donationBoxDonationService.getBoxCollectionStats(
         +boxId,
       );
@@ -155,6 +203,13 @@ export class DonationBoxDonationController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,
@@ -165,15 +220,28 @@ export class DonationBoxDonationController {
 
   @Get(':id')
   @RequiredPermissions([ 'fund_raising.donation_box_donations.view', 'super_admin','fund_raising_manager', 'fund_raising_user'])
-  async findOne(@Param('id') id: string, @Res() res: Response) {
+  async findOne(@Param('id') id: string, @Res() res: Response, @CurrentUser() currentUser?: any) {
     try {
       const result = await this.donationBoxDonationService.findOne(+id);
+
+      // Geographic access check via parent donation box
+      if (result.donation_box_id) {
+        await this.checkGeographicAccessByBoxId(currentUser?.id, result.donation_box_id);
+      }
+
       return res.status(HttpStatus.OK).json({
         success: true,
         message: 'Collection record retrieved successfully',
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       const status = error.message.includes('not found')
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
@@ -195,6 +263,13 @@ export class DonationBoxDonationController {
   ) {
     try {
       const currentUserId = req.user?.id;
+
+      // Geographic access check on the existing record's parent donation box
+      const existing = await this.donationBoxDonationService.findOne(+id);
+      if (existing.donation_box_id) {
+        await this.checkGeographicAccessByBoxId(currentUserId, existing.donation_box_id);
+      }
+
       const result = await this.donationBoxDonationService.update(
         +id,
         updateDonationBoxDonationDto,
@@ -206,6 +281,13 @@ export class DonationBoxDonationController {
         data: result,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       const status = error.message.includes('not found')
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
@@ -219,8 +301,14 @@ export class DonationBoxDonationController {
 
   @Delete(':id')
   @RequiredPermissions([ 'fund_raising.donation_box_donations.delete', 'super_admin', 'fund_raising_manager',])
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Res() res: Response, @CurrentUser() currentUser?: any) {
     try {
+      // Geographic access check on the existing record's parent donation box
+      const existing = await this.donationBoxDonationService.findOne(+id);
+      if (existing.donation_box_id) {
+        await this.checkGeographicAccessByBoxId(currentUser?.id, existing.donation_box_id);
+      }
+
       const result = await this.donationBoxDonationService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -228,6 +316,13 @@ export class DonationBoxDonationController {
         data: null,
       });
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
       const status = error.message.includes('not found')
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;

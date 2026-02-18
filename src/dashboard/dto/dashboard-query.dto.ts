@@ -1,5 +1,5 @@
-import { IsOptional, IsInt, Min, Max, IsDateString } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsInt, Min, Max, IsDateString, IsString, IsArray } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class DashboardSummaryQueryDto {
   @IsOptional()
@@ -44,7 +44,6 @@ export class DashboardOverviewQueryDto {
 }
 
 export class DashboardFundraisingOverviewQueryDto {
-  /** Year for the overview (e.g. 2024). If not set, uses current year. */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -52,11 +51,35 @@ export class DashboardFundraisingOverviewQueryDto {
   @Max(2100)
   year?: number;
 
-  /** Last N months from today (overrides year if both provided). Default 12. */
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(60)
   months?: number = 12;
+
+  @IsOptional()
+  @IsString()
+  donation_type?: string;
+
+  @IsOptional()
+  @IsString()
+  donation_method?: string;
+
+  /** Comma-separated ref/campaign values (e.g. "MTJ-123,MTJ-456") */
+  @IsOptional()
+  @IsString()
+  ref?: string;
+
+  @IsOptional()
+  @IsString()
+  date?: string;
+
+  @IsOptional()
+  @IsString()
+  start_date?: string;
+
+  @IsOptional()
+  @IsString()
+  end_date?: string;
 }

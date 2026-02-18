@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsOptional, IsEnum, IsDateString, Length, IsObject } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsEnum, IsDateString, Length, IsObject, IsArray, IsNumber } from 'class-validator';
 import { UserRole, Department } from '../user.entity';
 
 export class UpdateUserWithPermissionsDto {
@@ -60,6 +60,32 @@ export class UpdateUserWithPermissionsDto {
   @IsString()
   @IsOptional()
   password?: string;
+
+  // Geographic assignment fields (for fund_raising department)
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_countries?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_regions?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_districts?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_tehsils?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_cities?: number[];
 
   // Permissions field
   @IsObject()

@@ -32,6 +32,10 @@ export class CreateDonorDto {
 
   @IsString()
   @IsOptional()
+  source?: string;
+
+  @IsString()
+  @IsOptional()
   address?: string;
 
   @IsString()

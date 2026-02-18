@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CitiesService } from './cities.service';
-import { CitiesController } from './cities.controller';
-import { City } from './entities/city.entity';
-import { Tehsil } from '../tehsils/entities/tehsil.entity';
+import { TehsilsService } from './tehsils.service';
+import { TehsilsController } from './tehsils.controller';
+import { Tehsil } from './entities/tehsil.entity';
 import { District } from '../districts/entities/district.entity';
 import { Region } from '../regions/entities/region.entity';
 import { Country } from '../countries/entities/country.entity';
@@ -11,15 +10,16 @@ import { JwtModule } from '@nestjs/jwt';
 import { PermissionsModule } from 'src/permissions';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([City, Tehsil, District, Region, Country]),
+  imports: [
+    TypeOrmModule.forFeature([Tehsil, District, Region, Country]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
       signOptions: { expiresIn: '24h' },
     }),
     PermissionsModule,
   ],
-  controllers: [CitiesController],
-  providers: [CitiesService],
-  exports: [CitiesService, TypeOrmModule],
+  controllers: [TehsilsController],
+  providers: [TehsilsService],
+  exports: [TehsilsService, TypeOrmModule],
 })
-export class CitiesModule {}
+export class TehsilsModule {}
