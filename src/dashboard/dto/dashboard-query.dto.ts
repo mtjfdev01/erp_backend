@@ -71,6 +71,11 @@ export class DashboardFundraisingOverviewQueryDto {
   @IsString()
   ref?: string;
 
+  /** Comma-separated project IDs (e.g. "health,education,clean-water") */
+  @IsOptional()
+  @IsString()
+  projects?: string;
+
   @IsOptional()
   @IsString()
   date?: string;

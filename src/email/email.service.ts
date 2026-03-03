@@ -1104,4 +1104,93 @@ export class EmailService implements OnModuleInit {
       return false;
     }
   }
+
+//  Tasks Section 
+  async sendTaskOverdueNotification(
+    toEmail: string,
+    task: any,
+    escalationLevel: number,
+  ): Promise<boolean> {
+    try {
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const subject = `Urgent: Task Overdue Escalation (Level ${escalationLevel}) - ${task.title}`;
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [toEmail],
+        subject,
+        html: this.generateTaskOverdueTemplate(task, escalationLevel),
+      });
+
+      const messageId = result.data?.id || "unknown";
+      this.logger.log(
+        `Sent task overdue notification via Resend to ${toEmail} (id: ${messageId})`,
+      );
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Task overdue email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  private generateTaskOverdueTemplate(
+    task: any,
+    escalationLevel: number,
+  ): string {
+    const assignees =
+      (Array.isArray(task.assigned_users_meta) &&
+        task.assigned_users_meta
+          .map((m: any) => (m && m.user_id != null ? String(m.user_id) : null))
+          .filter((v: string | null) => v !== null)
+          .join(", ")) ||
+      (Array.isArray(task.assigned_user_ids) &&
+        task.assigned_user_ids.map((id) => String(id)).join(", ")) ||
+      "Unassigned";
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #d9534f; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .details { background-color: white; padding: 15px; border-radius: 5px; border-left: 5px solid #d9534f; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Task Overdue Alert</h1>
+          </div>
+          <div class="content">
+            <p><strong>Escalation Level: ${escalationLevel}</strong></p>
+            <p>The following task is overdue and requires immediate attention:</p>
+            <div class="details">
+              <p><strong>Title:</strong> ${task.title}</p>
+              <p><strong>Due Date:</strong> ${task.due_date}</p>
+              <p><strong>Priority:</strong> ${task.priority}</p>
+              <p><strong>Assigned To:</strong> ${assignees}</p>
+            </div>
+            <p>Please take necessary actions.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  }
 }

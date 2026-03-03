@@ -3,6 +3,7 @@ import { PermissionsEntity } from '../permissions/entities/permissions.entity';
 import { DonationBox } from '../dms/donation_box/entities/donation-box.entity';
 
 export enum UserRole {
+  SUPER_ADMIN = "super_admin",
   ADMIN = 'admin',
   USER = 'user',
   MANAGER = 'manager',
@@ -14,6 +15,12 @@ export enum UserRole {
   DEVELOPER = 'developer',
   SYSTEM_ADMIN = 'system_admin',
   IT_SUPPORT = 'it_support',
+  TEAM_LEAD = "team_lead",
+  STAFF = "staff",
+  FIELD_OFFICER = "field_officer",
+  VOLUNTEER = "volunteer",
+  DEPT_HEAD = "dept_head",
+
 }
 
 export enum Department {

@@ -26,6 +26,7 @@ import { GoldSilverPriceModule } from './zakat/gold_silver_price/gold_silver_pri
 import { ScheduleModule } from '@nestjs/schedule';
 import { QrCodeModule } from './qr_code/qr_code.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -51,6 +52,23 @@ import { DashboardModule } from './dashboard/dashboard.module';
         statement_timeout: 60000,
       }      
     }),
+
+    // ✅ VECTOR / AI DB (new pgvector service)
+    TypeOrmModule.forRoot({
+      name: 'vector',
+      type: 'postgres',
+      url: process.env.VECTOR_DATABASE_URL,
+      // keep this isolated to only AI entities (don’t use autoLoadEntities here)
+      autoLoadEntities: false,
+      synchronize: true, // OK for start; later move to migrations
+      ssl: process.env.VECTOR_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      extra: {
+        max: 5,
+        connectionTimeoutMillis: 15000,
+        query_timeout: 60000,
+        statement_timeout: 60000,
+      },
+    }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,
     ProcurementsModule,
@@ -74,6 +92,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     GoldSilverPriceModule,
     QrCodeModule,
     DashboardModule,
+    TasksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

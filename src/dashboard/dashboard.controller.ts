@@ -179,6 +179,7 @@ export class DashboardController {
         donation_type: query.donation_type,
         donation_method: query.donation_method,
         ref: query.ref,
+        projects: query.projects,
         date: query.date,
         start_date: query.start_date,
         end_date: query.end_date,

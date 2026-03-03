@@ -1173,6 +1173,10 @@ export class DonationsService {
     assignedCityNames?: string[] | null,
   ) {
     try {
+      const restrictedEmails = [
+        'mtjf_agency@example.com',
+        'musna@mtjfoundation.org',
+      ];
       console.log("user email in donation listing", user?.email);
       console.log("multiselectFilters", multiselectFilters);
       const entitySearchFields = ['city'];
@@ -1180,9 +1184,9 @@ export class DonationsService {
       .leftJoin('donation.donor', 'donor')
       .addSelect('donor.name', 'donor_name')
       .addSelect('donor.id', 'donor_id')
-      if(user?.email != 'mtjf_agency@example.com') {  
-        query.addSelect('donor.email', 'donor_email')
-        query.addSelect('donor.phone', 'donor_phone')
+      if (!restrictedEmails.includes(user?.email)) {
+        query.addSelect('donor.email', 'donor_email');
+        query.addSelect('donor.phone', 'donor_phone');
       }
       query.getRawMany();
       // Apply filters

@@ -405,6 +405,7 @@ export class DashboardAggregateService {
       query.donation_type ||
       query.donation_method ||
       query.ref ||
+      query.projects ||
       query.date ||
       query.start_date ||
       query.end_date
@@ -421,6 +422,7 @@ export class DashboardAggregateService {
       donation_type?: string;
       donation_method?: string;
       ref?: string;
+      projects?: string;
       date?: string;
       start_date?: string;
       end_date?: string;
@@ -450,6 +452,12 @@ export class DashboardAggregateService {
       const refs = query.ref.split(',').map((r) => r.trim()).filter(Boolean);
       if (refs.length > 0) {
         qb.andWhere('d.ref IN (:...refs)', { refs });
+      }
+    }
+    if (query.projects) {
+      const projectIds = query.projects.split(',').map((p) => p.trim()).filter(Boolean);
+      if (projectIds.length > 0) {
+        qb.andWhere('d.project_id IN (:...projectIds)', { projectIds });
       }
     }
 
@@ -571,6 +579,7 @@ export class DashboardAggregateService {
     donation_type?: string;
     donation_method?: string;
     ref?: string;
+    projects?: string;
     date?: string;
     start_date?: string;
     end_date?: string;
