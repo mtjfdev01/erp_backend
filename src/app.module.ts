@@ -54,21 +54,21 @@ import { TasksModule } from './tasks/tasks.module';
     }),
 
     // ✅ VECTOR / AI DB (new pgvector service)
-    TypeOrmModule.forRoot({
-      name: 'vector',
-      type: 'postgres',
-      url: process.env.VECTOR_DATABASE_URL,
-      // keep this isolated to only AI entities (don’t use autoLoadEntities here)
-      autoLoadEntities: false,
-      synchronize: true, // OK for start; later move to migrations
-      ssl: process.env.VECTOR_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-      extra: {
-        max: 5,
-        connectionTimeoutMillis: 15000,
-        query_timeout: 60000,
-        statement_timeout: 60000,
-      },
-    }),
+    // TypeOrmModule.forRoot({
+    //   name: 'vector',
+    //   type: 'postgres',
+    //   url: process.env.VECTOR_DATABASE_URL,
+    //   // keep this isolated to only AI entities (don’t use autoLoadEntities here)
+    //   autoLoadEntities: false,
+    //   synchronize: true, // OK for start; later move to migrations
+    //   ssl: process.env.VECTOR_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    //   extra: {
+    //     max: 5,
+    //     connectionTimeoutMillis: 15000,
+    //     query_timeout: 60000,
+    //     statement_timeout: 60000,
+    //   },
+    // }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,
     ProcurementsModule,
