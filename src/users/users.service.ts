@@ -443,4 +443,28 @@ export class UsersService {
       isActive: user.isActive,
     }));
   }
+
+  async findByIds(ids: number[]): Promise<User[]> {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return [];
+    }
+
+    const uniqueValidIds = Array.from(
+      new Set(
+        ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+
+    if (uniqueValidIds.length === 0) {
+      return [];
+    }
+
+    return this.userRepository
+      .createQueryBuilder('user')
+      .where('user.id IN (:...ids)', { ids: uniqueValidIds })
+      .andWhere('user.is_archived = :archived', { archived: false })
+      .getMany();
+  }
 } 

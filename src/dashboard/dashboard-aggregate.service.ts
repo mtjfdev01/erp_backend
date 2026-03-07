@@ -13,6 +13,7 @@ import {
   DashboardMonthDonorUnique,
   DashboardMonthEvents,
 } from './entities';
+import { applyCommonFilters, applyMultiselectFilters } from '../utils/filters/common-filter.util';
 
 /** Donation status considered "COMPLETED" for aggregation */
 const COMPLETED_STATUS = 'completed';
@@ -433,33 +434,39 @@ export class DashboardAggregateService {
       .leftJoinAndSelect('d.donor', 'donor')
       .where('d.status = :status', { status: COMPLETED_STATUS });
 
-    if (query.date) {
-      qb.andWhere('d.date = :exactDate', { exactDate: query.date });
-    } else {
-      const effectiveStart = query.start_date || start.toISOString().slice(0, 10);
-      const effectiveEnd = query.end_date || end.toISOString().slice(0, 10);
-      qb.andWhere('d.date >= :rangeStart', { rangeStart: effectiveStart });
-      qb.andWhere('d.date <= :rangeEnd', { rangeEnd: effectiveEnd });
-    }
+    const effectiveStart = query.start_date || start.toISOString().slice(0, 10);
+    const effectiveEnd = query.end_date || end.toISOString().slice(0, 10);
 
-    if (query.donation_type) {
-      qb.andWhere('d.donation_type = :dtype', { dtype: query.donation_type });
-    }
-    if (query.donation_method) {
-      qb.andWhere('d.donation_method = :dmethod', { dmethod: query.donation_method });
-    }
-    if (query.ref) {
-      const refs = query.ref.split(',').map((r) => r.trim()).filter(Boolean);
-      if (refs.length > 0) {
-        qb.andWhere('d.ref IN (:...refs)', { refs });
-      }
-    }
-    if (query.projects) {
-      const projectIds = query.projects.split(',').map((p) => p.trim()).filter(Boolean);
-      if (projectIds.length > 0) {
-        qb.andWhere('d.project_id IN (:...projectIds)', { projectIds });
-      }
-    }
+    applyCommonFilters(
+      qb,
+      {
+        donation_type: query.donation_type || '',
+        donation_method: query.donation_method || '',
+        date: query.date || '',
+        start_date: query.date ? '' : effectiveStart,
+        end_date: query.date ? '' : effectiveEnd,
+      },
+      [],
+      'd',
+    );
+
+    const refs = (query.ref || '')
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    const projectIds = (query.projects || '')
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    applyMultiselectFilters(
+      qb,
+      {
+        ...(refs.length ? { ref: refs } : {}),
+        ...(projectIds.length ? { project_id: projectIds } : {}),
+      },
+      'd',
+    );
 
     return qb;
   }

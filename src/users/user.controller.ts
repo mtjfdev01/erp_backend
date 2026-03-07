@@ -17,6 +17,14 @@ import { RequiredPermissions } from '../permissions/decorators/require-permissio
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  private parseUserIdOrThrow(id: string): number {
+    const parsedId = Number(id);
+    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+      throw new BadRequestException('Invalid user id');
+    }
+    return parsedId;
+  }
+
   @Post()
   @RequiredPermissions(['users.create', 'super_admin'])
   async create(@Body() createUserDto: CreateUserDto, @CurrentUser() user: User) {
@@ -61,6 +69,21 @@ export class UsersController {
     });
   }
 
+  @Get('by-ids')
+  @UseGuards(JwtGuard)
+  async getUsersByIds(@Query('ids') ids: string | string[]) {
+    const rawValues = Array.isArray(ids) ? ids : (ids ? [ids] : []);
+    const parsedIds = rawValues
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    if (parsedIds.length === 0) {
+      return [];
+    }
+
+    return this.usersService.findByIds(parsedIds);
+  }
+
   @Get('department/:department')
   @RequiredPermissions(['users.list_view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin'])
   async getUsersByDepartment(
@@ -87,19 +110,19 @@ export class UsersController {
   @Get(':id')
   @RequiredPermissions(['users.view', 'read_only_user_manager', 'read_only_super_admin', 'super_admin'])
   async findOne(@Param('id') id: string) {
-    return this.usersService.findOne(+id);
+    return this.usersService.findOne(this.parseUserIdOrThrow(id));
   }
 
   @Patch(':id')
   @RequiredPermissions(['users.update', 'super_admin'])
   async update(@Param('id') id: string, @Body() updateDto: UpdateUserWithPermissionsDto, @CurrentUser() user: User) {
-    return this.usersService.update(+id, updateDto, user);
+    return this.usersService.update(this.parseUserIdOrThrow(id), updateDto, user);
   }
 
   @Delete(':id')
   @RequiredPermissions(['users.delete', 'super_admin'])
   async remove(@Param('id') id: string, @CurrentUser() user: User) {
-    return this.usersService.remove(+id, user);
+    return this.usersService.remove(this.parseUserIdOrThrow(id), user);
   }
 
   // Password change endpoint (user changes their own password)
@@ -120,7 +143,11 @@ export class UsersController {
     @Body() changePasswordDto: ChangePasswordByAdminDto,
     @CurrentUser() currentUser: User
   ) {
-    return this.usersService.changePasswordByAdmin(currentUser, +id, changePasswordDto.newPassword);
+    return this.usersService.changePasswordByAdmin(
+      currentUser,
+      this.parseUserIdOrThrow(id),
+      changePasswordDto.newPassword,
+    );
   }
 
   // // Dedicated Permission Management Endpoints

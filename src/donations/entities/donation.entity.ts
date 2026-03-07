@@ -65,6 +65,14 @@ export class Donation extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true, default: null })
   bank_name: string;
+
+  // Optional bank field for manual donation entries
+  @Column({ type: 'varchar', nullable: true, default: null })
+  bank: string;
+
+  // Optional transaction reference for manual donation entries
+  @Column({ type: 'varchar', nullable: true, default: null })
+  transaction_id: string;
   
   // Order ID returned by the bank
   @Column({ type: 'varchar', nullable: true, default: null })

@@ -93,6 +93,14 @@ export class CreateDonationDto {
   @IsString()
   bank_name?: string;
 
+  @IsOptional()
+  @IsString()
+  bank?: string;
+
+  @IsOptional()
+  @IsString()
+  transaction_id?: string;
+
   // ⭐ NEW: In-kind donation fields
   @IsOptional()
   @IsString()
