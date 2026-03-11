@@ -182,7 +182,7 @@ export class DonorService {
   /**
    * Find all donors with pagination and filtering
    */
-  async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: { online: boolean; offline: boolean }) {
+async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: { online: boolean; offline: boolean }) {
     try {
       const {
         page = 1,
