@@ -271,8 +271,10 @@ export class DonorService {
       const sortFieldName = validSortFields.includes(sortField) ? sortField : 'created_at';
       queryBuilder.orderBy(`donor.${sortFieldName}`, sortOrder);
 
-      // Apply pagination
-      queryBuilder.skip(skip).take(pageSize);
+      // Apply pagination only if pageSize > 0
+      if (pageSize > 0) {
+        queryBuilder.skip(skip).take(pageSize);
+      }
 
       // Execute query
       const [data, total] = await queryBuilder.getManyAndCount();
@@ -286,8 +288,8 @@ export class DonorService {
           page,
           pageSize,
           total,
-          totalPages: Math.ceil(total / pageSize),
-          hasNext: page < Math.ceil(total / pageSize),
+          totalPages: pageSize > 0 ? Math.ceil(total / pageSize) : 1,
+          hasNext: pageSize > 0 ? page < Math.ceil(total / pageSize) : false,
           hasPrev: page > 1,
         },
       };

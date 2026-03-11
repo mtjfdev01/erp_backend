@@ -48,6 +48,13 @@ console.log("23456753424567", user);
       if (Array.isArray(requiredPermission)) {
         // Check if user has ANY of the permissions in the array
         for (const permission of requiredPermission) {
+          // 1. Check if the "permission" string is actually a Role name and matches user's role
+          if (user.role && String(user.role).toLowerCase() === String(permission).toLowerCase()) {
+            hasPermission = true;
+            break;
+          }
+
+          // 2. Otherwise check standard path-based permissions
           const hasThisPermission = await this.permissionsService.hasPermission(
             Number(user.id),
             permission,
@@ -59,10 +66,16 @@ console.log("23456753424567", user);
         }
       } else {
         // Single permission check
-        hasPermission = await this.permissionsService.hasPermission(
-          user.id,
-          requiredPermission,
-        );
+        // 1. Check if it's a role match
+        if (user.role && String(user.role).toLowerCase() === String(requiredPermission).toLowerCase()) {
+          hasPermission = true;
+        } else {
+          // 2. Standard path check
+          hasPermission = await this.permissionsService.hasPermission(
+            user.id,
+            requiredPermission,
+          );
+        }
       }
 
       if (!hasPermission) {
