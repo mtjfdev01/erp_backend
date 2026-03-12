@@ -1591,13 +1591,19 @@ export class TasksService {
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
     const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+    const oldProgress = task.progress;
     task.progress = value;
     task.last_progress_notes = payload.notes || null;
     await this.taskRepo.save(task);
-    await this.logActivity(task, currentUser, "progress_updated", {
-      progress: value,
-      notes: payload.notes?.slice(0, 120),
-    });
+
+    // Only log activity if progress increased (i.e., an item was checked)
+    if (value > oldProgress) {
+      await this.logActivity(task, currentUser, "progress_updated", {
+        progress: value,
+        notes: payload.notes?.slice(0, 120),
+      });
+    }
+
     const refreshed = await this.findOne(id, currentUser);
     return refreshed;
   }
