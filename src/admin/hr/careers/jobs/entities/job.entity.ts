@@ -43,8 +43,6 @@ export class Job extends BaseEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   location: string;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  experience: string;
 
   @Column({ type: 'text', nullable: true })
   about: string;
@@ -71,6 +69,12 @@ export class Job extends BaseEntity {
 
   @Column({ type: 'timestamp', nullable: true })
   closing_date: Date;
+
+@Column('text', { array: true, nullable: true })
+experience?: string[];
+
+@Column('text', { array: true, nullable: true })
+skills?: string[];
 
   // // Relationships
   // @OneToMany(() => Application, (application) => application.job, { eager: false })
