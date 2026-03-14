@@ -39,9 +39,20 @@ export class CreateJobDto {
   @IsNotEmpty({ message: 'Location is required' })
   location: string;
 
+  
   @IsOptional()
-  @IsString()
-  experience?: string;
+  @IsArray()
+  @IsString({ each: true })
+  experience?: string[];
+  
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  skills?: string[];
+  
+  @IsOptional()
+  @IsDateString()
+  posted_date?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'About is required' })
@@ -67,10 +78,6 @@ export class CreateJobDto {
   @IsOptional()
   @IsBoolean()
   is_featured?: boolean;
-
-  @IsOptional()
-  @IsDateString()
-  posted_date?: Date;
 
   @IsOptional()
   @IsDateString()
