@@ -250,25 +250,30 @@ export class TasksService {
   ): Promise<void> {
     if (!user) return;
 
-    // Always allow viewing if user is a required approver, regardless of role or scope
+    const isAdmin = user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN;
+
+    // 1. Super Admins and Admins can see everything across all departments
+    if (isAdmin) {
+      return;
+    }
+
+    // 2. For non-admins, strictly enforce department boundaries with involvement exceptions
     qb.andWhere(
-      new Brackets((orQb) => {
-        orQb.where(":userId = ANY(task.approval_required_user_ids)", {
+      new Brackets((mainQb) => {
+        // A. Always allow viewing if user is a required approver (even across departments)
+        mainQb.where(":userId = ANY(task.approval_required_user_ids)", {
           userId: user.id,
         });
 
-        if (
-          user.role === UserRole.SUPER_ADMIN ||
-          user.role === UserRole.ADMIN
-        ) {
-          orQb.orWhere("1=1");
-          return;
+        // B. OR the task belongs to the user's department
+        if (user.department) {
+          mainQb.orWhere("task.department::text = :userDept", { userDept: user.department });
         }
 
-        // If not admin, check direct assignment, creation, or reporting
-        orQb.orWhere(":userId = ANY(task.assigned_user_ids)", { userId: user.id });
-        orQb.orWhere("task.created_by_id = :userId", { userId: user.id });
-        orQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
+        // C. OR the user is directly involved in the task (regardless of department)
+        mainQb.orWhere(":userId = ANY(task.assigned_user_ids)", { userId: user.id });
+        mainQb.orWhere("task.created_by_id = :userId", { userId: user.id });
+        mainQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
       }),
     );
   }
@@ -345,7 +350,7 @@ export class TasksService {
         delete safeFilters.filters;
       }
 
-      // Handle department filter specially (union of assigned-to and assigned-by department)
+      // Handle department filter strictly
       let departmentFilter: string | undefined = undefined;
       if (safeFilters.department) {
         departmentFilter = safeFilters.department;
@@ -355,27 +360,10 @@ export class TasksService {
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
       if (departmentFilter) {
-        if (currentUser?.id) {
-          qb.andWhere(
-            `(task.department::text = :department
-              OR EXISTS (
-                SELECT 1 FROM "user" u2
-                WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-              )
-              OR :userId = ANY(task.approval_required_user_ids)
-            )`,
-            { department: departmentFilter, userId: currentUser.id },
-          );
-        } else {
-          qb.andWhere(
-            `(task.department::text = :department
-              OR EXISTS (
-                SELECT 1 FROM "user" u2
-                WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-              ))`,
-            { department: departmentFilter },
-          );
-        }
+        // Force the department to match exactly what's requested
+        qb.andWhere("task.department::text = :department", { 
+          department: departmentFilter 
+        });
       }
 
       const validSort = [
@@ -425,14 +413,9 @@ export class TasksService {
         });
       }
       if (filters.department) {
-        qb.andWhere(
-          `(task.department::text = :department
-            OR EXISTS (
-              SELECT 1 FROM "user" u2
-              WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-            ))`,
-          { department: filters.department },
-        );
+        qb.andWhere("task.department::text = :filterDept", { 
+          filterDept: filters.department 
+        });
       }
       if (filters.project_id) {
         qb.andWhere("task.project_id = :project_id", {
