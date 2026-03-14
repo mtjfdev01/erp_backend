@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, SelectQueryBuilder, IsNull, Not } from "typeorm";
+import { Repository, SelectQueryBuilder, IsNull, Not, Brackets } from "typeorm";
 import {
   Task,
   TaskStatus,
@@ -80,8 +80,9 @@ export class TasksService {
         ? user.department
         : null;
     const modulePermissions =
-      (deptKey ? permissions[deptKey]?.tasks : null) ||
+      (deptKey ? permissions?.[deptKey]?.tasks : null) ||
       permissions?.admin?.tasks ||
+      permissions?.tasking?.tasks ||
       permissions?.tasks ||
       {};
     const reports = modulePermissions?.reports || {};
@@ -89,6 +90,21 @@ export class TasksService {
     if (reports.view_dept === true) return "department";
     if (reports.view_team === true) return "team";
     if (reports.view_own === true) return "self";
+
+    // Fallback based on role if no explicit scope is defined in reports
+    if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) {
+      return "org";
+    }
+    if (
+      (user.role === UserRole.MANAGER || user.role === UserRole.DEPT_HEAD) &&
+      user.department
+    ) {
+      return "department";
+    }
+    if (user.role === UserRole.TEAM_LEAD) {
+      return "team";
+    }
+
     return "self";
   }
 
@@ -113,6 +129,7 @@ export class TasksService {
     const modulePermissions =
       (deptKey ? permissions?.[deptKey]?.tasks : null) ||
       permissions?.admin?.tasks ||
+      permissions?.tasking?.tasks ||
       permissions?.tasks ||
       {};
     const reports = modulePermissions?.reports || {};
@@ -127,6 +144,18 @@ export class TasksService {
       scope = "team";
     } else if (reports.view_own === true) {
       scope = "self";
+    } else {
+      // Fallback based on role if no explicit scope is defined in reports
+      if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) {
+        scope = "org";
+      } else if (
+        (user.role === UserRole.MANAGER || user.role === UserRole.DEPT_HEAD) &&
+        user.department
+      ) {
+        scope = "department";
+      } else if (user.role === UserRole.TEAM_LEAD) {
+        scope = "team";
+      }
     }
     const canViewBase = actions.view === true;
     const canViewReports =
@@ -221,51 +250,27 @@ export class TasksService {
   ): Promise<void> {
     if (!user) return;
 
-    if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) {
-      return;
-    }
-
-    const scope = await this.getTaskScope(user);
-
-    if (scope === "org") {
-      return;
-    }
-
-    if (scope === "department" || scope === "team") {
-      if (user.department && user.id) {
-        qb.andWhere(
-          `(task.department::text = :department
-            OR EXISTS (
-              SELECT 1 FROM "user" u2
-              WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-            )
-            OR :userId = ANY(task.approval_required_user_ids)
-          )`,
-          { department: user.department, userId: user.id },
-        );
-      } else if (user.department) {
-        qb.andWhere(
-          `(task.department::text = :department
-            OR EXISTS (
-              SELECT 1 FROM "user" u2
-              WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-            ))`,
-          { department: user.department },
-        );
-      }
-      return;
-    }
-
-    if (user.id) {
-      qb.andWhere(
-        "(:userId = ANY(task.assigned_user_ids) OR :userId = ANY(task.approval_required_user_ids))",
-        {
+    // Always allow viewing if user is a required approver, regardless of role or scope
+    qb.andWhere(
+      new Brackets((orQb) => {
+        orQb.where(":userId = ANY(task.approval_required_user_ids)", {
           userId: user.id,
-        },
-      );
-    } else {
-      qb.andWhere("1=0");
-    }
+        });
+
+        if (
+          user.role === UserRole.SUPER_ADMIN ||
+          user.role === UserRole.ADMIN
+        ) {
+          orQb.orWhere("1=1");
+          return;
+        }
+
+        // If not admin, check direct assignment, creation, or reporting
+        orQb.orWhere(":userId = ANY(task.assigned_user_ids)", { userId: user.id });
+        orQb.orWhere("task.created_by_id = :userId", { userId: user.id });
+        orQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
+      }),
+    );
   }
 
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
@@ -466,7 +471,7 @@ export class TasksService {
       const completedTasks = await qb
         .clone()
         .andWhere("task.status = :completedStatus", {
-          completedStatus: TaskStatus.COMPLETED,
+          completedStatus: TaskStatus.CLOSED,
         })
         .getCount();
 
@@ -720,9 +725,19 @@ export class TasksService {
       let newCompletedDate = task.completed_date;
       let shouldResetApprovalWorkflow = false;
       let shouldResetApprovalsForRework = false;
+      let newProgress = task.progress;
       const nextStatus = dto.status ?? oldStatus;
 
       if (dto.status && dto.status !== oldStatus) {
+        // Reset progress when reopening from Closed or Cancelled
+        if (
+          (oldStatus === TaskStatus.CLOSED ||
+            oldStatus === TaskStatus.CANCELLED) &&
+          nextStatus === TaskStatus.OPEN
+        ) {
+          newProgress = 0;
+        }
+
         const workflowType =
           dto.workflow_type !== undefined
             ? dto.workflow_type
@@ -749,6 +764,7 @@ export class TasksService {
       ) {
         shouldResetApprovalWorkflow = true;
         newCompletedDate = null;
+        newProgress = 0;
       }
       if (
         isApprovalWorkflow &&
@@ -782,6 +798,7 @@ export class TasksService {
         updatedRejectedByIds = null;
       }
 
+      const oldProgress = task.progress;
       Object.assign(task, {
         title: dto.title ?? task.title,
         description: dto.description ?? task.description,
@@ -798,7 +815,7 @@ export class TasksService {
         assigned_user_ids: Array.isArray(dto.assigned_users)
           ? dto.assigned_users
           : task.assigned_user_ids,
-        assigned_users_meta:
+        assigned_user_ids_meta:
           Array.isArray(dto.assigned_users_meta) &&
           dto.assigned_users_meta.length > 0
             ? dto.assigned_users_meta
@@ -807,6 +824,7 @@ export class TasksService {
         recurrence_next_date: dto.recurrence_next_date
           ? new Date(dto.recurrence_next_date)
           : task.recurrence_next_date,
+        progress: newProgress,
         reported_by_id:
           typeof dto.reported_by_id === "number"
             ? dto.reported_by_id
@@ -821,6 +839,14 @@ export class TasksService {
         updated_by_id: currentUser?.id ?? task.updated_by_id,
       });
       const saved = await this.taskRepo.save(task);
+
+      if (saved.progress !== oldProgress) {
+        await this.logActivity(saved, currentUser, "progress_updated", {
+          from_progress: oldProgress,
+          progress: saved.progress,
+          notes: "Progress reset due to task reopening/rework.",
+        });
+      }
       await this.upsertTaskApprovalState(saved);
       if (shouldResetApprovalWorkflow) {
         await this.logActivity(
@@ -850,7 +876,7 @@ export class TasksService {
         }
       }
       await this.logActivity(saved, currentUser, "updated", { changes: dto });
-      return saved;
+      return this.findOne(saved.id, currentUser);
     } catch (e) {
       throw e;
     }
@@ -872,9 +898,13 @@ export class TasksService {
           .filter((v) => v !== null && !isNaN(v as number)) as number[])
       : [];
     const allAssignedIds = [...assignedIds, ...metaIds];
-    const isAssignee = allAssignedIds.includes(Number(currentUser.id));
+    const currentUserId = Number(currentUser.id);
+    const isAssignee = allAssignedIds.includes(currentUserId);
+    const isCreator = task.created_by_id === currentUserId;
+    const isReporter = task.reported_by_id === currentUserId;
+
     if (!perms.canUpdate) {
-      if (!perms.canView || !isAssignee) {
+      if (!perms.canView || (!isAssignee && !isCreator && !isReporter)) {
         throw new ForbiddenException(
           "Insufficient permissions to change task status",
         );
@@ -893,9 +923,9 @@ export class TasksService {
         nextStatus,
       )
     ) {
-      if (!perms.canApprove && !isAdminRole) {
+      if (!perms.canApprove && !isAdminRole && !isCreator && !isReporter) {
         throw new ForbiddenException(
-          "Only approvers or admins can update this status",
+          "Only approvers, admins, creators, or assigners can update this status",
         );
       }
     }
@@ -903,7 +933,9 @@ export class TasksService {
       nextStatus === TaskStatus.CLOSED &&
       !perms.canUpdate &&
       !isAdminRole &&
-      !perms.canApprove
+      !perms.canApprove &&
+      !isCreator &&
+      !isReporter
     ) {
       throw new ForbiddenException("Only authorized staff can close tasks");
     }
@@ -949,7 +981,7 @@ export class TasksService {
       to_status: updated.status,
       notes: dto.notes ? dto.notes.slice(0, 500) : undefined,
     });
-    return updated;
+    return this.findOne(id, currentUser);
   }
 
   async assign(
@@ -1321,6 +1353,7 @@ export class TasksService {
     }
     const qb = this.taskApprovalRepo
       .createQueryBuilder("ta")
+      .leftJoinAndSelect("ta.task", "task")
       .where(":userId = ANY(ta.approval_required_user_ids)", { userId })
       .andWhere("ta.approval_status IS NOT NULL");
 
@@ -1558,13 +1591,19 @@ export class TasksService {
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
     const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+    const oldProgress = task.progress;
     task.progress = value;
     task.last_progress_notes = payload.notes || null;
     await this.taskRepo.save(task);
-    await this.logActivity(task, currentUser, "progress_updated", {
-      progress: value,
-      notes: payload.notes?.slice(0, 120),
-    });
+
+    // Only log activity if progress increased (i.e., an item was checked)
+    if (value > oldProgress) {
+      await this.logActivity(task, currentUser, "progress_updated", {
+        progress: value,
+        notes: payload.notes?.slice(0, 120),
+      });
+    }
+
     const refreshed = await this.findOne(id, currentUser);
     return refreshed;
   }
@@ -1675,6 +1714,7 @@ export class TasksService {
           assigned_users_meta: Array.isArray(changes.assigned_users_meta)
             ? changes.assigned_users_meta
             : null,
+          progress: changes.progress ?? null,
         };
         const activity = this.activityRepo.create(payload);
         await this.activityRepo.save(activity);

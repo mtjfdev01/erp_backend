@@ -8,6 +8,7 @@ export class TaskApprovalMetaEntryDto {
 
 export class TaskApprovalStateDto {
   task_id: number;
+  task?: any;
   approval_required_user_ids: number[] | null;
   approvals_meta: TaskApprovalMetaEntryDto[] | null;
   approved_by_id: number[] | null;

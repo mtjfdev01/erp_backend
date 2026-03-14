@@ -44,6 +44,7 @@ export class TasksController {
 
   @Post()
   @RequiredPermissions([
+    "tasking.tasks.create",
     "tasks.create",
     'super_admin'
   ])
@@ -57,7 +58,11 @@ export class TasksController {
   }
 
   @Post("search")
-  @RequiredPermissions(["tasking.tasks.list_view", "super_admin"]) 
+  @RequiredPermissions([
+    "tasking.tasks.list_view",
+    "tasks.list_view",
+    "super_admin"
+  ]) 
   async findAll(
     @Body() payload: any,
     @CurrentUser() user: User,
@@ -69,9 +74,9 @@ export class TasksController {
 
   @Get("dashboard/stats")
   @RequiredPermissions([
+    "tasking.dashboard.view",
     "tasks.dashboard.view",
     "super_admin",
-
   ])
   async getDashboardStats(
     @Query() query: any,
@@ -85,9 +90,9 @@ export class TasksController {
 
   @Get("reports")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
     "super_admin",
-
   ])
   async getReports(
     @Query() query: any,
@@ -101,9 +106,9 @@ export class TasksController {
 
   @Get(":id")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
     "super_admin",
-
   ])
   async findOne(
     @Param("id") id: string,
@@ -116,9 +121,9 @@ export class TasksController {
 
   @Get(":id/approval")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
     "super_admin",
-
   ])
   async getApprovalState(
     @Param("id") id: string,
@@ -145,9 +150,9 @@ export class TasksController {
 
   @Patch(":id")
   @RequiredPermissions([
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   async update(
     @Param("id") id: string,
@@ -161,10 +166,11 @@ export class TasksController {
 
   @Post(":id/assign")
   @RequiredPermissions([
+    "tasking.tasks.assign",
     "tasks.assign",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   async assign(
     @Param("id") id: string,
@@ -178,10 +184,11 @@ export class TasksController {
 
   @Post(":id/reassign")
   @RequiredPermissions([
+    "tasking.tasks.assign",
     "tasks.assign",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-   
   ])
   async reassign(
     @Param("id") id: string,
@@ -195,12 +202,15 @@ export class TasksController {
 
   @Post(":id/approve")
   @RequiredPermissions([
+    "tasking.tasks.approve",
     "tasks.approve",
+    "tasking.tasks.update",
     "tasks.update",
     UserRole.SUPER_ADMIN,
     UserRole.ADMIN,
     UserRole.DEPT_HEAD,
     UserRole.MANAGER,
+    UserRole.USER,
   ])
   async approve(
     @Param("id") id: string,
@@ -213,17 +223,12 @@ export class TasksController {
   }
 
   @Get("approvals/my")
-  @RequiredPermissions([
-    "tasks.approve",
-    "tasks.update",
-    "super_admin",
-
-  ])
   async getMyApprovals(@CurrentUser() user: User, @Res() res: Response) {
     const approvals =
       await this.tasksService.getApprovalsForUserDashboard(user);
     const data: TaskApprovalStateDto[] = approvals.map((approval) => ({
       task_id: approval.task_id,
+      task: approval.task ?? null,
       approval_required_user_ids: approval.approval_required_user_ids ?? null,
       approvals_meta: (approval.approvals_meta as any) ?? null,
       approved_by_id: approval.approved_by_id ?? null,
@@ -238,9 +243,10 @@ export class TasksController {
 
   @Post(":id/complete")
   @RequiredPermissions([
+    "tasking.tasks.complete",
     "tasks.complete",
+    "tasking.tasks.update",
     "tasks.update",
-
   ])
   async complete(
     @Param("id") id: string,
@@ -253,10 +259,11 @@ export class TasksController {
 
   @Post(":id/status-transition")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   async statusTransition(
     @Param("id") id: string,
@@ -270,10 +277,11 @@ export class TasksController {
 
   @Post(":id/attachments")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   async addAttachment(
     @Param("id") id: string,
@@ -287,10 +295,11 @@ export class TasksController {
 
   @Post(":id/attachments/upload")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   @UseInterceptors(
     FileInterceptor("file", {
@@ -353,10 +362,11 @@ export class TasksController {
 
   @Delete(":id/attachments/:attachmentId")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-
   ])
   async removeAttachment(
     @Param("id") id: string,
@@ -374,10 +384,11 @@ export class TasksController {
 
   @Post(":id/comments")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
     "super_admin",
-    
   ])
   async addComment(
     @Param("id") id: string,
@@ -391,6 +402,7 @@ export class TasksController {
 
   @Delete(":id")
   @RequiredPermissions([
+    "tasking.tasks.delete",
     "tasks.delete",
     "super_admin",
     "admin",
@@ -406,7 +418,9 @@ export class TasksController {
 
   @Get(":id/work-history")
   @RequiredPermissions([
+    "tasking.tasks.view",
     "tasks.view",
+    "tasking.tasks.update",
     "tasks.update",
   ])
   async getWorkHistory(
@@ -420,7 +434,9 @@ export class TasksController {
 
   @Post(":id/time-entries")
   @RequiredPermissions([
+    "tasking.tasks.update",
     "tasks.update",
+    "tasking.tasks.view",
     "tasks.view",
   ])
   async addTimeEntry(
@@ -435,6 +451,7 @@ export class TasksController {
 
   @Patch(":id/progress")
   @RequiredPermissions([
+    "tasking.tasks.update",
     "tasks.update",
   ])
   async updateProgress(
@@ -449,9 +466,10 @@ export class TasksController {
 
   @Put(":id/progress")
   @RequiredPermissions([
+    "tasking.tasks.update",
     "tasks.update",
+    "tasking.tasks.view",
     "tasks.view",
-
   ])
   async replaceProgress(
     @Param("id") id: string,
