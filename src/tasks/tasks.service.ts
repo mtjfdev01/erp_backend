@@ -250,30 +250,35 @@ export class TasksService {
   ): Promise<void> {
     if (!user) return;
 
-    const isAdmin = user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN;
-
-    // 1. Super Admins and Admins can see everything across all departments
-    if (isAdmin) {
-      return;
-    }
-
-    // 2. For non-admins, strictly enforce department boundaries with involvement exceptions
     qb.andWhere(
       new Brackets((mainQb) => {
-        // A. Always allow viewing if user is a required approver (even across departments)
-        mainQb.where(":userId = ANY(task.approval_required_user_ids)", {
+        // A. Super Admin & Admin: Always see all tasks
+        if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) {
+          mainQb.where("1=1");
+          return;
+        }
+
+        // B. Required Approver: See tasks they need to approve (even across departments)
+        mainQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
           userId: user.id,
         });
 
-        // B. OR the task belongs to the user's department
-        if (user.department) {
-          mainQb.orWhere("task.department::text = :userDept", { userDept: user.department });
-        }
-
-        // C. OR the user is directly involved in the task (regardless of department)
-        mainQb.orWhere(":userId = ANY(task.assigned_user_ids)", { userId: user.id });
+        // C. Direct Involvement: See tasks where user is assigned, creator, or reporter (regardless of department)
+        mainQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: user.id });
         mainQb.orWhere("task.created_by_id = :userId", { userId: user.id });
         mainQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
+
+        // D. Role-based Department Visibility: Leaders see all tasks within their department
+        if (
+          user.department &&
+          (user.role === UserRole.DEPT_HEAD ||
+            user.role === UserRole.MANAGER ||
+            user.role === UserRole.TEAM_LEAD)
+        ) {
+          mainQb.orWhere("task.department::text = :userDept", {
+            userDept: user.department,
+          });
+        }
       }),
     );
   }
@@ -360,10 +365,19 @@ export class TasksService {
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
       if (departmentFilter) {
-        // Force the department to match exactly what's requested
-        qb.andWhere("task.department::text = :department", { 
-          department: departmentFilter 
-        });
+        // Force the department to match exactly what's requested, 
+        // BUT allow users to see tasks they are directly involved in (assigned, created, reported, approver)
+        // even if those tasks are from a different department.
+        qb.andWhere(new Brackets((dqb) => {
+          dqb.where("task.department::text = :department", { department: departmentFilter });
+          
+          if (currentUser) {
+            dqb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+            dqb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
+            dqb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
+            dqb.orWhere("task.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+          }
+        }));
       }
 
       const validSort = [
@@ -497,14 +511,9 @@ export class TasksService {
         qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
       }
       if (query.department) {
-        qb.andWhere(
-          `(task.department::text = :department
-            OR EXISTS (
-              SELECT 1 FROM "user" u2
-              WHERE u2.id = ANY(task.assigned_user_ids) AND u2.department::text = :department
-            ))`,
-          { department: query.department },
-        );
+        qb.andWhere("task.department::text = :department", { 
+          department: query.department 
+        });
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -798,7 +807,7 @@ export class TasksService {
         assigned_user_ids: Array.isArray(dto.assigned_users)
           ? dto.assigned_users
           : task.assigned_user_ids,
-        assigned_user_ids_meta:
+        assigned_users_meta:
           Array.isArray(dto.assigned_users_meta) &&
           dto.assigned_users_meta.length > 0
             ? dto.assigned_users_meta
@@ -1337,7 +1346,7 @@ export class TasksService {
     const qb = this.taskApprovalRepo
       .createQueryBuilder("ta")
       .leftJoinAndSelect("ta.task", "task")
-      .where(":userId = ANY(ta.approval_required_user_ids)", { userId })
+      .where("ta.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId })
       .andWhere("ta.approval_status IS NOT NULL");
 
     const approvals = await qb.getMany();
