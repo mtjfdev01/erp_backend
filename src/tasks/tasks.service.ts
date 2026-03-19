@@ -59,7 +59,7 @@ export class TasksService {
     private readonly taskApprovalRepo: Repository<TaskApproval>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
-  ) {}
+  ) { }
 
   private userDisplayName(u?: User | null): string | null {
     if (!u) return null;
@@ -75,8 +75,8 @@ export class TasksService {
     );
     const deptKey =
       user.department &&
-      permissions?.[user.department] &&
-      permissions[user.department]?.tasks
+        permissions?.[user.department] &&
+        permissions[user.department]?.tasks
         ? user.department
         : null;
     const modulePermissions =
@@ -225,10 +225,10 @@ export class TasksService {
     taskId: number,
     meta:
       | {
-          user_id: number;
-          decision: "approved" | "rejected" | "pending";
-          decided_at?: Date;
-        }[]
+        user_id: number;
+        decision: "approved" | "rejected" | "pending";
+        decided_at?: Date;
+      }[]
       | null,
   ): Promise<void> {
     if (!taskId) return;
@@ -308,7 +308,7 @@ export class TasksService {
           : null,
         assigned_users_meta:
           Array.isArray(dto.assigned_users_meta) &&
-          dto.assigned_users_meta.length > 0
+            dto.assigned_users_meta.length > 0
             ? dto.assigned_users_meta
             : null,
         approval_required_user_ids: Array.isArray(
@@ -370,7 +370,7 @@ export class TasksService {
         // even if those tasks are from a different department.
         qb.andWhere(new Brackets((dqb) => {
           dqb.where("task.department::text = :department", { department: departmentFilter });
-          
+
           if (currentUser) {
             dqb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
             dqb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
@@ -427,8 +427,8 @@ export class TasksService {
         });
       }
       if (filters.department) {
-        qb.andWhere("task.department::text = :filterDept", { 
-          filterDept: filters.department 
+        qb.andWhere("task.department::text = :filterDept", {
+          filterDept: filters.department
         });
       }
       if (filters.project_id) {
@@ -511,8 +511,8 @@ export class TasksService {
         qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
       }
       if (query.department) {
-        qb.andWhere("task.department::text = :department", { 
-          department: query.department 
+        qb.andWhere("task.department::text = :department", {
+          department: query.department
         });
       }
       if (query.project_id) {
@@ -618,8 +618,8 @@ export class TasksService {
           : [];
         const approverIds = Array.isArray(task.approval_required_user_ids)
           ? task.approval_required_user_ids
-              .map((v) => Number(v))
-              .filter((v) => !isNaN(v))
+            .map((v) => Number(v))
+            .filter((v) => !isNaN(v))
           : [];
         const isAssignee = assignedIds.includes(userId);
         const isApprover = approverIds.includes(userId);
@@ -661,13 +661,25 @@ export class TasksService {
 
       if (
         task.status === TaskStatus.COMPLETED &&
-        dto.status !== TaskStatus.PENDING_APPROVAL
+        dto.status !== TaskStatus.PENDING_APPROVAL &&
+        dto.status !== TaskStatus.CLOSED
       ) {
         if (
           currentUser.role !== UserRole.SUPER_ADMIN &&
           currentUser.role !== UserRole.ADMIN
         ) {
           throw new ForbiddenException("Only Admins can edit completed tasks");
+        }
+      }
+
+      // If user is trying to CLOSE a COMPLETED task, allow it if they are the creator or reporter
+      if (task.status === TaskStatus.COMPLETED && dto.status === TaskStatus.CLOSED) {
+        const isCreator = task.created_by_id === currentUser.id;
+        const isReporter = task.reported_by_id === currentUser.id;
+        const isAdmin = currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN;
+        
+        if (!isCreator && !isReporter && !isAdmin) {
+          throw new ForbiddenException("Only the creator, assigner, or an Admin can close this task.");
         }
       }
 
@@ -772,8 +784,8 @@ export class TasksService {
       if (shouldResetApprovalWorkflow || shouldResetApprovalsForRework) {
         const approvers = Array.isArray(task.approval_required_user_ids)
           ? task.approval_required_user_ids
-              .map((v) => Number(v))
-              .filter((v) => !isNaN(v))
+            .map((v) => Number(v))
+            .filter((v) => !isNaN(v))
           : [];
         if (approvers.length > 0) {
           await this.setTaskApprovalMeta(
@@ -809,7 +821,7 @@ export class TasksService {
           : task.assigned_user_ids,
         assigned_users_meta:
           Array.isArray(dto.assigned_users_meta) &&
-          dto.assigned_users_meta.length > 0
+            dto.assigned_users_meta.length > 0
             ? dto.assigned_users_meta
             : task.assigned_users_meta,
         recurrence_rule: dto.recurrence_rule ?? task.recurrence_rule,
@@ -850,8 +862,8 @@ export class TasksService {
 
         const approverIds = Array.isArray(saved.approval_required_user_ids)
           ? saved.approval_required_user_ids
-              .map((v) => Number(v))
-              .filter((v) => !isNaN(v))
+            .map((v) => Number(v))
+            .filter((v) => !isNaN(v))
           : [];
         if (approverIds.length > 0) {
           const approvers = await this.userRepo
@@ -886,8 +898,8 @@ export class TasksService {
       : [];
     const metaIds = Array.isArray(task.assigned_users_meta)
       ? (task.assigned_users_meta
-          .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
-          .filter((v) => v !== null && !isNaN(v as number)) as number[])
+        .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
+        .filter((v) => v !== null && !isNaN(v as number)) as number[])
       : [];
     const allAssignedIds = [...assignedIds, ...metaIds];
     const currentUserId = Number(currentUser.id);
@@ -1164,8 +1176,8 @@ export class TasksService {
       }
       const approvers = Array.isArray(task.approval_required_user_ids)
         ? task.approval_required_user_ids
-            .map((v) => Number(v))
-            .filter((v) => !isNaN(v))
+          .map((v) => Number(v))
+          .filter((v) => !isNaN(v))
         : [];
       const isAdminRole =
         currentUser.role === UserRole.SUPER_ADMIN ||
@@ -1185,24 +1197,24 @@ export class TasksService {
       });
       const existingMeta = Array.isArray(approvalState?.approvals_meta)
         ? (approvalState!.approvals_meta as {
-            user_id: number;
-            decision: "approved" | "rejected" | "pending";
-            decided_at?: Date;
-          }[])
+          user_id: number;
+          decision: "approved" | "rejected" | "pending";
+          decided_at?: Date;
+        }[])
         : [];
       const normalizedMeta = approvers.length
         ? approvers.map((userId) => {
-            const existing = existingMeta.find(
-              (m) => m && Number(m.user_id) === Number(userId),
-            );
-            if (existing) {
-              return existing;
-            }
-            return {
-              user_id: userId,
-              decision: "pending" as const,
-            };
-          })
+          const existing = existingMeta.find(
+            (m) => m && Number(m.user_id) === Number(userId),
+          );
+          if (existing) {
+            return existing;
+          }
+          return {
+            user_id: userId,
+            decision: "pending" as const,
+          };
+        })
         : existingMeta;
 
       const updatedMeta: {
@@ -1489,9 +1501,9 @@ export class TasksService {
       total_seconds: totalSeconds,
       active_entry: active
         ? {
-            id: active.id,
-            started_at: active.started_at,
-          }
+          id: active.id,
+          started_at: active.started_at,
+        }
         : null,
     };
   }
