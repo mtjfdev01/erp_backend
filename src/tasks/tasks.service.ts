@@ -355,29 +355,43 @@ export class TasksService {
         delete safeFilters.filters;
       }
 
-      // Handle department filter strictly
+      // Handle department filter
       let departmentFilter: string | undefined = undefined;
       if (safeFilters.department) {
         departmentFilter = safeFilters.department;
         delete safeFilters.department;
       }
 
+      const isStrictDept = payload?.strictDepartment === true;
+      delete safeFilters.strictDepartment;
+
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
       if (departmentFilter) {
-        // Force the department to match exactly what's requested, 
-        // BUT allow users to see tasks they are directly involved in (assigned, created, reported, approver)
-        // even if those tasks are from a different department.
-        qb.andWhere(new Brackets((dqb) => {
-          dqb.where("task.department::text = :department", { department: departmentFilter });
+        if (isStrictDept) {
+          // Strict mode: Only tasks explicitly in this department,
+          // BUT still allow those where the user is an assignee or approver.
+          // This ensures assignees see their tasks even if they are in a different department list.
+          qb.andWhere(new Brackets((dqb) => {
+            dqb.where("task.department::text = :department", { department: departmentFilter });
+            if (currentUser) {
+              dqb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+              dqb.orWhere("task.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+            }
+          }));
+        } else {
+          // Flexible mode: Tasks in this department OR tasks where user is directly involved
+          qb.andWhere(new Brackets((dqb) => {
+            dqb.where("task.department::text = :department", { department: departmentFilter });
 
-          if (currentUser) {
-            dqb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
-            dqb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
-            dqb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
-            dqb.orWhere("task.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
-          }
-        }));
+            if (currentUser) {
+              dqb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+              dqb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
+              dqb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
+              dqb.orWhere("task.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId: currentUser.id });
+            }
+          }));
+        }
       }
 
       const validSort = [
@@ -523,10 +537,31 @@ export class TasksService {
 
       const tasks = await qb.getMany();
 
-      const userCountsMap: Record<string, number> = {};
+      const userCountsMap: Record<string, { label: string; count: number }> = {};
       const projectCountsMap: Record<string, number> = {};
       let totalDays = 0;
       let completedCount = 0;
+
+      // Pre-fetch user names to avoid multiple queries or complex joins if preferred, 
+      // but let's just collect all unique user IDs first.
+      const allUserIds = new Set<number>();
+      for (const t of tasks) {
+        if (Array.isArray(t.assigned_user_ids)) {
+          t.assigned_user_ids.forEach(id => allUserIds.add(Number(id)));
+        }
+      }
+
+      const usersList = allUserIds.size > 0 
+        ? await this.userRepo.createQueryBuilder("user")
+            .where("user.id IN (:...ids)", { ids: Array.from(allUserIds) })
+            .getMany()
+        : [];
+      
+      const userNamesMap = new Map<number, string>();
+      usersList.forEach(u => {
+        const name = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || `User #${u.id}`;
+        userNamesMap.set(Number(u.id), name);
+      });
 
       for (const t of tasks) {
         if (
@@ -534,12 +569,19 @@ export class TasksService {
           t.assigned_user_ids.length > 0
         ) {
           for (const uid of t.assigned_user_ids) {
-            const label = String(uid);
-            userCountsMap[label] = (userCountsMap[label] || 0) + 1;
+            const userId = Number(uid);
+            const name = userNamesMap.get(userId) || `User #${userId}`;
+            if (!userCountsMap[userId]) {
+              userCountsMap[userId] = { label: name, count: 0 };
+            }
+            userCountsMap[userId].count++;
           }
         } else {
           const label = "Unassigned";
-          userCountsMap[label] = (userCountsMap[label] || 0) + 1;
+          if (!userCountsMap[label]) {
+            userCountsMap[label] = { label: "Unassigned", count: 0 };
+          }
+          userCountsMap[label].count++;
         }
 
         const projectKey = t.project_name || "No Project";
@@ -557,9 +599,9 @@ export class TasksService {
         }
       }
 
-      const users = Object.entries(userCountsMap).map(([label, count]) => ({
-        label,
-        count,
+      const users = Object.values(userCountsMap).map((item) => ({
+        label: item.label,
+        count: item.count,
       }));
       const projects = Object.entries(projectCountsMap).map(
         ([label, count]) => ({
