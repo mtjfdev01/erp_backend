@@ -17,7 +17,58 @@ export class KasbTrainingReportsController {
   @RequiredPermissions(['program.kasb_training_reports.create', 'super_admin', 'programs_manager'])
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createDto: CreateKasbTrainingReportDto, @CurrentUser() user: User) {
-    return await this.kasbTrainingReportsService.create(createDto, user);
+    const report = await this.kasbTrainingReportsService.create(createDto, user);
+    return {
+      success: true,
+      message: 'Kasb training report created successfully',
+      data: report,
+    };
+  }
+
+  @Post('multiple')
+  @RequiredPermissions(['program.kasb_training_reports.create', 'super_admin', 'programs_manager'])
+  @HttpCode(HttpStatus.CREATED)
+  async createMultiple(
+    @Body() createDtos: CreateKasbTrainingReportDto[],
+    @CurrentUser() user: User,
+  ) {
+    const reports = await this.kasbTrainingReportsService.createMultiple(createDtos, user);
+    return {
+      success: true,
+      message: 'Kasb training reports created successfully',
+      data: reports,
+    };
+  }
+
+  @Get('date/:date')
+  @RequiredPermissions(['program.kasb_training_reports.view', 'super_admin', 'programs_manager', 'read_only_super_admin'])
+  async findByDate(@Param('date') date: string) {
+    const reports = await this.kasbTrainingReportsService.findByDate(date);
+
+    return {
+      success: true,
+      data: {
+        date,
+        activities: reports.map((report) => ({
+          id: report.id,
+          skill_level: report.skill_level,
+          quantity: report.quantity,
+          addition: report.addition,
+          left: report.left,
+          total: report.total,
+        })),
+      },
+    };
+  }
+
+  @Delete('date/:date')
+  @RequiredPermissions(['program.kasb_training_reports.delete', 'super_admin', 'programs_manager'])
+  async removeByDate(@Param('date') date: string) {
+    await this.kasbTrainingReportsService.removeByDate(date);
+    return {
+      success: true,
+      message: 'Kasb training reports deleted successfully for this date',
+    };
   }
 
   @Get()
@@ -34,9 +85,26 @@ export class KasbTrainingReportsController {
   @RequiredPermissions(['program.kasb_training_reports.view', 'super_admin', 'programs_manager', 'read_only_super_admin'])
   async findOne(@Param('id') id: string) {
     const report = await this.kasbTrainingReportsService.findOne(+id);
+    const dateKey =
+      report.date instanceof Date
+        ? report.date.toISOString().split('T')[0]
+        : new Date(report.date).toISOString().split('T')[0];
+
+    const activities = await this.kasbTrainingReportsService.findByDate(dateKey);
     return {
       success: true,
-      data: report
+      data: {
+        id: report.id,
+        date: dateKey,
+        activities: activities.map((a) => ({
+          id: a.id,
+          skill_level: a.skill_level,
+          quantity: a.quantity,
+          addition: a.addition,
+          left: a.left,
+          total: a.total,
+        })),
+      },
     };
   }
 

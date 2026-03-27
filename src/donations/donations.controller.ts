@@ -26,6 +26,7 @@ import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
 import { RequiredPermissions } from 'src/permissions';
 import { PermissionsService } from 'src/permissions/permissions.service';
 import { JwtGuard } from 'src/auth/jwt.guard';
+import { DonationsReceiptsService } from './receipts.service';
 
 @Controller('donations')
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -33,6 +34,7 @@ export class DonationsController {
   constructor(
     private readonly donationsService: DonationsService,
     private readonly permissionsService: PermissionsService,
+    private readonly receiptsService: DonationsReceiptsService,
   ) {}
 
   /**
@@ -298,6 +300,46 @@ export class DonationsController {
         return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
       }
       const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Post('sendDonationReceipt/:id')
+  async sendDonationReceipt(@Param('id') id: string, @Res() res: Response, @Req() req: any) {
+    try {
+      const donationId = Number(id);
+      if (!donationId || Number.isNaN(donationId)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: 'Invalid donation id',
+          data: null,
+        });
+      }
+
+      const user = req?.user ?? null;
+      const donation = await this.donationsService.findOne(donationId);
+
+      if (user?.id) {
+        await this.checkDonationPermission(user.id, donation.donation_source, 'view');
+        await this.checkGeographicAccess(user.id, donation);
+      }
+
+      const sent = await this.receiptsService.sendDonationReceipt(donation);
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: sent ? 'Donation receipt sent successfully' : 'Donation receipt not sent',
+        data: { sent },
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,

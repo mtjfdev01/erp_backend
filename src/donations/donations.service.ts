@@ -50,6 +50,38 @@ export class DonationsService {
     private dashboardAggregateService: DashboardAggregateService,
   ) {}
 
+  private async persistGatewayInvoiceError(
+    donationId: number | undefined | null,
+    message: string,
+  ): Promise<void> {
+    if (donationId == null || !message) return;
+    await this.donationRepository.update(donationId, { err_msg: message });
+  }
+
+  /** Reuse same-day pending donation for existing donor (same amount, method, campaign). */
+  private async findReusablePendingDonation(params: {
+    donorId: number;
+    amount: number;
+    donationMethod: string;
+    campaignId: number | null;
+  }): Promise<Donation | null> {
+    const qb = this.donationRepository
+      .createQueryBuilder('d')
+      .where('d.donor_id = :donorId', { donorId: params.donorId })
+      .andWhere('d.status = :status', { status: 'pending' })
+      .andWhere('d.amount = :amount', { amount: params.amount })
+      .andWhere('d.donation_method = :method', { method: params.donationMethod })
+      .andWhere('DATE(d.date) = CURRENT_DATE');
+
+    if (params.campaignId === null) {
+      qb.andWhere('d.campaign_id IS NULL');
+    } else {
+      qb.andWhere('d.campaign_id = :campaignId', { campaignId: params.campaignId });
+    }
+
+    return qb.orderBy('d.id', 'DESC').getOne();
+  }
+
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
    * Returns null if the user has no geographic assignments (meaning no geo filter needed).
@@ -301,7 +333,6 @@ export class DonationsService {
       // Update donation if provided
       if (savedDonation) {
         savedDonation.orderId = data.orderId;
-        savedDonation.status = 'registered';
         await this.donationRepository.save(savedDonation);
       }
 
@@ -310,11 +341,13 @@ export class DonationsService {
         orderId: data.orderId,
       };
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      await this.persistGatewayInvoiceError(savedDonation?.id, msg);
       if (error instanceof HttpException) {
         throw error;
       }
       throw new HttpException(
-        `Failed to create Meezan invoice: ${error.message}`,
+        `Failed to create Meezan invoice: ${msg}`,
         500,
       );
     }
@@ -877,6 +910,8 @@ export class DonationsService {
     let donorId: number | null = createDonationDto.donor_id || null;
     let donor:any;
     let savedDonation:any;
+    let isNewDonorThisRequest = false;
+    let reusedPendingDonation = false;
     if(!createDonationDto?.previous_donation_id){ // if previous donation id is not provided, then we need to create a new donation and register donor if not exists then skip this
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
@@ -933,6 +968,7 @@ export class DonationsService {
          if (donor) {
            console.log(`✅ Successfully auto-registered donor: ${donor.email} (ID: ${donor.id})`);
            donorId = donor.id;
+           isNewDonorThisRequest = true;
          } else {
            console.warn(`⚠️ Failed to auto-register donor, but continuing with donation...`);
          }
@@ -941,18 +977,6 @@ export class DonationsService {
        console.log(`⚠️ Skipping donor auto-registration: missing email or phone`);
      }
      // ============================================
-    //   donation_frequency is monthly then insert record in recurring repository  also 
-    if(createDonationDto?.donation_frequency && createDonationDto?.donation_frequency === 'monthly') {
-      const recurringDonation = this.recurringDonationRepository.create({
-        ...createDonationDto,
-        donor_id: donorId,
-      });
-      savedDonation = await this.recurringDonationRepository.save(recurringDonation);
-      // mark donor as recurring donor
-      donor.recurring = true; 
-      await this.donorRepository.save(donor);
-    }
-     // Validate campaign if provided
      let campaignId: number | null = createDonationDto?.campaign_id ?? null;
      if (campaignId) {
        try {
@@ -970,17 +994,49 @@ export class DonationsService {
        }
      }
 
-     // Create donation with donor_id and campaign_id if available
-     const donation =  this.donationRepository.create({
-       ...createDonationDto,
-       donor_id: donorId, // ✅ Link donation to donor
-       campaign_id: campaignId,
-       created_by: user?.id == -1 ? null : user?.id,
-       recurrence_id: savedDonation?.id || 0, 
-     });
-      savedDonation = await this.donationRepository.save(donation);
-     
-     console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
+     if (
+       !isNewDonorThisRequest &&
+       donorId &&
+       createDonationDto.donation_method &&
+       createDonationDto.amount != null &&
+       createDonationDto.donation_frequency !== 'monthly'
+     ) {
+       const existing = await this.findReusablePendingDonation({
+         donorId,
+         amount: Number(createDonationDto.amount),
+         donationMethod: createDonationDto.donation_method as string,
+         campaignId,
+       });
+       if (existing) {
+         savedDonation = existing;
+         reusedPendingDonation = true;
+         console.log(`♻️ Reusing pending donation ${existing.id} for donor ${donorId}`);
+       }
+     }
+
+     if (!reusedPendingDonation) {
+       if (createDonationDto?.donation_frequency && createDonationDto.donation_frequency === 'monthly') {
+         const recurringDonation = this.recurringDonationRepository.create({
+           ...createDonationDto,
+           donor_id: donorId,
+         });
+         savedDonation = await this.recurringDonationRepository.save(recurringDonation);
+         if (donor) {
+           donor.recurring = true;
+           await this.donorRepository.save(donor);
+         }
+       }
+
+       const donation = this.donationRepository.create({
+         ...createDonationDto,
+         donor_id: donorId,
+         campaign_id: campaignId,
+         created_by: user?.id == -1 ? null : user?.id,
+         recurrence_id: savedDonation?.id || 0,
+       });
+       savedDonation = await this.donationRepository.save(donation);
+       console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
+     }
 
      if(createDonationDto?.previous_donation_id) {
       savedDonation = await this.donationRepository.findOne({
@@ -994,11 +1050,10 @@ export class DonationsService {
     }
     }
     //  await this.emailService.sendDonationFailureNotification(savedDonation);
-     // Create notification for donation users (one notification, multiple user_notification records)
+     if (!reusedPendingDonation) {
      try {
        const donationUsers = await this.getDonationUsers();
        
-       // Filter to only valid, active users
        const validUserIds: number[] = [];
        for (const userId of donationUsers) {
          const userExists = await this.userRepository.findOne({
@@ -1010,7 +1065,6 @@ export class DonationsService {
          }
        }
 
-       // Create one notification and assign it to all valid users
        if (validUserIds.length > 0) {
          await this.notificationsService.create(
            {
@@ -1025,12 +1079,13 @@ export class DonationsService {
                donation_method: savedDonation.donation_method,
              },
            },
-           validUserIds, // Pass array of user IDs
+           validUserIds,
            user
          );
        }
      } catch (error) {
        console.error('Failed to create notifications:', error.message);
+     }
      }
 
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
@@ -1047,71 +1102,91 @@ export class DonationsService {
       };
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'blinq') {
-      // Use reusable helper method to generate Blinq invoice
-      const blinqResult = await this.generateBlinqInvoice(
-        savedDonation.id.toString(),
-        savedDonation.amount,
-        donor?.name || 'Anonymous',
-      );
-
-      // Update donation with Blinq payment code and status
-      savedDonation.status = 'registered';
-      savedDonation.orderId = blinqResult.paymentCode || null;
-      await this.donationRepository.save(savedDonation);
-
-      // Return payment URL for user to complete payment
-      return { paymentUrl: blinqResult.paymentUrl };
+      try {
+        const blinqResult = await this.generateBlinqInvoice(
+          savedDonation.id.toString(),
+          savedDonation.amount,
+          donor?.name || 'Anonymous',
+        );
+        savedDonation.orderId = blinqResult.paymentCode || null;
+        await this.donationRepository.save(savedDonation);
+        return { paymentUrl: blinqResult.paymentUrl };
+      } catch (e) {
+        await this.persistGatewayInvoiceError(
+          savedDonation.id,
+          e instanceof Error ? e.message : String(e),
+        );
+        throw e;
+      }
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'payfast') {
-      // Get complete response from Payfast
-      const payfastResponse = await this.payfastService.getAccessToken(
-        savedDonation.id.toString(),
-        savedDonation.amount
-      );
-
-      // console.log("payfastResponse_____", payfastResponse);
-      
-      // Return complete Payfast response
-      return {...payfastResponse, 
-        BASKET_ID: savedDonation.id.toString(),
-        TXNAMT: savedDonation.amount.toString(),
-      };
+      try {
+        const payfastResponse = await this.payfastService.getAccessToken(
+          savedDonation.id.toString(),
+          savedDonation.amount,
+        );
+        return {
+          ...payfastResponse,
+          BASKET_ID: savedDonation.id.toString(),
+          TXNAMT: savedDonation.amount.toString(),
+        };
+      } catch (e) {
+        await this.persistGatewayInvoiceError(
+          savedDonation.id,
+          e instanceof Error ? e.message : String(e),
+        );
+        throw e;
+      }
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe') {
-      const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
-      const stripeResult = await this.stripeService.createCheckoutSession({
-        donationId: savedDonation.id,
-        amount: savedDonation.amount,
-        currency: savedDonation.currency || 'pkr',
-        successUrl: `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`,
-        cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
-        donorEmail: donor?.email || createDonationDto.donor_email,
-        donorName: donor?.name || createDonationDto.donor_name,
-        isMonthly: createDonationDto.donation_frequency === 'monthly',
-      });
-      savedDonation.status = 'registered';
-      savedDonation.orderId = stripeResult.sessionId;
-      await this.donationRepository.save(savedDonation);
-      return { paymentUrl: stripeResult.paymentUrl };
+      try {
+        const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
+        const stripeResult = await this.stripeService.createCheckoutSession({
+          donationId: savedDonation.id,
+          amount: savedDonation.amount,
+          currency: savedDonation.currency || 'pkr',
+          successUrl: `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`,
+          cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
+          donorEmail: donor?.email || createDonationDto.donor_email,
+          donorName: donor?.name || createDonationDto.donor_name,
+          isMonthly: createDonationDto.donation_frequency === 'monthly',
+        });
+        savedDonation.orderId = stripeResult.sessionId;
+        await this.donationRepository.save(savedDonation);
+        return { paymentUrl: stripeResult.paymentUrl };
+      } catch (e) {
+        await this.persistGatewayInvoiceError(
+          savedDonation.id,
+          e instanceof Error ? e.message : String(e),
+        );
+        throw e;
+      }
     }
     else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe_embed') {
-      const embedResult = await this.stripeService.createPaymentIntentForEmbed({
-        donationId: savedDonation.id,
-        amount: savedDonation.amount,
-        currency: savedDonation.currency || 'pkr',
-        donorEmail: donor?.email || createDonationDto.donor_email,
-        donorName: donor?.name || createDonationDto.donor_name,
-        isMonthly: createDonationDto.donation_frequency === 'monthly',
-      });
-      savedDonation.status = 'registered';
-      savedDonation.orderId = embedResult.subscriptionId ?? embedResult.paymentIntentId;
-      await this.donationRepository.save(savedDonation);
-      return {
-        clientSecret: embedResult.clientSecret,
-        paymentIntentId: embedResult.paymentIntentId,
-        donationId: savedDonation.id,
-        ...(embedResult.subscriptionId && { subscriptionId: embedResult.subscriptionId }),
-      };
+      try {
+        const embedResult = await this.stripeService.createPaymentIntentForEmbed({
+          donationId: savedDonation.id,
+          amount: savedDonation.amount,
+          currency: savedDonation.currency || 'pkr',
+          donorEmail: donor?.email || createDonationDto.donor_email,
+          donorName: donor?.name || createDonationDto.donor_name,
+          isMonthly: createDonationDto.donation_frequency === 'monthly',
+        });
+        savedDonation.orderId = embedResult.subscriptionId ?? embedResult.paymentIntentId;
+        await this.donationRepository.save(savedDonation);
+        return {
+          clientSecret: embedResult.clientSecret,
+          paymentIntentId: embedResult.paymentIntentId,
+          donationId: savedDonation.id,
+          ...(embedResult.subscriptionId && { subscriptionId: embedResult.subscriptionId }),
+        };
+      } catch (e) {
+        await this.persistGatewayInvoiceError(
+          savedDonation.id,
+          e instanceof Error ? e.message : String(e),
+        );
+        throw e;
+      }
     }
     else if(manualDonationMethodOptions.includes(createDonationDto.donation_method))  {
       // here we need to create a manual donation

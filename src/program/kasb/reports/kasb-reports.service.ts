@@ -136,9 +136,15 @@ export class KasbReportsService {
 
   async removeByDate(date: string): Promise<void> {
     const reports = await this.findByDate(date);
-    if(!reports){
+    if(!reports || reports.length === 0){
       throw new NotFoundException(`Kasb report with date ${date} not found`);
     }
-    await this.kasbReportRepository.update(reports[0].id, { is_archived: true });
+
+    // Archive all rows for the given date.
+    await Promise.all(
+      reports.map((report) =>
+        this.kasbReportRepository.update(report.id, { is_archived: true }),
+      ),
+    );
   }
 } 

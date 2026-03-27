@@ -34,10 +34,10 @@ export class DonationBox extends BaseEntity {
   key_no: string;
 
   // Location Details - Foreign Key
-  @Column()
+  @Column({ nullable: true })
   route_id: number;
 
-  @Column({ nullable: false })
+  @Column({ nullable: true })
   city_id: number;
 
   // Shop Details
