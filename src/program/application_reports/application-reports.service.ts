@@ -65,19 +65,17 @@ export class ApplicationReportsService {
         .createQueryBuilder('report')
         .where(whereClause)
         .orderBy(`report.${sortField}`, sortOrder)
-        .skip(skip)
-        .take(pageSize)
 
       const reports = await queryBuilder.getMany();
 
-      // Group reports by report_date and notes to create the frontend-expected format
+      // Group all rows first so pagination/count reflects grouped report records.
       const groupedReports = this.groupReportsByDate(reports);
-
-      const total = await this.applicationReportRepository.count({ where: whereClause });
+      const paginatedGroupedReports = groupedReports.slice(skip, skip + pageSize);
+      const total = groupedReports.length;
       const totalPages = Math.ceil(total / pageSize);
 
       return {
-        data: groupedReports,
+        data: paginatedGroupedReports,
         pagination: {
           total,
           page,

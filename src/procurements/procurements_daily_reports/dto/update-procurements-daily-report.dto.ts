@@ -11,43 +11,43 @@ export class UpdateProcurementsDailyReportDto {
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseInt(value) : undefined)
-  totalGeneratedPOs?: number;
+  total_generated_pos?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseInt(value) : undefined)
-  pendingPOs?: number;
+  pending_pos?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseInt(value) : undefined)
-  fulfilledPOs?: number;
+  fulfilled_pos?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseInt(value) : undefined)
-  totalGeneratedPIs?: number;
+  total_generated_pis?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseFloat(value) : undefined)
-  totalPaidAmount?: number;
+  total_paid_amount?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseFloat(value) : undefined)
-  unpaidAmount?: number;
+  unpaid_amount?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Transform(({ value }) => value ? parseInt(value) : undefined)
-  unpaidPIs?: number;
+  unpaid_pis?: number;
 
   @IsOptional()
   @IsNumber()
