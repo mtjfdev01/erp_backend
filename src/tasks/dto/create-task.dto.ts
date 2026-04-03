@@ -12,6 +12,7 @@ import {
   TaskPriority,
   TaskWorkflowType,
   TaskType,
+  RecurrenceEndType,
 } from "../entities/task.entity";
 
 export class CreateTaskDto {
@@ -71,6 +72,18 @@ export class CreateTaskDto {
   recurrence_next_date?: string;
 
   @IsOptional()
+  @IsEnum(RecurrenceEndType)
+  recurrence_end_type?: RecurrenceEndType;
+
+  @IsOptional()
+  @IsDateString()
+  recurrence_end_date?: string;
+
+  @IsOptional()
+  @IsInt()
+  recurrence_end_occurrences?: number;
+
+  @IsOptional()
   @IsBoolean()
   approval_required?: boolean;
 
@@ -82,4 +95,13 @@ export class CreateTaskDto {
   @IsOptional()
   @IsInt()
   reported_by_id?: number;
+
+  @IsOptional()
+  @IsArray()
+  mov_checklist?: {
+    text: string;
+    checked: boolean;
+    checked_by_id: number;
+    checked_at: Date;
+  }[];
 }

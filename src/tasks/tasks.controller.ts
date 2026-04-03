@@ -341,6 +341,8 @@ export class TasksController {
   async uploadAttachment(
     @Param("id") id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body("description") description: string,
+    @Body("is_initial") is_initial: any,
     @CurrentUser() user: User,
     @Res() res: Response,
   ) {
@@ -354,6 +356,8 @@ export class TasksController {
         file_name: file.originalname,
         file_url: relativeUrl,
         file_type: file.mimetype,
+        description: description || undefined,
+        is_initial: String(is_initial) === "true",
       },
       user,
     );

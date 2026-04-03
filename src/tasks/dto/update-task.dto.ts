@@ -11,6 +11,7 @@ import {
   TaskStatus,
   TaskWorkflowType,
   TaskType,
+  RecurrenceEndType,
 } from "../entities/task.entity";
 import { Department } from "../../users/user.entity";
 
@@ -77,6 +78,18 @@ export class UpdateTaskDto {
   recurrence_next_date?: string;
 
   @IsOptional()
+  @IsEnum(RecurrenceEndType)
+  recurrence_end_type?: RecurrenceEndType;
+
+  @IsOptional()
+  @IsDateString()
+  recurrence_end_date?: string;
+
+  @IsOptional()
+  @IsInt()
+  recurrence_end_occurrences?: number;
+
+  @IsOptional()
   @IsInt()
   reported_by_id?: number;
 
@@ -84,4 +97,9 @@ export class UpdateTaskDto {
   @IsArray()
   @IsInt({ each: true })
   approval_required_user_ids?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  mov_items?: string[];
 }

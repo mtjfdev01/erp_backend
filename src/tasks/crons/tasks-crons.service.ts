@@ -17,4 +17,16 @@ export class TasksCronsService {
       this.logger.error(`Overdue escalation failed: ${error?.message}`);
     }
   }
+
+  @Cron(CronExpression.EVERY_DAY_AT_2AM)
+  async handleRecurrence() {
+    try {
+      const count = await this.tasksService.processRecurrence();
+      if (count > 0) {
+        this.logger.log(`Recurrence processed: ${count} new tasks created`);
+      }
+    } catch (error) {
+      this.logger.error(`Recurrence processing failed: ${error?.message}`);
+    }
+  }
 }

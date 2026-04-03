@@ -1,4 +1,4 @@
-import { IsString } from "class-validator";
+import { IsString, IsOptional, IsBoolean } from "class-validator";
 
 export class AddAttachmentDto {
   @IsString()
@@ -9,4 +9,12 @@ export class AddAttachmentDto {
 
   @IsString()
   file_type: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_initial?: boolean;
 }

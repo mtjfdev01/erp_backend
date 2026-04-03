@@ -1106,11 +1106,65 @@ export class EmailService implements OnModuleInit {
   }
 
 //  Tasks Section 
+  async sendTaskAssignmentEmail(user: any, task: any, master?: any): Promise<boolean> {
+    /*
+    try {
+      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      if (!this.resend) {
+        this.logger.error('Resend is not configured - cannot send email');
+        return false;
+      }
+
+      let recurrenceInfo = '';
+      if (master && master.task_type === 'recurring') {
+        const rule = master.recurrence_rule;
+        const endType = master.recurrence_end_type;
+        const endDate = master.recurrence_end_date ? new Date(master.recurrence_end_date).toLocaleDateString() : '';
+        const endOccurrences = master.recurrence_end_occurrences;
+        const currentOccurrence = master.recurrence_created_count;
+
+        let endMsg = '';
+        if (endType === 'on_date') {
+          endMsg = `until ${endDate}`;
+        } else if (endType === 'after_occurrences') {
+          endMsg = `for ${endOccurrences} total occurrences (This is #${currentOccurrence})`;
+        } else {
+          endMsg = `indefinitely`;
+        }
+        recurrenceInfo = `<p><strong>Note:</strong> This is a recurring task repeating every ${rule} ${endMsg}.</p>`;
+      }
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `New Task Assigned: ${task.title}`,
+        html: `
+          <h1>New Task Assigned</h1>
+          <p>Hi ${user.first_name || user.email},</p>
+          <p>You have been assigned a new task: <strong>${task.title}</strong></p>
+          <p><strong>Priority:</strong> ${task.priority}</p>
+          <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : 'N/A'}</p>
+          ${recurrenceInfo}
+          <p>Please log in to the ERP to view more details.</p>
+        `,
+      });
+      return result.error === null;
+    } catch (e: any) {
+      this.logger.error(`Failed to send task assignment email: ${e.message}`);
+      return false;
+    }
+    */
+    return true;
+  }
+
   async sendTaskOverdueNotification(
     toEmail: string,
     task: any,
     escalationLevel: number,
   ): Promise<boolean> {
+    /*
     try {
       const fromEmail = this.configService.get<string>(
         "RESEND_FROM_EMAIL",
@@ -1144,12 +1198,15 @@ export class EmailService implements OnModuleInit {
       this.logger.error(`Task overdue email send failed: ${error?.message}`);
       return false;
     }
+    */
+    return true;
   }
 
   private generateTaskOverdueTemplate(
     task: any,
     escalationLevel: number,
   ): string {
+    /*
     const assignees =
       (Array.isArray(task.assigned_users_meta) &&
         task.assigned_users_meta
@@ -1192,5 +1249,7 @@ export class EmailService implements OnModuleInit {
       </body>
       </html>
     `;
+    */
+    return "";
   }
 }

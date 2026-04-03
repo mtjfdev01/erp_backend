@@ -21,6 +21,12 @@ export class TaskAttachment extends BaseEntity {
   @Column({ type: "varchar", nullable: true })
   file_type: string;
 
+  @Column({ type: "text", nullable: true })
+  description: string;
+
+  @Column({ type: "boolean", default: false })
+  is_initial: boolean;
+
   @ManyToOne(() => User, (user) => user.id, {
     nullable: true,
     onDelete: "SET NULL",

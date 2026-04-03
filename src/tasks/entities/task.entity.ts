@@ -45,6 +45,12 @@ export enum TaskType {
   PROJECT_LINKED = "project_linked",
 }
 
+export enum RecurrenceEndType {
+  NEVER = "never",
+  ON_DATE = "on_date",
+  AFTER_OCCURRENCES = "after_occurrences",
+}
+
 @Entity("tasks")
 export class Task {
   @PrimaryGeneratedColumn("increment")
@@ -145,6 +151,23 @@ export class Task {
 
   @Column({ type: "date", nullable: true })
   recurrence_next_date: Date;
+
+  @Column({
+    type: "enum",
+    enum: RecurrenceEndType,
+    default: RecurrenceEndType.NEVER,
+    nullable: true,
+  })
+  recurrence_end_type: RecurrenceEndType;
+
+  @Column({ type: "date", nullable: true })
+  recurrence_end_date: Date;
+
+  @Column({ type: "int", nullable: true })
+  recurrence_end_occurrences: number;
+
+  @Column({ type: "int", default: 0 })
+  recurrence_created_count: number;
 
   @Column({ type: "int", default: 0 })
   progress: number;
