@@ -6,6 +6,10 @@ export class UpdateApplicationDto {
   @IsOptional()
   project?: string;
 
+  @IsString()
+  @IsOptional()
+  subprogram?: string;
+
   @IsNumber()
   @Min(0)
   @IsOptional()
@@ -20,11 +24,6 @@ export class UpdateApplicationDto {
   @Min(0)
   @IsOptional()
   investigation_count?: number;
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  verified_count?: number;
 
   @IsNumber()
   @Min(0)

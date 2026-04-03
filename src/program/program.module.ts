@@ -14,6 +14,13 @@ import { TreePlantationReportsModule } from './tree_plantation/reports/tree-plan
 import { AreaRationReportsModule } from './area_ration/reports/area-ration-reports.module';
 import { FinancialAssistanceReportsModule } from './financial_assistance/reports/financial-assistance-reports.module';
 import { TargetsModule } from './targets/targets.module';
+import { ApplicantModule } from './applicant/applicant.module';
+import { FamilyHeadModule } from './family_head/family_head.module';
+import { BenificiaryModule } from './benificiary/benificiary.module';
+import { ProjectsModule } from './projects/projects.module';
+import { SubProjectsModule } from './sub_projects/sub_projects.module';
+import { SubprogramsModule } from './subprograms/subprograms.module';
+import { ProgramsModule } from './programs/programs.module';
 
 @Module({
   imports: [
@@ -32,6 +39,13 @@ import { TargetsModule } from './targets/targets.module';
     AreaRationReportsModule,
     FinancialAssistanceReportsModule,
     TargetsModule,
+    ApplicantModule,
+    FamilyHeadModule,
+    BenificiaryModule,
+    ProjectsModule,
+    SubProjectsModule,
+    SubprogramsModule,
+    ProgramsModule,
   ],
   controllers: [],
   providers: [],

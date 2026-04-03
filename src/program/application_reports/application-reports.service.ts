@@ -42,10 +42,10 @@ export class ApplicationReportsService {
         applications: createdReports.map(report => ({
           id: report.id,
           project: report.project,
+          subprogram: report.subprogram,
           pending_last_month: report.pending_last_month,
           application_count: report.application_count,
           investigation_count: report.investigation_count,
-          verified_count: report.verified_count,
           approved_count: report.approved_count,
           rejected_count: report.rejected_count,
           pending_count: report.pending_count
@@ -117,10 +117,10 @@ export class ApplicationReportsService {
         applications: relatedReports.map(r => ({
           id: r.id,
           project: r.project,
+          subprogram: r.subprogram,
           pending_last_month: r.pending_last_month,
           application_count: r.application_count,
           investigation_count: r.investigation_count,
-          verified_count: r.verified_count,
           approved_count: r.approved_count,
           rejected_count: r.rejected_count,
           pending_count: r.pending_count
@@ -131,6 +131,49 @@ export class ApplicationReportsService {
         throw error;
       }
       throw new BadRequestException('Failed to fetch application report: ' + error.message);
+    }
+  }
+
+  async findLatest(): Promise<any> {
+    try {
+      const latestRow = await this.applicationReportRepository.findOne({
+        where: { is_archived: false },
+        order: { created_at: 'DESC' },
+      });
+
+      if (!latestRow) {
+        throw new NotFoundException('No application reports found');
+      }
+
+      // Find all related reports (same date and notes)
+      const relatedReports = await this.applicationReportRepository.find({
+        where: {
+          report_date: latestRow.report_date,
+          notes: latestRow.notes,
+          is_archived: false,
+        },
+        order: { id: 'ASC' },
+      });
+
+      return {
+        id: latestRow.id,
+        report_date: latestRow.report_date,
+        notes: latestRow.notes,
+        applications: relatedReports.map((r) => ({
+          id: r.id,
+          project: r.project,
+          subprogram: r.subprogram,
+          pending_last_month: r.pending_last_month,
+          application_count: r.application_count,
+          investigation_count: r.investigation_count,
+          approved_count: r.approved_count,
+          rejected_count: r.rejected_count,
+          pending_count: r.pending_count,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new BadRequestException('Failed to fetch latest application report: ' + error.message);
     }
   }
 
@@ -229,10 +272,10 @@ export class ApplicationReportsService {
       group.applications.push({
         id: report.id,
         project: report.project,
+        subprogram: report.subprogram,
         pending_last_month: report.pending_last_month,
         application_count: report.application_count,
         investigation_count: report.investigation_count,
-        verified_count: report.verified_count,
         approved_count: report.approved_count,
         rejected_count: report.rejected_count,
         pending_count: report.pending_count
