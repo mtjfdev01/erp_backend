@@ -52,11 +52,6 @@ export class CreateProgramDailyApplicationReports1700000000000
             default: 0,
           },
           {
-            name: 'verified_count',
-            type: 'int',
-            default: 0,
-          },
-          {
             name: 'approved_count',
             type: 'int',
             default: 0,

@@ -1070,7 +1070,11 @@ export class EmailService implements OnModuleInit {
       }
 
       // Ensure we're passing a proper array to Resend
-      const result = await this.resend.emails.send({
+      this.logger.log(
+        `Resend sendReportEmail inputs: to=${validRecipients.join(', ')} | from=${fromEmail} | subject=${data.subject}`,
+      );
+
+      const result: any = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [...validRecipients], // Create a new array to ensure it's a proper array
         subject: data.subject,
@@ -1082,9 +1086,14 @@ export class EmailService implements OnModuleInit {
         },
       });
 
-      const messageId = result.data?.id || 'unknown';
+      const messageId = result?.data?.id || 'unknown';
       const recipientsList = validRecipients.join(', ');
-      this.logger.log(`Sent report email via Resend to ${validRecipients.length} recipient(s): ${recipientsList} (id: ${messageId})`);
+      this.logger.log(
+        `Resend sendReportEmail response: to=${recipientsList} | messageId=${messageId} | hasError=${result?.error != null}`,
+      );
+      this.logger.log(
+        `Resend sendReportEmail response.data: ${JSON.stringify(result?.data || null)}`,
+      );
 
       if (result.error !== null) {
         this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
@@ -1092,7 +1101,9 @@ export class EmailService implements OnModuleInit {
       }
 
       if (!result.data?.id) {
-        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+        this.logger.warn(
+          `Resend response missing message ID. Full response: ${JSON.stringify(result)}`,
+        );
       }
 
       return true;

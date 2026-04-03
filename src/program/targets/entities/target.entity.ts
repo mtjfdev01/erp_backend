@@ -13,6 +13,9 @@ export class Target extends BaseEntity {
     @Column({ type: 'int', default: 0, nullable: true })
     target: number;
 
+    @Column({ type: 'int', default: 0, nullable: true })
+    reached: number;
+
     @Column({ type: 'varchar', nullable: true })
     target_type: string;
     

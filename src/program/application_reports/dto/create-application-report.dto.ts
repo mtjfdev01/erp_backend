@@ -7,6 +7,10 @@ export class CreateApplicationDto {
   @IsNotEmpty()
   project: string;
 
+  @IsString()
+  @IsNotEmpty()
+  subprogram: string;
+
   @IsNumber()
   @Min(0)
   pending_last_month: number;
@@ -18,10 +22,6 @@ export class CreateApplicationDto {
   @IsNumber()
   @Min(0)
   investigation_count: number;
-
-  @IsNumber()
-  @Min(0)
-  verified_count: number;
 
   @IsNumber()
   @Min(0)

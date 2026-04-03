@@ -39,6 +39,34 @@ export class KasbTrainingReportsService {
     }
   }
 
+  async createMultiple(createDtos: CreateKasbTrainingReportDto[], user: User): Promise<KasbTrainingReport[]> {
+    try {
+      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+
+      const reports = createDtos.map(dto => {
+        const quantity = dto.quantity || 0;
+        const addition = dto.addition || 0;
+        const left = dto.left || 0;
+        const total = quantity + addition - left;
+
+        return this.kasbTrainingReportRepository.create({
+          date: new Date(dto.date),
+          skill_level: dto.skill_level,
+          quantity,
+          addition,
+          left,
+          total,
+          created_by: dbUser,
+          updated_by: dbUser,
+        });
+      });
+
+      return await this.kasbTrainingReportRepository.save(reports);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async findAll(): Promise<KasbTrainingReport[]> {
     return await this.kasbTrainingReportRepository.find({
       where: { is_archived: false },
@@ -88,5 +116,25 @@ export class KasbTrainingReportsService {
       throw new NotFoundException(`Kasb training report with ID ${id} not found`);
     }
     await this.kasbTrainingReportRepository.update(id, { is_archived: true });
+  }
+
+  async findByDate(date: string): Promise<KasbTrainingReport[]> {
+    return await this.kasbTrainingReportRepository.find({
+      where: { date: new Date(date), is_archived: false },
+      order: { id: 'ASC' },
+    });
+  }
+
+  async removeByDate(date: string): Promise<void> {
+    const reports = await this.findByDate(date);
+    if (!reports || reports.length === 0) {
+      throw new NotFoundException(`Kasb training reports with date ${date} not found`);
+    }
+
+    await Promise.all(
+      reports.map((report) =>
+        this.kasbTrainingReportRepository.update(report.id, { is_archived: true }),
+      ),
+    );
   }
 } 

@@ -25,7 +25,7 @@ export class ProcurementsDailyReportsService {
       const userData = await this.userRepository.findOne({ where: { id: user.id } });
       // Check if report already exists for the same date
       const existingReport = await this.procurementsDailyReportRepository.findOne({
-        where: { date: reportInfo.date }
+        where: { date: reportInfo.date, is_archived: false }
       });
 
       if (existingReport) {
@@ -112,7 +112,7 @@ export class ProcurementsDailyReportsService {
       this.logger.log(`Updating procurements daily report with ID: ${id}`);
 
       const report = await this.procurementsDailyReportRepository.findOne({
-        where: { id }
+        where: { id, is_archived: false }
       });
 
       if (!report) {
@@ -122,7 +122,7 @@ export class ProcurementsDailyReportsService {
       // If date is being updated, check for conflicts
       if (updateDto.date && updateDto.date !== report.date) {
         const existingReport = await this.procurementsDailyReportRepository.findOne({
-          where: { date: updateDto.date }
+          where: { date: updateDto.date, is_archived: false }
         });
 
         if (existingReport && existingReport.id !== id) {

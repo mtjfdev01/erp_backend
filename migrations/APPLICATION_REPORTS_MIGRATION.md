@@ -33,7 +33,6 @@ The Application Reports system allows tracking of various program applications w
 - `pending_last_month` (INT, DEFAULT 0) - Applications pending from previous month
 - `application_count` (INT, DEFAULT 0) - Total new applications received
 - `investigation_count` (INT, DEFAULT 0) - Applications under investigation
-- `verified_count` (INT, DEFAULT 0) - Applications that have been verified
 - `approved_count` (INT, DEFAULT 0) - Applications that have been approved
 - `rejected_count` (INT, DEFAULT 0) - Applications that have been rejected
 - `pending_count` (INT, DEFAULT 0) - Applications currently pending

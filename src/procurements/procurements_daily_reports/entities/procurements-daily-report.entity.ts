@@ -21,10 +21,10 @@ export class ProcurementsDailyReportEntity {
   @Column({ type: 'int', default: 0, nullable: true })
   total_generated_pis: number;
 
-  @Column({ type: 'int', default: 0, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0, nullable: true })
   total_paid_amount: number;
 
-  @Column({ type: 'int', default: 0, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0, nullable: true })
   unpaid_amount: number;
 
   @Column({ type: 'int', default: 0, nullable: true })

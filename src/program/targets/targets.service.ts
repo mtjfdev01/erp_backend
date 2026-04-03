@@ -16,6 +16,26 @@ export class TargetsService {
     private readonly usersRepository: Repository<User>
   ) {   }
 
+  private normalizeSortField(sortField?: string) {
+    const allowed = new Set([
+      'id',
+      'year',
+      'program',
+      'target',
+      'reached',
+      'target_type',
+      'created_at',
+      'updated_at',
+      'is_archived',
+    ]);
+    if (!sortField || !allowed.has(sortField)) return 'created_at';
+    return sortField;
+  }
+
+  private normalizeSortOrder(sortOrder?: string) {
+    return sortOrder === 'ASC' ? 'ASC' : 'DESC';
+  }
+
   async create(createTargetDto: any, user: any) {
     try {
       // Check if this is a multiple targets request
@@ -70,11 +90,13 @@ export class TargetsService {
   async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'created_at', sortOrder: string = 'DESC') {
     try {
       const skip = (page - 1) * pageSize;
+      const safeSortField = this.normalizeSortField(sortField);
+      const safeSortOrder = this.normalizeSortOrder(sortOrder);
       
       const [targets, total] = await this.targetsRepository.findAndCount({
         skip: skip,
         take: pageSize,
-        order: { [sortField]: sortOrder },
+        order: { [safeSortField]: safeSortOrder },
         relations: ['created_by', 'updated_by']
       });
 

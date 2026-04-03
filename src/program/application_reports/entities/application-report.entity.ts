@@ -23,6 +23,9 @@ export class ApplicationReport {
   @Column({ type: 'varchar', length: 255 })
   project: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  subprogram: string;
+
   @Column({ type: 'int', name: 'pending_last_month', default: 0 })
   pending_last_month: number;
 
@@ -31,9 +34,6 @@ export class ApplicationReport {
 
   @Column({ type: 'int', name: 'investigation_count', default: 0 })
   investigation_count: number;
-
-  @Column({ type: 'int', name: 'verified_count', default: 0 })
-  verified_count: number;
 
   @Column({ type: 'int', name: 'approved_count', default: 0 })
   approved_count: number;

@@ -86,6 +86,26 @@ export class ApplicationReportsController {
     }
   }
 
+  @Get('latest')
+  @RequiredPermissions(['program.application_reports.view', 'super_admin', 'programs_manager', 'read_only_super_admin'])
+  async findLatest(@Res() res: Response) {
+    try {
+      const result = await this.applicationReportsService.findLatest();
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Latest application report retrieved successfully',
+        data: result,
+      });
+    } catch (error) {
+      const status = error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(':id')
   @RequiredPermissions(['program.application_reports.view', 'super_admin', 'programs_manager', 'read_only_super_admin'])
   async findOne(@Param('id') id: string, @Res() res: Response) {

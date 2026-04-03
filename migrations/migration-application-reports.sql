@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS applications (
     pending_last_month INT DEFAULT 0,
     application_count INT DEFAULT 0,
     investigation_count INT DEFAULT 0,
-    verified_count INT DEFAULT 0,
     approved_count INT DEFAULT 0,
     rejected_count INT DEFAULT 0,
     pending_count INT DEFAULT 0,
@@ -39,9 +38,9 @@ INSERT INTO application_reports (report_date, notes) VALUES
 ('2024-01-16', 'Follow-up report on pending applications'),
 ('2024-01-17', 'Weekly summary report');
 
-INSERT INTO applications (project, pending_last_month, application_count, investigation_count, verified_count, approved_count, rejected_count, pending_count, application_report_id) VALUES 
-('Youth Empowerment Program', 5, 12, 3, 4, 2, 1, 2, 1),
-('Women Skills Development', 3, 8, 2, 3, 2, 0, 1, 1),
-('Community Health Initiative', 2, 15, 5, 6, 3, 1, 0, 2),
-('Education Support Program', 0, 20, 8, 7, 4, 1, 0, 3),
-('Environmental Awareness', 1, 10, 4, 3, 2, 0, 1, 3); 
+INSERT INTO applications (project, pending_last_month, application_count, investigation_count, approved_count, rejected_count, pending_count, application_report_id) VALUES 
+('Youth Empowerment Program', 5, 12, 3, 2, 1, 2, 1),
+('Women Skills Development', 3, 8, 2, 2, 0, 1, 1),
+('Community Health Initiative', 2, 15, 5, 3, 1, 0, 2),
+('Education Support Program', 0, 20, 8, 4, 1, 0, 3),
+('Environmental Awareness', 1, 10, 4, 2, 0, 1, 3); 

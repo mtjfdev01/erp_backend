@@ -21,6 +21,7 @@ import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
 import { CampaignsModule } from '../dms/campaigns/campaigns.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
+import { DonationsReceiptsService } from './receipts.service';
 
 @Module({
   imports: [
@@ -37,7 +38,7 @@ import { DashboardModule } from '../dashboard/dashboard.module';
     DashboardModule,
   ], 
   controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController, CommunicationController],
-  providers: [DonationsService, PayfastService, StripeService, WhatsAppService],
+  providers: [DonationsService, DonationsReceiptsService, PayfastService, StripeService, WhatsAppService],
   exports: [DonationsService],
 })
 export class DonationsModule {}

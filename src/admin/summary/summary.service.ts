@@ -17,154 +17,6 @@ export class SummaryService {
       // console.log("summaryData called ______________________", typeof year);
       // return;
       const summaryData: any = {};
-      
-      // Separate aggregation queries per table with CASE statements
-      // const tableAggregations = {
-      //   education_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN male_orphans IS NOT NULL THEN male_orphans ELSE 0 END) as total_male_orphans,
-      //       SUM(CASE WHEN female_orphans IS NOT NULL THEN female_orphans ELSE 0 END) as total_female_orphans,
-      //       SUM(CASE WHEN male_divorced IS NOT NULL THEN male_divorced ELSE 0 END) as total_male_divorced,
-      //       SUM(CASE WHEN female_divorced IS NOT NULL THEN female_divorced ELSE 0 END) as total_female_divorced,
-      //       SUM(CASE WHEN male_disable IS NOT NULL THEN male_disable ELSE 0 END) as total_male_disable,
-      //       SUM(CASE WHEN female_disable IS NOT NULL THEN female_disable ELSE 0 END) as total_female_disable,
-      //       SUM(CASE WHEN male_indegent IS NOT NULL THEN male_indegent ELSE 0 END) as total_male_indegent,
-      //       SUM(CASE WHEN female_indegent IS NOT NULL THEN female_indegent ELSE 0 END) as total_female_indegent
-      //     FROM education_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   financial_assistance_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN widow IS NOT NULL THEN widow ELSE 0 END) as total_widows,
-      //       SUM(CASE WHEN divorced IS NOT NULL THEN divorced ELSE 0 END) as total_divorced,
-      //       SUM(CASE WHEN disable IS NOT NULL THEN disable ELSE 0 END) as total_disable,
-      //       SUM(CASE WHEN extreme_poor IS NOT NULL THEN extreme_poor ELSE 0 END) as total_indegent
-      //     FROM financial_assistance_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   // kasb_reports: `
-      //   //   SELECT 
-      //   //
-      //   //     COUNT(*) as total_records,
-      //   //     SUM(CASE WHEN loan_amount IS NOT NULL THEN loan_amount ELSE 0 END) as total_loans,
-      //   //     SUM(CASE WHEN participants IS NOT NULL THEN participants ELSE 0 END) as total_participants,
-      //   //     SUM(CASE WHEN training_hours IS NOT NULL THEN training_hours ELSE 0 END) as total_hours
-      //   //   FROM kasb_reports 
-      //   //   WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   // `,
-        
-      //   kasb_training_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN addition IS NOT NULL THEN addition ELSE 0 END) as total_addition
-      //     FROM kasb_training_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   marriage_gift_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN orphans IS NOT NULL THEN orphans ELSE 0 END) as total_orphans,
-      //       SUM(CASE WHEN divorced IS NOT NULL THEN divorced ELSE 0 END) as total_divorced,
-      //       SUM(CASE WHEN disable IS NOT NULL THEN gift_disable ELSE 0 END) as total_diable,
-      //       SUM(CASE WHEN indegent IS NOT NULL THEN indegent ELSE 0 END) as total_indegent
-      //     FROM marriage_gift_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   sewing_machine_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN orphans IS NOT NULL THEN orphans ELSE 0 END) as total_orphans,
-      //       SUM(CASE WHEN divorced IS NOT NULL THEN divorced ELSE 0 END) as total_divorced,
-      //       SUM(CASE WHEN disable IS NOT NULL THEN disable ELSE 0 END) as total_disable,
-      //       SUM(CASE WHEN indegent IS NOT NULL THEN indegent ELSE 0 END) as total_indegent
-      //     FROM sewing_machine_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-      //   ration_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN full_widows IS NOT NULL THEN full_widows ELSE 0 END) as total_full_widows,
-      //       SUM(CASE WHEN full_divorced IS NOT NULL THEN full_divorced ELSE 0 END) as total_full_divorced,
-      //       SUM(CASE WHEN full_disable IS NOT NULL THEN full_disable ELSE 0 END) as total_full_disable,
-      //       SUM(CASE WHEN full_indegent IS NOT NULL THEN full_indegent ELSE 0 END) as total_full_indegent,
-      //       SUM(CASE WHEN full_orphan IS NOT NULL THEN full_orphan ELSE 0 END) as total_full_orphan,
-      //       SUM(CASE WHEN half_widows IS NOT NULL THEN half_widows ELSE 0 END) as total_half_widows,
-      //       SUM(CASE WHEN half_divorced IS NOT NULL THEN half_divorced ELSE 0 END) as total_half_divorced,
-      //       SUM(CASE WHEN half_disable IS NOT NULL THEN half_disable ELSE 0 END) as total_half_disable,
-      //       SUM(CASE WHEN half_indegent IS NOT NULL THEN half_indegent ELSE 0 END) as total_half_indegent,
-      //       SUM(CASE WHEN half_orphan IS NOT NULL THEN half_orphan ELSE 0 END) as total_half_orphan,
-      //       SUM(CASE WHEN full_divorced IS NOT NULL THEN full_divorced ELSE 0 END) as total_full_divorced
-      //     FROM ration_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   tree_plantation_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN plants IS NOT NULL THEN plants ELSE 0 END) as total_plants
-      //     FROM tree_plantation_reports 
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false
-      //   `,
-        
-      //   water_reports: `
-      //     SELECT 
-      //       COUNT(*) as total_records,
-      //       SUM(CASE WHEN system = 'Hand Pump Indoor' THEN quantity ELSE 0 END) as total_hand_pump_indoor,
-      //       SUM(CASE WHEN system = 'Hand Pump Outdoor' THEN quantity ELSE 0 END) as total_hand_pump_outdoor,
-      //       SUM(CASE WHEN system = 'Water Motor Indoor' THEN quantity ELSE 0 END) as total_water_motor_indoor,
-      //       SUM(CASE WHEN system = 'Water Motor Outdoor' THEN quantity ELSE 0 END) as total_water_motor_outdoor,
-      //       SUM(CASE WHEN system = 'Affrideve HP' THEN quantity ELSE 0 END) as total_affrideve_hp,
-      //       SUM(CASE WHEN system = 'WF PLANT' THEN quantity ELSE 0 END) as total_wf_plant   
-      //     FROM water_reports  
-      //     WHERE (YEAR(date) = ? OR YEAR(report_date) = ?) AND is_archived = false AND activity = Installation
-      //   `,
-        
-      //   wheel_chair_or_crutches_reports: ` 
-      //     SELECT 
-      //         -- Wheel Chair breakdown
-      //         SUM(CASE WHEN type = 'Wheel Chair' THEN orphans ELSE 0 END) AS wheel_chair_orphans,
-      //         SUM(CASE WHEN type = 'Wheel Chair' THEN divorced ELSE 0 END) AS wheel_chair_divorced,
-      //         SUM(CASE WHEN type = 'Wheel Chair' THEN disable ELSE 0 END) AS wheel_chair_disable,
-      //         SUM(CASE WHEN type = 'Wheel Chair' THEN indegent ELSE 0 END) AS wheel_chair_indegent,
-
-      //         -- Crutches breakdown
-      //         SUM(CASE WHEN type = 'Crutches' THEN orphans ELSE 0 END) AS crutches_orphans,
-      //         SUM(CASE WHEN type = 'Crutches' THEN divorced ELSE 0 END) AS crutches_divorced,
-      //         SUM(CASE WHEN type = 'Crutches' THEN disable ELSE 0 END) AS crutches_disable,
-      //         SUM(CASE WHEN type = 'Crutches' THEN indegent ELSE 0 END) AS crutches_indegent,
-
-      //         -- Total per vulnerability (all types)
-      //         SUM(orphans) AS total_orphans,
-      //         SUM(divorced) AS total_divorced,
-      //         SUM(disable) AS total_disable,
-      //         SUM(indegent) AS total_indegent,
-
-      //         -- Totals by gender
-      //         SUM(CASE WHEN gender = 'Male' THEN orphans + divorced + disable + indegent ELSE 0 END) AS total_male,
-      //         SUM(CASE WHEN gender = 'Female' THEN orphans + divorced + disable + indegent ELSE 0 END) AS total_female,
-
-      //         -- ✅ Total Wheel Chairs (sum all fields for Wheel Chair)
-      //         SUM(CASE WHEN type = 'Wheel Chair' THEN orphans + divorced + disable + indegent ELSE 0 END) AS total_wheel_chairs,
-
-      //         -- ✅ Total Crutches (sum all fields for Crutches)
-      //         SUM(CASE WHEN type = 'Crutches' THEN orphans + divorced + disable + indegent ELSE 0 END) AS total_crutches,
-
-      //         -- ✅ Grand total
-      //         SUM(orphans + divorced + disable + indegent) AS total_all_items
-
-      //       FROM wheel_chair_or_crutches_reports
-      //       WHERE (YEAR(date) = ? OR YEAR(report_date) = ?)
-      //         AND is_archived = false;
-      //   `
-      // };
-      
-
 
       const tableAggregations = {
         education_reports: `
@@ -172,6 +24,7 @@ export class SummaryService {
             COUNT(*) AS total_records,
             SUM(COALESCE(male_orphans, 0))    AS total_male_orphans,
             SUM(COALESCE(female_orphans, 0))  AS total_female_orphans,
+            SUM(COALESCE(male_orphans, 0) + COALESCE(female_orphans, 0)) AS total_orphans,
             SUM(COALESCE(male_divorced, 0))   AS total_male_divorced,
             SUM(COALESCE(female_divorced, 0)) AS total_female_divorced,
             SUM(COALESCE(male_disable, 0))    AS total_male_disable,
@@ -194,6 +47,7 @@ export class SummaryService {
             SUM(COALESCE(divorced, 0))     AS total_divorced,
             SUM(COALESCE(disable, 0))      AS total_disable,
             SUM(COALESCE(extreme_poor, 0)) AS total_indegent,
+            SUM(COALESCE(widow, 0) + COALESCE(divorced, 0) + COALESCE(disable, 0) + COALESCE(extreme_poor, 0)) AS total_achieved,
             SUM(COALESCE(widow, 0) + COALESCE(divorced, 0))       AS female_achieved,
             SUM(COALESCE(disable, 0) + COALESCE(extreme_poor, 0)) AS male_achieved
           FROM financial_assistance_reports 
@@ -367,7 +221,7 @@ export class SummaryService {
       // ORPHANS achieved
       const total_orphans_achieved = n(summaryData.education_reports.total_orphans) + n(summaryData.marriage_gift_reports.total_orphans) + n(summaryData.sewing_machine_reports.total_orphans) + n(summaryData.wheel_chair_or_crutches_reports.total_orphans);
       //add women-headed households achieved in summary data
-      const total_women_headed_households_achieved = n(summaryData.financial_assistance_reports.total_women_headed_households);
+      const total_women_headed_households_achieved = 0;
       // total targeted
 
 
@@ -415,36 +269,66 @@ export class SummaryService {
       },
       // use program keys here as keys here 
       program_wise: {
-          total_achieved: summaryData.education_reports.total_achieved + summaryData.financial_assistance_reports.total_achieved + summaryData.kasb_training_reports.total_achieved + summaryData.marriage_gift_reports.total_achieved + summaryData.sewing_machine_reports.total_achieved + summaryData.ration_reports.total_achieved,
+          total_achieved:
+            n(summaryData.education_reports.total_achieved) +
+            n(summaryData.financial_assistance_reports.total_achieved) +
+            n(summaryData.kasb_training_reports.total_achieved) +
+            n(summaryData.marriage_gift_reports.total_achieved) +
+            n(summaryData.sewing_machine_reports.total_achieved) +
+            n(summaryData.ration_reports.total_achieved) +
+            n(summaryData.tree_plantation_reports.total_achieved) +
+            n(summaryData.water_reports.total_achieved) +
+            n(summaryData.wheel_chair_or_crutches_reports.total_achieved),
           education_reports: summaryData.education_reports,
           financial_assistance_reports: summaryData.financial_assistance_reports,
           kasb_training_reports: summaryData.kasb_training_reports,
           marriage_gift_reports: summaryData.marriage_gift_reports,
           sewing_machine_reports: summaryData.sewing_machine_reports,
           ration_reports: summaryData.ration_reports,
+          tree_plantation_reports: summaryData.tree_plantation_reports,
+          water_reports: summaryData.water_reports,
+          wheel_chair_or_crutches_reports: summaryData.wheel_chair_or_crutches_reports,
         },
         
       }
       
       summaryData.targets = {
         category_wise: {
-          girls_target: summaryData.achievements.category_wise.total_girls_achieved * 0.15,
-          boys_target: summaryData.achievements.category_wise.total_boys_achieved * 0.15,
-          total_target: summaryData.achievements.category_wise.total_young_achieved * 0.15,
-          widows_target: summaryData.achievements.category_wise.total_widows_achieved * 0.15,
-          divorced_target: summaryData.achievements.category_wise.total_divorced_achieved * 0.15,
-          disabled_target: summaryData.achievements.category_wise.total_disabled_achieved * 0.15,
-          indegent_target: summaryData.achievements.category_wise.total_indegent_achieved * 0.15,
-          youth_target: summaryData.achievements.category_wise.total_young_achieved * 0.15,
-          female_target: summaryData.achievements.category_wise.total_female_achieved * 0.15,
-          male_target: summaryData.achievements.category_wise.total_male_achieved * 0.15,
-          adult_target: summaryData.achievements.category_wise.total_adult_achieved * 0.15,
-          orphans_target: summaryData.achievements.category_wise.total_orphans_achieved * 0.15,
-          women_headed_households_target: summaryData.achievements.category_wise.total_women_headed_households_achieved * 0.15,
-          young_target: summaryData.achievements.category_wise.total_young_achieved * 0.15,
+          girls_target: summaryData.achievements.category_wise.total_girls_achieved * 1.15,
+          boys_target: summaryData.achievements.category_wise.total_boys_achieved * 1.15,
+          total_target: summaryData.achievements.category_wise.total_young_achieved * 1.15,
+          widows_target: summaryData.achievements.category_wise.total_widows_achieved * 1.15,
+          divorced_target: summaryData.achievements.category_wise.total_divorced_achieved * 1.15,
+          disabled_target: summaryData.achievements.category_wise.total_disabled_achieved * 1.15,
+          indegent_target: summaryData.achievements.category_wise.total_indegent_achieved * 1.15,
+          youth_target: summaryData.achievements.category_wise.total_young_achieved * 1.15,
+          female_target: summaryData.achievements.category_wise.total_female_achieved * 1.15,
+          male_target: summaryData.achievements.category_wise.total_male_achieved * 1.15,
+          adult_target: summaryData.achievements.category_wise.total_adult_achieved * 1.15,
+          orphans_target: summaryData.achievements.category_wise.total_orphans_achieved * 1.15,
+          women_headed_households_target: summaryData.achievements.category_wise.total_women_headed_households_achieved * 1.15,
+          young_target: summaryData.achievements.category_wise.total_young_achieved * 1.15,
         },
         program_wise: {
-
+          education_reports_target:
+            n(summaryData.education_reports?.total_achieved) * 1.15,
+          financial_assistance_reports_target:
+            n(summaryData.financial_assistance_reports?.total_achieved) * 1.15,
+          kasb_training_reports_target:
+            n(summaryData.kasb_training_reports?.total_achieved) * 1.15,
+          marriage_gift_reports_target:
+            n(summaryData.marriage_gift_reports?.total_achieved) * 1.15,
+          sewing_machine_reports_target:
+            n(summaryData.sewing_machine_reports?.total_achieved) * 1.15,
+          ration_reports_target:
+            n(summaryData.ration_reports?.total_achieved) * 1.15,
+          tree_plantation_reports_target:
+            n(summaryData.tree_plantation_reports?.total_achieved) * 1.15,
+          water_reports_target: n(summaryData.water_reports?.total_achieved) * 1.15,
+          wheel_chair_or_crutches_reports_target:
+            n(summaryData.wheel_chair_or_crutches_reports?.total_achieved) * 1.15,
+          total_target:
+            n(summaryData.achievements?.program_wise?.total_achieved) * 1.15,
         }
       }
 
