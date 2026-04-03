@@ -584,17 +584,21 @@ export class TasksService {
         });
       }
       if (filters.department) {
-        qb.andWhere(new Brackets((dqb) => {
-          // Filter by the department of the assigned users (assignee's department)
-          dqb.where(
-            "task.assigned_users_meta @> :deptMeta::jsonb",
-            { deptMeta: JSON.stringify([{ department: filters.department }]) }
-          );
+        if (filters.strictDepartment === true || filters.strictDepartment === "true") {
+          qb.andWhere("task.department::text = :filterDept", { filterDept: filters.department });
+        } else {
+          qb.andWhere(new Brackets((dqb) => {
+            // Filter by the department of the assigned users (assignee's department)
+            dqb.where(
+              "task.assigned_users_meta @> :deptMeta::jsonb",
+              { deptMeta: JSON.stringify([{ department: filters.department }]) }
+            );
 
-          // Keep the direct department check as well for backward compatibility and
-          // to include tasks explicitly labeled with that department.
-          dqb.orWhere("task.department::text = :filterDept", { filterDept: filters.department });
-        }));
+            // Keep the direct department check as well for backward compatibility and
+            // to include tasks explicitly labeled with that department.
+            dqb.orWhere("task.department::text = :filterDept", { filterDept: filters.department });
+          }));
+        }
       }
       if (filters.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -699,17 +703,21 @@ export class TasksService {
         qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
       }
       if (query.department) {
-        qb.andWhere(new Brackets((dqb) => {
-          // Filter by the department of the assigned users (assignee's department)
-          dqb.where(
-            "task.assigned_users_meta @> :deptMeta::jsonb",
-            { deptMeta: JSON.stringify([{ department: query.department }]) }
-          );
+        if (query.strictDepartment === true || query.strictDepartment === "true") {
+          qb.andWhere("task.department::text = :filterDept", { filterDept: query.department });
+        } else {
+          qb.andWhere(new Brackets((dqb) => {
+            // Filter by the department of the assigned users (assignee's department)
+            dqb.where(
+              "task.assigned_users_meta @> :deptMeta::jsonb",
+              { deptMeta: JSON.stringify([{ department: query.department }]) }
+            );
 
-          // Keep the direct department check as well for backward compatibility and
-          // to include tasks explicitly labeled with that department.
-          dqb.orWhere("task.department::text = :filterDept", { filterDept: query.department });
-        }));
+            // Keep the direct department check as well for backward compatibility and
+            // to include tasks explicitly labeled with that department.
+            dqb.orWhere("task.department::text = :filterDept", { filterDept: query.department });
+          }));
+        }
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
