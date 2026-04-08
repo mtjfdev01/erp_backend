@@ -26,6 +26,7 @@ export class SubprogramsController {
     @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
     @Query('active') active?: string,
     @Query('program_id') programId?: string,
+    @Query('search') search?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const pageSizeNum = pageSize ? parseInt(pageSize, 10) : 10;
@@ -40,6 +41,7 @@ export class SubprogramsController {
       sortOrder,
       active: typeof active === 'string' ? activeBool : undefined,
       program_id: programIdNum,
+      search,
     });
   }
 

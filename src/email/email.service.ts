@@ -54,6 +54,59 @@ export class EmailService implements OnModuleInit {
     this.logger.log('Email service configuration validated');
   }
 
+  /**
+   * Send a dynamic email using a template string and data for placeholders.
+   * Placeholders should be in the format {{variable_name}}.
+   */
+  async sendDynamicEmail(params: {
+    to: string;
+    subject: string;
+    body: string;
+    data: Record<string, any>;
+  }): Promise<boolean> {
+    try {
+      if (!this.resend) {
+        this.logger.error('Resend is not configured - cannot send email');
+        return false;
+      }
+
+      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
+      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+
+      // Replace placeholders in subject and body
+      const replacePlaceholders = (text: string, data: Record<string, any>) => {
+        return text.replace(/{{(\w+)}}/g, (match, key) => {
+          return data[key] !== undefined ? data[key] : match;
+        });
+      };
+
+      const renderedSubject = replacePlaceholders(params.subject, params.data);
+      const renderedBody = replacePlaceholders(params.body, params.data);
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [params.to],
+        subject: renderedSubject,
+        html: renderedBody,
+        headers: {
+          'X-Mailer': 'MTJ Foundation Dynamic Email System',
+          'Reply-To': fromEmail,
+        },
+      });
+
+      if (result.error !== null) {
+        this.logger.warn(`Resend error sending dynamic email: ${JSON.stringify(result.error)}`);
+        return false;
+      }
+
+      this.logger.log(`Dynamic email sent successfully to ${params.to}`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(`Failed to send dynamic email: ${error.message}`);
+      return false;
+    }
+  }
+
   private donationLabel(type?: string) {
     if (type === 'zakat') return 'Zakat';
     if (type === 'sadqa' || type === 'sadaqah') return 'Sadqa';

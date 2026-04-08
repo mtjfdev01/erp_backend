@@ -15,15 +15,13 @@ import { NotificationType } from '../notifications/entities/notification.entity'
 import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters, applyMultiselectFilters } from '../utils/filters/common-filter.util';
 import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } from '../utils/summary/date-range.util';
 import axios from 'axios';
-import { get } from 'http';
-import { DonationMethod } from 'src/utils/enums';
-import * as crypto from 'crypto';
 import { WhatsAppService } from 'src/utils/services/whatsapp.service';
 import { Donor } from 'src/dms/donor/entities/donor.entity';
 import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
 import { City } from '../dms/geographic/cities/entities/city.entity';
 import { CampaignsService } from '../dms/campaigns/campaigns.service';
 import { DashboardAggregateService } from '../dashboard/dashboard-aggregate.service';
+import { ProgressTrackersService } from '../progress_tracking/progress_trackers/progress-trackers.service';
 
 @Injectable()
 export class DonationsService {
@@ -48,6 +46,7 @@ export class DonationsService {
     private whatsAppService: WhatsAppService,
     private campaignsService: CampaignsService,
     private dashboardAggregateService: DashboardAggregateService,
+    private progressTrackersService: ProgressTrackersService,
   ) {}
 
   private async persistGatewayInvoiceError(
@@ -58,29 +57,55 @@ export class DonationsService {
     await this.donationRepository.update(donationId, { err_msg: message });
   }
 
-  /** Reuse same-day pending donation for existing donor (same amount, method, campaign). */
-  private async findReusablePendingDonation(params: {
-    donorId: number;
-    amount: number;
-    donationMethod: string;
-    campaignId: number | null;
-  }): Promise<Donation | null> {
-    const qb = this.donationRepository
-      .createQueryBuilder('d')
-      .where('d.donor_id = :donorId', { donorId: params.donorId })
-      .andWhere('d.status = :status', { status: 'pending' })
-      .andWhere('d.amount = :amount', { amount: params.amount })
-      .andWhere('d.donation_method = :method', { method: params.donationMethod })
-      .andWhere('DATE(d.date) = CURRENT_DATE');
-
-    if (params.campaignId === null) {
-      qb.andWhere('d.campaign_id IS NULL');
-    } else {
-      qb.andWhere('d.campaign_id = :campaignId', { campaignId: params.campaignId });
+  private async maybeCreateProgressTrackerForNewDonation(
+    createDonationDto: CreateDonationDto,
+    savedDonation: { id: number },
+    user: any,
+  ): Promise<void> {
+    const templateId = createDonationDto.progress_workflow_template_id;
+    if (templateId == null || templateId === undefined) return;
+    const tid = Number(templateId);
+    if (!Number.isFinite(tid) || tid <= 0) return;
+    try {
+      await this.progressTrackersService.createTrackerFromTemplate(
+        {
+          template_id: tid,
+          donation_id: savedDonation.id,
+          donor_visible: createDonationDto.progress_tracker_donor_visible ?? true,
+        },
+        user,
+      );
+    } catch (e: any) {
+      console.error(
+        `Failed to create progress tracker for donation ${savedDonation.id} (template ${tid}):`,
+        e?.message || e,
+      );
     }
-
-    return qb.orderBy('d.id', 'DESC').getOne();
   }
+
+  // /** Reuse same-day pending donation for existing donor (same amount, method, campaign). */
+  // private async findReusablePendingDonation(params: {
+  //   donorId: number;
+  //   amount: number;
+  //   donationMethod: string;
+  //   campaignId: number | null;
+  // }): Promise<Donation | null> {
+  //   const qb = this.donationRepository
+  //     .createQueryBuilder('d')
+  //     .where('d.donor_id = :donorId', { donorId: params.donorId })
+  //     .andWhere('d.status = :status', { status: 'pending' })
+  //     .andWhere('d.amount = :amount', { amount: params.amount })
+  //     .andWhere('d.donation_method = :method', { method: params.donationMethod })
+  //     .andWhere('DATE(d.date) = CURRENT_DATE');
+
+  //   if (params.campaignId === null) {
+  //     qb.andWhere('d.campaign_id IS NULL');
+  //   } else {
+  //     qb.andWhere('d.campaign_id = :campaignId', { campaignId: params.campaignId });
+  //   }
+
+  //   return qb.orderBy('d.id', 'DESC').getOne();
+  // }
 
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
@@ -586,10 +611,9 @@ export class DonationsService {
       };
     }
 
-    // Auto-update DB if provider status differs from current DB status
+    // Auto-update DB only when provider status differs from current DB status
     let dbUpdated = false;
-    // if (donationStatus !== donation.status) {
-      if (true) {
+    if (donationStatus !== donation.status) {
       const updateData: any = { status: donationStatus };
       if (donationStatus === 'completed') {
         updateData.paid_amount = donation.amount;
@@ -911,7 +935,7 @@ export class DonationsService {
     let donor:any;
     let savedDonation:any;
     let isNewDonorThisRequest = false;
-    let reusedPendingDonation = false;
+    // let reusedPendingDonation = false;
     if(!createDonationDto?.previous_donation_id){ // if previous donation id is not provided, then we need to create a new donation and register donor if not exists then skip this
      // ============================================
      // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
@@ -994,27 +1018,27 @@ export class DonationsService {
        }
      }
 
-     if (
-       !isNewDonorThisRequest &&
-       donorId &&
-       createDonationDto.donation_method &&
-       createDonationDto.amount != null &&
-       createDonationDto.donation_frequency !== 'monthly'
-     ) {
-       const existing = await this.findReusablePendingDonation({
-         donorId,
-         amount: Number(createDonationDto.amount),
-         donationMethod: createDonationDto.donation_method as string,
-         campaignId,
-       });
-       if (existing) {
-         savedDonation = existing;
-         reusedPendingDonation = true;
-         console.log(`♻️ Reusing pending donation ${existing.id} for donor ${donorId}`);
-       }
-     }
+     // if (
+     //   !isNewDonorThisRequest &&
+     //   donorId &&
+     //   createDonationDto.donation_method &&
+     //   createDonationDto.amount != null &&
+     //   createDonationDto.donation_frequency !== 'monthly'
+     // ) {
+     //   const existing = await this.findReusablePendingDonation({
+     //     donorId,
+     //     amount: Number(createDonationDto.amount),
+     //     donationMethod: createDonationDto.donation_method as string,
+     //     campaignId,
+     //   });
+     //   if (existing) {
+     //     savedDonation = existing;
+     //     reusedPendingDonation = true;
+     //     console.log(`♻️ Reusing pending donation ${existing.id} for donor ${donorId}`);
+     //   }
+     // }
 
-     if (!reusedPendingDonation) {
+     // if (!reusedPendingDonation) { // This condition is now always true since reusedPendingDonation is not set
        if (createDonationDto?.donation_frequency && createDonationDto.donation_frequency === 'monthly') {
          const recurringDonation = this.recurringDonationRepository.create({
            ...createDonationDto,
@@ -1036,7 +1060,9 @@ export class DonationsService {
        });
        savedDonation = await this.donationRepository.save(donation);
        console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
-     }
+
+       await this.maybeCreateProgressTrackerForNewDonation(createDonationDto, savedDonation, user);
+     // }
 
      if(createDonationDto?.previous_donation_id) {
       savedDonation = await this.donationRepository.findOne({
@@ -1050,7 +1076,7 @@ export class DonationsService {
     }
     }
     //  await this.emailService.sendDonationFailureNotification(savedDonation);
-     if (!reusedPendingDonation) {
+    //  if (!reusedPendingDonation) {
      try {
        const donationUsers = await this.getDonationUsers();
        
@@ -1086,7 +1112,7 @@ export class DonationsService {
      } catch (error) {
        console.error('Failed to create notifications:', error.message);
      }
-     }
+    //  }
 
       if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
       // Use reusable helper method to create Meezan invoice
@@ -1441,15 +1467,68 @@ export class DonationsService {
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
-      
-      await this.donationRepository.update(id, updateDonationDto);
-      return await this.donationRepository.findOne({ where: { id } });
+
+      const patch = this.buildDonationPatch(updateDonationDto);
+      if (Object.keys(patch).length > 0) {
+        await this.donationRepository.update(id, patch as any);
+      }
+      return await this.findOne(id);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new Error(`Failed to update donation: ${error.message}`);
     }
+  }
+
+  /** Whitelist fields for PATCH; in-kind rows are not updated here. */
+  private buildDonationPatch(dto: UpdateDonationDto): Record<string, unknown> {
+    const d = dto as Record<string, unknown>;
+    const allowed = [
+      'amount',
+      'paid_amount',
+      'currency',
+      'date',
+      'donation_type',
+      'donation_method',
+      'donation_source',
+      'status',
+      'country',
+      'city',
+      'project_id',
+      'project_name',
+      'campaign_id',
+      'sub_program_id',
+      'event_id',
+      'cheque_number',
+      'bank_name',
+      'bank',
+      'transaction_id',
+      'ref',
+    ] as const;
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (d[key] === undefined) continue;
+      if (
+        (key === 'campaign_id' || key === 'sub_program_id' || key === 'event_id') &&
+        (d[key] === '' || d[key] === null)
+      ) {
+        patch[key] = null;
+        continue;
+      }
+      if (key === 'amount' || key === 'paid_amount') {
+        const n = Number(d[key]);
+        if (!Number.isNaN(n)) patch[key] = Math.round(n);
+        continue;
+      }
+      if (key === 'campaign_id' || key === 'sub_program_id' || key === 'event_id') {
+        const n = Number(d[key]);
+        if (!Number.isNaN(n)) patch[key] = n;
+        continue;
+      }
+      patch[key] = d[key];
+    }
+    return patch;
   }
 
   /**

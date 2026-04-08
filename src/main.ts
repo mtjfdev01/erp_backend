@@ -31,7 +31,8 @@ async function bootstrap() {
     "http://192.168.2.131:3001",
     'https://mtjfoundation.org', // Add non-www version
     'http://18.143.123.75', // EOceans IP - add protocol
-    'https://18.143.123.75' // EOceans IP - HTTPS version
+    'https://18.143.123.75', // EOceans IP - HTTPS version
+    'https://erp.mtjfoundation.pk'
   ];
 
   // Normalize origin for comparison (remove trailing slash, convert to lowercase)

@@ -25,6 +25,7 @@ export class ProgramsController {
     @Query('sortField') sortField?: string,
     @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
     @Query('active') active?: string,
+    @Query('search') search?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const pageSizeNum = pageSize ? parseInt(pageSize, 10) : 10;
@@ -37,6 +38,7 @@ export class ProgramsController {
       sortField,
       sortOrder,
       active: typeof active === 'string' ? activeBool : undefined,
+      search,
     });
   }
 

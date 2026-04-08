@@ -31,4 +31,26 @@ export class DmsCronsController {
       });
     }
   }
+
+  /**
+   * One-time manual trigger to clean up pending donations
+   * POST /dms-crons/cleanup-pending-donations
+   */
+  @Post('cleanup-pending-donations')
+  // @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
+  async cleanupPendingDonations(@Res() res: Response) {
+    try {
+      const result = await this.dmsCronsService.cleanupPendingDonations();
+      return res.status(200).json({
+        success: true,
+        message: `Pending donations cleanup complete — Processed Donors: ${result.processedDonors}, Deleted Donations: ${result.deletedDonations}`,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: `Pending donations cleanup failed: ${error.message}`,
+      });
+    }
+  }
 }

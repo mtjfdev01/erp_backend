@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsDateString, IsEmail, IsPhoneNumber, IsEnum, IsBoolean } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsDateString, IsEmail, IsPhoneNumber, IsEnum, IsBoolean, IsInt } from 'class-validator';
 import { DonationMethod } from 'src/utils/enums';
 
 export class CreateDonationDto {
@@ -122,6 +122,10 @@ export class CreateDonationDto {
   @IsNumber()
   campaign_id?: number;
 
+  @IsOptional()
+  @IsNumber()
+  sub_program_id?: number;
+
   // ⭐ NEW: In-kind items array
   @IsOptional()
   in_kind_items?: Array<{
@@ -149,4 +153,12 @@ export class CreateDonationDto {
   @IsString()
   donation_frequency?: string;
 
+  /** When set, creates a progress tracker from this workflow template for the new donation. */
+  @IsOptional()
+  @IsInt()
+  progress_workflow_template_id?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  progress_tracker_donor_visible?: boolean;
 }

@@ -27,6 +27,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { QrCodeModule } from './qr_code/qr_code.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { TasksModule } from './tasks/tasks.module';
+import { ProgressTrackingModule } from './progress_tracking/progress-tracking.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { TasksModule } from './tasks/tasks.module';
     QrCodeModule,
     DashboardModule,
     TasksModule,
+    ProgressTrackingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -9,10 +9,10 @@ export class DonationsReportCronService {
   constructor(private readonly donationsReportService: DonationsReportService) {}
 
   /**
-   * Daily cron job - Runs at 1 AM every day (reports previous day)
-   * Cron expression: '0 1 * * *' = At 01:00 AM every day
+   * Daily cron job - Runs at 3 AM every day (reports previous day)
+   * Cron expression: '0 3 * * *' = At 03:00 AM every day
    */
-  @Cron('0 1 * * *', {
+  @Cron('0 3 * * *', {
     name: 'donations-daily-report',
     timeZone: 'Asia/Karachi',
   })

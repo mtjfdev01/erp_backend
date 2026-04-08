@@ -84,6 +84,7 @@ export class ProgramsService {
     sortField?: string;
     sortOrder?: 'ASC' | 'DESC';
     active?: boolean;
+    search?: string;
   }) {
     await this.ensureSeededDefaults();
 
@@ -93,23 +94,34 @@ export class ProgramsService {
       sortField,
       sortOrder,
       active,
+      search,
     } = params;
 
-    const skip = (page - 1) * pageSize;
+    const query = this.programsRepository.createQueryBuilder('program');
+
+    query.where('program.is_archived = false');
+
+    if (typeof active === 'boolean') {
+      query.andWhere('program.status = :status', {
+        status: active ? 'active' : 'inactive',
+      });
+    }
+
+    if (search) {
+      query.andWhere(
+        '(program.key ILIKE :search OR program.label ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
     const safeSortField = this.normalizeSortField(sortField);
     const safeSortOrder = this.normalizeSortOrder(sortOrder);
 
-    const where: any = { is_archived: false };
-    if (typeof active === 'boolean') {
-      where.status = active ? 'active' : 'inactive';
-    }
-
-    const [rows, total] = await this.programsRepository.findAndCount({
-      where,
-      skip,
-      take: pageSize,
-      order: { [safeSortField]: safeSortOrder },
-    });
+    const [rows, total] = await query
+      .orderBy(`program.${safeSortField}`, safeSortOrder)
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount();
 
     const totalPages = Math.ceil(total / pageSize);
     return {

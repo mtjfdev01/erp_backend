@@ -22,6 +22,7 @@ import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurrin
 import { CampaignsModule } from '../dms/campaigns/campaigns.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
 import { DonationsReceiptsService } from './receipts.service';
+import { ProgressTrackersModule } from '../progress_tracking/progress_trackers/progress-trackers.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DonationsReceiptsService } from './receipts.service';
     NotificationsModule,
     CampaignsModule,
     DashboardModule,
+    ProgressTrackersModule,
   ], 
   controllers: [DonationsController, PublicDonationsController, MigrationController, DonationsSummaryController, CommunicationController],
   providers: [DonationsService, DonationsReceiptsService, PayfastService, StripeService, WhatsAppService],

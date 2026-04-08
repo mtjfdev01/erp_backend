@@ -137,6 +137,7 @@ export class SubprogramsService {
     sortOrder?: 'ASC' | 'DESC';
     active?: boolean;
     program_id?: number;
+    search?: string;
   }) {
     await this.ensureSeededDefaults();
 
@@ -147,26 +148,38 @@ export class SubprogramsService {
       sortOrder,
       active,
       program_id,
+      search,
     } = params;
 
-    const skip = (page - 1) * pageSize;
+    const query = this.subprogramsRepository.createQueryBuilder('subprogram');
+
+    query.where('subprogram.is_archived = false');
+
+    if (typeof active === 'boolean') {
+      query.andWhere('subprogram.status = :status', {
+        status: active ? 'active' : 'inactive',
+      });
+    }
+
+    if (program_id) {
+      query.andWhere('subprogram.program_id = :program_id', { program_id });
+    }
+
+    if (search) {
+      query.andWhere(
+        '(subprogram.key ILIKE :search OR subprogram.label ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
     const safeSortField = this.normalizeSortField(sortField);
     const safeSortOrder = this.normalizeSortOrder(sortOrder);
 
-    const where: any = { is_archived: false };
-    if (typeof active === 'boolean') {
-      where.status = active ? 'active' : 'inactive';
-    }
-    if (program_id) {
-      where.program_id = program_id;
-    }
-
-    const [rows, total] = await this.subprogramsRepository.findAndCount({
-      where,
-      skip,
-      take: pageSize,
-      order: { [safeSortField]: safeSortOrder },
-    });
+    const [rows, total] = await query
+      .orderBy(`subprogram.${safeSortField}`, safeSortOrder)
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount();
 
     const totalPages = Math.ceil(total / pageSize);
 
