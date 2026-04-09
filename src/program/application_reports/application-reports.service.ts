@@ -191,7 +191,7 @@ export class ApplicationReportsService {
         },
         order: { id: 'ASC' }
       });
-      // Update report metadata for all related reports
+      // Submit Report metadata for all related reports
       if (Object.keys(reportData).length > 0) {
         for (const report of relatedReports) {
           await this.applicationReportRepository.update(report.id, {

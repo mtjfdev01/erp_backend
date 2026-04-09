@@ -61,7 +61,7 @@ npm run start:dev
 - `POST /procurements/reports` - Create new report
 - `GET /procurements/reports` - List reports (with pagination)
 - `GET /procurements/reports/:id` - Get single report
-- `PATCH /procurements/reports/:id` - Update report
+- `PATCH /procurements/reports/:id` - Submit Report
 - `DELETE /procurements/reports/:id` - Delete report
 
 ### Query Parameters for List Endpoint

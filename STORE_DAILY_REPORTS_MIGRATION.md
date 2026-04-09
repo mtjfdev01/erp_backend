@@ -29,7 +29,7 @@ src/store/
 - `POST /store/reports` - Create new report
 - `GET /store/reports` - List all reports (with pagination)
 - `GET /store/reports/:id` - Get specific report
-- `PATCH /store/reports/:id` - Update report
+- `PATCH /store/reports/:id` - Submit Report
 - `DELETE /store/reports/:id` - Delete report
 
 ### 3. Database Changes
