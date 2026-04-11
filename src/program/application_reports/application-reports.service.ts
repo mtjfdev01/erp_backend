@@ -46,6 +46,7 @@ export class ApplicationReportsService {
           pending_last_month: report.pending_last_month,
           application_count: report.application_count,
           investigation_count: report.investigation_count,
+          verified_count: report.verified_count,
           approved_count: report.approved_count,
           rejected_count: report.rejected_count,
           pending_count: report.pending_count
@@ -121,6 +122,7 @@ export class ApplicationReportsService {
           pending_last_month: r.pending_last_month,
           application_count: r.application_count,
           investigation_count: r.investigation_count,
+          verified_count: r.verified_count,
           approved_count: r.approved_count,
           rejected_count: r.rejected_count,
           pending_count: r.pending_count
@@ -166,6 +168,7 @@ export class ApplicationReportsService {
           pending_last_month: r.pending_last_month,
           application_count: r.application_count,
           investigation_count: r.investigation_count,
+          verified_count: r.verified_count,
           approved_count: r.approved_count,
           rejected_count: r.rejected_count,
           pending_count: r.pending_count,
@@ -276,6 +279,7 @@ export class ApplicationReportsService {
         pending_last_month: report.pending_last_month,
         application_count: report.application_count,
         investigation_count: report.investigation_count,
+        verified_count: report.verified_count,
         approved_count: report.approved_count,
         rejected_count: report.rejected_count,
         pending_count: report.pending_count

@@ -28,6 +28,7 @@ import { QrCodeModule } from './qr_code/qr_code.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { TasksModule } from './tasks/tasks.module';
 import { ProgressTrackingModule } from './progress_tracking/progress-tracking.module';
+import { NewDashboardModule } from './new_dashboard/new_dashboard.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { ProgressTrackingModule } from './progress_tracking/progress-tracking.mo
     DashboardModule,
     TasksModule,
     ProgressTrackingModule,
+    NewDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
