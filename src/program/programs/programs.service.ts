@@ -14,14 +14,14 @@ export class ProgramsService {
 
   private normalizeSortField(sortField?: string) {
     const allowed = new Set([
-      "id",
-      "key",
-      "label",
-      "logo",
-      "status",
-      "created_at",
-      "updated_at",
-      "is_archived",
+      'id',
+      'key',
+      'label',
+      'logo',
+      'status',
+      'created_at',
+      'updated_at',
+      'is_archived',
     ]);
     if (!sortField || !allowed.has(sortField)) return "created_at";
     return sortField;
@@ -36,71 +36,17 @@ export class ProgramsService {
     if (totalCount > 0) return;
 
     const defaults: Array<
-      Pick<ProgramEntity, "id" | "key" | "label" | "logo" | "status">
+      Pick<ProgramEntity, 'id' | 'key' | 'label' | 'logo' | 'status' | 'applicationable'>
     > = [
-      {
-        id: 1,
-        key: "food_security",
-        label: "Food Security",
-        logo: "/public/assets/images/program_logos/ration.png",
-        status: "active",
-      },
-      {
-        id: 2,
-        key: "community_services",
-        label: "Community Services",
-        logo: "/public/assets/images/program_logos/ration.png",
-        status: "active",
-      },
-      {
-        id: 3,
-        key: "education",
-        label: "Education",
-        logo: "/public/assets/images/program_logos/education.png",
-        status: "active",
-      },
-      {
-        id: 4,
-        key: "water_clean_water",
-        label: "Water & Clean Water",
-        logo: "/public/assets/images/program_logos/water.png",
-        status: "active",
-      },
-      {
-        id: 5,
-        key: "kasb",
-        label: "KASB",
-        logo: "/public/assets/images/program_logos/kasb.png",
-        status: "active",
-      },
-      {
-        id: 6,
-        key: "green_initiative",
-        label: "Green Initiative",
-        logo: "/public/assets/images/program_logos/kasb.png",
-        status: "active",
-      },
-      {
-        id: 7,
-        key: "widows_and_orphans_care_program",
-        label: "Widows and Orphans Care Program",
-        logo: "/public/assets/images/program_logos/maskan.png",
-        status: "active",
-      },
-      {
-        id: 8,
-        key: "livelihood_support_program",
-        label: "Livelihood Support Program",
-        logo: "/public/assets/images/program_logos/kasb.png",
-        status: "active",
-      },
-      {
-        id: 9,
-        key: "disaster_management",
-        label: "Disaster Management",
-        logo: "/public/assets/images/program_logos/disaster_management.png",
-        status: "active",
-      },
+      { id: 1, key: 'food_security', label: 'Food Security', logo: '/public/assets/images/program_logos/ration.png', status: 'active', applicationable: true },
+      { id: 2, key: 'community_services', label: 'Community Services', logo: '/public/assets/images/program_logos/ration.png', status: 'active', applicationable: true },
+      { id: 3, key: 'education', label: 'Education', logo: '/public/assets/images/program_logos/education.png', status: 'active', applicationable: true },
+      { id: 4, key: 'water_clean_water', label: 'Water & Clean Water', logo: '/public/assets/images/program_logos/water.png', status: 'active', applicationable: true },
+      { id: 5, key: 'kasb', label: 'KASB', logo: '/public/assets/images/program_logos/kasb.png', status: 'active', applicationable: true },
+      { id: 6, key: 'green_initiative', label: 'Green Initiative', logo: '/public/assets/images/program_logos/kasb.png', status: 'active', applicationable: true },
+      { id: 7, key: 'widows_and_orphans_care_program', label: 'Widows and Orphans Care Program', logo: '/public/assets/images/program_logos/maskan.png', status: 'active', applicationable: true },
+      { id: 8, key: 'livelihood_support_program', label: 'Livelihood Support Program', logo: '/public/assets/images/program_logos/kasb.png', status: 'active', applicationable: true },
+      { id: 9, key: 'disaster_management', label: 'Disaster Management', logo: '/public/assets/images/program_logos/disaster_management.png', status: 'active', applicationable: true },
     ];
 
     await this.programsRepository.insert(
@@ -122,9 +68,11 @@ export class ProgramsService {
     }
 
     const status = createProgramDto.status ?? "active";
+    const applicationable = createProgramDto.applicationable ?? true;
     const entity = this.programsRepository.create({
       ...createProgramDto,
       status,
+      applicationable,
       is_archived: false,
       created_by: user,
       updated_by: user,
@@ -144,6 +92,8 @@ export class ProgramsService {
     sortField?: string;
     sortOrder?: "ASC" | "DESC";
     active?: boolean;
+    /** When set, filter by `applicationable` */
+    applicationable?: boolean;
     search?: string;
   }) {
     await this.ensureSeededDefaults();
@@ -154,6 +104,7 @@ export class ProgramsService {
       sortField,
       sortOrder,
       active,
+      applicationable,
       search,
     } = params;
 
@@ -165,6 +116,14 @@ export class ProgramsService {
       query.andWhere("program.status = :status", {
         status: active ? "active" : "inactive",
       });
+    }
+
+    if (typeof applicationable === 'boolean') {
+      query.andWhere('program.applicationable = :applicationable', { applicationable });
+    }
+
+    if (typeof applicationable === 'boolean') {
+      query.andWhere('program.applicationable = :applicationable', { applicationable });
     }
 
     if (search) {

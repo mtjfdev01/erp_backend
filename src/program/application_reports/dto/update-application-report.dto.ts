@@ -36,6 +36,11 @@ export class UpdateApplicationDto {
   @IsNumber()
   @Min(0)
   @IsOptional()
+  verified_count?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
   approved_count?: number;
 
   @IsNumber()

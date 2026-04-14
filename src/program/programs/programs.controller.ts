@@ -32,12 +32,13 @@ export class ProgramsController {
 
   @Get()
   findAll(
-    @Query("page") page?: string,
-    @Query("pageSize") pageSize?: string,
-    @Query("sortField") sortField?: string,
-    @Query("sortOrder") sortOrder?: "ASC" | "DESC",
-    @Query("active") active?: string,
-    @Query("search") search?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sortField') sortField?: string,
+    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
+    @Query('active') active?: string,
+    @Query('applicationable') applicationable?: string,
+    @Query('search') search?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const pageSizeNum = pageSize ? parseInt(pageSize, 10) : 10;
@@ -46,12 +47,20 @@ export class ProgramsController {
         ? active.toLowerCase() === "true" || active === "1"
         : undefined;
 
+    let applicationableFilter: boolean | undefined;
+    if (typeof applicationable === 'string') {
+      const v = applicationable.trim().toLowerCase();
+      if (v === 'true' || v === '1') applicationableFilter = true;
+      else if (v === 'false' || v === '0') applicationableFilter = false;
+    }
+
     return this.programsService.findAll({
       page: pageNum,
       pageSize: pageSizeNum,
       sortField,
       sortOrder,
-      active: typeof active === "string" ? activeBool : undefined,
+      active: typeof active === 'string' ? activeBool : undefined,
+      applicationable: applicationableFilter,
       search,
     });
   }

@@ -145,22 +145,17 @@ export class AdminService {
 
         //  Application Reports
         this.applicationReportRepository
-          .createQueryBuilder("a_r_report")
-          .select("SUM(a_r_report.pending_last_month)", "Pending Last Month")
-          .addSelect("SUM(a_r_report.application_count)", "Applications")
-          .addSelect("SUM(a_r_report.investigation_count)", "Investigations")
-          .addSelect("SUM(a_r_report.approved_count)", "Approved")
-          .addSelect("SUM(a_r_report.rejected_count)", "Rejected")
-          .addSelect("SUM(a_r_report.pending_count)", "Pending")
-          .addSelect("COUNT(*)", "Total Reports") // ✅ use COUNT(*)
-          .addSelect(
-            "SUM(a_r_report.pending_last_month + a_r_report.application_count + a_r_report.investigation_count + a_r_report.approved_count + a_r_report.rejected_count + a_r_report.pending_count)",
-            "Grand_Total",
-          )
-          .where("a_r_report.report_date BETWEEN :fromDate AND :toDate", {
-            fromDate: from,
-            toDate: to,
-          })
+          .createQueryBuilder('a_r_report')
+          .select('SUM(a_r_report.pending_last_month)', 'Pending Last Month')
+          .addSelect('SUM(a_r_report.application_count)', 'Applications')
+          .addSelect('SUM(a_r_report.investigation_count)', 'Investigations')
+          .addSelect('SUM(a_r_report.verified_count)', 'Verified')
+          .addSelect('SUM(a_r_report.approved_count)', 'Approved')
+          .addSelect('SUM(a_r_report.rejected_count)', 'Rejected')
+          .addSelect('SUM(a_r_report.pending_count)', 'Pending')
+          .addSelect('COUNT(*)', 'Total Reports') // ✅ use COUNT(*)
+          .addSelect('SUM(a_r_report.pending_last_month + a_r_report.application_count + a_r_report.investigation_count + a_r_report.verified_count + a_r_report.approved_count + a_r_report.rejected_count + a_r_report.pending_count)', 'Grand_Total')
+          .where('a_r_report.report_date BETWEEN :fromDate AND :toDate', { fromDate: from, toDate: to })
           .getRawOne(),
 
         // Area Ration Reports

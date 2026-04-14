@@ -35,6 +35,10 @@ export class CreateApplicationDto {
 
   @IsNumber()
   @Min(0)
+  verified_count: number;
+
+  @IsNumber()
+  @Min(0)
   approved_count: number;
 
   @IsNumber()

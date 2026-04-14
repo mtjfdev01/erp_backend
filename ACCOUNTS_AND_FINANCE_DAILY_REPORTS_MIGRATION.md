@@ -32,7 +32,7 @@ accounts_and_finance_daily_reports/
 - `POST /accounts-and-finance/reports` - Create new report
 - `GET /accounts-and-finance/reports` - Get all reports
 - `GET /accounts-and-finance/reports/:id` - Get specific report
-- `PATCH /accounts-and-finance/reports/:id` - Update report
+- `PATCH /accounts-and-finance/reports/:id` - Submit Report
 - `DELETE /accounts-and-finance/reports/:id` - Delete report
 
 ## Migration Steps

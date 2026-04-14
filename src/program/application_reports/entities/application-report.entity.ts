@@ -35,7 +35,10 @@ export class ApplicationReport {
   @Column({ type: "int", name: "investigation_count", default: 0 })
   investigation_count: number;
 
-  @Column({ type: "int", name: "approved_count", default: 0 })
+  @Column({ type: 'int', name: 'verified_count', default: 0 })
+  verified_count: number;
+
+  @Column({ type: 'int', name: 'approved_count', default: 0 })
   approved_count: number;
 
   @Column({ type: "int", name: "rejected_count", default: 0 })

@@ -15,4 +15,8 @@ export class ProgramEntity extends BaseEntity {
 
   @Column({ type: "varchar", length: 20, default: "active" })
   status: string;
+
+  /** When false, program is excluded from application reports UI and Program Overview (Applications). */
+  @Column({ type: 'boolean', name: 'applicationable', default: true })
+  applicationable: boolean;
 }

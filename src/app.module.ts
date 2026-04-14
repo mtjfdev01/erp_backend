@@ -1,33 +1,34 @@
-import { Module } from "@nestjs/common";
-import { TypeOrmModule } from "@nestjs/typeorm";
-import { ConfigModule } from "@nestjs/config";
-import { AppController } from "./app.controller";
-import { AppService } from "./app.service";
-import { StoreModule } from "./store/store.module";
-import { ProcurementsModule } from "./procurements/procurements.module";
-import { ProgramModule } from "./program/program.module";
-import { AccountsAndFinanceModule } from "./accounts-and-finance/accounts-and-finance.module";
-import { AuthModule } from "./auth/auth.module";
-import { UsersModule } from "./users/users.module";
-import { AdminModule } from "./admin/admin.module";
-import { PermissionsModule } from "./permissions/permissions.module";
-import { EventEmitterModule } from "@nestjs/event-emitter";
-import { DonationsModule } from "./donations/donations.module";
-import { DmsModule } from "./dms/dms.module";
-import { DmsCronsModule } from "./crons/dms_crons/dms-crons.module";
-import { DonationsReportModule } from "./crons/donations_report/donations-report.module";
-import { GeographicModule } from "./dms/geographic/geographic.module";
-import { MessagesModule } from "./website/messages/messages.module";
-import { NewsletterModule } from "./website/newsletter/newsletter.module";
-import { VolunteerModule } from "./volunteer/volunteer.module";
-import { EmailModule } from "./email/email.module";
-import { NotificationsModule } from "./notifications/notifications.module";
-import { GoldSilverPriceModule } from "./zakat/gold_silver_price/gold_silver_price.module";
-import { ScheduleModule } from "@nestjs/schedule";
-import { QrCodeModule } from "./qr_code/qr_code.module";
-import { DashboardModule } from "./dashboard/dashboard.module";
-import { TasksModule } from "./tasks/tasks.module";
-import { ProgressTrackingModule } from "./progress_tracking/progress-tracking.module";
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { StoreModule } from './store/store.module';
+import { ProcurementsModule } from './procurements/procurements.module';
+import { ProgramModule } from './program/program.module';
+import { AccountsAndFinanceModule } from './accounts-and-finance/accounts-and-finance.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { AdminModule } from './admin/admin.module';
+import { PermissionsModule } from './permissions/permissions.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { DonationsModule } from './donations/donations.module';
+import { DmsModule } from './dms/dms.module';
+import { DmsCronsModule } from './crons/dms_crons/dms-crons.module';
+import { DonationsReportModule } from './crons/donations_report/donations-report.module';
+import { GeographicModule } from './dms/geographic/geographic.module';
+import { MessagesModule } from './website/messages/messages.module';
+import { NewsletterModule } from './website/newsletter/newsletter.module';
+import { VolunteerModule } from './volunteer/volunteer.module';
+import { EmailModule } from './email/email.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { GoldSilverPriceModule } from './zakat/gold_silver_price/gold_silver_price.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { QrCodeModule } from './qr_code/qr_code.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { TasksModule } from './tasks/tasks.module';
+import { ProgressTrackingModule } from './progress_tracking/progress-tracking.module';
+import { NewDashboardModule } from './new_dashboard/new_dashboard.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { ProgressTrackingModule } from "./progress_tracking/progress-tracking.mo
     DashboardModule,
     TasksModule,
     ProgressTrackingModule,
+    NewDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

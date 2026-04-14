@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from "class-validator";
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class UpdateProgramDto {
   @IsString()
@@ -15,6 +15,10 @@ export class UpdateProgramDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(["active", "inactive"])
-  status?: "active" | "inactive";
+  @IsIn(['active', 'inactive'])
+  status?: 'active' | 'inactive';
+
+  @IsBoolean()
+  @IsOptional()
+  applicationable?: boolean;
 }
