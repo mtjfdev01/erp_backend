@@ -21,6 +21,10 @@ import { ProjectsModule } from './projects/projects.module';
 import { SubProjectsModule } from './sub_projects/sub_projects.module';
 import { SubprogramsModule } from './subprograms/subprograms.module';
 import { ProgramsModule } from './programs/programs.module';
+import { DreamSchoolsModule } from './dream_schools/dream_schools.module';
+import { DreamSchoolReportsModule } from './dream_school_reports/dream_school_reports.module';
+import { AasCollectionCentersReportModule } from './aas_collection_centers_report/aas_collection_centers_report.module';
+import { AlHasanainClgModule } from './al_hasanain_clg/al_hasanain_clg.module';
 
 @Module({
   imports: [
@@ -46,6 +50,10 @@ import { ProgramsModule } from './programs/programs.module';
     SubProjectsModule,
     SubprogramsModule,
     ProgramsModule,
+    DreamSchoolsModule,
+    DreamSchoolReportsModule,
+    AasCollectionCentersReportModule,
+    AlHasanainClgModule,
   ],
   controllers: [],
   providers: [],
