@@ -1,1 +1,1 @@
-export class UpdateCareerDto  {}
+export class UpdateCareerDto {}

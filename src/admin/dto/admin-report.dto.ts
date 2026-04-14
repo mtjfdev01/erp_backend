@@ -1,5 +1,5 @@
-import { IsDate, IsNotEmpty } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsNotEmpty } from "class-validator";
+import { Type } from "class-transformer";
 
 export class AdminReportDto {
   @IsNotEmpty()
@@ -11,4 +11,4 @@ export class AdminReportDto {
   @IsDate()
   @Type(() => Date)
   toDate: Date;
-} 
+}

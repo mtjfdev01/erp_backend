@@ -7,9 +7,9 @@ import {
   IsDateString,
   MaxLength,
   Min,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-import { EventStatus, EventType } from '../entities/event.entity';
+} from "class-validator";
+import { Type } from "class-transformer";
+import { EventStatus, EventType } from "../entities/event.entity";
 
 export class CreateEventDto {
   @IsString()

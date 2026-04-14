@@ -1,5 +1,14 @@
-import { IsString, IsEmail, IsOptional, IsEnum, IsDateString, Length, IsArray, IsNumber } from 'class-validator';
-import { UserRole, Department } from '../user.entity';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsEnum,
+  IsDateString,
+  Length,
+  IsArray,
+  IsNumber,
+} from "class-validator";
+import { UserRole, Department } from "../user.entity";
 
 export class UpdateUserDto {
   @IsString()
@@ -85,4 +94,4 @@ export class UpdateUserDto {
   @IsArray()
   @IsNumber({}, { each: true })
   assigned_cities?: number[];
-} 
+}

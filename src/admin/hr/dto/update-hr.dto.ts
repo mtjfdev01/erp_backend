@@ -1,1 +1,1 @@
-export class UpdateHrDto  {}
+export class UpdateHrDto {}

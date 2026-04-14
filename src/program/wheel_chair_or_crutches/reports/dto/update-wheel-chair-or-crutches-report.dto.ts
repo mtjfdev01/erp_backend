@@ -1,5 +1,12 @@
-import { IsDate, IsString, IsIn, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsDate,
+  IsString,
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateWheelChairOrCrutchesReportDto {
   @IsDate()
@@ -8,12 +15,12 @@ export class UpdateWheelChairOrCrutchesReportDto {
   date?: Date;
 
   @IsString()
-  @IsIn(['Wheel Chair', 'Crutches'])
+  @IsIn(["Wheel Chair", "Crutches"])
   @IsOptional()
   type?: string;
 
   @IsString()
-  @IsIn(['Male', 'Female'])
+  @IsIn(["Male", "Female"])
   @IsOptional()
   gender?: string;
 
@@ -36,4 +43,4 @@ export class UpdateWheelChairOrCrutchesReportDto {
   @Min(0)
   @IsOptional()
   indegent?: number;
-} 
+}

@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ProcurementsEntity } from '../entities/procurements.entity/procurements.entity';
-import { CreateProcurementsDto } from '../dto/create-procurements.dto/create-procurements.dto';
+import {
+  Injectable,
+  NotFoundException,
+  InternalServerErrorException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { ProcurementsEntity } from "../entities/procurements.entity/procurements.entity";
+import { CreateProcurementsDto } from "../dto/create-procurements.dto/create-procurements.dto";
 
 @Injectable()
 export class ProcurementsService {
@@ -19,30 +23,42 @@ export class ProcurementsService {
       });
       return await this.procurementsRepository.save(entity);
     } catch (error) {
-      throw new InternalServerErrorException('Failed to create procurement record');
+      throw new InternalServerErrorException(
+        "Failed to create procurement record",
+      );
     }
   }
 
   async findAll() {
     try {
-      return await this.procurementsRepository.find({ where: { is_archived: false } });
+      return await this.procurementsRepository.find({
+        where: { is_archived: false },
+      });
     } catch (error) {
-      throw new InternalServerErrorException('Failed to fetch procurement records');
+      throw new InternalServerErrorException(
+        "Failed to fetch procurement records",
+      );
     }
   }
 
   async findOne(id: number) {
     try {
-      const record = await this.procurementsRepository.findOne({ where: { id, is_archived: false } });
+      const record = await this.procurementsRepository.findOne({
+        where: { id, is_archived: false },
+      });
       if (!record) {
-        throw new NotFoundException(`Procurement record with ID ${id} not found`);
+        throw new NotFoundException(
+          `Procurement record with ID ${id} not found`,
+        );
       }
       return record;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to fetch procurement record');
+      throw new InternalServerErrorException(
+        "Failed to fetch procurement record",
+      );
     }
   }
 
@@ -55,22 +71,30 @@ export class ProcurementsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to update procurement record');
+      throw new InternalServerErrorException(
+        "Failed to update procurement record",
+      );
     }
   }
 
   async remove(id: number) {
     try {
       const record = await this.findOne(id);
-      if(!record){
-        throw new NotFoundException(`Procurement record with ID ${id} not found`);
+      if (!record) {
+        throw new NotFoundException(
+          `Procurement record with ID ${id} not found`,
+        );
       }
-      return await this.procurementsRepository.update(id, { is_archived: true });
+      return await this.procurementsRepository.update(id, {
+        is_archived: true,
+      });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to delete procurement record');
+      throw new InternalServerErrorException(
+        "Failed to delete procurement record",
+      );
     }
   }
 }

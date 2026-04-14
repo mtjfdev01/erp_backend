@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateMiDto } from './dto/create-mi.dto';
-import { UpdateMiDto } from './dto/update-mi.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateMiDto } from "./dto/create-mi.dto";
+import { UpdateMiDto } from "./dto/update-mi.dto";
 
 @Injectable()
 export class MisService {
   create(createMiDto: CreateMiDto) {
-    return 'This action adds a new mi';
+    return "This action adds a new mi";
   }
 
   findAll() {

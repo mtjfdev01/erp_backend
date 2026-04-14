@@ -1,5 +1,15 @@
-import { IsOptional, IsString, IsNumber, IsDateString, IsEmail, IsPhoneNumber, IsEnum, IsBoolean, IsInt } from 'class-validator';
-import { DonationMethod } from 'src/utils/enums';
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  IsDateString,
+  IsEmail,
+  IsPhoneNumber,
+  IsEnum,
+  IsBoolean,
+  IsInt,
+} from "class-validator";
+import { DonationMethod } from "src/utils/enums";
 
 export class CreateDonationDto {
   @IsOptional()
@@ -40,7 +50,10 @@ export class CreateDonationDto {
   donation_type?: string;
 
   @IsOptional()
-  @IsEnum(DonationMethod, { message: 'donation_method must be one of: meezan, blinq, payfast, stripe, stripe_embed' })
+  @IsEnum(DonationMethod, {
+    message:
+      "donation_method must be one of: meezan, blinq, payfast, stripe, stripe_embed",
+  })
   donation_method?: DonationMethod;
 
   @IsOptional()

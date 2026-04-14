@@ -1,5 +1,13 @@
-import { IsOptional, IsInt, Min, Max, IsDateString, IsString, IsArray } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import {
+  IsOptional,
+  IsInt,
+  Min,
+  Max,
+  IsDateString,
+  IsString,
+  IsArray,
+} from "class-validator";
+import { Type, Transform } from "class-transformer";
 
 export class DashboardSummaryQueryDto {
   @IsOptional()

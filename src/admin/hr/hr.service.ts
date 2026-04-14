@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateHrDto } from './dto/create-hr.dto';
-import { UpdateHrDto } from './dto/update-hr.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateHrDto } from "./dto/create-hr.dto";
+import { UpdateHrDto } from "./dto/update-hr.dto";
 
 @Injectable()
 export class HrService {
   create(createHrDto: CreateHrDto) {
-    return 'This action adds a new hr';
+    return "This action adds a new hr";
   }
 
   findAll() {

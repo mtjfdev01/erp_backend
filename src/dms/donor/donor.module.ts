@@ -1,20 +1,20 @@
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { JwtModule } from '@nestjs/jwt';
-import { DonorService } from './donor.service';
-import { DonorController } from './donor.controller';
-import { Donor } from './entities/donor.entity';
-import { City } from '../geographic/cities/entities/city.entity';
-import { PermissionsModule } from '../../permissions/permissions.module';
-import { User } from 'src/users/user.entity';
-import { UsersModule } from 'src/users/users.module';
+import { Module } from "@nestjs/common";
+import { TypeOrmModule } from "@nestjs/typeorm";
+import { JwtModule } from "@nestjs/jwt";
+import { DonorService } from "./donor.service";
+import { DonorController } from "./donor.controller";
+import { Donor } from "./entities/donor.entity";
+import { City } from "../geographic/cities/entities/city.entity";
+import { PermissionsModule } from "../../permissions/permissions.module";
+import { User } from "src/users/user.entity";
+import { UsersModule } from "src/users/users.module";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Donor, User, City]),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key',
-      signOptions: { expiresIn: '24h' },
+      secret: process.env.JWT_SECRET || "your-secret-key",
+      signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
     UsersModule,

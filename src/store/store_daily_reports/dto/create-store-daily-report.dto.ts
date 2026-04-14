@@ -1,5 +1,5 @@
-import { IsDate, IsNumber, IsNotEmpty, IsOptional } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsDate, IsNumber, IsNotEmpty, IsOptional } from "class-validator";
+import { Transform } from "class-transformer";
 
 export class CreateStoreDailyReportDto {
   @IsDate()
@@ -31,4 +31,4 @@ export class CreateStoreDailyReportDto {
   @IsNotEmpty()
   @Transform(({ value }) => parseInt(value))
   rejected_demands: number;
-} 
+}

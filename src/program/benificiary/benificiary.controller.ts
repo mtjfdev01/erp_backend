@@ -1,9 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { BenificiaryService } from './benificiary.service';
-import { CreateBenificiaryDto } from './dto/create-benificiary.dto';
-import { UpdateBenificiaryDto } from './dto/update-benificiary.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from "@nestjs/common";
+import { BenificiaryService } from "./benificiary.service";
+import { CreateBenificiaryDto } from "./dto/create-benificiary.dto";
+import { UpdateBenificiaryDto } from "./dto/update-benificiary.dto";
 
-@Controller('benificiary')
+@Controller("benificiary")
 export class BenificiaryController {
   constructor(private readonly benificiaryService: BenificiaryService) {}
 
@@ -17,18 +25,21 @@ export class BenificiaryController {
     return this.benificiaryService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Get(":id")
+  findOne(@Param("id") id: string) {
     return this.benificiaryService.findOne(+id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateBenificiaryDto: UpdateBenificiaryDto) {
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() updateBenificiaryDto: UpdateBenificiaryDto,
+  ) {
     return this.benificiaryService.update(+id, updateBenificiaryDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
+  @Delete(":id")
+  remove(@Param("id") id: string) {
     return this.benificiaryService.remove(+id);
   }
 }

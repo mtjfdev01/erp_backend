@@ -1,15 +1,22 @@
-import { IsDateString, IsString, IsIn, IsNumber, Min, IsOptional } from 'class-validator';
+import {
+  IsDateString,
+  IsString,
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+} from "class-validator";
 
 export class CreateWheelChairOrCrutchesReportDto {
   @IsDateString()
   date: string;
 
   @IsString()
-  @IsIn(['Wheel Chair', 'Crutches'])
+  @IsIn(["Wheel Chair", "Crutches"])
   type: string;
 
   @IsString()
-  @IsIn(['Male', 'Female'])
+  @IsIn(["Male", "Female"])
   gender: string;
 
   @IsNumber()
@@ -31,4 +38,4 @@ export class CreateWheelChairOrCrutchesReportDto {
   @Min(0)
   @IsOptional()
   indegent?: number;
-} 
+}

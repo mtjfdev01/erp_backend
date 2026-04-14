@@ -1,11 +1,16 @@
-
-import { IsOptional, IsString, IsIn, IsNumber, IsNotEmpty } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsIn,
+  IsNumber,
+  IsNotEmpty,
+} from "class-validator";
 
 export class UpdateUserDonorDto {
   @IsString()
   @IsOptional()
-  @IsIn(['active', 'inactive', 'transferred'], { 
-    message: 'Status must be active, inactive, or transferred' 
+  @IsIn(["active", "inactive", "transferred"], {
+    message: "Status must be active, inactive, or transferred",
   })
   status?: string;
 

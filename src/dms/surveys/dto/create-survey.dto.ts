@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsEnum, IsDateString } from 'class-validator';
-import { SurveyStatus } from '../entities/survey.entity';
+import { IsString, IsOptional, IsEnum, IsDateString } from "class-validator";
+import { SurveyStatus } from "../entities/survey.entity";
 
 export class CreateSurveyDto {
   @IsString()

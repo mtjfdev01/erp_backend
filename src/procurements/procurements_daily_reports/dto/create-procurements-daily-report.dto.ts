@@ -1,8 +1,8 @@
-import { IsDate, IsNumber, IsObject, IsOptional, Min } from 'class-validator';
-import { Type } from 'class-transformer';
-import { User } from 'src/users/user.entity';
+import { IsDate, IsNumber, IsObject, IsOptional, Min } from "class-validator";
+import { Type } from "class-transformer";
+import { User } from "src/users/user.entity";
 
-export class CreateProcurementsDailyReportDto { 
+export class CreateProcurementsDailyReportDto {
   @IsDate()
   @Type(() => Date)
   date: Date;
@@ -42,4 +42,4 @@ export class CreateProcurementsDailyReportDto {
   @IsOptional()
   @IsObject()
   created_by: User;
-} 
+}

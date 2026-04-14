@@ -1,27 +1,46 @@
-import { HttpException, Injectable, NotFoundException } from '@nestjs/common';
-import { CreateDonationDto } from './dto/create-donation.dto';
-import { UpdateDonationDto } from './dto/update-donation.dto';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Donation } from './entities/donation.entity';
-import { DonationInKind, DonationInKindCategory, DonationInKindCondition } from '../dms/donation_in_kind/entities/donation_in_kind.entity';
-import { User, Department, UserRole } from '../users/user.entity';
-import { EmailService } from '../email/email.service';
-import { PayfastService } from './payfast.service';
-import { StripeService } from './stripe.service';
-import { DonorService } from '../dms/donor/donor.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { NotificationType } from '../notifications/entities/notification.entity';
-import { applyCommonFilters, FilterPayload, applyHybridFilters, HybridFilter, applyRelationsFilter, RelationsFilterConfig, applyRelationsSearch, normalizeRelationsFilters, applyMultiselectFilters } from '../utils/filters/common-filter.util';
-import { DateRangeUtil, DateRangeOptions, MONTH_NAMES_SHORT, DAY_NAMES_SHORT } from '../utils/summary/date-range.util';
-import axios from 'axios';
-import { WhatsAppService } from 'src/utils/services/whatsapp.service';
-import { Donor } from 'src/dms/donor/entities/donor.entity';
-import { RecurringDonation } from 'src/dms/recurring_donations/entities/recurring_donation.entity';
-import { City } from '../dms/geographic/cities/entities/city.entity';
-import { CampaignsService } from '../dms/campaigns/campaigns.service';
-import { DashboardAggregateService } from '../dashboard/dashboard-aggregate.service';
-import { ProgressTrackersService } from '../progress_tracking/progress_trackers/progress-trackers.service';
+import { HttpException, Injectable, NotFoundException } from "@nestjs/common";
+import { CreateDonationDto } from "./dto/create-donation.dto";
+import { UpdateDonationDto } from "./dto/update-donation.dto";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Donation } from "./entities/donation.entity";
+import {
+  DonationInKind,
+  DonationInKindCategory,
+  DonationInKindCondition,
+} from "../dms/donation_in_kind/entities/donation_in_kind.entity";
+import { User, Department, UserRole } from "../users/user.entity";
+import { EmailService } from "../email/email.service";
+import { PayfastService } from "./payfast.service";
+import { StripeService } from "./stripe.service";
+import { DonorService } from "../dms/donor/donor.service";
+import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationType } from "../notifications/entities/notification.entity";
+import {
+  applyCommonFilters,
+  FilterPayload,
+  applyHybridFilters,
+  HybridFilter,
+  applyRelationsFilter,
+  RelationsFilterConfig,
+  applyRelationsSearch,
+  normalizeRelationsFilters,
+  applyMultiselectFilters,
+} from "../utils/filters/common-filter.util";
+import {
+  DateRangeUtil,
+  DateRangeOptions,
+  MONTH_NAMES_SHORT,
+  DAY_NAMES_SHORT,
+} from "../utils/summary/date-range.util";
+import axios from "axios";
+import { WhatsAppService } from "src/utils/services/whatsapp.service";
+import { Donor } from "src/dms/donor/entities/donor.entity";
+import { RecurringDonation } from "src/dms/recurring_donations/entities/recurring_donation.entity";
+import { City } from "../dms/geographic/cities/entities/city.entity";
+import { CampaignsService } from "../dms/campaigns/campaigns.service";
+import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
+import { ProgressTrackersService } from "../progress_tracking/progress_trackers/progress-trackers.service";
 
 @Injectable()
 export class DonationsService {
@@ -71,7 +90,8 @@ export class DonationsService {
         {
           template_id: tid,
           donation_id: savedDonation.id,
-          donor_visible: createDonationDto.progress_tracker_donor_visible ?? true,
+          donor_visible:
+            createDonationDto.progress_tracker_donor_visible ?? true,
         },
         user,
       );
@@ -146,57 +166,57 @@ export class DonationsService {
       // 1. Direct city IDs → get their names
       if (assignedCities.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.id IN (:...ids)', { ids: assignedCities })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.id IN (:...ids)", { ids: assignedCities })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       // 2. Tehsil IDs → get all cities under those tehsils
       if (assignedTehsils.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       // 3. District IDs → get all cities under those districts
       if (assignedDistricts.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       // 4. Region IDs → get all cities under those regions
       if (assignedRegions.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       // 5. Country IDs → get all cities under those countries
       if (assignedCountries.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       // Return unique city names array (or null if none resolved)
       return allCityNames.size > 0 ? Array.from(allCityNames) : null;
     } catch (error) {
-      console.error('Error resolving user geography:', error);
+      console.error("Error resolving user geography:", error);
       return null; // On error, don't block — just skip geo filtering
     }
   }
@@ -208,11 +228,11 @@ export class DonationsService {
     try {
       const donor = await this.donorRepository.findOne({
         where: { id: donorId },
-        select: ['id', 'city'],
+        select: ["id", "city"],
       });
       return donor?.city || null;
     } catch (error) {
-      console.error('Error fetching donor city:', error);
+      console.error("Error fetching donor city:", error);
       return null;
     }
   }
@@ -225,7 +245,7 @@ export class DonationsService {
       // Always include user ID 5 (validate it exists first)
       const user5 = await this.userRepository.findOne({
         where: { id: 5, isActive: true, is_archived: false },
-        select: ['id'],
+        select: ["id"],
       });
       if (user5) {
         userIds.push(5);
@@ -233,19 +253,19 @@ export class DonationsService {
 
       // Also get users from FUND_RAISING department or ADMIN role (including user ID 5 if they match)
       const additionalUsers = await this.userRepository
-        .createQueryBuilder('user')
-        .select('user.id', 'id')
-        .where('user.isActive = :isActive', { isActive: true })
-        .andWhere('user.is_archived = :is_archived', { is_archived: false })
+        .createQueryBuilder("user")
+        .select("user.id", "id")
+        .where("user.isActive = :isActive", { isActive: true })
+        .andWhere("user.is_archived = :is_archived", { is_archived: false })
         .orWhere({
           department: Department.FUND_RAISING,
         })
         .orWhere({
-          id:5
+          id: 5,
         })
         .getRawMany();
 
-      additionalUsers.forEach(user => {
+      additionalUsers.forEach((user) => {
         if (!userIds.includes(user.id)) {
           userIds.push(user.id);
         }
@@ -253,7 +273,7 @@ export class DonationsService {
 
       return userIds;
     } catch (error) {
-      console.error('Error getting donation users:', error.message);
+      console.error("Error getting donation users:", error.message);
       // Return empty array if query fails (don't create notifications for invalid users)
       return [];
     }
@@ -262,16 +282,16 @@ export class DonationsService {
   // Helper method to map category string to enum
   private mapCategoryToEnum(category: string): DonationInKindCategory {
     const categoryMap: { [key: string]: DonationInKindCategory } = {
-      'clothing': DonationInKindCategory.CLOTHING,
-      'food': DonationInKindCategory.FOOD,
-      'medical': DonationInKindCategory.MEDICAL,
-      'educational': DonationInKindCategory.EDUCATIONAL,
-      'electronics': DonationInKindCategory.ELECTRONICS,
-      'furniture': DonationInKindCategory.FURNITURE,
-      'books': DonationInKindCategory.BOOKS,
-      'toys': DonationInKindCategory.TOYS,
-      'household': DonationInKindCategory.HOUSEHOLD,
-      'other': DonationInKindCategory.OTHER,
+      clothing: DonationInKindCategory.CLOTHING,
+      food: DonationInKindCategory.FOOD,
+      medical: DonationInKindCategory.MEDICAL,
+      educational: DonationInKindCategory.EDUCATIONAL,
+      electronics: DonationInKindCategory.ELECTRONICS,
+      furniture: DonationInKindCategory.FURNITURE,
+      books: DonationInKindCategory.BOOKS,
+      toys: DonationInKindCategory.TOYS,
+      household: DonationInKindCategory.HOUSEHOLD,
+      other: DonationInKindCategory.OTHER,
     };
     return categoryMap[category.toLowerCase()] || DonationInKindCategory.OTHER;
   }
@@ -279,13 +299,15 @@ export class DonationsService {
   // Helper method to map condition string to enum
   private mapConditionToEnum(condition: string): DonationInKindCondition {
     const conditionMap: { [key: string]: DonationInKindCondition } = {
-      'new': DonationInKindCondition.NEW,
-      'like_new': DonationInKindCondition.LIKE_NEW,
-      'good': DonationInKindCondition.GOOD,
-      'fair': DonationInKindCondition.FAIR,
-      'poor': DonationInKindCondition.POOR,
+      new: DonationInKindCondition.NEW,
+      like_new: DonationInKindCondition.LIKE_NEW,
+      good: DonationInKindCondition.GOOD,
+      fair: DonationInKindCondition.FAIR,
+      poor: DonationInKindCondition.POOR,
     };
-    return conditionMap[condition.toLowerCase()] || DonationInKindCondition.GOOD;
+    return (
+      conditionMap[condition.toLowerCase()] || DonationInKindCondition.GOOD
+    );
   }
 
   /**
@@ -306,13 +328,15 @@ export class DonationsService {
     try {
       const meezanUser = process.env.MEEZAN_USER;
       const meezanPass = process.env.MEEZAN_PASS;
-      const meezanUrl = process.env.MEEZAN_URL || 'https://acquiring.meezanbank.com/payment/rest/';
-      const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
+      const meezanUrl =
+        process.env.MEEZAN_URL ||
+        "https://acquiring.meezanbank.com/payment/rest/";
+      const baseFrontendUrl = process.env.BASE_Frontend_URL || "";
 
       // Validate that required credentials are present
       if (!meezanUser || !meezanPass) {
         throw new HttpException(
-          'Meezan credentials not configured. Please check environment variables.',
+          "Meezan credentials not configured. Please check environment variables.",
           500,
         );
       }
@@ -327,32 +351,26 @@ export class DonationsService {
         password: meezanPass,
         orderNumber: orderNumber.toString(),
         amount: Math.round(Number(amount) * 100).toString(), // amount in minor units (PKR -> paisa), fixed precision
-        currency: '586', // 586 = PKR (ISO 4217)
+        currency: "586", // 586 = PKR (ISO 4217)
         returnUrl: returnUrl,
         // failUrl: returnUrl,
       });
 
       // Call Meezan register.do with timeout
-      const response = await axios.post(
-        `${meezanUrl}/register.do`,
-        reqParams,
-      );
+      const response = await axios.post(`${meezanUrl}/register.do`, reqParams);
       const data = response.data;
 
       // Handle response - check for errors first
       if (data.errorCode || data.error) {
         throw new HttpException(
-          data.errorMessage || data.error || 'Meezan API error',
+          data.errorMessage || data.error || "Meezan API error",
           400,
         );
       }
-      
+
       if (!data.orderId || !data.formUrl) {
-        console.error('Meezan API unexpected response:', data);
-        throw new HttpException(
-          'Meezan API returned invalid response',
-          502,
-        );
+        console.error("Meezan API unexpected response:", data);
+        throw new HttpException("Meezan API returned invalid response", 502);
       }
 
       // Update donation if provided
@@ -371,10 +389,7 @@ export class DonationsService {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
-        `Failed to create Meezan invoice: ${msg}`,
-        500,
-      );
+      throw new HttpException(`Failed to create Meezan invoice: ${msg}`, 500);
     }
   }
 
@@ -387,11 +402,13 @@ export class DonationsService {
     try {
       const meezanUser = process.env.MEEZAN_USER;
       const meezanPass = process.env.MEEZAN_PASS;
-      const meezanUrl = process.env.MEEZAN_URL || 'https://acquiring.meezanbank.com/payment/rest/';
+      const meezanUrl =
+        process.env.MEEZAN_URL ||
+        "https://acquiring.meezanbank.com/payment/rest/";
 
       if (!meezanUser || !meezanPass) {
         throw new HttpException(
-          'Meezan credentials not configured. Please check environment variables.',
+          "Meezan credentials not configured. Please check environment variables.",
           500,
         );
       }
@@ -412,7 +429,7 @@ export class DonationsService {
 
       if (data.errorCode || data.error) {
         throw new HttpException(
-          data.errorMessage || data.error || 'Meezan API error',
+          data.errorMessage || data.error || "Meezan API error",
           400,
         );
       }
@@ -429,9 +446,12 @@ export class DonationsService {
         );
       }
       if (error.request) {
-        throw new HttpException('Meezan API timeout or network error', 503);
+        throw new HttpException("Meezan API timeout or network error", 503);
       }
-      throw new HttpException(`Failed to get Meezan order status: ${error.message}`, 500);
+      throw new HttpException(
+        `Failed to get Meezan order status: ${error.message}`,
+        500,
+      );
     }
   }
 
@@ -450,20 +470,19 @@ export class DonationsService {
     // 6 → Declined → failed
     switch (orderStatus) {
       case 2:
-        return 'completed';
+        return "completed";
       case 3:
-        return 'cancelled';
+        return "cancelled";
       case 4:
-        return 'refunded';
+        return "refunded";
       case 6:
-        return 'failed';
+        return "failed";
       case 0:
       case 1:
       default:
-        return 'pending';
+        return "pending";
     }
   }
-
 
   /**
    * Map PayFast status_code to donation status
@@ -482,33 +501,31 @@ export class DonationsService {
    */
   private mapPayfastStatusToDonationStatus(statusCode: string): string {
     switch (statusCode) {
-      case '00':
-      case '79':
-        return 'completed';
-      case '001':
-        return 'pending';
-      case '002':  // timeout
-      case '54':   // card expired
-      case '97':   // insufficient balance
-      case '106':  // transaction limit exceeded
-      case '3':    // inactive account
-      case '14':   // incorrect details / inactive card
-      case '15':   // inactive card
-      case '42':   // invalid CNIC
-      case '55':   // invalid OTP/PIN
-      case '75':   // max PIN retries exceeded
-      case '13':   // invalid amount
-      case '126':  // invalid account details
-      case '423':  // unable to process
-      case '41':   // mismatched details
-      case '9000': // rejected by FRMS
-        return 'failed';
+      case "00":
+      case "79":
+        return "completed";
+      case "001":
+        return "pending";
+      case "002": // timeout
+      case "54": // card expired
+      case "97": // insufficient balance
+      case "106": // transaction limit exceeded
+      case "3": // inactive account
+      case "14": // incorrect details / inactive card
+      case "15": // inactive card
+      case "42": // invalid CNIC
+      case "55": // invalid OTP/PIN
+      case "75": // max PIN retries exceeded
+      case "13": // invalid amount
+      case "126": // invalid account details
+      case "423": // unable to process
+      case "41": // mismatched details
+      case "9000": // rejected by FRMS
+        return "failed";
       default:
-        return 'failed';
+        return "failed";
     }
   }
-
-
 
   /**
    * Unified provider status check - Detects the donation method and queries
@@ -527,37 +544,44 @@ export class DonationsService {
   }> {
     const donation = await this.donationRepository.findOne({
       where: { id: donationId },
-      relations: ['donor'],
+      relations: ["donor"],
     });
 
     if (!donation) {
       throw new NotFoundException(`Donation with ID ${donationId} not found`);
     }
 
-    const method = (donation.donation_method || '').toLowerCase();
-    let providerStatus = '';
+    const method = (donation.donation_method || "").toLowerCase();
+    let providerStatus = "";
     let donationStatus = donation.status;
     let details: any = {};
-    let provider = method;
+    const provider = method;
 
     try {
- if (method === 'meezan') {
-        console.log('Getting Meezan status for donation:', donation.orderId);
+      if (method === "meezan") {
+        console.log("Getting Meezan status for donation:", donation.orderId);
         if (!donation.orderId) {
           return {
             donationId,
             provider,
-            providerStatus: 'no_order_id',
+            providerStatus: "no_order_id",
             donationStatus: donation.status,
             dbUpdated: false,
-            details: { message: 'No Meezan orderId found on this donation. Cannot query provider.' },
+            details: {
+              message:
+                "No Meezan orderId found on this donation. Cannot query provider.",
+            },
           };
         }
-        const meezanResult = await this.getMeezanOrderStatusExtended(donation.orderId);
-        console.log('Meezan response:', meezanResult);
+        const meezanResult = await this.getMeezanOrderStatusExtended(
+          donation.orderId,
+        );
+        console.log("Meezan response:", meezanResult);
         // return;
-        providerStatus = String(meezanResult?.OrderStatus ?? '');
-        donationStatus = this.mapMeezanStatusToDonationStatus(Number(meezanResult?.OrderStatus));
+        providerStatus = String(meezanResult?.OrderStatus ?? "");
+        donationStatus = this.mapMeezanStatusToDonationStatus(
+          Number(meezanResult?.OrderStatus),
+        );
         details = {
           orderStatus: meezanResult?.OrderStatus,
           actionCode: meezanResult?.actionCode,
@@ -568,7 +592,7 @@ export class DonationsService {
           errorCode: meezanResult?.ErrorCode,
           errorMessage: meezanResult?.ErrorMessage,
         };
-      } else if (method === 'stripe' || method === 'stripe_embed') {
+      } else if (method === "stripe" || method === "stripe_embed") {
         // For Stripe, we don't have a direct status API here – return DB status
         return {
           donationId,
@@ -576,9 +600,12 @@ export class DonationsService {
           providerStatus: donation.status,
           donationStatus: donation.status,
           dbUpdated: false,
-          details: { message: 'Stripe status is updated via webhooks. Showing current DB status.' },
+          details: {
+            message:
+              "Stripe status is updated via webhooks. Showing current DB status.",
+          },
         };
-      } else if (method === 'blinq') {
+      } else if (method === "blinq") {
         // Blinq status is callback-driven, no polling API available
         return {
           donationId,
@@ -586,28 +613,40 @@ export class DonationsService {
           providerStatus: donation.status,
           donationStatus: donation.status,
           dbUpdated: false,
-          details: { message: 'Blinq status is updated via callback. Showing current DB status.' },
+          details: {
+            message:
+              "Blinq status is updated via callback. Showing current DB status.",
+          },
         };
       } else {
         // Manual methods (cash, bank_transfer, cheque, in_kind, etc.)
         return {
           donationId,
-          provider: method || 'unknown',
+          provider: method || "unknown",
           providerStatus: donation.status,
           donationStatus: donation.status,
           dbUpdated: false,
-          details: { message: 'Manual donation method – no external provider to query.' },
+          details: {
+            message: "Manual donation method – no external provider to query.",
+          },
         };
       }
     } catch (error) {
-      console.error(`Provider status check failed for donation ${donationId} (${method}):`, error.message);
+      console.error(
+        `Provider status check failed for donation ${donationId} (${method}):`,
+        error.message,
+      );
       return {
         donationId,
         provider,
-        providerStatus: 'error',
+        providerStatus: "error",
         donationStatus: donation.status,
         dbUpdated: false,
-        details: { error: error.message, message: 'Failed to reach payment provider. Showing current DB status.' },
+        details: {
+          error: error.message,
+          message:
+            "Failed to reach payment provider. Showing current DB status.",
+        },
       };
     }
 
@@ -615,27 +654,37 @@ export class DonationsService {
     let dbUpdated = false;
     if (donationStatus !== donation.status) {
       const updateData: any = { status: donationStatus };
-      if (donationStatus === 'completed') {
+      if (donationStatus === "completed") {
         updateData.paid_amount = donation.amount;
       }
       // Save error message from provider (e.g. Meezan ErrorMessage / actionCodeDescription)
-      if (['failed', 'cancelled', 'refunded'].includes(donationStatus)) {
+      if (["failed", "cancelled", "refunded"].includes(donationStatus)) {
         updateData.err_msg = details.errorMessage || null;
       }
 
-      console.log('Update data:', updateData);
+      console.log("Update data:", updateData);
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
       // Dashboard aggregation
-      if (donationStatus === 'completed') {
-        this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
-          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
-        );
-      } else if (['refunded', 'reversed'].includes(donationStatus)) {
-        this.dashboardAggregateService.applyDonationReversed(donationId).catch((e) =>
-          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
-        );
+      if (donationStatus === "completed") {
+        this.dashboardAggregateService
+          .applyDonationCompleted(donationId)
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationCompleted failed for ${donationId}:`,
+              e,
+            ),
+          );
+      } else if (["refunded", "reversed"].includes(donationStatus)) {
+        this.dashboardAggregateService
+          .applyDonationReversed(donationId)
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationReversed failed for ${donationId}:`,
+              e,
+            ),
+          );
       }
     }
 
@@ -657,7 +706,7 @@ export class DonationsService {
   async getDonationForRedirect(donationId: number): Promise<Donation> {
     const donation = await this.donationRepository.findOne({
       where: { id: donationId },
-      relations: ['donor'],
+      relations: ["donor"],
     });
 
     if (!donation) {
@@ -697,14 +746,14 @@ export class DonationsService {
    */
   async getBlinqAccessToken(): Promise<string> {
     try {
-      const blinq_url = 'https://api.blinq.pk/';
+      const blinq_url = "https://api.blinq.pk/";
       const authPayload = {
         ClientID: process.env.BLINQ_ID?.toString(),
         ClientSecret: process.env.BLINQ_PASS?.toString(),
       };
 
       if (!authPayload.ClientID || !authPayload.ClientSecret) {
-        throw new HttpException('Blinq credentials not configured', 500);
+        throw new HttpException("Blinq credentials not configured", 500);
       }
 
       const authResponse = await axios.post(
@@ -712,7 +761,7 @@ export class DonationsService {
         authPayload,
         {
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
         },
       );
@@ -724,11 +773,14 @@ export class DonationsService {
         authResponse?.data?.data?.token;
 
       if (!authToken) {
-        console.error('Blinq auth response structure:', {
+        console.error("Blinq auth response structure:", {
           headers: authResponse?.headers,
           data: authResponse?.data,
         });
-        throw new HttpException('Failed to get Blinq authentication token', 401);
+        throw new HttpException(
+          "Failed to get Blinq authentication token",
+          401,
+        );
       }
 
       return authToken;
@@ -736,7 +788,10 @@ export class DonationsService {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(`Blinq authentication failed: ${error.message}`, 500);
+      throw new HttpException(
+        `Blinq authentication failed: ${error.message}`,
+        500,
+      );
     }
   }
 
@@ -751,7 +806,7 @@ export class DonationsService {
   async generateBlinqInvoice(
     invoiceNumber: string,
     amount: number | string,
-    customerName: string = 'Anonymous',
+    customerName: string = "Anonymous",
     authToken?: string,
   ): Promise<{
     paymentUrl: string;
@@ -759,7 +814,7 @@ export class DonationsService {
     invoiceData: any;
   }> {
     try {
-      const blinq_url = 'https://api.blinq.pk/';
+      const blinq_url = "https://api.blinq.pk/";
       const token = authToken || (await this.getBlinqAccessToken());
 
       // Calculate dates
@@ -774,8 +829,8 @@ export class DonationsService {
       // Format dates to YYYY-MM-DD (local date, not UTC)
       const formatDate = (date: Date): string => {
         const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
         return `${year}-${month}-${day}`;
       };
 
@@ -785,7 +840,7 @@ export class DonationsService {
           InvoiceAmount: amount.toString(),
           InvoiceDueDate: formatDate(dueDate),
           ValidityDate: formatDate(validityDate),
-          InvoiceType: 'Service',
+          InvoiceType: "Service",
           IssueDate: formatDate(currentDate),
           CustomerName: customerName,
         },
@@ -797,7 +852,7 @@ export class DonationsService {
         invoicePayload,
         {
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             token: token,
           },
         },
@@ -809,11 +864,11 @@ export class DonationsService {
       const paymentCode = detail?.PaymentCode || null;
 
       if (!paymentUrl) {
-        console.error('Blinq invoice unexpected response:', blinqInvoice?.data);
+        console.error("Blinq invoice unexpected response:", blinqInvoice?.data);
         throw new HttpException(
           {
-            message: 'Blinq invoice created but ClickToPayUrl missing',
-            provider: 'blinq',
+            message: "Blinq invoice created but ClickToPayUrl missing",
+            provider: "blinq",
             invoiceNumber: invoiceNumber,
             providerResponse: blinqInvoice?.data,
           },
@@ -830,7 +885,10 @@ export class DonationsService {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(`Failed to create Blinq invoice: ${error.message}`, 500);
+      throw new HttpException(
+        `Failed to create Blinq invoice: ${error.message}`,
+        500,
+      );
     }
   }
 
@@ -844,7 +902,7 @@ export class DonationsService {
   ): Promise<{ donation: Donation; updated: boolean; message: string }> {
     const donation = await this.donationRepository.findOne({
       where: { id: donationId },
-      relations: ['donor'],
+      relations: ["donor"],
     });
 
     if (!donation) {
@@ -852,7 +910,11 @@ export class DonationsService {
     }
 
     // idempotent: don't overwrite final statuses
-    if (donation.status === 'completed' || donation.status === 'cancelled' || donation.status === 'refunded') {
+    if (
+      donation.status === "completed" ||
+      donation.status === "cancelled" ||
+      donation.status === "refunded"
+    ) {
       return {
         donation,
         updated: false,
@@ -860,30 +922,31 @@ export class DonationsService {
       };
     }
 
-    const incoming = (payload?.status || '').toLowerCase();
+    const incoming = (payload?.status || "").toLowerCase();
     const nextStatus =
-      incoming === 'success' || incoming === 'completed'
-        ? 'completed'
-        : incoming === 'failed' || incoming === 'cancelled'
-          ? 'failed'
-          : 'pending';
+      incoming === "success" || incoming === "completed"
+        ? "completed"
+        : incoming === "failed" || incoming === "cancelled"
+          ? "failed"
+          : "pending";
 
     const updateData: any = {
       status: nextStatus,
     };
 
-    if (nextStatus === 'completed') {
+    if (nextStatus === "completed") {
       updateData.paid_amount = donation.amount;
     }
 
     if (payload?.errorMessage || payload?.errorCode) {
-      updateData.err_msg = payload?.errorMessage || `Meezan errorCode: ${payload?.errorCode}`;
+      updateData.err_msg =
+        payload?.errorMessage || `Meezan errorCode: ${payload?.errorCode}`;
     }
 
     await this.donationRepository.update(donationId, updateData);
     const updatedDonation = await this.donationRepository.findOne({
       where: { id: donationId },
-      relations: ['donor'],
+      relations: ["donor"],
     });
 
     return {
@@ -897,8 +960,12 @@ export class DonationsService {
    * Get only donation status - Calls Meezan API to get real-time status
    * This is the ONLY method that calls getMeezanOrderStatusExtended
    */
-  async getDonationStatusOnly(donationId: number): Promise<{ donationId: number; status: string }> {
-    const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+  async getDonationStatusOnly(
+    donationId: number,
+  ): Promise<{ donationId: number; status: string }> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+    });
     if (!donation) {
       throw new NotFoundException(`Donation with ID ${donationId} not found`);
     }
@@ -910,353 +977,420 @@ export class DonationsService {
 
     // Call Meezan API to get real-time status (ONLY place this is called)
     try {
-      console.log('Getting Meezan status for donation:', donation.orderId);
-      const meezanStatus = await this.getMeezanOrderStatusExtended(donation.orderId);
+      console.log("Getting Meezan status for donation:", donation.orderId);
+      const meezanStatus = await this.getMeezanOrderStatusExtended(
+        donation.orderId,
+      );
       const orderStatus = meezanStatus.orderStatus;
       const realTimeStatus = this.mapMeezanStatusToDonationStatus(orderStatus);
-      
+
       return { donationId, status: realTimeStatus };
     } catch (error) {
       // If Meezan API fails, return current DB status
-      console.error(`Failed to get Meezan status for donation ${donationId}:`, error.message);
+      console.error(
+        `Failed to get Meezan status for donation ${donationId}:`,
+        error.message,
+      );
       return { donationId, status: donation.status };
     }
   }
 
   async create(createDonationDto: CreateDonationDto, user: any) {
     try {
-     const meezan_url="https://acquiring.meezanbank.com/payment/rest/";
-     const blinq_url="https://api.blinq.pk/";
-     const manualDonationMethodOptions = ['cash','bank_transfer','credit_card','cheque','in_kind','online'];
-     const onlineDonationMethodOptions = ['meezan','blinq','payfast','stripe','stripe_embed'];
-    console.log("createDonationDto", createDonationDto);
-    
-    let donorId: number | null = createDonationDto.donor_id || null;
-    let donor:any;
-    let savedDonation:any;
-    let isNewDonorThisRequest = false;
-    // let reusedPendingDonation = false;
-    if(!createDonationDto?.previous_donation_id){ // if previous donation id is not provided, then we need to create a new donation and register donor if not exists then skip this
-     // ============================================
-     // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
-     // ============================================
-     
-     if (Number(createDonationDto?.amount) < 50){
-      //  return with error that donation amount is less than 50
-      throw new HttpException('Donation amount is less than 50 PKR', 400);
-     }
-     if (createDonationDto.donor_email && createDonationDto.donor_phone || donorId) {
-       console.log(`🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`);
-       
-       // Check if donor already exists with this email AND phone
-       if(createDonationDto.donor_email && createDonationDto.donor_phone){
-        donor = await this.donorService.findByEmail(
-          createDonationDto.donor_email
-        );
-       }
-       else if(donorId){
-        donor = await this.donorService.findOne(donorId);
-       }
-       
-       if (donor) {
-         let alreadyMultiTimeDonor = donor?.multi_time_donor || false;
-         if(!alreadyMultiTimeDonor) {
-          donor.multi_time_donor = true;
-          await this.donorRepository.save(donor);
-          console.log(`✅ Donor is now a multi-time donor: ${donor.email} (ID: ${donor.id})`);
-         }
-         if (createDonationDto.notification_subscription !== undefined) {
-          donor.notification_subscription = createDonationDto.notification_subscription;
-          await this.donorRepository.save(donor);
-         }
-         console.log(`✅ Donor already exists: ${donor.email} (ID: ${donor.id})`);
-         donorId = donor.id;
-        //  return with error that donor is archived 
-        if(donor?.is_archived === true){
-          throw new HttpException('Donor is archived', 400);
+      const meezan_url = "https://acquiring.meezanbank.com/payment/rest/";
+      const blinq_url = "https://api.blinq.pk/";
+      const manualDonationMethodOptions = [
+        "cash",
+        "bank_transfer",
+        "credit_card",
+        "cheque",
+        "in_kind",
+        "online",
+      ];
+      const onlineDonationMethodOptions = [
+        "meezan",
+        "blinq",
+        "payfast",
+        "stripe",
+        "stripe_embed",
+      ];
+      console.log("createDonationDto", createDonationDto);
+
+      let donorId: number | null = createDonationDto.donor_id || null;
+      let donor: any;
+      let savedDonation: any;
+      let isNewDonorThisRequest = false;
+      // let reusedPendingDonation = false;
+      if (!createDonationDto?.previous_donation_id) {
+        // if previous donation id is not provided, then we need to create a new donation and register donor if not exists then skip this
+        // ============================================
+        // AUTO-REGISTER DONOR IF NOT EXISTS & LINK TO DONATION
+        // ============================================
+
+        if (Number(createDonationDto?.amount) < 50) {
+          //  return with error that donation amount is less than 50
+          throw new HttpException("Donation amount is less than 50 PKR", 400);
         }
-       } else {
-         console.log(`❌ Donor not found. Auto-registering...`);
-         
-         // Auto-register the donor
-         donor = await this.donorService.autoRegisterFromDonation({
-           donor_name: createDonationDto.donor_name,
-           donor_email: createDonationDto.donor_email,
-           donor_phone: createDonationDto.donor_phone,
-           city: createDonationDto.city,
-           country: createDonationDto.country,
-           address: createDonationDto?.address,
-           notification_subscription: createDonationDto.notification_subscription,
-         });
-         
-         if (donor) {
-           console.log(`✅ Successfully auto-registered donor: ${donor.email} (ID: ${donor.id})`);
-           donorId = donor.id;
-           isNewDonorThisRequest = true;
-         } else {
-           console.warn(`⚠️ Failed to auto-register donor, but continuing with donation...`);
-         }
-       }
-     } else {
-       console.log(`⚠️ Skipping donor auto-registration: missing email or phone`);
-     }
-     // ============================================
-     let campaignId: number | null = createDonationDto?.campaign_id ?? null;
-     if (campaignId) {
-       try {
-         const campaign = await this.campaignsService.findOne(campaignId);
-         const isAdmin = user?.role === 'admin';
-         if (!this.campaignsService.canAcceptDonation(campaign, isAdmin)) {
-           throw new HttpException(
-             `Campaign "${campaign.title}" is not accepting donations (status: ${campaign.status})`,
-             400,
-           );
-         }
-       } catch (e) {
-         if (e instanceof HttpException) throw e;
-         throw new HttpException('Campaign not found', 404);
-       }
-     }
+        if (
+          (createDonationDto.donor_email && createDonationDto.donor_phone) ||
+          donorId
+        ) {
+          console.log(
+            `🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`,
+          );
 
-     // if (
-     //   !isNewDonorThisRequest &&
-     //   donorId &&
-     //   createDonationDto.donation_method &&
-     //   createDonationDto.amount != null &&
-     //   createDonationDto.donation_frequency !== 'monthly'
-     // ) {
-     //   const existing = await this.findReusablePendingDonation({
-     //     donorId,
-     //     amount: Number(createDonationDto.amount),
-     //     donationMethod: createDonationDto.donation_method as string,
-     //     campaignId,
-     //   });
-     //   if (existing) {
-     //     savedDonation = existing;
-     //     reusedPendingDonation = true;
-     //     console.log(`♻️ Reusing pending donation ${existing.id} for donor ${donorId}`);
-     //   }
-     // }
-
-     // if (!reusedPendingDonation) { // This condition is now always true since reusedPendingDonation is not set
-       if (createDonationDto?.donation_frequency && createDonationDto.donation_frequency === 'monthly') {
-         const recurringDonation = this.recurringDonationRepository.create({
-           ...createDonationDto,
-           donor_id: donorId,
-         });
-         savedDonation = await this.recurringDonationRepository.save(recurringDonation);
-         if (donor) {
-           donor.recurring = true;
-           await this.donorRepository.save(donor);
-         }
-       }
-
-       const donation = this.donationRepository.create({
-         ...createDonationDto,
-         donor_id: donorId,
-         campaign_id: campaignId,
-         created_by: user?.id == -1 ? null : user?.id,
-         recurrence_id: savedDonation?.id || 0,
-       });
-       savedDonation = await this.donationRepository.save(donation);
-       console.log(`💾 Donation saved with donor_id: ${donorId || 'null'} (Donation ID: ${savedDonation.id})`);
-
-       await this.maybeCreateProgressTrackerForNewDonation(createDonationDto, savedDonation, user);
-     // }
-
-     if(createDonationDto?.previous_donation_id) {
-      savedDonation = await this.donationRepository.findOne({
-        where: { id: parseInt(createDonationDto.previous_donation_id) },
-        relations: ['donor']
-      });
-
-      if(!savedDonation){
-        throw new HttpException('Previous donation not found', 404);
-      }
-    }
-    }
-    //  await this.emailService.sendDonationFailureNotification(savedDonation);
-    //  if (!reusedPendingDonation) {
-     try {
-       const donationUsers = await this.getDonationUsers();
-       
-       const validUserIds: number[] = [];
-       for (const userId of donationUsers) {
-         const userExists = await this.userRepository.findOne({
-           where: { id: userId, isActive: true, is_archived: false },
-           select: ['id'],
-         });
-         if (userExists) {
-           validUserIds.push(userId);
-         }
-       }
-
-       if (validUserIds.length > 0) {
-         await this.notificationsService.create(
-           {
-             title: 'New Donation Received',
-             message: `A new donation attempt of ${savedDonation.amount} ${savedDonation.currency || 'PKR'} has been done ${donor?.name ? ` from ${donor.name}` : ''}.`,
-             type: NotificationType.DONATION,
-             link: `/donations/online_donations/view/${savedDonation.id}`,
-             metadata: {
-               donation_id: savedDonation.id,
-               amount: savedDonation.amount,
-               donation_type: savedDonation.donation_type,
-               donation_method: savedDonation.donation_method,
-             },
-           },
-           validUserIds,
-           user
-         );
-       }
-     } catch (error) {
-       console.error('Failed to create notifications:', error.message);
-     }
-    //  }
-
-      if(createDonationDto.donation_method && createDonationDto.donation_method === 'meezan') {
-      // Use reusable helper method to create Meezan invoice
-      const meezanResult = await this.createMeezanInvoice(
-        savedDonation.id,
-        savedDonation.amount,
-        savedDonation,
-      );
-
-      // Return payment URL for user to complete payment
-      return {
-        paymentUrl: meezanResult.paymentUrl,
-      };
-    }
-    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'blinq') {
-      try {
-        const blinqResult = await this.generateBlinqInvoice(
-          savedDonation.id.toString(),
-          savedDonation.amount,
-          donor?.name || 'Anonymous',
-        );
-        savedDonation.orderId = blinqResult.paymentCode || null;
-        await this.donationRepository.save(savedDonation);
-        return { paymentUrl: blinqResult.paymentUrl };
-      } catch (e) {
-        await this.persistGatewayInvoiceError(
-          savedDonation.id,
-          e instanceof Error ? e.message : String(e),
-        );
-        throw e;
-      }
-    }
-    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'payfast') {
-      try {
-        const payfastResponse = await this.payfastService.getAccessToken(
-          savedDonation.id.toString(),
-          savedDonation.amount,
-        );
-        return {
-          ...payfastResponse,
-          BASKET_ID: savedDonation.id.toString(),
-          TXNAMT: savedDonation.amount.toString(),
-        };
-      } catch (e) {
-        await this.persistGatewayInvoiceError(
-          savedDonation.id,
-          e instanceof Error ? e.message : String(e),
-        );
-        throw e;
-      }
-    }
-    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe') {
-      try {
-        const baseFrontendUrl = process.env.BASE_Frontend_URL || '';
-        const stripeResult = await this.stripeService.createCheckoutSession({
-          donationId: savedDonation.id,
-          amount: savedDonation.amount,
-          currency: savedDonation.currency || 'pkr',
-          successUrl: `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`,
-          cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
-          donorEmail: donor?.email || createDonationDto.donor_email,
-          donorName: donor?.name || createDonationDto.donor_name,
-          isMonthly: createDonationDto.donation_frequency === 'monthly',
-        });
-        savedDonation.orderId = stripeResult.sessionId;
-        await this.donationRepository.save(savedDonation);
-        return { paymentUrl: stripeResult.paymentUrl };
-      } catch (e) {
-        await this.persistGatewayInvoiceError(
-          savedDonation.id,
-          e instanceof Error ? e.message : String(e),
-        );
-        throw e;
-      }
-    }
-    else if(createDonationDto.donation_method && createDonationDto.donation_method === 'stripe_embed') {
-      try {
-        const embedResult = await this.stripeService.createPaymentIntentForEmbed({
-          donationId: savedDonation.id,
-          amount: savedDonation.amount,
-          currency: savedDonation.currency || 'pkr',
-          donorEmail: donor?.email || createDonationDto.donor_email,
-          donorName: donor?.name || createDonationDto.donor_name,
-          isMonthly: createDonationDto.donation_frequency === 'monthly',
-        });
-        savedDonation.orderId = embedResult.subscriptionId ?? embedResult.paymentIntentId;
-        await this.donationRepository.save(savedDonation);
-        return {
-          clientSecret: embedResult.clientSecret,
-          paymentIntentId: embedResult.paymentIntentId,
-          donationId: savedDonation.id,
-          ...(embedResult.subscriptionId && { subscriptionId: embedResult.subscriptionId }),
-        };
-      } catch (e) {
-        await this.persistGatewayInvoiceError(
-          savedDonation.id,
-          e instanceof Error ? e.message : String(e),
-        );
-        throw e;
-      }
-    }
-    else if(manualDonationMethodOptions.includes(createDonationDto.donation_method))  {
-      // here we need to create a manual donation
-      console.log("Created manually");
-      if(createDonationDto.donation_method === 'in_kind') {
-        
-        // Create DonationInKind records for each item in the array
-        if (createDonationDto.in_kind_items && createDonationDto.in_kind_items.length > 0) {
-          const donationInKindRecords = [];
-          
-          for (const item of createDonationDto.in_kind_items) {
-            const donationInKind = this.donationInKindRepository.create({
-              donation_id: savedDonation.id.toString(),
-              item_name: item.name,
-              item_id: item.item_code || null,
-              description: item.description || null,
-              category: item.category ? this.mapCategoryToEnum(item.category) : DonationInKindCategory.OTHER,
-              condition: item.condition ? this.mapConditionToEnum(item.condition) : DonationInKindCondition.GOOD,
-              quantity: item.quantity,
-              estimated_value: item.estimated_value || null,
-              brand: item.brand || null,
-              model: item.model || null,
-              size: item.size || null,
-              color: item.color || null,
-              collection_date: new Date(item.collection_date),
-              collection_location: item.collection_location || null,
-              notes: item.notes || null,
-            });
-            
-            donationInKindRecords.push(donationInKind);
+          // Check if donor already exists with this email AND phone
+          if (createDonationDto.donor_email && createDonationDto.donor_phone) {
+            donor = await this.donorService.findByEmail(
+              createDonationDto.donor_email,
+            );
+          } else if (donorId) {
+            donor = await this.donorService.findOne(donorId);
           }
-          
-          // Save all DonationInKind records
-          await this.donationInKindRepository.save(donationInKindRecords);
+
+          if (donor) {
+            const alreadyMultiTimeDonor = donor?.multi_time_donor || false;
+            if (!alreadyMultiTimeDonor) {
+              donor.multi_time_donor = true;
+              await this.donorRepository.save(donor);
+              console.log(
+                `✅ Donor is now a multi-time donor: ${donor.email} (ID: ${donor.id})`,
+              );
+            }
+            if (createDonationDto.notification_subscription !== undefined) {
+              donor.notification_subscription =
+                createDonationDto.notification_subscription;
+              await this.donorRepository.save(donor);
+            }
+            console.log(
+              `✅ Donor already exists: ${donor.email} (ID: ${donor.id})`,
+            );
+            donorId = donor.id;
+            //  return with error that donor is archived
+            if (donor?.is_archived === true) {
+              throw new HttpException("Donor is archived", 400);
+            }
+          } else {
+            console.log(`❌ Donor not found. Auto-registering...`);
+
+            // Auto-register the donor
+            donor = await this.donorService.autoRegisterFromDonation({
+              donor_name: createDonationDto.donor_name,
+              donor_email: createDonationDto.donor_email,
+              donor_phone: createDonationDto.donor_phone,
+              city: createDonationDto.city,
+              country: createDonationDto.country,
+              address: createDonationDto?.address,
+              notification_subscription:
+                createDonationDto.notification_subscription,
+            });
+
+            if (donor) {
+              console.log(
+                `✅ Successfully auto-registered donor: ${donor.email} (ID: ${donor.id})`,
+              );
+              donorId = donor.id;
+              isNewDonorThisRequest = true;
+            } else {
+              console.warn(
+                `⚠️ Failed to auto-register donor, but continuing with donation...`,
+              );
+            }
+          }
+        } else {
+          console.log(
+            `⚠️ Skipping donor auto-registration: missing email or phone`,
+          );
         }
-        
-        return savedDonation;
+        // ============================================
+        const campaignId: number | null =
+          createDonationDto?.campaign_id ?? null;
+        if (campaignId) {
+          try {
+            const campaign = await this.campaignsService.findOne(campaignId);
+            const isAdmin = user?.role === "admin";
+            if (!this.campaignsService.canAcceptDonation(campaign, isAdmin)) {
+              throw new HttpException(
+                `Campaign "${campaign.title}" is not accepting donations (status: ${campaign.status})`,
+                400,
+              );
+            }
+          } catch (e) {
+            if (e instanceof HttpException) throw e;
+            throw new HttpException("Campaign not found", 404);
+          }
+        }
+
+        // if (
+        //   !isNewDonorThisRequest &&
+        //   donorId &&
+        //   createDonationDto.donation_method &&
+        //   createDonationDto.amount != null &&
+        //   createDonationDto.donation_frequency !== 'monthly'
+        // ) {
+        //   const existing = await this.findReusablePendingDonation({
+        //     donorId,
+        //     amount: Number(createDonationDto.amount),
+        //     donationMethod: createDonationDto.donation_method as string,
+        //     campaignId,
+        //   });
+        //   if (existing) {
+        //     savedDonation = existing;
+        //     reusedPendingDonation = true;
+        //     console.log(`♻️ Reusing pending donation ${existing.id} for donor ${donorId}`);
+        //   }
+        // }
+
+        // if (!reusedPendingDonation) { // This condition is now always true since reusedPendingDonation is not set
+        if (
+          createDonationDto?.donation_frequency &&
+          createDonationDto.donation_frequency === "monthly"
+        ) {
+          const recurringDonation = this.recurringDonationRepository.create({
+            ...createDonationDto,
+            donor_id: donorId,
+          });
+          savedDonation =
+            await this.recurringDonationRepository.save(recurringDonation);
+          if (donor) {
+            donor.recurring = true;
+            await this.donorRepository.save(donor);
+          }
+        }
+
+        const donation = this.donationRepository.create({
+          ...createDonationDto,
+          donor_id: donorId,
+          campaign_id: campaignId,
+          created_by: user?.id == -1 ? null : user?.id,
+          recurrence_id: savedDonation?.id || 0,
+        });
+        savedDonation = await this.donationRepository.save(donation);
+        console.log(
+          `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
+        );
+
+        await this.maybeCreateProgressTrackerForNewDonation(
+          createDonationDto,
+          savedDonation,
+          user,
+        );
+        // }
+
+        if (createDonationDto?.previous_donation_id) {
+          savedDonation = await this.donationRepository.findOne({
+            where: { id: parseInt(createDonationDto.previous_donation_id) },
+            relations: ["donor"],
+          });
+
+          if (!savedDonation) {
+            throw new HttpException("Previous donation not found", 404);
+          }
+        }
       }
-    }
-    else {
-      throw new HttpException('Invalid donation method', 400);
-    }
+      //  await this.emailService.sendDonationFailureNotification(savedDonation);
+      //  if (!reusedPendingDonation) {
+      try {
+        const donationUsers = await this.getDonationUsers();
+
+        const validUserIds: number[] = [];
+        for (const userId of donationUsers) {
+          const userExists = await this.userRepository.findOne({
+            where: { id: userId, isActive: true, is_archived: false },
+            select: ["id"],
+          });
+          if (userExists) {
+            validUserIds.push(userId);
+          }
+        }
+
+        if (validUserIds.length > 0) {
+          await this.notificationsService.create(
+            {
+              title: "New Donation Received",
+              message: `A new donation attempt of ${savedDonation.amount} ${savedDonation.currency || "PKR"} has been done ${donor?.name ? ` from ${donor.name}` : ""}.`,
+              type: NotificationType.DONATION,
+              link: `/donations/online_donations/view/${savedDonation.id}`,
+              metadata: {
+                donation_id: savedDonation.id,
+                amount: savedDonation.amount,
+                donation_type: savedDonation.donation_type,
+                donation_method: savedDonation.donation_method,
+              },
+            },
+            validUserIds,
+            user,
+          );
+        }
+      } catch (error) {
+        console.error("Failed to create notifications:", error.message);
+      }
+      //  }
+
+      if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "meezan"
+      ) {
+        // Use reusable helper method to create Meezan invoice
+        const meezanResult = await this.createMeezanInvoice(
+          savedDonation.id,
+          savedDonation.amount,
+          savedDonation,
+        );
+
+        // Return payment URL for user to complete payment
+        return {
+          paymentUrl: meezanResult.paymentUrl,
+        };
+      } else if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "blinq"
+      ) {
+        try {
+          const blinqResult = await this.generateBlinqInvoice(
+            savedDonation.id.toString(),
+            savedDonation.amount,
+            donor?.name || "Anonymous",
+          );
+          savedDonation.orderId = blinqResult.paymentCode || null;
+          await this.donationRepository.save(savedDonation);
+          return { paymentUrl: blinqResult.paymentUrl };
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "payfast"
+      ) {
+        try {
+          const payfastResponse = await this.payfastService.getAccessToken(
+            savedDonation.id.toString(),
+            savedDonation.amount,
+          );
+          return {
+            ...payfastResponse,
+            BASKET_ID: savedDonation.id.toString(),
+            TXNAMT: savedDonation.amount.toString(),
+          };
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "stripe"
+      ) {
+        try {
+          const baseFrontendUrl = process.env.BASE_Frontend_URL || "";
+          const stripeResult = await this.stripeService.createCheckoutSession({
+            donationId: savedDonation.id,
+            amount: savedDonation.amount,
+            currency: savedDonation.currency || "pkr",
+            successUrl: `${baseFrontendUrl}/thanks?donation_id=${savedDonation.id}`,
+            cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
+            donorEmail: donor?.email || createDonationDto.donor_email,
+            donorName: donor?.name || createDonationDto.donor_name,
+            isMonthly: createDonationDto.donation_frequency === "monthly",
+          });
+          savedDonation.orderId = stripeResult.sessionId;
+          await this.donationRepository.save(savedDonation);
+          return { paymentUrl: stripeResult.paymentUrl };
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "stripe_embed"
+      ) {
+        try {
+          const embedResult =
+            await this.stripeService.createPaymentIntentForEmbed({
+              donationId: savedDonation.id,
+              amount: savedDonation.amount,
+              currency: savedDonation.currency || "pkr",
+              donorEmail: donor?.email || createDonationDto.donor_email,
+              donorName: donor?.name || createDonationDto.donor_name,
+              isMonthly: createDonationDto.donation_frequency === "monthly",
+            });
+          savedDonation.orderId =
+            embedResult.subscriptionId ?? embedResult.paymentIntentId;
+          await this.donationRepository.save(savedDonation);
+          return {
+            clientSecret: embedResult.clientSecret,
+            paymentIntentId: embedResult.paymentIntentId,
+            donationId: savedDonation.id,
+            ...(embedResult.subscriptionId && {
+              subscriptionId: embedResult.subscriptionId,
+            }),
+          };
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (
+        manualDonationMethodOptions.includes(createDonationDto.donation_method)
+      ) {
+        // here we need to create a manual donation
+        console.log("Created manually");
+        if (createDonationDto.donation_method === "in_kind") {
+          // Create DonationInKind records for each item in the array
+          if (
+            createDonationDto.in_kind_items &&
+            createDonationDto.in_kind_items.length > 0
+          ) {
+            const donationInKindRecords = [];
+
+            for (const item of createDonationDto.in_kind_items) {
+              const donationInKind = this.donationInKindRepository.create({
+                donation_id: savedDonation.id.toString(),
+                item_name: item.name,
+                item_id: item.item_code || null,
+                description: item.description || null,
+                category: item.category
+                  ? this.mapCategoryToEnum(item.category)
+                  : DonationInKindCategory.OTHER,
+                condition: item.condition
+                  ? this.mapConditionToEnum(item.condition)
+                  : DonationInKindCondition.GOOD,
+                quantity: item.quantity,
+                estimated_value: item.estimated_value || null,
+                brand: item.brand || null,
+                model: item.model || null,
+                size: item.size || null,
+                color: item.color || null,
+                collection_date: new Date(item.collection_date),
+                collection_location: item.collection_location || null,
+                notes: item.notes || null,
+              });
+
+              donationInKindRecords.push(donationInKind);
+            }
+
+            // Save all DonationInKind records
+            await this.donationInKindRepository.save(donationInKindRecords);
+          }
+
+          return savedDonation;
+        }
+      } else {
+        throw new HttpException("Invalid donation method", 400);
+      }
     } catch (error) {
-      console.log(error?.message)
+      console.log(error?.message);
       throw new Error(`Failed to create donation: ${error.message}`);
     }
   }
@@ -1264,8 +1398,8 @@ export class DonationsService {
   async findAll(
     page = 1,
     pageSize = 10,
-    sortField = 'created_at',
-    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    sortField = "created_at",
+    sortOrder: "ASC" | "DESC" = "DESC",
     filters: FilterPayload = {},
     hybridFilters: HybridFilter[] = [],
     multiselectFilters: any[] = [],
@@ -1275,50 +1409,73 @@ export class DonationsService {
   ) {
     try {
       const restrictedEmails = [
-        'mtjf_agency@example.com',
-        'musna@mtjfoundation.org',
+        "mtjf_agency@example.com",
+        "musna@mtjfoundation.org",
       ];
       console.log("user email in donation listing", user?.email);
       console.log("multiselectFilters", multiselectFilters);
-      const entitySearchFields = ['city'];
-      const query = this.donationRepository.createQueryBuilder('donation')
-      .leftJoin('donation.donor', 'donor')
-      .addSelect('donor.name', 'donor_name')
-      .addSelect('donor.id', 'donor_id')
+      const entitySearchFields = ["city"];
+      const query = this.donationRepository
+        .createQueryBuilder("donation")
+        .leftJoin("donation.donor", "donor")
+        .addSelect("donor.name", "donor_name")
+        .addSelect("donor.id", "donor_id");
       if (!restrictedEmails.includes(user?.email)) {
-        query.addSelect('donor.email', 'donor_email');
-        query.addSelect('donor.phone', 'donor_phone');
+        query.addSelect("donor.email", "donor_email");
+        query.addSelect("donor.phone", "donor_phone");
       }
       query.getRawMany();
       // Apply filters
       // 1) Main entity search/equality/date/range
-      applyCommonFilters(query, filters, entitySearchFields, 'donation');
+      applyCommonFilters(query, filters, entitySearchFields, "donation");
       // applyHybridFilters(query, hybridFilters, 'donation');
 
       // 2) Relation search (const config) using top-level search
-      const RELATIONS_SEARCH: RelationsFilterConfig = { donor: ['name', 'email', 'phone'] };
-      applyRelationsSearch(query, filters.search as any, RELATIONS_SEARCH, 'donation');
+      const RELATIONS_SEARCH: RelationsFilterConfig = {
+        donor: ["name", "email", "phone"],
+      };
+      applyRelationsSearch(
+        query,
+        filters.search as any,
+        RELATIONS_SEARCH,
+        "donation",
+      );
 
       // 2b) Per-relation search terms via relationsFilters.{alias}.search
       if (relationsFilters) {
         Object.entries(relationsFilters).forEach(([alias, cols]) => {
           const term = (cols as any)?.search;
-          if (term && typeof term === 'string') {
-            const singleAliasCfg: RelationsFilterConfig = { [alias]: RELATIONS_SEARCH[alias] || [] } as any;
-            applyRelationsSearch(query, term, singleAliasCfg, 'donation');
+          if (term && typeof term === "string") {
+            const singleAliasCfg: RelationsFilterConfig = {
+              [alias]: RELATIONS_SEARCH[alias] || [],
+            } as any;
+            applyRelationsSearch(query, term, singleAliasCfg, "donation");
           }
         });
       }
 
       // 3) Relation equality: normalize nested relationsFilters -> namespaced keys and apply
-      const RELATIONS_EQ: RelationsFilterConfig = { donor: ['name', 'email', 'phone'] };
-      const normalizedRelationFilters = normalizeRelationsFilters(relationsFilters, RELATIONS_EQ);
-      applyRelationsFilter(query, normalizedRelationFilters, RELATIONS_EQ, 'donation');
+      const RELATIONS_EQ: RelationsFilterConfig = {
+        donor: ["name", "email", "phone"],
+      };
+      const normalizedRelationFilters = normalizeRelationsFilters(
+        relationsFilters,
+        RELATIONS_EQ,
+      );
+      applyRelationsFilter(
+        query,
+        normalizedRelationFilters,
+        RELATIONS_EQ,
+        "donation",
+      );
 
       // 4) Multiselect filters multi select is object and we need to apply it to the query here is the example { columnName: ['1', '2', '3'] }
-      if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
-        console.log("here (multiselectFilters && multiselectFilters.length > 0", multiselectFilters)
-        applyMultiselectFilters(query, multiselectFilters, 'donation');
+      if (multiselectFilters && Object.keys(multiselectFilters).length > 0) {
+        console.log(
+          "here (multiselectFilters && multiselectFilters.length > 0",
+          multiselectFilters,
+        );
+        applyMultiselectFilters(query, multiselectFilters, "donation");
       }
 
       // 5) Geographic filter — restrict donations to user's assigned city names
@@ -1333,7 +1490,7 @@ export class DonationsService {
               SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNames)
             ))
           )`,
-          { geoCityNames: assignedCityNames }
+          { geoCityNames: assignedCityNames },
         );
       }
 
@@ -1348,29 +1505,43 @@ export class DonationsService {
       const [data, total] = await query.getManyAndCount();
       const totalPages = Math.ceil(total / pageSize);
 
-
       // ✅ Get SUM(amount) with same filters
-      const sumQuery = this.donationRepository.createQueryBuilder('donation')
-        .select('SUM(donation.amount)', 'totalDonationAmount')
-        .leftJoin('donation.donor', 'donor');
+      const sumQuery = this.donationRepository
+        .createQueryBuilder("donation")
+        .select("SUM(donation.amount)", "totalDonationAmount")
+        .leftJoin("donation.donor", "donor");
 
       // Apply same filters to keep consistent
-      applyCommonFilters(sumQuery, filters, entitySearchFields, 'donation');
+      applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
       // applyHybridFilters(sumQuery, hybridFilters, 'donation');
-      applyRelationsSearch(sumQuery, filters.search as any, RELATIONS_SEARCH, 'donation');
+      applyRelationsSearch(
+        sumQuery,
+        filters.search as any,
+        RELATIONS_SEARCH,
+        "donation",
+      );
       if (relationsFilters) {
         Object.entries(relationsFilters).forEach(([alias, cols]) => {
           const term = (cols as any)?.search;
-          if (term && typeof term === 'string') {
-            const singleAliasCfg: RelationsFilterConfig = { [alias]: RELATIONS_SEARCH[alias] || [] } as any;
-            applyRelationsSearch(sumQuery, term, singleAliasCfg, 'donation');
+          if (term && typeof term === "string") {
+            const singleAliasCfg: RelationsFilterConfig = {
+              [alias]: RELATIONS_SEARCH[alias] || [],
+            } as any;
+            applyRelationsSearch(sumQuery, term, singleAliasCfg, "donation");
           }
         });
       }
-      applyRelationsFilter(sumQuery, normalizedRelationFilters, RELATIONS_EQ, 'donation');
-      if(multiselectFilters && Object.keys(multiselectFilters).length > 0) {
-        console.log("here (multiselectFilters && multiselectFilters.length > 0")
-        applyMultiselectFilters(sumQuery, multiselectFilters, 'donation');
+      applyRelationsFilter(
+        sumQuery,
+        normalizedRelationFilters,
+        RELATIONS_EQ,
+        "donation",
+      );
+      if (multiselectFilters && Object.keys(multiselectFilters).length > 0) {
+        console.log(
+          "here (multiselectFilters && multiselectFilters.length > 0",
+        );
+        applyMultiselectFilters(sumQuery, multiselectFilters, "donation");
       }
       // Apply same geographic filter to sum query
       if (assignedCityNames && assignedCityNames.length > 0) {
@@ -1382,7 +1553,7 @@ export class DonationsService {
               SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNamesSum)
             ))
           )`,
-          { geoCityNamesSum: assignedCityNames }
+          { geoCityNamesSum: assignedCityNames },
         );
       }
       const sumResult = await sumQuery.getRawOne();
@@ -1411,17 +1582,17 @@ export class DonationsService {
     try {
       // Use createQueryBuilder to join with donor table
       const donation = await this.donationRepository
-        .createQueryBuilder('donation')
-        .leftJoinAndSelect('donation.donor', 'donor')
-        .where('donation.id = :id', { id })
+        .createQueryBuilder("donation")
+        .leftJoinAndSelect("donation.donor", "donor")
+        .where("donation.id = :id", { id })
         .getOne();
-      
+
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
-      
+
       // if donation.donation_method is in_kind then get its all in kind items
-      if(donation.donation_method === 'in_kind') {
+      if (donation.donation_method === "in_kind") {
         const inKindItems = await this.findInKindByDonationId(id);
         return {
           ...donation,
@@ -1442,7 +1613,7 @@ export class DonationsService {
     try {
       return await this.donationInKindRepository.find({
         where: { donation_id: donationId.toString() },
-        order: { created_at: 'DESC' },
+        order: { created_at: "DESC" },
       });
     } catch (error) {
       throw new Error(`Failed to retrieve in-kind items: ${error.message}`);
@@ -1454,10 +1625,12 @@ export class DonationsService {
     try {
       return await this.donationInKindRepository.find({
         where: { donation_id: donationId.toString() },
-        order: { created_at: 'DESC' },
+        order: { created_at: "DESC" },
       });
     } catch (error) {
-      throw new Error(`Failed to retrieve donation in kind records: ${error.message}`);
+      throw new Error(
+        `Failed to retrieve donation in kind records: ${error.message}`,
+      );
     }
   }
 
@@ -1485,43 +1658,49 @@ export class DonationsService {
   private buildDonationPatch(dto: UpdateDonationDto): Record<string, unknown> {
     const d = dto as Record<string, unknown>;
     const allowed = [
-      'amount',
-      'paid_amount',
-      'currency',
-      'date',
-      'donation_type',
-      'donation_method',
-      'donation_source',
-      'status',
-      'country',
-      'city',
-      'project_id',
-      'project_name',
-      'campaign_id',
-      'sub_program_id',
-      'event_id',
-      'cheque_number',
-      'bank_name',
-      'bank',
-      'transaction_id',
-      'ref',
+      "amount",
+      "paid_amount",
+      "currency",
+      "date",
+      "donation_type",
+      "donation_method",
+      "donation_source",
+      "status",
+      "country",
+      "city",
+      "project_id",
+      "project_name",
+      "campaign_id",
+      "sub_program_id",
+      "event_id",
+      "cheque_number",
+      "bank_name",
+      "bank",
+      "transaction_id",
+      "ref",
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
       if (d[key] === undefined) continue;
       if (
-        (key === 'campaign_id' || key === 'sub_program_id' || key === 'event_id') &&
-        (d[key] === '' || d[key] === null)
+        (key === "campaign_id" ||
+          key === "sub_program_id" ||
+          key === "event_id") &&
+        (d[key] === "" || d[key] === null)
       ) {
         patch[key] = null;
         continue;
       }
-      if (key === 'amount' || key === 'paid_amount') {
+      if (key === "amount" || key === "paid_amount") {
         const n = Number(d[key]);
         if (!Number.isNaN(n)) patch[key] = Math.round(n);
         continue;
       }
-      if (key === 'campaign_id' || key === 'sub_program_id' || key === 'event_id') {
+      if (
+        key === "campaign_id" ||
+        key === "sub_program_id" ||
+        key === "event_id"
+      ) {
         const n = Number(d[key]);
         if (!Number.isNaN(n)) patch[key] = n;
         continue;
@@ -1546,7 +1725,10 @@ export class DonationsService {
         noted_by: user?.id ?? null,
       } as any);
 
-      return await this.donationRepository.findOne({ where: { id }, relations: ['donor'] });
+      return await this.donationRepository.findOne({
+        where: { id },
+        relations: ["donor"],
+      });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -1565,9 +1747,9 @@ export class DonationsService {
   async updateStatusAction(donationId: number, newStatus: string) {
     try {
       // Find the donation
-      const donation = await this.donationRepository.findOne({ 
+      const donation = await this.donationRepository.findOne({
         where: { id: donationId },
-        relations: ['donor']
+        relations: ["donor"],
       });
 
       if (!donation) {
@@ -1587,22 +1769,34 @@ export class DonationsService {
       await this.donationRepository.update(donationId, { status: newStatus });
 
       // Get updated donation
-      const updatedDonation = await this.donationRepository.findOne({ 
+      const updatedDonation = await this.donationRepository.findOne({
         where: { id: donationId },
-        relations: ['donor']
+        relations: ["donor"],
       });
 
-      console.log(`Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`);
+      console.log(
+        `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
+      );
 
       // Dashboard aggregation: event-driven updates
-      if (newStatus === 'completed') {
-        this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
-          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
-        );
-      } else if (['refunded', 'reversed'].includes(newStatus)) {
-        this.dashboardAggregateService.applyDonationReversed(donationId).catch((e) =>
-          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
-        );
+      if (newStatus === "completed") {
+        this.dashboardAggregateService
+          .applyDonationCompleted(donationId)
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationCompleted failed for ${donationId}:`,
+              e,
+            ),
+          );
+      } else if (["refunded", "reversed"].includes(newStatus)) {
+        this.dashboardAggregateService
+          .applyDonationReversed(donationId)
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationReversed failed for ${donationId}:`,
+              e,
+            ),
+          );
       }
 
       return {
@@ -1626,9 +1820,9 @@ export class DonationsService {
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
-      
+
       await this.donationRepository.delete(id);
-      return { message: 'Donation deleted successfully' };
+      return { message: "Donation deleted successfully" };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -1640,37 +1834,49 @@ export class DonationsService {
   async updateDonationStatus(payload: any) {
     try {
       console.log("Updating donation status with payload:", payload);
-      
+
       let donationId: string;
       let paymentMethod: string;
-      
+
       // Determine payment method and extract donation ID
-      if (payload.transaction_id && payload.err_code !== undefined && payload.basket_id) {
+      if (
+        payload.transaction_id &&
+        payload.err_code !== undefined &&
+        payload.basket_id
+      ) {
         // Payfast payload format
-        paymentMethod = 'payfast';
+        paymentMethod = "payfast";
         donationId = payload.basket_id;
         console.log("Processing Payfast status update");
-      } else if (payload.payment_method && (payload.payment_method === 'meezan' || payload.payment_method === 'blinq')) {
-        
+      } else if (
+        payload.payment_method &&
+        (payload.payment_method === "meezan" ||
+          payload.payment_method === "blinq")
+      ) {
         // Meezan or Blinq payload format
         paymentMethod = payload.payment_method;
         donationId = payload.donation_id || payload.orderId || payload.order_id;
         console.log(`Processing ${paymentMethod} status update`);
-      } else if (payload.payment_method && payload.payment_method === 'stripe') {
-        paymentMethod = 'stripe';
+      } else if (
+        payload.payment_method &&
+        payload.payment_method === "stripe"
+      ) {
+        paymentMethod = "stripe";
         donationId = payload.donation_id || payload.client_reference_id;
-        console.log('Processing Stripe status update');
+        console.log("Processing Stripe status update");
       } else {
-        throw new Error('Invalid payload format: Unable to determine payment method or donation ID');
+        throw new Error(
+          "Invalid payload format: Unable to determine payment method or donation ID",
+        );
       }
 
       if (!donationId) {
-        throw new Error('Donation ID not found in payload');
+        throw new Error("Donation ID not found in payload");
       }
 
       // Find the donation by ID
-      const donation = await this.donationRepository.findOne({ 
-        where: { id: parseInt(donationId) } 
+      const donation = await this.donationRepository.findOne({
+        where: { id: parseInt(donationId) },
       });
 
       if (!donation) {
@@ -1681,55 +1887,57 @@ export class DonationsService {
       let newStatus: string;
       let updateData: any = {};
 
-      if (paymentMethod === 'payfast') {
+      if (paymentMethod === "payfast") {
         // Payfast status logic
-        if (payload.err_code === '00' || payload.err_code === 0) {
-          newStatus = 'completed';
+        if (payload.err_code === "00" || payload.err_code === 0) {
+          newStatus = "completed";
         } else {
-          newStatus = 'failed';
+          newStatus = "failed";
         }
-        
+
         updateData = {
           status: newStatus,
           transaction_id: payload.transaction_id,
           error_code: payload.err_code,
           error_message: payload.err_msg,
         };
-        
-      } else if (paymentMethod === 'meezan') {
+      } else if (paymentMethod === "meezan") {
         // Meezan status logic
-        if (payload.status === 'completed' || payload.status === 'success') {
-          newStatus = 'completed';
+        if (payload.status === "completed" || payload.status === "success") {
+          newStatus = "completed";
         } else {
-          newStatus = 'failed';
+          newStatus = "failed";
         }
-        
+
         updateData = {
           status: newStatus,
           transaction_id: payload.transaction_id,
           error_code: payload.error_code,
           error_message: payload.error_message,
         };
-        
-      } else if (paymentMethod === 'blinq') {
+      } else if (paymentMethod === "blinq") {
         // Blinq status logic
-        if (payload.status === 'completed' || payload.status === 'success') {
-          newStatus = 'completed';
+        if (payload.status === "completed" || payload.status === "success") {
+          newStatus = "completed";
         } else {
-          newStatus = 'failed';
+          newStatus = "failed";
         }
-        
+
         updateData = {
           status: newStatus,
           transaction_id: payload.transaction_id,
           error_code: payload.error_code,
           error_message: payload.error_message,
         };
-      } else if (paymentMethod === 'stripe') {
-        if (payload.status === 'completed' || payload.status === 'success' || payload.payment_status === 'paid') {
-          newStatus = 'completed';
+      } else if (paymentMethod === "stripe") {
+        if (
+          payload.status === "completed" ||
+          payload.status === "success" ||
+          payload.payment_status === "paid"
+        ) {
+          newStatus = "completed";
         } else {
-          newStatus = 'failed';
+          newStatus = "failed";
         }
         updateData = {
           status: newStatus,
@@ -1742,30 +1950,39 @@ export class DonationsService {
       await this.donationRepository.update(parseInt(donationId), updateData);
 
       // Dashboard aggregation: event-driven updates
-      if (newStatus === 'completed') {
-        this.dashboardAggregateService.applyDonationCompleted(parseInt(donationId)).catch((e) =>
-          console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
-        );
-      } else if (['refunded', 'reversed'].includes(newStatus)) {
-        this.dashboardAggregateService.applyDonationReversed(parseInt(donationId)).catch((e) =>
-          console.error(`Dashboard applyDonationReversed failed for ${donationId}:`, e),
-        );
+      if (newStatus === "completed") {
+        this.dashboardAggregateService
+          .applyDonationCompleted(parseInt(donationId))
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationCompleted failed for ${donationId}:`,
+              e,
+            ),
+          );
+      } else if (["refunded", "reversed"].includes(newStatus)) {
+        this.dashboardAggregateService
+          .applyDonationReversed(parseInt(donationId))
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationReversed failed for ${donationId}:`,
+              e,
+            ),
+          );
       }
 
       // Get updated donation
-      const updatedDonation = await this.donationRepository.findOne({ 
-        where: { id: parseInt(donationId) } 
+      const updatedDonation = await this.donationRepository.findOne({
+        where: { id: parseInt(donationId) },
       });
 
       console.log(`Donation ${donationId} status updated to: ${newStatus}`);
-      
+
       return {
         donationId: parseInt(donationId),
         paymentMethod,
         newStatus,
         // updatedDonation,
       };
-      
     } catch (error) {
       console.error("Error in updateDonationStatus:", error);
       if (error instanceof NotFoundException) {
@@ -1781,7 +1998,7 @@ export class DonationsService {
       console.log("=== PAYFAST IPN RECEIVED ===");
       console.log("Full IPN Payload:", JSON.stringify(payload, null, 2));
       console.log("Timestamp:", new Date().toISOString());
-      
+
       // Extract key parameters from PayFast IPN
       const {
         basket_id,
@@ -1795,7 +2012,7 @@ export class DonationsService {
         err_msg,
         transaction_currency,
         mobile_no,
-        masked_pan
+        masked_pan,
       } = payload;
 
       console.log("=== EXTRACTED PARAMETERS ===");
@@ -1811,69 +2028,88 @@ export class DonationsService {
 
       // Validate required parameters
       if (!basket_id || !err_code || !validation_hash) {
-        throw new Error('Missing required PayFast parameters');
+        throw new Error("Missing required PayFast parameters");
       }
 
       // Find donation by basket_id (which is the donation id)
       const donation = await this.donationRepository
-        .createQueryBuilder('donation')
-        .leftJoinAndSelect('donation.donor', 'donor')
-        .where('donation.id = :id', { id: parseInt(basket_id) })
+        .createQueryBuilder("donation")
+        .leftJoinAndSelect("donation.donor", "donor")
+        .where("donation.id = :id", { id: parseInt(basket_id) })
         .getOne();
 
       if (!donation) {
-        throw new Error(`Donation with ID ${basket_id} not found in handlePayfastIpn`);
+        throw new Error(
+          `Donation with ID ${basket_id} not found in handlePayfastIpn`,
+        );
       }
 
-      console.log("Found donation:", { id: donation.id, amount: donation.amount, status: donation.status });
+      console.log("Found donation:", {
+        id: donation.id,
+        amount: donation.amount,
+        status: donation.status,
+      });
 
       // Verify PayFast hash
-      const hashValid = this.verifyPayfastHash(basket_id, err_code, validation_hash);
+      const hashValid = this.verifyPayfastHash(
+        basket_id,
+        err_code,
+        validation_hash,
+      );
       console.log("Hash verification result:", hashValid);
 
       if (!hashValid) {
-        throw new Error('Invalid PayFast validation hash');
+        throw new Error("Invalid PayFast validation hash");
       }
 
       // Update donation status based on err_code
       let newStatus: string;
-      if (err_code === '000' || err_code === '00') {
+      if (err_code === "000" || err_code === "00") {
         // end success message and email if not sent already
-        newStatus = 'completed';
+        newStatus = "completed";
         console.log("Donation marked as completed");
       } else {
-        newStatus = 'failed';
+        newStatus = "failed";
         console.log("Donation marked as failed");
-        
+
         // // Send failure email
         // await this.emailService.sendDonationFailureEmail(donation, {
         //   err_code,
         //   err_msg,
         //   transaction_id,
         //   donation_id: basket_id
-        // }}); 
+        // }});
       }
 
       let message_sent: boolean = false;
       let email_sent: boolean = false;
-      let send_message = donation?.message_sent == false && donation?.amount >= 5000 ? true : false;
-      let send_email = donation?.email_sent == false && donation?.amount >= 5000 ? true : false;
-      if (err_code === '000' || err_code === '00') {
-        if(send_message){
+      const send_message =
+        donation?.message_sent == false && donation?.amount >= 5000
+          ? true
+          : false;
+      const send_email =
+        donation?.email_sent == false && donation?.amount >= 5000
+          ? true
+          : false;
+      if (err_code === "000" || err_code === "00") {
+        if (send_message) {
           message_sent = true;
           await this.whatsAppService.sendPaymentConfirmation({
-          phoneNumber: donation.donor.phone,
+            phoneNumber: donation.donor.phone,
             userName: donation.donor.name,
             amount: donation.amount,
           });
-          if(send_email){
+          if (send_email) {
             email_sent = true;
-            await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
+            await this.emailService.sendDonationSuccessEmail(
+              donation,
+              donation.donor,
+              donation.donor.email,
+            );
           }
         }
-      }
-      else{
-        if(send_message){
+      } else {
+        if (send_message) {
           message_sent = true;
           // send abandon message
           // need to finalize the  flow for this
@@ -1883,66 +2119,73 @@ export class DonationsService {
             amount: donation.amount,
             donationId: basket_id,
           });
-          if(send_email){
+          if (send_email) {
             email_sent = true;
             await this.emailService.sendDonationFailureEmail(donation);
           }
         }
       }
-        // Update donation
-        await this.donationRepository.update(parseInt(basket_id), {
-          orderId: transaction_id,
-          status: newStatus,
-          err_msg,
-          message_sent,
-          email_sent
-        });
-      console.log(`Donation ${basket_id} updated successfully with status: ${newStatus}`);
+      // Update donation
+      await this.donationRepository.update(parseInt(basket_id), {
+        orderId: transaction_id,
+        status: newStatus,
+        err_msg,
+        message_sent,
+        email_sent,
+      });
+      console.log(
+        `Donation ${basket_id} updated successfully with status: ${newStatus}`,
+      );
       console.log("=== IPN PROCESSING COMPLETE ===");
-      
+
       return {
         basket_id: basket_id,
         err_code: err_code,
         transaction_id: transaction_id,
         status: newStatus,
-        processed: true
+        processed: true,
       };
-      
     } catch (error) {
       console.error("=== IPN PROCESSING ERROR ===");
       console.error("Error:", error.message);
       console.error("Stack:", error.stack);
-      
+
       throw error;
     }
   }
 
   // Verify PayFast validation hash
-  private verifyPayfastHash(basket_id: string, err_code: string, received_hash: string): boolean {
+  private verifyPayfastHash(
+    basket_id: string,
+    err_code: string,
+    received_hash: string,
+  ): boolean {
     try {
-      const crypto = require('crypto');
-      
+      const crypto = require("crypto");
+
       // Get PayFast credentials from environment
-      const merchant_secret_key = process.env.PF_SECURED_KEY; 
+      const merchant_secret_key = process.env.PF_SECURED_KEY;
       const merchant_id = process.env.PF_MERCHANT_ID;
-      
+
       if (!merchant_secret_key || !merchant_id) {
-        console.error('PayFast credentials not configured');
+        console.error("PayFast credentials not configured");
         return false;
       }
 
       // Create hash string: basket_id|merchant_secret_key|merchant_id|err_code
       const hashString = `${basket_id}|${merchant_secret_key}|${merchant_id}|${err_code}`;
       console.log("Hash string:", hashString);
-      
+
       // Calculate SHA256 hash
-      const calculatedHash = crypto.createHash('sha256').update(hashString).digest('hex');
+      const calculatedHash = crypto
+        .createHash("sha256")
+        .update(hashString)
+        .digest("hex");
       console.log("Calculated hash:", calculatedHash);
       console.log("Received hash:", received_hash);
-      
+
       // Compare hashes (case insensitive)
       return calculatedHash.toLowerCase() === received_hash.toLowerCase();
-      
     } catch (error) {
       console.error("Hash verification error:", error.message);
       return false;
@@ -1952,32 +2195,35 @@ export class DonationsService {
   // Public endpoint to update donation status
   async updateDonationFromPublic(id: string, order_id: string, status: string) {
     try {
-      console.log(`Updating donation ID: ${id} with order_id: ${order_id} with status: ${status}`);
-      
-      // Find donation by ID here add check if that donation is not completed already if completed then return success and not update the donation  
-      const donation = await this.donationRepository.findOne({ 
-        where: { id: Number(id) } 
+      console.log(
+        `Updating donation ID: ${id} with order_id: ${order_id} with status: ${status}`,
+      );
+
+      // Find donation by ID here add check if that donation is not completed already if completed then return success and not update the donation
+      const donation = await this.donationRepository.findOne({
+        where: { id: Number(id) },
       });
 
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
 
-        // Update only orderId and status
+      // Update only orderId and status
       await this.donationRepository.update(parseInt(id), {
         orderId: order_id,
-        status: status
+        status: status,
       });
 
-      console.log(`Donation ${id} updated successfully with order_id: ${order_id} and status: ${status}`);
-      
+      console.log(
+        `Donation ${id} updated successfully with order_id: ${order_id} and status: ${status}`,
+      );
+
       return {
         id: parseInt(id),
         order_id: order_id,
         status: status,
-        updated: true
+        updated: true,
       };
-      
     } catch (error) {
       console.error("Error updating donation from public:", error.message);
       if (error instanceof NotFoundException) {
@@ -1991,9 +2237,12 @@ export class DonationsService {
    * Stripe webhook handler. Verifies signature, then updates donation on checkout.session.completed.
    * Expects raw body (Buffer) and Stripe-Signature header.
    */
-  async handleStripeWebhook(rawBody: Buffer | string, signature: string): Promise<{ received: boolean; donationId?: number }> {
+  async handleStripeWebhook(
+    rawBody: Buffer | string,
+    signature: string,
+  ): Promise<{ received: boolean; donationId?: number }> {
     const event = this.stripeService.constructWebhookEvent(rawBody, signature);
-    if (event.type === 'checkout.session.completed') {
+    if (event.type === "checkout.session.completed") {
       const session = event.data.object as {
         id?: string;
         client_reference_id?: string;
@@ -2001,43 +2250,64 @@ export class DonationsService {
         mode?: string;
         subscription?: string;
       };
-      const donationId = session.client_reference_id ? parseInt(session.client_reference_id, 10) : null;
+      const donationId = session.client_reference_id
+        ? parseInt(session.client_reference_id, 10)
+        : null;
       if (donationId && !isNaN(donationId)) {
-        const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+        const donation = await this.donationRepository.findOne({
+          where: { id: donationId },
+        });
         if (donation) {
           const orderIdForDonation =
-            session.mode === 'subscription' && session.subscription
+            session.mode === "subscription" && session.subscription
               ? session.subscription
               : session.id || donation.orderId;
           await this.donationRepository.update(donationId, {
-            status: 'completed',
+            status: "completed",
             orderId: orderIdForDonation,
           });
-          this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
-            console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
-          );
+          this.dashboardAggregateService
+            .applyDonationCompleted(donationId)
+            .catch((e) =>
+              console.error(
+                `Dashboard applyDonationCompleted failed for ${donationId}:`,
+                e,
+              ),
+            );
           console.log(
-            `Stripe webhook: Donation ${donationId} marked completed (${session.mode === 'subscription' ? 'subscription' : 'session'}: ${orderIdForDonation})`,
+            `Stripe webhook: Donation ${donationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
           );
           return { received: true, donationId };
         }
       }
     }
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object as { id?: string; metadata?: { donation_id?: string } };
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object as {
+        id?: string;
+        metadata?: { donation_id?: string };
+      };
       const donationIdStr = paymentIntent.metadata?.donation_id;
       const donationId = donationIdStr ? parseInt(donationIdStr, 10) : null;
       if (donationId && !isNaN(donationId)) {
-        const donation = await this.donationRepository.findOne({ where: { id: donationId } });
+        const donation = await this.donationRepository.findOne({
+          where: { id: donationId },
+        });
         if (donation) {
           await this.donationRepository.update(donationId, {
-            status: 'completed',
+            status: "completed",
             orderId: paymentIntent.id || donation.orderId,
           });
-          this.dashboardAggregateService.applyDonationCompleted(donationId).catch((e) =>
-            console.error(`Dashboard applyDonationCompleted failed for ${donationId}:`, e),
+          this.dashboardAggregateService
+            .applyDonationCompleted(donationId)
+            .catch((e) =>
+              console.error(
+                `Dashboard applyDonationCompleted failed for ${donationId}:`,
+                e,
+              ),
+            );
+          console.log(
+            `Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`,
           );
-          console.log(`Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`);
           return { received: true, donationId };
         }
       }
@@ -2051,7 +2321,7 @@ export class DonationsService {
       console.log("=== BLINQ CALLBACK RECEIVED ===");
       console.log("Full Callback Payload:", JSON.stringify(payload, null, 2));
       console.log("Timestamp:", new Date().toISOString());
-      
+
       // Extract key parameters from Blinq callback
       const {
         data_integrity,
@@ -2066,7 +2336,7 @@ export class DonationsService {
         amount_paid,
         net_amount,
         txnFee,
-        paid_via
+        paid_via,
       } = payload;
 
       console.log("=== EXTRACTED PARAMETERS ===");
@@ -2084,7 +2354,7 @@ export class DonationsService {
           code: "01",
           message: "Missing required parameters",
           status: "failure",
-          invoice_number: invoice_number || "unknown"
+          invoice_number: invoice_number || "unknown",
         };
       }
 
@@ -2097,19 +2367,19 @@ export class DonationsService {
           code: "01",
           message: "Invalid data integrity validation",
           status: "failure",
-          invoice_number: invoice_number
+          invoice_number: invoice_number,
         };
       }
 
       // Find donation by invoice_number (which should match our donation ID)
-      // const donation = await this.donationRepository.findOne({ 
-      //   where: { id: parseInt(invoice_number) } 
+      // const donation = await this.donationRepository.findOne({
+      //   where: { id: parseInt(invoice_number) }
       // });
 
       const donation = await this.donationRepository
-        .createQueryBuilder('donation')
-        .leftJoinAndSelect('donation.donor', 'donor')
-        .where('donation.id = :id', { id: parseInt(invoice_number) })
+        .createQueryBuilder("donation")
+        .leftJoinAndSelect("donation.donor", "donor")
+        .where("donation.id = :id", { id: parseInt(invoice_number) })
         .getOne();
 
       if (!donation) {
@@ -2117,26 +2387,32 @@ export class DonationsService {
           code: "03",
           message: "Invoice not found",
           status: "failure",
-          invoice_number: invoice_number
+          invoice_number: invoice_number,
         };
       }
 
       // Check if already paid
-      if (donation.status === 'completed') {
+      if (donation.status === "completed") {
         return {
           code: "02",
           message: "Invoice already paid",
           status: "success",
-          invoice_number: invoice_number
+          invoice_number: invoice_number,
         };
       }
-      let status:any ;
+      let status: any;
       let message_sent = false;
-      let send_message = donation?.message_sent == false && donation?.amount >= 5000 ? true : false;
+      const send_message =
+        donation?.message_sent == false && donation?.amount >= 5000
+          ? true
+          : false;
       let email_sent = false;
-      let send_email = donation?.email_sent == false && donation?.amount >= 5000 ? true : false;
-      if (invoice_status == 'PAID' && send_message && send_email) {
-        status = 'completed';
+      const send_email =
+        donation?.email_sent == false && donation?.amount >= 5000
+          ? true
+          : false;
+      if (invoice_status == "PAID" && send_message && send_email) {
+        status = "completed";
         // send success message
         await this.whatsAppService.sendPaymentConfirmation({
           phoneNumber: donation.donor.phone,
@@ -2145,26 +2421,33 @@ export class DonationsService {
         });
         message_sent = true;
         email_sent = true;
-        await this.emailService.sendDonationSuccessEmail(donation, donation.donor, donation.donor.email);
-      }
-      else{
-        status = 'failed'
-        if(send_message){
-        await this.whatsAppService.sendAbandonMessage({
-          phoneNumber: donation.donor.phone,
-          userName: donation.donor.name,
+        await this.emailService.sendDonationSuccessEmail(
+          donation,
+          donation.donor,
+          donation.donor.email,
+        );
+      } else {
+        status = "failed";
+        if (send_message) {
+          await this.whatsAppService.sendAbandonMessage({
+            phoneNumber: donation.donor.phone,
+            userName: donation.donor.name,
             amount: donation.amount,
             donationId: invoice_number,
           });
         }
         message_sent = true;
-        if (send_email){
+        if (send_email) {
           email_sent = true;
           await this.emailService.sendDonationFailureEmail(donation);
         }
       }
 
-      console.log("Found donation:", { id: donation.id, amount: donation.amount, status: donation.status });
+      console.log("Found donation:", {
+        id: donation.id,
+        amount: donation.amount,
+        status: donation.status,
+      });
 
       // Update donation status
       await this.donationRepository.update(parseInt(invoice_number), {
@@ -2172,101 +2455,120 @@ export class DonationsService {
         status: status,
         err_msg: `Paid via ${paid_via} - Bank: ${paid_bank}`,
         message_sent,
-        email_sent
+        email_sent,
       });
 
-      if (status === 'completed') {
-        this.dashboardAggregateService.applyDonationCompleted(parseInt(invoice_number)).catch((e) =>
-          console.error(`Dashboard applyDonationCompleted failed for ${invoice_number}:`, e),
-        );
+      if (status === "completed") {
+        this.dashboardAggregateService
+          .applyDonationCompleted(parseInt(invoice_number))
+          .catch((e) =>
+            console.error(
+              `Dashboard applyDonationCompleted failed for ${invoice_number}:`,
+              e,
+            ),
+          );
       }
 
-      console.log(`Donation ${invoice_number} updated successfully with status: completed`);
+      console.log(
+        `Donation ${invoice_number} updated successfully with status: completed`,
+      );
       console.log("=== BLINQ CALLBACK PROCESSING COMPLETE ===");
-      
+
       return {
         code: "00",
         message: "Invoice successfully marked as paid",
         status: "success",
-        invoice_number: invoice_number
+        invoice_number: invoice_number,
       };
-      
     } catch (error) {
       console.error("=== BLINQ CALLBACK PROCESSING ERROR ===");
       console.error("Error:", error.message);
       console.error("Stack:", error.stack);
-      
+
       return {
         code: "01",
         message: "Internal server error",
         status: "failure",
-        invoice_number: payload.invoice_number || "unknown"
+        invoice_number: payload.invoice_number || "unknown",
       };
     }
   }
 
   // Verify Blinq data integrity hash
-  private verifyBlinqHash(invoice_number: string, received_hash: string): boolean { 
+  private verifyBlinqHash(
+    invoice_number: string,
+    received_hash: string,
+  ): boolean {
     try {
-      const crypto = require('crypto');
-      
+      const crypto = require("crypto");
+
       // Get Blinq callback secret from environment
-      const callback_secret = process.env.BLINQ_CALLBACK_SECRET || process.env.BLINQ_PASS;
-      
+      const callback_secret =
+        process.env.BLINQ_CALLBACK_SECRET || process.env.BLINQ_PASS;
+
       if (!callback_secret) {
-        console.error('Blinq callback secret not configured');
+        console.error("Blinq callback secret not configured");
         return false;
       }
 
       // Step 1: Concatenate invoice_number + callback_secret
       const concatenatedString = `${invoice_number}${callback_secret}`;
       console.log("Concatenated string:", concatenatedString);
-      
+
       // Step 2: Generate SHA-256 hash
-      const sha256Hash = crypto.createHash('sha256').update(concatenatedString).digest('hex');
+      const sha256Hash = crypto
+        .createHash("sha256")
+        .update(concatenatedString)
+        .digest("hex");
       console.log("SHA-256 hash:", sha256Hash);
-      
+
       // Step 3: Convert SHA-256 result to MD5 hash
-      const md5Hash = crypto.createHash('md5').update(sha256Hash).digest('hex');
+      const md5Hash = crypto.createHash("md5").update(sha256Hash).digest("hex");
       console.log("MD5 hash:", md5Hash);
       console.log("Received hash:", received_hash);
-      
+
       // Step 4: Compare hashes (case insensitive)
       return md5Hash.toLowerCase() === received_hash.toLowerCase();
-      
     } catch (error) {
       console.error("Blinq hash verification error:", error.message);
       return false;
     }
   }
 
-  async getDonationListForDropdown(options?: { status?: string; paymentMethod?: string }) {
+  async getDonationListForDropdown(options?: {
+    status?: string;
+    paymentMethod?: string;
+  }) {
     const queryBuilder = this.donationRepository
-      .createQueryBuilder('donation')
-      .leftJoin('donation.donor', 'donor')
+      .createQueryBuilder("donation")
+      .leftJoin("donation.donor", "donor")
       .select([
-        'donation.id',
-        'donation.amount',
-        'donation.status',
-        'donation.payment_method',
-        'donation.created_at',
-        'donor.id',
-        'donor.name'
+        "donation.id",
+        "donation.amount",
+        "donation.status",
+        "donation.payment_method",
+        "donation.created_at",
+        "donor.id",
+        "donor.name",
       ]);
 
     if (options?.status) {
-      queryBuilder.andWhere('donation.status = :status', { status: options.status });
+      queryBuilder.andWhere("donation.status = :status", {
+        status: options.status,
+      });
     }
 
     if (options?.paymentMethod) {
-      queryBuilder.andWhere('donation.payment_method = :paymentMethod', { paymentMethod: options.paymentMethod });
+      queryBuilder.andWhere("donation.payment_method = :paymentMethod", {
+        paymentMethod: options.paymentMethod,
+      });
     }
 
-    queryBuilder.orderBy('donation.created_at', 'DESC');
+    queryBuilder.orderBy("donation.created_at", "DESC");
 
     const donations = await queryBuilder.getMany();
 
-    return donations.map(donation => ({
+    return donations.map((donation) => ({
       id: donation.id,
       amount: donation.amount,
       status: donation.status,
@@ -2276,7 +2578,6 @@ export class DonationsService {
       donor_name: donation.donor?.name || null,
     }));
   }
-
 
   /**
    * Get donation summary for a specific date range in Chart.js format
@@ -2291,135 +2592,149 @@ export class DonationsService {
       // Extract date-only parts (YYYY-MM-DD) to match donation.date column format
       // The dateRange dates are timestamps (2023-12-31T19:00:00.000Z)
       // But donation.date is DATE type (2025-09-24), so we need to extract just the date part
-      const startDateOnly = dateRange.startDate.toISOString().split('T')[0]; // YYYY-MM-DD
-      const endDateOnly = dateRange.endDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      const startDateOnly = dateRange.startDate.toISOString().split("T")[0]; // YYYY-MM-DD
+      const endDateOnly = dateRange.endDate.toISOString().split("T")[0]; // YYYY-MM-DD
 
       // Generate labels based on duration type using common utility
-      const labels = DateRangeUtil.generateLabels(dateRange.durationType, dateRange.startDate, dateRange.endDate);
+      const labels = DateRangeUtil.generateLabels(
+        dateRange.durationType,
+        dateRange.startDate,
+        dateRange.endDate,
+      );
 
       // Helper to create base query builder
       // Using date column (DATE type) instead of created_at (TIMESTAMP)
       // Compare DATE types with date strings (YYYY-MM-DD format)
       const createBaseQuery = () => {
         return this.donationRepository
-          .createQueryBuilder('donation')
-          .where('donation.date >= :startDate', { startDate: startDateOnly })
-          .andWhere('donation.date <= :endDate', { endDate: endDateOnly });
+          .createQueryBuilder("donation")
+          .where("donation.date >= :startDate", { startDate: startDateOnly })
+          .andWhere("donation.date <= :endDate", { endDate: endDateOnly });
       };
 
       // Get time-series data based on duration type
       let timeSeriesData: any[] = [];
 
       switch (dateRange.durationType) {
-        case 'year':
+        case "year":
           // Group by month
           timeSeriesData = await createBaseQuery()
-            .select("TO_CHAR(donation.date, 'Mon')", 'period')
-            .addSelect('COUNT(donation.id)', 'count')
-            .addSelect('SUM(donation.amount)', 'totalAmount')
-            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .select("TO_CHAR(donation.date, 'Mon')", "period")
+            .addSelect("COUNT(donation.id)", "count")
+            .addSelect("SUM(donation.amount)", "totalAmount")
+            .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
             .groupBy("TO_CHAR(donation.date, 'Mon')")
             .addGroupBy("EXTRACT(MONTH FROM donation.date)")
-            .orderBy("EXTRACT(MONTH FROM donation.date)", 'ASC')
+            .orderBy("EXTRACT(MONTH FROM donation.date)", "ASC")
             .getRawMany();
           break;
 
-        case 'month':
+        case "month":
           // Group by day
           timeSeriesData = await createBaseQuery()
-            .select("EXTRACT(DAY FROM donation.date)", 'period')
-            .addSelect('COUNT(donation.id)', 'count')
-            .addSelect('SUM(donation.amount)', 'totalAmount')
-            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .select("EXTRACT(DAY FROM donation.date)", "period")
+            .addSelect("COUNT(donation.id)", "count")
+            .addSelect("SUM(donation.amount)", "totalAmount")
+            .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
             .groupBy("EXTRACT(DAY FROM donation.date)")
-            .orderBy("EXTRACT(DAY FROM donation.date)", 'ASC')
+            .orderBy("EXTRACT(DAY FROM donation.date)", "ASC")
             .getRawMany();
           break;
 
-        case 'week':
+        case "week":
           // Group by day of week
           timeSeriesData = await createBaseQuery()
-            .select("TO_CHAR(donation.date, 'Dy')", 'period')
-            .addSelect("EXTRACT(DOW FROM donation.date)", 'dayNum')
-            .addSelect('COUNT(donation.id)', 'count')
-            .addSelect('SUM(donation.amount)', 'totalAmount')
-            .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+            .select("TO_CHAR(donation.date, 'Dy')", "period")
+            .addSelect("EXTRACT(DOW FROM donation.date)", "dayNum")
+            .addSelect("COUNT(donation.id)", "count")
+            .addSelect("SUM(donation.amount)", "totalAmount")
+            .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
             .groupBy("TO_CHAR(donation.date, 'Dy')")
             .addGroupBy("EXTRACT(DOW FROM donation.date)")
-            .orderBy("EXTRACT(DOW FROM donation.date)", 'ASC')
+            .orderBy("EXTRACT(DOW FROM donation.date)", "ASC")
             .getRawMany();
           break;
 
-        case 'custom':
+        case "custom":
           // Determine grouping based on range length
-          const daysDiff = Math.ceil((dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-          
+          const daysDiff =
+            Math.ceil(
+              (dateRange.endDate.getTime() - dateRange.startDate.getTime()) /
+                (1000 * 60 * 60 * 24),
+            ) + 1;
+
           if (daysDiff <= 31) {
             // Group by day - date column is already DATE type
             timeSeriesData = await createBaseQuery()
-              .select("donation.date", 'period')
-              .addSelect('COUNT(donation.id)', 'count')
-              .addSelect('SUM(donation.amount)', 'totalAmount')
-              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .select("donation.date", "period")
+              .addSelect("COUNT(donation.id)", "count")
+              .addSelect("SUM(donation.amount)", "totalAmount")
+              .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
               .groupBy("donation.date")
-              .orderBy("donation.date", 'ASC')
+              .orderBy("donation.date", "ASC")
               .getRawMany();
           } else if (daysDiff <= 365) {
             // Group by week
             timeSeriesData = await createBaseQuery()
-              .select("DATE_TRUNC('week', donation.date)", 'period')
-              .addSelect('COUNT(donation.id)', 'count')
-              .addSelect('SUM(donation.amount)', 'totalAmount')
-              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .select("DATE_TRUNC('week', donation.date)", "period")
+              .addSelect("COUNT(donation.id)", "count")
+              .addSelect("SUM(donation.amount)", "totalAmount")
+              .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
               .groupBy("DATE_TRUNC('week', donation.date)")
-              .orderBy("DATE_TRUNC('week', donation.date)", 'ASC')
+              .orderBy("DATE_TRUNC('week', donation.date)", "ASC")
               .getRawMany();
           } else {
             // Group by month
             timeSeriesData = await createBaseQuery()
-              .select("DATE_TRUNC('month', donation.date)", 'period')
-              .addSelect('COUNT(donation.id)', 'count')
-              .addSelect('SUM(donation.amount)', 'totalAmount')
-              .addSelect('SUM(donation.paid_amount)', 'totalPaidAmount')
+              .select("DATE_TRUNC('month', donation.date)", "period")
+              .addSelect("COUNT(donation.id)", "count")
+              .addSelect("SUM(donation.amount)", "totalAmount")
+              .addSelect("SUM(donation.paid_amount)", "totalPaidAmount")
               .groupBy("DATE_TRUNC('month', donation.date)")
-              .orderBy("DATE_TRUNC('month', donation.date)", 'ASC')
+              .orderBy("DATE_TRUNC('month', donation.date)", "ASC")
               .getRawMany();
           }
           break;
       }
 
       // Map data to labels
-      const mapDataToLabels = (dataKey: string, defaultValue: number = 0): number[] => {
+      const mapDataToLabels = (
+        dataKey: string,
+        defaultValue: number = 0,
+      ): number[] => {
         const dataMap = new Map<string, number>();
-        
-        timeSeriesData.forEach(item => {
-          const period = item.period?.toString() || '';
+
+        timeSeriesData.forEach((item) => {
+          const period = item.period?.toString() || "";
           // Handle null values - convert to 0 if null/undefined
           const rawValue = item[dataKey];
-          const value = rawValue === null || rawValue === undefined ? 0 : Number(rawValue || 0);
-          
+          const value =
+            rawValue === null || rawValue === undefined
+              ? 0
+              : Number(rawValue || 0);
+
           // Handle different period formats based on duration type
-          if (dateRange.durationType === 'year') {
+          if (dateRange.durationType === "year") {
             // Period is already month abbreviation (e.g., 'Sep', 'Oct')
             // Use it directly to match with MONTH_NAMES_SHORT
             if (period && MONTH_NAMES_SHORT.includes(period)) {
               dataMap.set(period, value);
             }
-          } else if (dateRange.durationType === 'week') {
+          } else if (dateRange.durationType === "week") {
             // Period is day abbreviation (e.g., 'Mon', 'Tue')
-            const dayNum = parseInt(item.dayNum || '0', 10);
+            const dayNum = parseInt(item.dayNum || "0", 10);
             if (!isNaN(dayNum) && dayNum >= 0 && dayNum <= 6) {
               // PostgreSQL DOW: 0=Sunday, 1=Monday, ..., 6=Saturday
               // We want Monday=0, so adjust: Sunday (0) -> 6, others -> dayNum-1
-              const adjustedDay = (dayNum === 0 ? 6 : dayNum - 1);
+              const adjustedDay = dayNum === 0 ? 6 : dayNum - 1;
               // DAY_NAMES_SHORT starts with Monday, so use adjustedDay directly
               if (adjustedDay >= 0 && adjustedDay < DAY_NAMES_SHORT.length) {
                 dataMap.set(DAY_NAMES_SHORT[adjustedDay], value);
               }
             }
-          } else if (dateRange.durationType === 'month') {
+          } else if (dateRange.durationType === "month") {
             // For month, period is day number as string (e.g., '1', '15', '31')
-            const dayNum = parseInt(period || '0', 10);
+            const dayNum = parseInt(period || "0", 10);
             if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
               dataMap.set(dayNum.toString(), value);
             }
@@ -2429,22 +2744,25 @@ export class DonationsService {
           }
         });
 
-        return labels.map(label => {
+        return labels.map((label) => {
           // For custom ranges, try to match date formats more precisely
-          if (dateRange.durationType === 'custom') {
+          if (dateRange.durationType === "custom") {
             // Convert database date to label format for matching
             for (const [key, value] of dataMap.entries()) {
-              if (key && typeof key === 'string') {
+              if (key && typeof key === "string") {
                 try {
                   // If key is a date string, parse it
                   const keyDate = new Date(key);
                   if (!isNaN(keyDate.getTime())) {
                     // Match based on date format
-                    const labelDate = label.includes('/') 
+                    const labelDate = label.includes("/")
                       ? this.parseLabelDate(label, dateRange.startDate)
                       : null;
-                    
-                    if (labelDate && keyDate.toDateString() === labelDate.toDateString()) {
+
+                    if (
+                      labelDate &&
+                      keyDate.toDateString() === labelDate.toDateString()
+                    ) {
                       return value;
                     }
                   }
@@ -2468,16 +2786,20 @@ export class DonationsService {
       // Build datasets
       const datasets = [
         {
-          label: 'Total Amount',
-          data: mapDataToLabels('totalAmount', 0).map(val => Math.round(val * 100) / 100),
+          label: "Total Amount",
+          data: mapDataToLabels("totalAmount", 0).map(
+            (val) => Math.round(val * 100) / 100,
+          ),
         },
         {
-          label: 'Total Count',
-          data: mapDataToLabels('count', 0),
+          label: "Total Count",
+          data: mapDataToLabels("count", 0),
         },
         {
-          label: 'Paid Amount',
-          data: mapDataToLabels('totalPaidAmount', 0).map(val => Math.round(val * 100) / 100),
+          label: "Paid Amount",
+          data: mapDataToLabels("totalPaidAmount", 0).map(
+            (val) => Math.round(val * 100) / 100,
+          ),
         },
       ];
 
@@ -2504,11 +2826,18 @@ export class DonationsService {
    */
   private parseLabelDate(label: string, referenceDate: Date): Date | null {
     try {
-      const parts = label.split('/');
+      const parts = label.split("/");
       if (parts.length === 2) {
         const day = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
-        if (!isNaN(day) && !isNaN(month) && day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+        if (
+          !isNaN(day) &&
+          !isNaN(month) &&
+          day >= 1 &&
+          day <= 31 &&
+          month >= 0 &&
+          month <= 11
+        ) {
           return new Date(referenceDate.getFullYear(), month, day);
         }
       }

@@ -1,5 +1,5 @@
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
-import { EvidenceFileType } from '../../common/progress-tracking.enum';
+import { IsEnum, IsNumber, IsOptional, IsString } from "class-validator";
+import { EvidenceFileType } from "../../common/progress-tracking.enum";
 
 export class AddEvidenceDto {
   @IsString()
@@ -20,4 +20,3 @@ export class AddEvidenceDto {
   @IsNumber()
   sort_order?: number;
 }
-

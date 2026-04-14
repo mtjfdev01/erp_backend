@@ -1,13 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-import { Donation } from '../../donations/entities/donation.entity';
-import { EmailService } from '../../email/email.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { ConfigService } from "@nestjs/config";
+import { Donation } from "../../donations/entities/donation.entity";
+import { EmailService } from "../../email/email.service";
 
 export interface DonationReportData {
   period: {
-    type: 'daily' | 'weekly' | 'monthly';
+    type: "daily" | "weekly" | "monthly";
     startDate: Date;
     endDate: Date;
     label: string;
@@ -58,7 +58,7 @@ export interface DonationReportData {
 export interface ReportPeriod {
   startDate: Date;
   endDate: Date;
-  type: 'daily' | 'weekly' | 'monthly';
+  type: "daily" | "weekly" | "monthly";
   label: string;
 }
 
@@ -68,16 +68,16 @@ export class DonationsReportService {
 
   // Project mapping - IDs stored in project_name column
   private readonly PROJECTS = [
-    { id: 'health', title: 'Health' },
-    { id: 'education', title: 'Education' },
-    { id: 'clean-water', title: 'Clean Water' },
-    { id: 'apna-ghar', title: 'Apna Ghar' },
-    { id: 'disaster-management', title: 'Disaster Relief' },
-    { id: 'kasb-skill-development', title: 'KASB Skill Development' },
-    { id: 'seeds-of-change', title: 'Seeds of Change' },
-    { id: 'qurbani-barai-mustehqeen', title: 'Qurbani Barai Mustehqeen' },
-    { id: 'aas-lab-diagnostics', title: 'AAS Lab & Diagnostics' },
-    { id: 'community-services', title: 'Community Services' },
+    { id: "health", title: "Health" },
+    { id: "education", title: "Education" },
+    { id: "clean-water", title: "Clean Water" },
+    { id: "apna-ghar", title: "Apna Ghar" },
+    { id: "disaster-management", title: "Disaster Relief" },
+    { id: "kasb-skill-development", title: "KASB Skill Development" },
+    { id: "seeds-of-change", title: "Seeds of Change" },
+    { id: "qurbani-barai-mustehqeen", title: "Qurbani Barai Mustehqeen" },
+    { id: "aas-lab-diagnostics", title: "AAS Lab & Diagnostics" },
+    { id: "community-services", title: "Community Services" },
   ];
 
   constructor(
@@ -95,59 +95,68 @@ export class DonationsReportService {
    * 3. Array-like string: DONATIONS_REPORT_DEFAULT_EMAILS="['dev@mtjfoundation.org', 'irfan.waheed@mtjfoundation.org']"
    */
   private getDefaultEmails(): string[] {
-    const envEmails = this.configService.get<string>('DONATIONS_REPORT_DEFAULT_EMAILS', '');
-    
+    const envEmails = this.configService.get<string>(
+      "DONATIONS_REPORT_DEFAULT_EMAILS",
+      "",
+    );
+
     if (!envEmails || !envEmails.trim()) {
-      return ['dev@mtjfoundation.org'];
+      return ["dev@mtjfoundation.org"];
     }
 
     const trimmed = envEmails.trim();
     let emails: string[] = [];
 
     // Try to parse as JSON array first (handles both ["email"] and ['email'] formats)
-    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
       try {
         // Replace single quotes with double quotes for JSON parsing
         const jsonString = trimmed.replace(/'/g, '"');
         const parsed = JSON.parse(jsonString);
         if (Array.isArray(parsed)) {
-          emails = parsed.filter(email => email && typeof email === 'string');
+          emails = parsed.filter((email) => email && typeof email === "string");
         }
       } catch (error) {
         // If JSON parsing fails, fall through to comma-separated parsing
-        this.logger.warn(`Failed to parse DONATIONS_REPORT_DEFAULT_EMAILS as JSON, trying comma-separated format`);
+        this.logger.warn(
+          `Failed to parse DONATIONS_REPORT_DEFAULT_EMAILS as JSON, trying comma-separated format`,
+        );
       }
     }
 
     // If JSON parsing didn't work or didn't produce valid emails, try comma-separated
     if (emails.length === 0) {
       emails = trimmed
-        .split(',')
-        .map(email => email.trim())
-        .map(email => {
+        .split(",")
+        .map((email) => email.trim())
+        .map((email) => {
           // Remove brackets and quotes if present
-          return email.replace(/^['"\[\]]+|['"\[\]]+$/g, '');
+          return email.replace(/^['"\[\]]+|['"\[\]]+$/g, "");
         })
-        .filter(email => email && email.includes('@'));
+        .filter((email) => email && email.includes("@"));
     }
 
     // Filter and validate emails
     const validEmails = emails
-      .map(email => email.trim())
-      .filter(email => {
+      .map((email) => email.trim())
+      .filter((email) => {
         // Basic email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return email && emailRegex.test(email);
       });
 
     if (validEmails.length > 0) {
-      this.logger.log(`Loaded ${validEmails.length} default email(s) from environment: ${validEmails.join(', ')}`);
+      this.logger.log(
+        `Loaded ${validEmails.length} default email(s) from environment: ${validEmails.join(", ")}`,
+      );
       return validEmails;
     }
-    
+
     // Fallback to single default email
-    this.logger.warn('No valid emails found in DONATIONS_REPORT_DEFAULT_EMAILS, using default');
-    return ['dev@mtjfoundation.org'];
+    this.logger.warn(
+      "No valid emails found in DONATIONS_REPORT_DEFAULT_EMAILS, using default",
+    );
+    return ["dev@mtjfoundation.org"];
   }
 
   /**
@@ -167,12 +176,12 @@ export class DonationsReportService {
     const period: ReportPeriod = {
       startDate: yesterday,
       endDate: endDate,
-      type: 'daily',
-      label: `Daily Report - ${yesterday.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
+      type: "daily",
+      label: `Daily Report - ${yesterday.toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
       })}`,
     };
 
@@ -186,7 +195,7 @@ export class DonationsReportService {
   async generateWeeklyReport(): Promise<DonationReportData> {
     const today = new Date();
     const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    
+
     // Calculate previous week's Monday
     // If today is Monday, previous Monday is 7 days ago
     // If today is Tuesday, previous Monday is 1 day ago
@@ -202,7 +211,7 @@ export class DonationsReportService {
       // Tuesday-Saturday: previous Monday is (dayOfWeek - 1) days ago
       daysToPreviousMonday = dayOfWeek - 1;
     }
-    
+
     const previousMonday = new Date(today);
     previousMonday.setDate(today.getDate() - daysToPreviousMonday);
     previousMonday.setHours(0, 0, 0, 0);
@@ -215,14 +224,14 @@ export class DonationsReportService {
     const period: ReportPeriod = {
       startDate: previousMonday,
       endDate: previousSunday,
-      type: 'weekly',
-      label: `Weekly Report - ${previousMonday.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric' 
-      })} to ${previousSunday.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        year: 'numeric' 
+      type: "weekly",
+      label: `Weekly Report - ${previousMonday.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      })} to ${previousSunday.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
       })}`,
     };
 
@@ -234,22 +243,33 @@ export class DonationsReportService {
    */
   async generateMonthlyReport(): Promise<DonationReportData> {
     const today = new Date();
-    const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const firstDayOfCurrentMonth = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      1,
+    );
     const lastDayOfPreviousMonth = new Date(firstDayOfCurrentMonth);
     lastDayOfPreviousMonth.setDate(0); // Get last day of previous month
     lastDayOfPreviousMonth.setHours(23, 59, 59, 999);
 
-    const firstDayOfPreviousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const firstDayOfPreviousMonth = new Date(
+      today.getFullYear(),
+      today.getMonth() - 1,
+      1,
+    );
     firstDayOfPreviousMonth.setHours(0, 0, 0, 0);
 
     const period: ReportPeriod = {
       startDate: firstDayOfPreviousMonth,
       endDate: lastDayOfPreviousMonth,
-      type: 'monthly',
-      label: `Monthly Report - ${firstDayOfPreviousMonth.toLocaleDateString('en-US', { 
-        month: 'long', 
-        year: 'numeric' 
-      })}`,
+      type: "monthly",
+      label: `Monthly Report - ${firstDayOfPreviousMonth.toLocaleDateString(
+        "en-US",
+        {
+          month: "long",
+          year: "numeric",
+        },
+      )}`,
     };
 
     return this.generateReport(period);
@@ -261,7 +281,7 @@ export class DonationsReportService {
   async generateCustomReport(
     startDate: Date,
     endDate: Date,
-    type: 'daily' | 'weekly' | 'monthly' = 'daily',
+    type: "daily" | "weekly" | "monthly" = "daily",
   ): Promise<DonationReportData> {
     const period: ReportPeriod = {
       startDate,
@@ -276,7 +296,9 @@ export class DonationsReportService {
   /**
    * Core method to generate report data
    */
-  private async generateReport(period: ReportPeriod): Promise<DonationReportData> {
+  private async generateReport(
+    period: ReportPeriod,
+  ): Promise<DonationReportData> {
     try {
       this.logger.log(`Generating ${period.type} report for ${period.label}`);
 
@@ -285,8 +307,8 @@ export class DonationsReportService {
       // Convert to local date string to avoid timezone issues
       const formatDateForQuery = (date: Date): string => {
         const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
         return `${year}-${month}-${day}`;
       };
 
@@ -295,9 +317,9 @@ export class DonationsReportService {
 
       // Base query builder - using date column (DATE type) for filtering
       const baseQuery = this.donationRepository
-        .createQueryBuilder('donation')
-        .where('donation.date >= :startDate', { startDate: startDateStr })
-        .andWhere('donation.date <= :endDate', { endDate: endDateStr });
+        .createQueryBuilder("donation")
+        .where("donation.date >= :startDate", { startDate: startDateStr })
+        .andWhere("donation.date <= :endDate", { endDate: endDateStr });
 
       // Get all donations in period
       const allDonations = await baseQuery.getMany();
@@ -341,11 +363,12 @@ export class DonationsReportService {
         // Handle null/undefined amounts properly (0 is a valid amount)
         const amount = donation.amount ?? 0;
         // Handle status with proper null checking
-        const status = (donation.status || 'pending').toLowerCase();
+        const status = (donation.status || "pending").toLowerCase();
         const donationType = this.getDonationType(donation.donation_type);
         // Priority: project_name (contains ID) > project_id > 'other'
         // User specified that IDs are stored in project_name column
-        const projectId = donation.project_name || donation.project_id || 'other';
+        const projectId =
+          donation.project_name || donation.project_id || "other";
         const projectName = this.getProjectName(projectId);
 
         // Initialize project if not exists
@@ -367,7 +390,7 @@ export class DonationsReportService {
         const project = projectData.get(projectId);
 
         // Update summary and project data based on status
-        if (status === 'completed') {
+        if (status === "completed") {
           summary.totalReceived.count++;
           summary.totalReceived.amount += amount;
           summary.totalReceived.byType[donationType].count++;
@@ -377,7 +400,7 @@ export class DonationsReportService {
           project.received.amount += amount;
           project.byType[donationType].count++;
           project.byType[donationType].amount += amount;
-        } else if (status === 'pending' || status === 'registered') {
+        } else if (status === "pending" || status === "registered") {
           summary.totalPending.count++;
           summary.totalPending.amount += amount;
           summary.totalPending.byType[donationType].count++;
@@ -387,7 +410,7 @@ export class DonationsReportService {
           project.pending.amount += amount;
           project.byType[donationType].count++;
           project.byType[donationType].amount += amount;
-        } else if (status === 'failed') {
+        } else if (status === "failed") {
           summary.totalFailed.count++;
           summary.totalFailed.amount += amount;
           summary.totalFailed.byType[donationType].count++;
@@ -423,7 +446,10 @@ export class DonationsReportService {
 
       return reportData;
     } catch (error: any) {
-      this.logger.error(`Failed to generate report: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to generate report: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -438,7 +464,7 @@ export class DonationsReportService {
   ): Promise<boolean> {
     try {
       const defaultEmails = this.getDefaultEmails();
-      
+
       // Normalize to array: if string, convert to array; if array, use as-is; if undefined, use default
       let recipients: string[];
       if (!recipientEmail) {
@@ -450,22 +476,28 @@ export class DonationsReportService {
       }
 
       // Filter out any empty or invalid emails
-      const validRecipients = recipients.filter(email => email && typeof email === 'string' && email.includes('@'));
+      const validRecipients = recipients.filter(
+        (email) => email && typeof email === "string" && email.includes("@"),
+      );
 
       if (validRecipients.length === 0) {
-        this.logger.warn('No valid email recipients provided, using default emails');
+        this.logger.warn(
+          "No valid email recipients provided, using default emails",
+        );
         validRecipients.push(...defaultEmails);
       }
 
-      const recipientsList = validRecipients.join(', ');
-      this.logger.log(`Sending ${reportData.period.type} report email to ${validRecipients.length} recipient(s): ${recipientsList}`);
+      const recipientsList = validRecipients.join(", ");
+      this.logger.log(
+        `Sending ${reportData.period.type} report email to ${validRecipients.length} recipient(s): ${recipientsList}`,
+      );
 
       // Generate HTML email
       const htmlContent = this.generateReportEmailHtml(reportData);
       const textContent = this.generateReportEmailText(reportData);
 
       // Ensure validRecipients is a proper array (not stringified)
-      const emailRecipients: string[] = Array.isArray(validRecipients) 
+      const emailRecipients: string[] = Array.isArray(validRecipients)
         ? [...validRecipients] // Create a new array copy
         : [validRecipients as string];
 
@@ -478,14 +510,19 @@ export class DonationsReportService {
       });
 
       if (emailSent) {
-        this.logger.log(`Report email sent successfully to ${emailRecipients.length} recipient(s): ${recipientsList}`);
+        this.logger.log(
+          `Report email sent successfully to ${emailRecipients.length} recipient(s): ${recipientsList}`,
+        );
       } else {
         this.logger.warn(`Failed to send report email to ${recipientsList}`);
       }
 
       return emailSent;
     } catch (error: any) {
-      this.logger.error(`Failed to send report email: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to send report email: ${error.message}`,
+        error.stack,
+      );
       return false;
     }
   }
@@ -494,12 +531,16 @@ export class DonationsReportService {
    * Generate and send daily report
    * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendDailyReport(recipientEmail?: string | string[]): Promise<boolean> {
+  async generateAndSendDailyReport(
+    recipientEmail?: string | string[],
+  ): Promise<boolean> {
     try {
       const reportData = await this.generateDailyReport();
       return await this.sendReportEmail(reportData, recipientEmail);
     } catch (error: any) {
-      this.logger.error(`Failed to generate and send daily report: ${error.message}`);
+      this.logger.error(
+        `Failed to generate and send daily report: ${error.message}`,
+      );
       return false;
     }
   }
@@ -508,12 +549,16 @@ export class DonationsReportService {
    * Generate and send weekly report
    * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendWeeklyReport(recipientEmail?: string | string[]): Promise<boolean> {
+  async generateAndSendWeeklyReport(
+    recipientEmail?: string | string[],
+  ): Promise<boolean> {
     try {
       const reportData = await this.generateWeeklyReport();
       return await this.sendReportEmail(reportData, recipientEmail);
     } catch (error: any) {
-      this.logger.error(`Failed to generate and send weekly report: ${error.message}`);
+      this.logger.error(
+        `Failed to generate and send weekly report: ${error.message}`,
+      );
       return false;
     }
   }
@@ -522,12 +567,16 @@ export class DonationsReportService {
    * Generate and send monthly report
    * Supports single email (string) or multiple emails (string[])
    */
-  async generateAndSendMonthlyReport(recipientEmail?: string | string[]): Promise<boolean> {
+  async generateAndSendMonthlyReport(
+    recipientEmail?: string | string[],
+  ): Promise<boolean> {
     try {
       const reportData = await this.generateMonthlyReport();
       return await this.sendReportEmail(reportData, recipientEmail);
     } catch (error: any) {
-      this.logger.error(`Failed to generate and send monthly report: ${error.message}`);
+      this.logger.error(
+        `Failed to generate and send monthly report: ${error.message}`,
+      );
       return false;
     }
   }
@@ -535,12 +584,14 @@ export class DonationsReportService {
   /**
    * Helper: Get donation type category
    */
-  private getDonationType(type: string | null | undefined): 'zakat' | 'sadqa' | 'general' {
-    if (!type) return 'general';
+  private getDonationType(
+    type: string | null | undefined,
+  ): "zakat" | "sadqa" | "general" {
+    if (!type) return "general";
     const lowerType = type.toLowerCase();
-    if (lowerType === 'zakat') return 'zakat';
-    if (lowerType === 'sadqa' || lowerType === 'sadaqah') return 'sadqa';
-    return 'general';
+    if (lowerType === "zakat") return "zakat";
+    if (lowerType === "sadqa" || lowerType === "sadaqah") return "sadqa";
+    return "general";
   }
 
   /**
@@ -558,9 +609,9 @@ export class DonationsReportService {
     const { period, summary, byProject } = reportData;
 
     const formatCurrency = (amount: number) => {
-      return new Intl.NumberFormat('en-PK', {
-        style: 'currency',
-        currency: 'PKR',
+      return new Intl.NumberFormat("en-PK", {
+        style: "currency",
+        currency: "PKR",
         minimumFractionDigits: 0,
       }).format(amount);
     };
@@ -786,7 +837,7 @@ export class DonationsReportService {
                     </tr>
                   `,
                     )
-                    .join('')}
+                    .join("")}
                 </tbody>
               </table>
             </div>
@@ -809,16 +860,16 @@ export class DonationsReportService {
     const { period, summary, byProject } = reportData;
 
     const formatCurrency = (amount: number) => {
-      return new Intl.NumberFormat('en-PK', {
-        style: 'currency',
-        currency: 'PKR',
+      return new Intl.NumberFormat("en-PK", {
+        style: "currency",
+        currency: "PKR",
         minimumFractionDigits: 0,
       }).format(amount);
     };
 
     let text = `DONATIONS REPORT\n`;
     text += `${period.label}\n`;
-    text += `\n${'='.repeat(50)}\n\n`;
+    text += `\n${"=".repeat(50)}\n\n`;
 
     text += `SUMMARY\n`;
     text += `--------\n`;
@@ -851,7 +902,7 @@ export class DonationsReportService {
       text += `  Total: ${formatCurrency(project.received.amount + project.pending.amount + project.failed.amount)}\n\n`;
     });
 
-    text += `\n${'='.repeat(50)}\n`;
+    text += `\n${"=".repeat(50)}\n`;
     text += `This is an automated report generated by MTJ Foundation ERP System.\n`;
     text += `© ${new Date().getFullYear()} MTJ Foundation. All rights reserved.\n`;
 

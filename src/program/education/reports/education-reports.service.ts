@@ -1,10 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { EducationReport } from './entities/education-report.entity';
-import { CreateEducationReportDto } from './dto/create-education-report.dto';
-import { UpdateEducationReportDto } from './dto/update-education-report.dto';
-import { User } from '../../../users/user.entity';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { EducationReport } from "./entities/education-report.entity";
+import { CreateEducationReportDto } from "./dto/create-education-report.dto";
+import { UpdateEducationReportDto } from "./dto/update-education-report.dto";
+import { User } from "../../../users/user.entity";
 
 @Injectable()
 export class EducationReportsService {
@@ -17,7 +21,9 @@ export class EducationReportsService {
 
   async create(dto: CreateEducationReportDto, user: User) {
     try {
-      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+      const dbUser = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
       const entity = this.repo.create({
         ...dto,
         created_by: dbUser,
@@ -29,12 +35,17 @@ export class EducationReportsService {
     }
   }
 
-  async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'date', sortOrder: 'ASC' | 'DESC' = 'DESC'): Promise<{ data: any[]; pagination: any }> {
+  async findAll(
+    page: number = 1,
+    pageSize: number = 10,
+    sortField: string = "date",
+    sortOrder: "ASC" | "DESC" = "DESC",
+  ): Promise<{ data: any[]; pagination: any }> {
     try {
       const skip = (page - 1) * pageSize;
-      
+
       const queryBuilder = this.repo
-        .createQueryBuilder('report')
+        .createQueryBuilder("report")
         .where({ is_archived: false })
         .orderBy(`report.${sortField}`, sortOrder)
         .skip(skip)
@@ -54,7 +65,9 @@ export class EducationReportsService {
         },
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch education reports: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch education reports: " + error.message,
+      );
     }
   }
 
@@ -67,18 +80,22 @@ export class EducationReportsService {
     if (updateEducationReportDto.date) {
       updateData.date = new Date(updateEducationReportDto.date);
     }
-    const report = await this.repo.findOne({ where: { id, is_archived: false } });
-    if(!report){
+    const report = await this.repo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
       throw new NotFoundException(`Education report with ID ${id} not found`);
     }
     return this.repo.update(id, updateData);
   }
 
   async remove(id: number) {
-    const report = await this.repo.findOne({ where: { id, is_archived: false } });
-    if(!report){
+    const report = await this.repo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
       throw new NotFoundException(`Education report with ID ${id} not found`);
     }
     return this.repo.update(id, { is_archived: true });
   }
-} 
+}

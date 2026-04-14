@@ -6,55 +6,55 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
-} from 'typeorm';
-import { User } from '../../../../users/user.entity';
+} from "typeorm";
+import { User } from "../../../../users/user.entity";
 
-@Entity('tree_plantation_reports')
+@Entity("tree_plantation_reports")
 export class TreePlantationReport {
-  @PrimaryGeneratedColumn('increment')
+  @PrimaryGeneratedColumn("increment")
   id: number;
 
-  @Column({ type: 'date', name: 'report_date' })
+  @Column({ type: "date", name: "report_date" })
   report_date: Date;
 
-  @Column({ type: 'varchar', name: 'school_name', length: 255 })
+  @Column({ type: "varchar", name: "school_name", length: 255 })
   school_name: string;
 
-  @Column({ type: 'int', name: 'plants', default: 0 })
+  @Column({ type: "int", name: "plants", default: 0 })
   plants: number;
 
   @ManyToOne(() => User, (user) => user.id, {
     nullable: true,
     eager: false,
-    onDelete: 'SET NULL',
+    onDelete: "SET NULL",
   })
-  @JoinColumn({ name: 'created_by' })
+  @JoinColumn({ name: "created_by" })
   created_by: User;
 
   @ManyToOne(() => User, (user) => user.id, {
     nullable: true,
     eager: false,
-    onDelete: 'SET NULL',
+    onDelete: "SET NULL",
   })
-  @JoinColumn({ name: 'updated_by' })
+  @JoinColumn({ name: "updated_by" })
   updated_by: User;
 
-  @CreateDateColumn({ 
-    name: 'created_at',
-    type: 'timestamp',
+  @CreateDateColumn({
+    name: "created_at",
+    type: "timestamp",
     precision: 6,
-    default: () => 'CURRENT_TIMESTAMP'
+    default: () => "CURRENT_TIMESTAMP",
   })
   created_at: Date;
 
-  @UpdateDateColumn({ 
-    name: 'updated_at',
-    type: 'timestamp',
+  @UpdateDateColumn({
+    name: "updated_at",
+    type: "timestamp",
     precision: 6,
-    default: () => 'CURRENT_TIMESTAMP'
+    default: () => "CURRENT_TIMESTAMP",
   })
   updated_at: Date;
 
-  @Column({ type: 'boolean', default: false })
-  is_archived: boolean; 
-} 
+  @Column({ type: "boolean", default: false })
+  is_archived: boolean;
+}

@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateGeographicDto } from './dto/create-geographic.dto';
-import { UpdateGeographicDto } from './dto/update-geographic.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateGeographicDto } from "./dto/create-geographic.dto";
+import { UpdateGeographicDto } from "./dto/update-geographic.dto";
 
 @Injectable()
 export class GeographicService {
   create(createGeographicDto: CreateGeographicDto) {
-    return 'This action adds a new geographic';
+    return "This action adds a new geographic";
   }
 
   findAll() {

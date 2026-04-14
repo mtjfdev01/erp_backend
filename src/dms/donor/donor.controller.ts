@@ -12,18 +12,18 @@ import {
   Req,
   UseGuards,
   ForbiddenException,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { DonorService } from './donor.service';
-import { CreateDonorDto } from './dto/create-donor.dto';
-import { UpdateDonorDto } from './dto/update-donor.dto';
+} from "@nestjs/common";
+import { Response } from "express";
+import { DonorService } from "./donor.service";
+import { CreateDonorDto } from "./dto/create-donor.dto";
+import { UpdateDonorDto } from "./dto/update-donor.dto";
 // import { ChangePasswordDto } from './dto/change-password.dto';
-import { ConditionalJwtGuard } from '../../auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from '../../permissions/guards/permissions.guard';
-import { RequiredPermissions } from '../../permissions/decorators/require-permission.decorator';
-import { PermissionsService } from '../../permissions/permissions.service';
+import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
+import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
+import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
+import { PermissionsService } from "../../permissions/permissions.service";
 
-@Controller('donors')
+@Controller("donors")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonorController {
   constructor(
@@ -36,44 +36,76 @@ export class DonorController {
    * Online = 'website', everything else = offline.
    */
   private isOnlineDonor(source: string | null | undefined): boolean {
-    return source === 'website';
+    return source === "website";
   }
 
   /**
    * Runtime permission check for online/offline donors.
    */
-  private async checkDonorPermission(userId: number, donorSource: string | null | undefined, action: string): Promise<void> {
+  private async checkDonorPermission(
+    userId: number,
+    donorSource: string | null | undefined,
+    action: string,
+  ): Promise<void> {
     if (userId === -1) return;
 
-    const hasSuperAdmin = await this.permissionsService.hasPermission(userId, 'super_admin');
+    const hasSuperAdmin = await this.permissionsService.hasPermission(
+      userId,
+      "super_admin",
+    );
     if (hasSuperAdmin) return;
 
-    const hasFundRaisingManager = await this.permissionsService.hasPermission(userId, 'fund_raising_manager');
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(
+      userId,
+      "fund_raising_manager",
+    );
     if (hasFundRaisingManager) return;
 
-    const submodule = this.isOnlineDonor(donorSource) ? 'online_donors' : 'offline_donors';
+    const submodule = this.isOnlineDonor(donorSource)
+      ? "online_donors"
+      : "offline_donors";
     const permissionPath = `fund_raising.${submodule}.${action}`;
 
-    const hasPermission = await this.permissionsService.hasPermission(userId, permissionPath);
+    const hasPermission = await this.permissionsService.hasPermission(
+      userId,
+      permissionPath,
+    );
     if (!hasPermission) {
-      throw new ForbiddenException(`Insufficient permissions for ${submodule.replace('_', ' ')}`);
+      throw new ForbiddenException(
+        `Insufficient permissions for ${submodule.replace("_", " ")}`,
+      );
     }
   }
 
   /**
    * Check which donor types the user can access.
    */
-  private async getDonorSourceAccess(userId: number, action: string): Promise<{ online: boolean; offline: boolean }> {
+  private async getDonorSourceAccess(
+    userId: number,
+    action: string,
+  ): Promise<{ online: boolean; offline: boolean }> {
     if (userId === -1) return { online: true, offline: true };
 
-    const hasSuperAdmin = await this.permissionsService.hasPermission(userId, 'super_admin');
+    const hasSuperAdmin = await this.permissionsService.hasPermission(
+      userId,
+      "super_admin",
+    );
     if (hasSuperAdmin) return { online: true, offline: true };
 
-    const hasFundRaisingManager = await this.permissionsService.hasPermission(userId, 'fund_raising_manager');
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(
+      userId,
+      "fund_raising_manager",
+    );
     if (hasFundRaisingManager) return { online: true, offline: true };
 
-    const hasOnline = await this.permissionsService.hasPermission(userId, `fund_raising.online_donors.${action}`);
-    const hasOffline = await this.permissionsService.hasPermission(userId, `fund_raising.offline_donors.${action}`);
+    const hasOnline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.online_donors.${action}`,
+    );
+    const hasOffline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.offline_donors.${action}`,
+    );
 
     return { online: hasOnline, offline: hasOffline };
   }
@@ -81,36 +113,52 @@ export class DonorController {
   /**
    * Check if a donor falls within the user's assigned geography.
    */
-  private async checkGeographicAccess(userId: number, donorCity: string | null | undefined): Promise<void> {
+  private async checkGeographicAccess(
+    userId: number,
+    donorCity: string | null | undefined,
+  ): Promise<void> {
     if (!userId || userId === -1 || !donorCity) return;
 
-    const assignedCityNames = await this.donorService.resolveUserGeography(userId);
+    const assignedCityNames =
+      await this.donorService.resolveUserGeography(userId);
     if (assignedCityNames === null) return;
 
     const normalizedCity = donorCity.toLowerCase().trim();
     if (!assignedCityNames.includes(normalizedCity)) {
-      throw new ForbiddenException('You do not have geographic access to this donor');
+      throw new ForbiddenException(
+        "You do not have geographic access to this donor",
+      );
     }
   }
 
-  @Post('register') 
-  async register(@Body() createDonorDto: CreateDonorDto, @Req() req: any, @Res() res: Response) {
+  @Post("register")
+  async register(
+    @Body() createDonorDto: CreateDonorDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
       const user = req?.user ?? null;
       if (user?.id) {
-        await this.checkDonorPermission(user.id, createDonorDto.source, 'create');
+        await this.checkDonorPermission(
+          user.id,
+          createDonorDto.source,
+          "create",
+        );
       }
       const result = await this.donorService.register(createDonorDto, user);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'Donor registered successfully',
+        message: "Donor registered successfully",
         data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
-      const status = error.message.includes('already exists')
+      const status = error.message.includes("already exists")
         ? HttpStatus.CONFLICT
         : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
@@ -123,18 +171,18 @@ export class DonorController {
 
   @Get()
   async findAll(
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-    @Query('sortField') sortField?: string,
-    @Query('sortOrder') sortOrder?: 'ASC' | 'DESC',
-    @Query('search') search?: string,
-    @Query('donor_type') donor_type?: string,
-    @Query('city') city?: string,
-    @Query('country') country?: string,
-    @Query('is_active') is_active?: string,
-    @Query('start_date') start_date?: string,
-    @Query('end_date') end_date?: string,
-    @Query('multi_time_donors') multi_time_donor?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("sortField") sortField?: string,
+    @Query("sortOrder") sortOrder?: "ASC" | "DESC",
+    @Query("search") search?: string,
+    @Query("donor_type") donor_type?: string,
+    @Query("city") city?: string,
+    @Query("country") country?: string,
+    @Query("is_active") is_active?: string,
+    @Query("start_date") start_date?: string,
+    @Query("end_date") end_date?: string,
+    @Query("multi_time_donors") multi_time_donor?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -144,11 +192,11 @@ export class DonorController {
       // Determine which donor sources the user can view
       let sourceAccess = { online: true, offline: true };
       if (user?.id) {
-        sourceAccess = await this.getDonorSourceAccess(user.id, 'list_view');
+        sourceAccess = await this.getDonorSourceAccess(user.id, "list_view");
         if (!sourceAccess.online && !sourceAccess.offline) {
           return res.status(HttpStatus.FORBIDDEN).json({
             success: false,
-            message: 'Insufficient permissions to view donors',
+            message: "Insufficient permissions to view donors",
             data: [],
             pagination: null,
           });
@@ -158,35 +206,48 @@ export class DonorController {
       // Resolve user's geographic assignments to city name strings
       let assignedCityNames: string[] | null = null;
       if (user?.id && user.id !== -1) {
-        assignedCityNames = await this.donorService.resolveUserGeography(user.id);
+        assignedCityNames = await this.donorService.resolveUserGeography(
+          user.id,
+        );
       }
 
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
 
-      const result = await this.donorService.findAll({
-        page: pageNum,
-        pageSize: pageSizeNum,
-        sortField,
-        sortOrder,
-        search,
-        donor_type,
-        city,
-        country,
-        is_active: is_active ? is_active === 'true' : undefined,
-        start_date,
-        end_date,
-        multi_time_donor: multi_time_donor ? multi_time_donor === 'true' : undefined,
-      }, assignedCityNames, sourceAccess);
+      const result = await this.donorService.findAll(
+        {
+          page: pageNum,
+          pageSize: pageSizeNum,
+          sortField,
+          sortOrder,
+          search,
+          donor_type,
+          city,
+          country,
+          is_active: is_active ? is_active === "true" : undefined,
+          start_date,
+          end_date,
+          multi_time_donor: multi_time_donor
+            ? multi_time_donor === "true"
+            : undefined,
+        },
+        assignedCityNames,
+        sourceAccess,
+      );
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donors retrieved successfully',
+        message: "Donors retrieved successfully",
         ...result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: [], pagination: null });
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: [],
+          pagination: null,
+        });
       }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
@@ -197,27 +258,29 @@ export class DonorController {
     }
   }
 
-  @Get('lookup')
+  @Get("lookup")
   async findByEmailOrPhone(
-    @Query('email') email?: string,
-    @Query('phone') phone?: string,
+    @Query("email") email?: string,
+    @Query("phone") phone?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
     try {
       const result = await this.donorService.findByEmailOrPhone(email, phone);
       if (result && req?.user?.id) {
-        await this.checkDonorPermission(req.user.id, result.source, 'view');
+        await this.checkDonorPermission(req.user.id, result.source, "view");
         await this.checkGeographicAccess(req.user.id, result.city);
       }
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: result ? 'Donor retrieved successfully' : 'No donor found',
+        message: result ? "Donor retrieved successfully" : "No donor found",
         data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
@@ -227,25 +290,31 @@ export class DonorController {
     }
   }
 
-  @Get(':id')
-  async findOne(@Param('id') id: string, @Req() req: any, @Res() res: Response) {
+  @Get(":id")
+  async findOne(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
       const result = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
-        await this.checkDonorPermission(user.id, result.source, 'view');
+        await this.checkDonorPermission(user.id, result.source, "view");
         await this.checkGeographicAccess(user.id, result.city);
       }
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donor retrieved successfully',
+        message: "Donor retrieved successfully",
         data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
-      const status = error.message.includes('not found')
+      const status = error.message.includes("not found")
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
@@ -256,9 +325,9 @@ export class DonorController {
     }
   }
 
-  @Patch(':id')
+  @Patch(":id")
   async update(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() updateDonorDto: UpdateDonorDto,
     @Req() req: any,
     @Res() res: Response,
@@ -267,20 +336,22 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
-        await this.checkDonorPermission(user.id, existing.source, 'update');
+        await this.checkDonorPermission(user.id, existing.source, "update");
         await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.update(+id, updateDonorDto);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donor updated successfully',
+        message: "Donor updated successfully",
         data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
-      const status = error.message.includes('not found')
+      const status = error.message.includes("not found")
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
@@ -291,13 +362,13 @@ export class DonorController {
     }
   }
 
-  @Delete(':id')
-  async remove(@Param('id') id: string, @Req() req: any, @Res() res: Response) {
+  @Delete(":id")
+  async remove(@Param("id") id: string, @Req() req: any, @Res() res: Response) {
     try {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
-        await this.checkDonorPermission(user.id, existing.source, 'delete');
+        await this.checkDonorPermission(user.id, existing.source, "delete");
         await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.remove(+id, req.user);
@@ -308,9 +379,11 @@ export class DonorController {
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
-      const status = error.message.includes('not found')
+      const status = error.message.includes("not found")
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
@@ -321,9 +394,9 @@ export class DonorController {
     }
   }
 
-  @Post(':id/change-password')
+  @Post(":id/change-password")
   async changePassword(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() changePasswordDto: any,
     @Req() req: any,
     @Res() res: Response,
@@ -332,7 +405,7 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
-        await this.checkDonorPermission(user.id, existing.source, 'update');
+        await this.checkDonorPermission(user.id, existing.source, "update");
         await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.changePassword(
@@ -347,7 +420,9 @@ export class DonorController {
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        return res.status(HttpStatus.FORBIDDEN).json({ success: false, message: error.message, data: null });
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
       }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,

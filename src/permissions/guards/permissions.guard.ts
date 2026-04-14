@@ -4,10 +4,10 @@ import {
   ExecutionContext,
   ForbiddenException,
   Logger,
-} from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { PERMISSION_KEY } from '../decorators/require-permission.decorator';
-import { PermissionsService } from '../permissions.service';
+} from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
+import { PERMISSION_KEY } from "../decorators/require-permission.decorator";
+import { PermissionsService } from "../permissions.service";
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -21,10 +21,9 @@ export class PermissionsGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     try {
       // Get the required permission from the decorator
-      const requiredPermission = this.reflector.getAllAndOverride<string | string[]>(
-        PERMISSION_KEY,
-        [context.getHandler(), context.getClass()],
-      );
+      const requiredPermission = this.reflector.getAllAndOverride<
+        string | string[]
+      >(PERMISSION_KEY, [context.getHandler(), context.getClass()]);
 
       // If no permission is required, allow access
       if (!requiredPermission) {
@@ -34,22 +33,27 @@ export class PermissionsGuard implements CanActivate {
       // Get the request object
       const request = context.switchToHttp().getRequest();
       const user = request.user;
-console.log("23456753424567", user);
+      console.log("23456753424567", user);
       // If no user is authenticated, deny access
       if (!user || !user.id) {
-        this.logger.warn('No authenticated user found');
-        throw new ForbiddenException('Authentication required');
+        this.logger.warn("No authenticated user found");
+        throw new ForbiddenException("Authentication required");
       }
 
-      if(user.id == -1) { return true; }
+      if (user.id == -1) {
+        return true;
+      }
       // Check if user has any of the required permissions (OR logic)
       let hasPermission = false;
-      
+
       if (Array.isArray(requiredPermission)) {
         // Check if user has ANY of the permissions in the array
         for (const permission of requiredPermission) {
           // 1. Check if the "permission" string is actually a Role name and matches user's role
-          if (user.role && String(user.role).toLowerCase() === String(permission).toLowerCase()) {
+          if (
+            user.role &&
+            String(user.role).toLowerCase() === String(permission).toLowerCase()
+          ) {
             hasPermission = true;
             break;
           }
@@ -67,7 +71,11 @@ console.log("23456753424567", user);
       } else {
         // Single permission check
         // 1. Check if it's a role match
-        if (user.role && String(user.role).toLowerCase() === String(requiredPermission).toLowerCase()) {
+        if (
+          user.role &&
+          String(user.role).toLowerCase() ===
+            String(requiredPermission).toLowerCase()
+        ) {
           hasPermission = true;
         } else {
           // 2. Standard path check
@@ -82,18 +90,18 @@ console.log("23456753424567", user);
         this.logger.warn(
           `User ${user.id} does not have any of the required permissions: ${JSON.stringify(requiredPermission)}`,
         );
-        throw new ForbiddenException('Insufficient permissions');
+        throw new ForbiddenException("Insufficient permissions");
       }
 
       return true;
     } catch (error) {
-      console.log('error', error);
+      console.log("error", error);
       if (error instanceof ForbiddenException) {
         throw error;
       }
-      
-      this.logger.error('Error in permissions guard:', error.stack);
-      throw new ForbiddenException('Permission check failed');
+
+      this.logger.error("Error in permissions guard:", error.stack);
+      throw new ForbiddenException("Permission check failed");
     }
   }
-} 
+}

@@ -1,13 +1,20 @@
-import { Entity, Column, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm';
-import { BaseEntity } from '../../../../utils/base_utils/entities/baseEntity';
-import { Country } from '../../countries/entities/country.entity';
-import { Region } from '../../regions/entities/region.entity';
-import { Tehsil } from '../../tehsils/entities/tehsil.entity';
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+  Index,
+} from "typeorm";
+import { BaseEntity } from "../../../../utils/base_utils/entities/baseEntity";
+import { Country } from "../../countries/entities/country.entity";
+import { Region } from "../../regions/entities/region.entity";
+import { Tehsil } from "../../tehsils/entities/tehsil.entity";
 
-@Entity('districts')
-@Index('idx_district_name', ['name'])
-@Index('idx_district_region', ['region_id'])
-@Index('idx_district_country', ['country_id'])
+@Entity("districts")
+@Index("idx_district_name", ["name"])
+@Index("idx_district_region", ["region_id"])
+@Index("idx_district_country", ["country_id"])
 export class District extends BaseEntity {
   @Column({ length: 100 })
   name: string;
@@ -18,7 +25,7 @@ export class District extends BaseEntity {
   @Column({ default: true })
   is_active: boolean;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: "text", nullable: true })
   description: string;
 
   // Foreign Keys
@@ -29,14 +36,17 @@ export class District extends BaseEntity {
   country_id: number;
 
   // Relationships
-  @ManyToOne(() => Region, region => region.districts, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'region_id' })
+  @ManyToOne(() => Region, (region) => region.districts, {
+    nullable: false,
+    onDelete: "CASCADE",
+  })
+  @JoinColumn({ name: "region_id" })
   region: Region;
 
-  @ManyToOne(() => Country, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'country_id' })
+  @ManyToOne(() => Country, { nullable: false, onDelete: "CASCADE" })
+  @JoinColumn({ name: "country_id" })
   country: Country;
 
-  @OneToMany(() => Tehsil, tehsil => tehsil.district, { cascade: true })
+  @OneToMany(() => Tehsil, (tehsil) => tehsil.district, { cascade: true })
   tehsils: Tehsil[];
 }

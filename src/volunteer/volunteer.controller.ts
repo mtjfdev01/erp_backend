@@ -1,9 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { VolunteerService } from './volunteer.service';
-import { CreateVolunteerDto } from './dto/create-volunteer.dto';
-import { UpdateVolunteerDto } from './dto/update-volunteer.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from "@nestjs/common";
+import { VolunteerService } from "./volunteer.service";
+import { CreateVolunteerDto } from "./dto/create-volunteer.dto";
+import { UpdateVolunteerDto } from "./dto/update-volunteer.dto";
 
-@Controller('register_volunteer')
+@Controller("register_volunteer")
 export class VolunteerController {
   constructor(private readonly volunteerService: VolunteerService) {}
 
@@ -17,19 +25,22 @@ export class VolunteerController {
     return await this.volunteerService.findAll();
   }
 
-  @Get(':id')
-  async findOne(@Param('id') id: string) {
+  @Get(":id")
+  async findOne(@Param("id") id: string) {
     return await this.volunteerService.findOne(+id);
   }
 
-  @Patch(':id')
-  async update(@Param('id') id: string, @Body() updateVolunteerDto: UpdateVolunteerDto) {
+  @Patch(":id")
+  async update(
+    @Param("id") id: string,
+    @Body() updateVolunteerDto: UpdateVolunteerDto,
+  ) {
     return await this.volunteerService.update(+id, updateVolunteerDto);
   }
 
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
+  @Delete(":id")
+  async remove(@Param("id") id: string) {
     await this.volunteerService.remove(+id);
-    return { message: 'Volunteer deleted successfully' };
+    return { message: "Volunteer deleted successfully" };
   }
 }

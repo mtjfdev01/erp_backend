@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateFamilyHeadDto } from './dto/create-family_head.dto';
-import { UpdateFamilyHeadDto } from './dto/update-family_head.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateFamilyHeadDto } from "./dto/create-family_head.dto";
+import { UpdateFamilyHeadDto } from "./dto/update-family_head.dto";
 
 @Injectable()
 export class FamilyHeadService {
   create(createFamilyHeadDto: CreateFamilyHeadDto) {
-    return 'This action adds a new familyHead';
+    return "This action adds a new familyHead";
   }
 
   findAll() {

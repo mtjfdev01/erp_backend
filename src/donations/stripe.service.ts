@@ -1,5 +1,5 @@
-import { Injectable, HttpException } from '@nestjs/common';
-import Stripe from 'stripe';
+import { Injectable, HttpException } from "@nestjs/common";
+import Stripe from "stripe";
 
 export interface CreateStripeCheckoutParams {
   donationId: number;
@@ -42,14 +42,14 @@ export class StripeService {
   constructor() {
     const secretKey = process.env.STRIPE_SECRET_KEY;
     if (secretKey) {
-      this.stripe = new Stripe(secretKey, { apiVersion: '2025-02-24.acacia' });
+      this.stripe = new Stripe(secretKey, { apiVersion: "2025-02-24.acacia" });
     }
   }
 
   private ensureStripe(): Stripe {
     if (!this.stripe) {
       throw new HttpException(
-        'Stripe is not configured. Set STRIPE_SECRET_KEY in environment.',
+        "Stripe is not configured. Set STRIPE_SECRET_KEY in environment.",
         500,
       );
     }
@@ -64,39 +64,42 @@ export class StripeService {
     params: CreateStripeCheckoutParams,
   ): Promise<StripeCheckoutResult> {
     const stripe = this.ensureStripe();
-    const currency = (params.currency || 'pkr').toLowerCase().replace(/\s/g, '');
+    const currency = (params.currency || "pkr")
+      .toLowerCase()
+      .replace(/\s/g, "");
     // Stripe expects amount in smallest currency unit (cents for USD, paisas for PKR)
-    const isZeroDecimal =
-      ['jpy', 'krw', 'vnd', 'clp'].indexOf(currency) !== -1;
+    const isZeroDecimal = ["jpy", "krw", "vnd", "clp"].indexOf(currency) !== -1;
     const unitAmount = isZeroDecimal
       ? Math.round(Number(params.amount))
       : Math.round(Number(params.amount) * 100);
 
     if (unitAmount < 50) {
       throw new HttpException(
-        'Amount is too small for Stripe (minimum 50 smallest units).',
+        "Amount is too small for Stripe (minimum 50 smallest units).",
         400,
       );
     }
 
     const isMonthly = params.isMonthly === true;
     const session = await stripe.checkout.sessions.create({
-      mode: isMonthly ? 'subscription' : 'payment',
-      payment_method_types: ['card'],
+      mode: isMonthly ? "subscription" : "payment",
+      payment_method_types: ["card"],
       line_items: [
         {
           quantity: 1,
           price_data: {
-            currency: currency === 'pkr' ? 'pkr' : currency || 'usd',
+            currency: currency === "pkr" ? "pkr" : currency || "usd",
             unit_amount: unitAmount,
             ...(isMonthly && {
-              recurring: { interval: 'month' as const },
+              recurring: { interval: "month" as const },
             }),
             product_data: {
-              name: isMonthly ? 'Monthly Donation' : 'Donation',
+              name: isMonthly ? "Monthly Donation" : "Donation",
               description: params.donorName
                 ? `Donation from ${params.donorName}`
-                : isMonthly ? 'Recurring monthly donation' : 'Donation',
+                : isMonthly
+                  ? "Recurring monthly donation"
+                  : "Donation",
               metadata: {
                 donation_id: String(params.donationId),
               },
@@ -117,10 +120,7 @@ export class StripeService {
     });
 
     if (!session.url) {
-      throw new HttpException(
-        'Stripe did not return a checkout URL',
-        502,
-      );
+      throw new HttpException("Stripe did not return a checkout URL", 502);
     }
 
     return {
@@ -137,16 +137,17 @@ export class StripeService {
     params: CreateStripeEmbedParams,
   ): Promise<StripeEmbedResult> {
     const stripe = this.ensureStripe();
-    const currency = (params.currency || 'pkr').toLowerCase().replace(/\s/g, '');
-    const isZeroDecimal =
-      ['jpy', 'krw', 'vnd', 'clp'].indexOf(currency) !== -1;
+    const currency = (params.currency || "pkr")
+      .toLowerCase()
+      .replace(/\s/g, "");
+    const isZeroDecimal = ["jpy", "krw", "vnd", "clp"].indexOf(currency) !== -1;
     const amountInSmallestUnit = isZeroDecimal
       ? Math.round(Number(params.amount))
       : Math.round(Number(params.amount) * 100);
 
     if (amountInSmallestUnit < 50) {
       throw new HttpException(
-        'Amount is too small for Stripe (minimum 50 smallest units).',
+        "Amount is too small for Stripe (minimum 50 smallest units).",
         400,
       );
     }
@@ -160,10 +161,10 @@ export class StripeService {
         metadata: { donation_id: String(params.donationId) },
       });
       const product = await stripe.products.create({
-        name: 'Monthly Donation',
+        name: "Monthly Donation",
         description: params.donorName
           ? `Monthly donation from ${params.donorName}`
-          : 'Recurring monthly donation',
+          : "Recurring monthly donation",
         metadata: { donation_id: String(params.donationId) },
       });
       const subscription = await stripe.subscriptions.create({
@@ -172,25 +173,26 @@ export class StripeService {
           {
             price_data: {
               product: product.id,
-              currency: currency === 'pkr' ? 'pkr' : currency || 'usd',
+              currency: currency === "pkr" ? "pkr" : currency || "usd",
               unit_amount: amountInSmallestUnit,
-              recurring: { interval: 'month' },
+              recurring: { interval: "month" },
             },
           },
         ],
-        payment_behavior: 'default_incomplete',
-        payment_settings: { save_default_payment_method: 'on_subscription' },
-        expand: ['latest_invoice.payment_intent'],
+        payment_behavior: "default_incomplete",
+        payment_settings: { save_default_payment_method: "on_subscription" },
+        expand: ["latest_invoice.payment_intent"],
         metadata: { donation_id: String(params.donationId) },
       });
 
       const invoice = subscription.latest_invoice as Stripe.Invoice;
-      const paymentIntent = invoice?.payment_intent as Stripe.PaymentIntent | null;
+      const paymentIntent =
+        invoice?.payment_intent as Stripe.PaymentIntent | null;
       const clientSecret = paymentIntent?.client_secret;
 
       if (!clientSecret) {
         throw new HttpException(
-          'Stripe did not return a client secret for subscription first payment',
+          "Stripe did not return a client secret for subscription first payment",
           502,
         );
       }
@@ -204,7 +206,7 @@ export class StripeService {
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInSmallestUnit,
-      currency: currency === 'pkr' ? 'pkr' : currency || 'usd',
+      currency: currency === "pkr" ? "pkr" : currency || "usd",
       automatic_payment_methods: { enabled: true },
       metadata: {
         donation_id: String(params.donationId),
@@ -212,12 +214,12 @@ export class StripeService {
       receipt_email: params.donorEmail || undefined,
       description: params.donorName
         ? `Donation from ${params.donorName}`
-        : 'Donation',
+        : "Donation",
     });
 
     if (!paymentIntent.client_secret) {
       throw new HttpException(
-        'Stripe did not return a client secret for PaymentIntent',
+        "Stripe did not return a client secret for PaymentIntent",
         502,
       );
     }
@@ -239,7 +241,7 @@ export class StripeService {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!webhookSecret) {
       throw new HttpException(
-        'STRIPE_WEBHOOK_SECRET is not set. Cannot verify webhook.',
+        "STRIPE_WEBHOOK_SECRET is not set. Cannot verify webhook.",
         500,
       );
     }

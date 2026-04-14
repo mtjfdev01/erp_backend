@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { GeographicController } from './geographic.controller';
-import { GeographicService } from './geographic.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { GeographicController } from "./geographic.controller";
+import { GeographicService } from "./geographic.service";
 
-describe('GeographicController', () => {
+describe("GeographicController", () => {
   let controller: GeographicController;
 
   beforeEach(async () => {
@@ -14,7 +14,7 @@ describe('GeographicController', () => {
     controller = module.get<GeographicController>(GeographicController);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(controller).toBeDefined();
   });
 });

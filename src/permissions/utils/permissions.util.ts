@@ -450,7 +450,7 @@
 //   }
 // };
 
-// export type PermissionType = 
+// export type PermissionType =
 //   | 'super_admin'
 //   | 'accounts_manager'
 //   | 'procurements_manager'
@@ -520,11 +520,11 @@
 //   customPermissions: Record<string, any> = {}
 // ): Record<string, any> {
 //   const defaultPerms = getDefaultPermissions(userType);
-  
+
 //   // Deep merge function
 //   const deepMerge = (target: any, source: any): any => {
 //     const result = { ...target };
-    
+
 //     for (const key in source) {
 //       if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
 //         result[key] = deepMerge(result[key] || {}, source[key]);
@@ -532,10 +532,10 @@
 //         result[key] = source[key];
 //       }
 //     }
-    
+
 //     return result;
 //   };
-  
+
 //   return deepMerge(defaultPerms, customPermissions);
 // }
 
@@ -548,8 +548,8 @@
 //   if (!permissions || typeof permissions !== 'object') {
 //     return false;
 //   }
-  
+
 //   // Add validation logic here if needed
 //   // For now, just check if it's a non-null object
 //   return true;
-// } 
+// }

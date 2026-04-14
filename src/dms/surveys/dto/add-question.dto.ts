@@ -1,6 +1,14 @@
-import { IsString, IsEnum, IsOptional, IsBoolean, IsInt, IsArray, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
-import { QuestionType } from '../entities/survey_question.entity';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsBoolean,
+  IsInt,
+  IsArray,
+  ValidateNested,
+} from "class-validator";
+import { Type } from "class-transformer";
+import { QuestionType } from "../entities/survey_question.entity";
 
 export class SurveyQuestionOptionDto {
   @IsString()

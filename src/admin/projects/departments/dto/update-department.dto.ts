@@ -1,1 +1,1 @@
-export class UpdateDepartmentDto  {}
+export class UpdateDepartmentDto {}

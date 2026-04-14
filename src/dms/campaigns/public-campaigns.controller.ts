@@ -1,8 +1,8 @@
-import { Controller, Get, Param, HttpStatus, Res } from '@nestjs/common';
-import { Response } from 'express';
-import { CampaignsService } from './campaigns.service';
+import { Controller, Get, Param, HttpStatus, Res } from "@nestjs/common";
+import { Response } from "express";
+import { CampaignsService } from "./campaigns.service";
 
-@Controller('public/campaigns')
+@Controller("public/campaigns")
 export class PublicCampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
 
@@ -12,7 +12,7 @@ export class PublicCampaignsController {
       const result = await this.campaignsService.getPublicActive();
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Active campaigns retrieved',
+        message: "Active campaigns retrieved",
         data: result,
       });
     } catch (error) {
@@ -24,18 +24,19 @@ export class PublicCampaignsController {
     }
   }
 
-  @Get(':slug')
-  async findBySlug(@Param('slug') slug: string, @Res() res: Response) {
+  @Get(":slug")
+  async findBySlug(@Param("slug") slug: string, @Res() res: Response) {
     try {
       const result = await this.campaignsService.getPublicBySlug(slug);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Campaign retrieved',
+        message: "Campaign retrieved",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,

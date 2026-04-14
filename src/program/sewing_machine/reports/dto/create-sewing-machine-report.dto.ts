@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, Min, IsOptional } from 'class-validator';
+import { IsDateString, IsNumber, Min, IsOptional } from "class-validator";
 
 export class CreateSewingMachineReportDto {
   @IsDateString()
@@ -23,4 +23,4 @@ export class CreateSewingMachineReportDto {
   @Min(0)
   @IsOptional()
   indegent?: number;
-} 
+}

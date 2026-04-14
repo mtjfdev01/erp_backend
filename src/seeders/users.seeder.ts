@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { UsersService } from '../users/users.service';
-import { Department, UserRole } from '../users/user.entity';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../users/user.entity';
+import { Injectable } from "@nestjs/common";
+import { UsersService } from "../users/users.service";
+import { Department, UserRole } from "../users/user.entity";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { User } from "../users/user.entity";
 
 interface SeedUser {
   email: string;
@@ -22,38 +22,38 @@ export class UsersSeeder {
 
   async seed(shouldDeleteExisting: boolean = false) {
     if (shouldDeleteExisting) {
-      console.log('Deleting existing users...');
+      console.log("Deleting existing users...");
       await this.userRepository.delete({});
     }
 
     const users: SeedUser[] = [
       {
-        email: 'store@example.com',
-        password: 'store%1123',
+        email: "store@example.com",
+        password: "store%1123",
         department: Department.STORE,
         role: UserRole.USER,
       },
       {
-        email: 'procurements@example.com',
-        password: 'procurements%1123',
+        email: "procurements@example.com",
+        password: "procurements%1123",
         department: Department.PROCUREMENTS,
         role: UserRole.USER,
       },
       {
-        email: 'program@example.com',
-        password: 'program%1123',
+        email: "program@example.com",
+        password: "program%1123",
         department: Department.PROGRAM,
         role: UserRole.USER,
       },
       {
-        email: 'finance@example.com',
-        password: 'finance%1123',
+        email: "finance@example.com",
+        password: "finance%1123",
         department: Department.ACCOUNTS_AND_FINANCE,
         role: UserRole.USER,
       },
       {
-        email: 'admin@example.com',
-        password: 'admin%1123',
+        email: "admin@example.com",
+        password: "admin%1123",
         department: Department.ADMIN, // Admin can access all departments
         role: UserRole.ADMIN,
       },
@@ -64,7 +64,7 @@ export class UsersSeeder {
         // Check if user exists (only if we're not deleting existing users)
         if (!shouldDeleteExisting) {
           const existingUser = await this.userRepository.findOne({
-            where: { email: user.email }
+            where: { email: user.email },
           });
           if (existingUser) {
             console.log(`User ${user.email} already exists, skipping...`);
@@ -85,4 +85,4 @@ export class UsersSeeder {
       }
     }
   }
-} 
+}

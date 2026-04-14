@@ -1,1 +1,1 @@
-export class UpdateDonationBoxDto  {}
+export class UpdateDonationBoxDto {}

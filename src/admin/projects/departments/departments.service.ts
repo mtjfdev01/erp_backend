@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateDepartmentDto } from './dto/create-department.dto';
-import { UpdateDepartmentDto } from './dto/update-department.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateDepartmentDto } from "./dto/create-department.dto";
+import { UpdateDepartmentDto } from "./dto/update-department.dto";
 
 @Injectable()
 export class DepartmentsService {
   create(createDepartmentDto: CreateDepartmentDto) {
-    return 'This action adds a new department';
+    return "This action adds a new department";
   }
 
   findAll() {

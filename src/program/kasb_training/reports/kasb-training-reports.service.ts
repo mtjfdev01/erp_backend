@@ -1,10 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { KasbTrainingReport } from './entities/kasb-training-report.entity';
-import { CreateKasbTrainingReportDto } from './dto/create-kasb-training-report.dto';
-import { UpdateKasbTrainingReportDto } from './dto/update-kasb-training-report.dto';
-import { User } from '../../../users/user.entity';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { KasbTrainingReport } from "./entities/kasb-training-report.entity";
+import { CreateKasbTrainingReportDto } from "./dto/create-kasb-training-report.dto";
+import { UpdateKasbTrainingReportDto } from "./dto/update-kasb-training-report.dto";
+import { User } from "../../../users/user.entity";
 
 @Injectable()
 export class KasbTrainingReportsService {
@@ -15,14 +19,19 @@ export class KasbTrainingReportsService {
     private readonly userRepository: Repository<User>,
   ) {}
 
-  async create(createDto: CreateKasbTrainingReportDto, user: User): Promise<KasbTrainingReport> {
+  async create(
+    createDto: CreateKasbTrainingReportDto,
+    user: User,
+  ): Promise<KasbTrainingReport> {
     try {
       // Calculate total
       const quantity = createDto.quantity || 0;
       const addition = createDto.addition || 0;
       const left = createDto.left || 0;
       const total = quantity + addition - left;
-      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+      const dbUser = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
       const report = this.kasbTrainingReportRepository.create({
         date: new Date(createDto.date),
         skill_level: createDto.skill_level,
@@ -39,11 +48,16 @@ export class KasbTrainingReportsService {
     }
   }
 
-  async createMultiple(createDtos: CreateKasbTrainingReportDto[], user: User): Promise<KasbTrainingReport[]> {
+  async createMultiple(
+    createDtos: CreateKasbTrainingReportDto[],
+    user: User,
+  ): Promise<KasbTrainingReport[]> {
     try {
-      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+      const dbUser = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
 
-      const reports = createDtos.map(dto => {
+      const reports = createDtos.map((dto) => {
         const quantity = dto.quantity || 0;
         const addition = dto.addition || 0;
         const left = dto.left || 0;
@@ -70,24 +84,35 @@ export class KasbTrainingReportsService {
   async findAll(): Promise<KasbTrainingReport[]> {
     return await this.kasbTrainingReportRepository.find({
       where: { is_archived: false },
-      order: { date: 'DESC', id: 'ASC' }  
+      order: { date: "DESC", id: "ASC" },
     });
   }
 
   async findOne(id: number): Promise<KasbTrainingReport> {
-    const report = await this.kasbTrainingReportRepository.findOne({ where: { id, is_archived: false } });
+    const report = await this.kasbTrainingReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
     if (!report) {
-      throw new NotFoundException(`Kasb training report with ID ${id} not found`);
+      throw new NotFoundException(
+        `Kasb training report with ID ${id} not found`,
+      );
     }
     return report;
   }
 
-  async update(id: number, updateDto: UpdateKasbTrainingReportDto): Promise<KasbTrainingReport> {
-    const report = await this.kasbTrainingReportRepository.findOne({ where: { id, is_archived: false } } );
-    if(!report){
-      throw new NotFoundException(`Kasb training report with ID ${id} not found`);
+  async update(
+    id: number,
+    updateDto: UpdateKasbTrainingReportDto,
+  ): Promise<KasbTrainingReport> {
+    const report = await this.kasbTrainingReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
+      throw new NotFoundException(
+        `Kasb training report with ID ${id} not found`,
+      );
     }
-    
+
     if (updateDto.date) {
       report.date = updateDto.date;
     }
@@ -103,17 +128,21 @@ export class KasbTrainingReportsService {
     if (updateDto.left !== undefined) {
       report.left = updateDto.left;
     }
-    
+
     // Recalculate total
     report.total = report.quantity + report.addition - report.left;
-    
+
     return await this.kasbTrainingReportRepository.save(report);
   }
 
   async remove(id: number): Promise<void> {
-    const report = await this.kasbTrainingReportRepository.findOne({ where: { id, is_archived: false } }  );
-    if(!report){
-      throw new NotFoundException(`Kasb training report with ID ${id} not found`);
+    const report = await this.kasbTrainingReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
+      throw new NotFoundException(
+        `Kasb training report with ID ${id} not found`,
+      );
     }
     await this.kasbTrainingReportRepository.update(id, { is_archived: true });
   }
@@ -121,20 +150,24 @@ export class KasbTrainingReportsService {
   async findByDate(date: string): Promise<KasbTrainingReport[]> {
     return await this.kasbTrainingReportRepository.find({
       where: { date: new Date(date), is_archived: false },
-      order: { id: 'ASC' },
+      order: { id: "ASC" },
     });
   }
 
   async removeByDate(date: string): Promise<void> {
     const reports = await this.findByDate(date);
     if (!reports || reports.length === 0) {
-      throw new NotFoundException(`Kasb training reports with date ${date} not found`);
+      throw new NotFoundException(
+        `Kasb training reports with date ${date} not found`,
+      );
     }
 
     await Promise.all(
       reports.map((report) =>
-        this.kasbTrainingReportRepository.update(report.id, { is_archived: true }),
+        this.kasbTrainingReportRepository.update(report.id, {
+          is_archived: true,
+        }),
       ),
     );
   }
-} 
+}

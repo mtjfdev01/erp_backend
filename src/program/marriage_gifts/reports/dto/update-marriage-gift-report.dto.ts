@@ -1,5 +1,5 @@
-import { IsDate, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsNumber, Min, IsOptional } from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateMarriageGiftReportDto {
   @IsDate()
@@ -26,4 +26,4 @@ export class UpdateMarriageGiftReportDto {
   @Min(0)
   @IsOptional()
   indegent?: number;
-} 
+}

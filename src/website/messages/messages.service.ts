@@ -1,9 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CreateMessageDto } from './dto/create-message.dto';
-import { UpdateMessageDto } from './dto/update-message.dto';
-import { WebMessage } from './entities/message.entity';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { CreateMessageDto } from "./dto/create-message.dto";
+import { UpdateMessageDto } from "./dto/update-message.dto";
+import { WebMessage } from "./entities/message.entity";
 
 @Injectable()
 export class MessagesService {
@@ -20,7 +20,7 @@ export class MessagesService {
   async findAll(): Promise<WebMessage[]> {
     return await this.messageRepository.find({
       where: { is_archived: false },
-      order: { created_at: 'DESC' },
+      order: { created_at: "DESC" },
     });
   }
 
@@ -45,7 +45,10 @@ export class MessagesService {
     return message;
   }
 
-  async update(id: number, updateMessageDto: UpdateMessageDto): Promise<WebMessage> {
+  async update(
+    id: number,
+    updateMessageDto: UpdateMessageDto,
+  ): Promise<WebMessage> {
     const message = await this.findOne(id);
     Object.assign(message, updateMessageDto);
     return await this.messageRepository.save(message);

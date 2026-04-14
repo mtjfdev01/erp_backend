@@ -1,7 +1,7 @@
-import { MigrationInterface, QueryRunner } from 'typeorm';
+import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class CreateAreaRationReports1700000010000 implements MigrationInterface {
-  name = 'CreateAreaRationReports1700000010000';
+  name = "CreateAreaRationReports1700000010000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -21,4 +21,4 @@ export class CreateAreaRationReports1700000010000 implements MigrationInterface 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query('DROP TABLE "area_ration_reports"');
   }
-} 
+}

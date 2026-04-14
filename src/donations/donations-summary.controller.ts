@@ -5,33 +5,33 @@ import {
   HttpStatus,
   Res,
   UseGuards,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { DonationsService } from './donations.service';
-import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
-import { RequiredPermissions } from 'src/permissions';
-import { DateRangeOptions } from 'src/utils/summary/date-range.util';
+} from "@nestjs/common";
+import { Response } from "express";
+import { DonationsService } from "./donations.service";
+import { ConditionalJwtGuard } from "src/auth/guards/conditional-jwt.guard";
+import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
+import { RequiredPermissions } from "src/permissions";
+import { DateRangeOptions } from "src/utils/summary/date-range.util";
 
-@Controller('donations-summary')
+@Controller("donations-summary")
 // @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonationsSummaryController {
   constructor(private readonly donationsService: DonationsService) {}
 
   @Get()
   @RequiredPermissions([
-        'fund_raising.donations.view',
-        'super_admin',
-        'fund_raising_manager',
-    ])
+    "fund_raising.donations.view",
+    "super_admin",
+    "fund_raising_manager",
+  ])
   async getSummary(
-    @Query('duration') duration?: 'year' | 'month' | 'week' | 'day' | 'custom',
-    @Query('year') year?: string,
-    @Query('month') month?: string,
-    @Query('week') week?: string,
-    @Query('day') day?: string,
-    @Query('start_date') startDate?: string,
-    @Query('end_date') endDate?: string,
+    @Query("duration") duration?: "year" | "month" | "week" | "day" | "custom",
+    @Query("year") year?: string,
+    @Query("month") month?: string,
+    @Query("week") week?: string,
+    @Query("day") day?: string,
+    @Query("start_date") startDate?: string,
+    @Query("end_date") endDate?: string,
     @Res() res?: Response,
   ) {
     try {
@@ -72,7 +72,7 @@ export class DonationsSummaryController {
       if (res) {
         return res.status(HttpStatus.OK).json({
           success: true,
-          message: 'Donation summary retrieved successfully',
+          message: "Donation summary retrieved successfully",
           data: result,
         });
       }
@@ -90,4 +90,3 @@ export class DonationsSummaryController {
     }
   }
 }
-

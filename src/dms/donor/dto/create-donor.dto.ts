@@ -1,15 +1,15 @@
-import { 
-  IsString, 
-  IsEmail, 
-  IsOptional, 
-  IsEnum, 
-  MinLength, 
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsEnum,
+  MinLength,
   IsNotEmpty,
   ValidateIf,
   IsPhoneNumber,
-  IsNumber
-} from 'class-validator';
-import { DonorType } from '../entities/donor.entity';
+  IsNumber,
+} from "class-validator";
+import { DonorType } from "../entities/donor.entity";
 
 export class CreateDonorDto {
   // Common fields for all donors
@@ -23,7 +23,7 @@ export class CreateDonorDto {
 
   @IsString()
   @IsOptional()
-  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  @MinLength(8, { message: "Password must be at least 8 characters long" })
   password?: string;
 
   @IsString()
@@ -55,53 +55,53 @@ export class CreateDonorDto {
   notes?: string;
 
   // Individual Donor fields (required when donor_type = 'individual')
-  @ValidateIf(o => o.donor_type === DonorType.INDIVIDUAL)
+  @ValidateIf((o) => o.donor_type === DonorType.INDIVIDUAL)
   @IsString()
-  @IsNotEmpty({ message: 'Name is required for individual donors' })
+  @IsNotEmpty({ message: "Name is required for individual donors" })
   name?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.INDIVIDUAL)
+  @ValidateIf((o) => o.donor_type === DonorType.INDIVIDUAL)
   @IsString()
   @IsOptional()
   first_name?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.INDIVIDUAL)
+  @ValidateIf((o) => o.donor_type === DonorType.INDIVIDUAL)
   @IsString()
   @IsOptional()
   last_name?: string;
 
   // CSR/Corporate Donor fields (required when donor_type = 'csr')
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
-  @IsNotEmpty({ message: 'Company name is required for CSR donors' })
+  @IsNotEmpty({ message: "Company name is required for CSR donors" })
   company_name?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
   @IsOptional()
   company_registration?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
-  @IsNotEmpty({ message: 'Contact person is required for CSR donors' })
+  @IsNotEmpty({ message: "Contact person is required for CSR donors" })
   contact_person?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
   @IsOptional()
   designation?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
   @IsOptional()
   company_address?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsString()
   @IsOptional()
   company_phone?: string;
 
-  @ValidateIf(o => o.donor_type === DonorType.CSR)
+  @ValidateIf((o) => o.donor_type === DonorType.CSR)
   @IsEmail()
   @IsOptional()
   company_email?: string;

@@ -1,14 +1,19 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { GoldSilverPrice } from './entities/gold_silver_price.entity';
-import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { GoldSilverPrice } from "./entities/gold_silver_price.entity";
+import { ConfigService } from "@nestjs/config";
+import axios from "axios";
 
 @Injectable()
 export class GoldSilverPriceService {
   private readonly logger = new Logger(GoldSilverPriceService.name);
-  private readonly API_BASE_URL = 'https://api.metalpriceapi.com/v1';
+  private readonly API_BASE_URL = "https://api.metalpriceapi.com/v1";
   private readonly API_KEY: string;
 
   constructor(
@@ -16,9 +21,14 @@ export class GoldSilverPriceService {
     private readonly goldSilverPriceRepository: Repository<GoldSilverPrice>,
     private readonly configService: ConfigService,
   ) {
-    this.API_KEY = this.configService.get<string>('METAL_PRICE_API_KEY') || process.env.METAL_PRICE_API_KEY || '';
+    this.API_KEY =
+      this.configService.get<string>("METAL_PRICE_API_KEY") ||
+      process.env.METAL_PRICE_API_KEY ||
+      "";
     if (!this.API_KEY) {
-      this.logger.warn('METAL_PRICE_API_KEY not configured. Please set it in environment variables.');
+      this.logger.warn(
+        "METAL_PRICE_API_KEY not configured. Please set it in environment variables.",
+      );
     }
   }
 
@@ -27,10 +37,14 @@ export class GoldSilverPriceService {
    * @param date - Optional date parameter (YYYY-MM-DD format) for historical data
    * @returns Promise with gold and silver prices
    */
-  async fetchFromAPI(date?: string): Promise<{ gold_price: number; silver_price: number; date: string }> {
+  async fetchFromAPI(
+    date?: string,
+  ): Promise<{ gold_price: number; silver_price: number; date: string }> {
     try {
       if (!this.API_KEY) {
-        throw new BadRequestException('METAL_PRICE_API_KEY is not configured. Please set it in environment variables.');
+        throw new BadRequestException(
+          "METAL_PRICE_API_KEY is not configured. Please set it in environment variables.",
+        );
       }
 
       // Construct API URL
@@ -45,12 +59,14 @@ export class GoldSilverPriceService {
         url = `${this.API_BASE_URL}/latest?api_key=${this.API_KEY}&base=PKR&currencies=XAU,XAG`;
       }
 
-      this.logger.log(`Fetching prices from Metal Price API: ${date ? `Historical (${date})` : 'Latest'}`);
+      this.logger.log(
+        `Fetching prices from Metal Price API: ${date ? `Historical (${date})` : "Latest"}`,
+      );
 
       const response = await axios.get(url, {
         timeout: 15000, // 15 seconds timeout
         headers: {
-          'Accept': 'application/json',
+          Accept: "application/json",
         },
       });
 
@@ -68,23 +84,32 @@ export class GoldSilverPriceService {
       // }
 
       if (!data.success) {
-        throw new BadRequestException(`API returned unsuccessful response: ${data.error || 'Unknown error'}`);
+        throw new BadRequestException(
+          `API returned unsuccessful response: ${data.error || "Unknown error"}`,
+        );
       }
 
       if (!data.rates || !data.rates.XAU || !data.rates.XAG) {
-        this.logger.error('Unexpected API response structure:', JSON.stringify(data));
-        throw new BadRequestException('API response missing required rate data (XAU or XAG)');
+        this.logger.error(
+          "Unexpected API response structure:",
+          JSON.stringify(data),
+        );
+        throw new BadRequestException(
+          "API response missing required rate data (XAU or XAG)",
+        );
       }
 
       const goldPrice = parseFloat(data.rates.XAU);
       const silverPrice = parseFloat(data.rates.XAG);
-      const priceDate = data.date || new Date().toISOString().split('T')[0];
+      const priceDate = data.date || new Date().toISOString().split("T")[0];
 
       if (isNaN(goldPrice) || isNaN(silverPrice)) {
-        throw new BadRequestException('Invalid price values received from API');
+        throw new BadRequestException("Invalid price values received from API");
       }
 
-      this.logger.log(`Successfully fetched prices - Gold: ${goldPrice} PKR/oz, Silver: ${silverPrice} PKR/oz, Date: ${priceDate}`);
+      this.logger.log(
+        `Successfully fetched prices - Gold: ${goldPrice} PKR/oz, Silver: ${silverPrice} PKR/oz, Date: ${priceDate}`,
+      );
 
       return {
         gold_price: goldPrice,
@@ -92,18 +117,21 @@ export class GoldSilverPriceService {
         date: priceDate,
       };
     } catch (error) {
-      this.logger.error(`Failed to fetch prices from API: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to fetch prices from API: ${error.message}`,
+        error.stack,
+      );
       if (error.response) {
         const status = error.response.status;
         const statusText = error.response.statusText;
         const errorData = error.response.data;
         this.logger.error(`API Error Response: ${JSON.stringify(errorData)}`);
         throw new BadRequestException(
-          `API Error (${status} ${statusText}): ${errorData?.error || errorData?.message || 'Unknown error'}`,
+          `API Error (${status} ${statusText}): ${errorData?.error || errorData?.message || "Unknown error"}`,
         );
       }
-      if (error.code === 'ECONNABORTED') {
-        throw new BadRequestException('API request timeout');
+      if (error.code === "ECONNABORTED") {
+        throw new BadRequestException("API request timeout");
       }
       if (error instanceof BadRequestException) {
         throw error;
@@ -128,7 +156,7 @@ export class GoldSilverPriceService {
   ): Promise<GoldSilverPrice> {
     try {
       const date = new Date(priceDate);
-      
+
       // Check if price for this date already exists
       const existing = await this.goldSilverPriceRepository.findOne({
         where: { price_date: date },
@@ -169,7 +197,7 @@ export class GoldSilverPriceService {
     try {
       const priceData = await this.fetchFromAPI(date);
       const apiResponse = JSON.stringify(priceData);
-      
+
       return await this.storePrice(
         priceData.gold_price,
         priceData.silver_price,
@@ -191,15 +219,17 @@ export class GoldSilverPriceService {
     try {
       const latest = await this.goldSilverPriceRepository.findOne({
         where: { is_archived: false },
-        order: { price_date: 'DESC', created_at: 'DESC' },
+        order: { price_date: "DESC", created_at: "DESC" },
       });
 
       // If no record exists, fetch from API and store it
       if (!latest) {
-        this.logger.log('No price records found in database. Fetching from API...');
+        this.logger.log(
+          "No price records found in database. Fetching from API...",
+        );
         try {
           const newPrice = await this.fetchAndStore();
-          this.logger.log('Successfully fetched and stored price from API');
+          this.logger.log("Successfully fetched and stored price from API");
           return newPrice;
         } catch (fetchError) {
           this.logger.error(`Failed to fetch from API: ${fetchError.message}`);
@@ -215,7 +245,9 @@ export class GoldSilverPriceService {
         throw error;
       }
       this.logger.error(`Failed to get latest price: ${error.message}`);
-      throw new BadRequestException(`Failed to get latest price: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to get latest price: ${error.message}`,
+      );
     }
   }
 
@@ -227,7 +259,7 @@ export class GoldSilverPriceService {
   async getPriceByDate(date: string): Promise<GoldSilverPrice> {
     try {
       const priceDate = new Date(date);
-      
+
       const price = await this.goldSilverPriceRepository.findOne({
         where: {
           price_date: priceDate,
@@ -245,7 +277,9 @@ export class GoldSilverPriceService {
         throw error;
       }
       this.logger.error(`Failed to get price by date: ${error.message}`);
-      throw new BadRequestException(`Failed to get price by date: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to get price by date: ${error.message}`,
+      );
     }
   }
 
@@ -261,7 +295,7 @@ export class GoldSilverPriceService {
 
       const [data, total] = await this.goldSilverPriceRepository.findAndCount({
         where: { is_archived: false },
-        order: { price_date: 'DESC', created_at: 'DESC' },
+        order: { price_date: "DESC", created_at: "DESC" },
         skip,
         take: pageSize,
       });
@@ -279,7 +313,9 @@ export class GoldSilverPriceService {
       };
     } catch (error) {
       this.logger.error(`Failed to get all prices: ${error.message}`);
-      throw new BadRequestException(`Failed to get all prices: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to get all prices: ${error.message}`,
+      );
     }
   }
 }

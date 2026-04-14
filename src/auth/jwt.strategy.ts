@@ -1,5 +1,5 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { UsersService } from '../users/users.service';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { UsersService } from "../users/users.service";
 
 @Injectable()
 export class JwtStrategy {
@@ -12,4 +12,4 @@ export class JwtStrategy {
     }
     return user;
   }
-} 
+}

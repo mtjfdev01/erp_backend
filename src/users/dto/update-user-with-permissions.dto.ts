@@ -1,5 +1,15 @@
-import { IsString, IsEmail, IsOptional, IsEnum, IsDateString, Length, IsObject, IsArray, IsNumber } from 'class-validator';
-import { UserRole, Department } from '../user.entity';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsEnum,
+  IsDateString,
+  Length,
+  IsObject,
+  IsArray,
+  IsNumber,
+} from "class-validator";
+import { UserRole, Department } from "../user.entity";
 
 export class UpdateUserWithPermissionsDto {
   // User fields
@@ -91,4 +101,4 @@ export class UpdateUserWithPermissionsDto {
   @IsObject()
   @IsOptional()
   permissions?: Record<string, any>;
-} 
+}

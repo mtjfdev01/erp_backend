@@ -1,5 +1,5 @@
-import { IsDate, IsNumber, IsString, Min, IsNotEmpty } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsNumber, IsString, Min, IsNotEmpty } from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateAreaRationReportDto {
   @IsDate()
@@ -23,4 +23,4 @@ export class CreateAreaRationReportDto {
   @Min(0)
   @IsNotEmpty()
   quantity: number;
-} 
+}

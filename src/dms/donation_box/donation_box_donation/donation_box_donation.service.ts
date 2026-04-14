@@ -3,27 +3,27 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { DonationBoxDonation } from './entities/donation_box_donation.entity';
-import { CreateDonationBoxDonationDto } from './dto/create-donation_box_donation.dto';
-import { UpdateDonationBoxDonationDto } from './dto/update-donation_box_donation.dto';
-import { DonationBox } from '../entities/donation-box.entity';
-import { City } from '../../geographic/cities/entities/city.entity';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { DonationBoxDonation } from "./entities/donation_box_donation.entity";
+import { CreateDonationBoxDonationDto } from "./dto/create-donation_box_donation.dto";
+import { UpdateDonationBoxDonationDto } from "./dto/update-donation_box_donation.dto";
+import { DonationBox } from "../entities/donation-box.entity";
+import { City } from "../../geographic/cities/entities/city.entity";
 import {
   applyCommonFilters,
   FilterPayload,
   applyHybridFilters,
   HybridFilter,
-} from '../../../utils/filters/common-filter.util';
-import { User, Department } from '../../../users/user.entity';
+} from "../../../utils/filters/common-filter.util";
+import { User, Department } from "../../../users/user.entity";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField?: string;
-  sortOrder?: 'ASC' | 'DESC';
+  sortOrder?: "ASC" | "DESC";
   search?: string;
   donation_box_id?: number;
   status?: string;
@@ -76,47 +76,47 @@ export class DonationBoxDonationService {
 
       const allCityIds: Set<number> = new Set();
 
-      assignedCities.forEach(id => allCityIds.add(id));
+      assignedCities.forEach((id) => allCityIds.add(id));
 
       if (assignedTehsils.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       if (assignedDistricts.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       if (assignedRegions.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       if (assignedCountries.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       return allCityIds.size > 0 ? Array.from(allCityIds) : null;
     } catch (error) {
-      console.error('Error resolving user geography city IDs:', error);
+      console.error("Error resolving user geography city IDs:", error);
       return null;
     }
   }
@@ -153,7 +153,7 @@ export class DonationBoxDonationService {
 
       // Validate collection amount
       if (createDonationBoxDonationDto.collection_amount < 0) {
-        throw new BadRequestException('Collection amount cannot be negative');
+        throw new BadRequestException("Collection amount cannot be negative");
       }
 
       // Auto-populate collected_by_id if not provided
@@ -167,9 +167,8 @@ export class DonationBoxDonationService {
         createDonationBoxDonationDto,
       );
 
-      const savedCollection = await this.donationBoxDonationRepository.save(
-        collection,
-      );
+      const savedCollection =
+        await this.donationBoxDonationRepository.save(collection);
 
       // Update donation box statistics
       await this.updateDonationBoxStats(
@@ -185,7 +184,7 @@ export class DonationBoxDonationService {
       // Return with relations
       return await this.donationBoxDonationRepository.findOne({
         where: { id: savedCollection.id },
-        relations: ['donation_box', 'collected_by', 'verified_by'],
+        relations: ["donation_box", "collected_by", "verified_by"],
       });
     } catch (error) {
       console.log("error", error);
@@ -207,12 +206,12 @@ export class DonationBoxDonationService {
       const {
         page = 1,
         pageSize = 10,
-        sortField = 'collection_date',
-        sortOrder = 'DESC',
-        search = '',
+        sortField = "collection_date",
+        sortOrder = "DESC",
+        search = "",
         donation_box_id,
-        status = '',
-        payment_method = '',
+        status = "",
+        payment_method = "",
         start_date,
         end_date,
       } = options;
@@ -221,21 +220,21 @@ export class DonationBoxDonationService {
 
       // Define searchable fields
       const searchFields = [
-        'collector_name',
-        'notes',
-        'bank_deposit_slip_no',
-        'receipt_number',
-        'cheque_number',
-        'bank_name',
+        "collector_name",
+        "notes",
+        "bank_deposit_slip_no",
+        "receipt_number",
+        "cheque_number",
+        "bank_name",
       ];
-      
+
       // Build query with relations
       const query = this.donationBoxDonationRepository
-        .createQueryBuilder('donation_box_donation')
-        .leftJoinAndSelect('donation_box_donation.donation_box', 'donation_box')
-        .leftJoinAndSelect('donation_box_donation.collected_by', 'collected_by')
-        .leftJoinAndSelect('donation_box_donation.verified_by', 'verified_by')
-        .leftJoinAndSelect('donation_box.route', 'route');
+        .createQueryBuilder("donation_box_donation")
+        .leftJoinAndSelect("donation_box_donation.donation_box", "donation_box")
+        .leftJoinAndSelect("donation_box_donation.collected_by", "collected_by")
+        .leftJoinAndSelect("donation_box_donation.verified_by", "verified_by")
+        .leftJoinAndSelect("donation_box.route", "route");
 
       // Apply common filters
       const filters: FilterPayload = {
@@ -250,29 +249,26 @@ export class DonationBoxDonationService {
         filters.donation_box_id = donation_box_id;
       }
 
-      applyCommonFilters(
-        query,
-        filters,
-        searchFields,
-        'donation_box_donation',
-      );
+      applyCommonFilters(query, filters, searchFields, "donation_box_donation");
 
       // Apply geographic restriction through parent donation box's city_id
       if (assignedCityIds && assignedCityIds.length > 0) {
-        query.andWhere('donation_box.city_id IN (:...assignedCityIds)', { assignedCityIds });
+        query.andWhere("donation_box.city_id IN (:...assignedCityIds)", {
+          assignedCityIds,
+        });
       }
 
       // Apply sorting (whitelist to prevent SQL injection)
       const allowedSortFields = [
-        'collection_date',
-        'collection_amount',
-        'created_at',
-        'status',
-        'deposit_date',
+        "collection_date",
+        "collection_amount",
+        "created_at",
+        "status",
+        "deposit_date",
       ];
       const safeSortField = allowedSortFields.includes(sortField)
         ? sortField
-        : 'collection_date';
+        : "collection_date";
       query.orderBy(`donation_box_donation.${safeSortField}`, sortOrder);
 
       // Apply pagination
@@ -308,7 +304,7 @@ export class DonationBoxDonationService {
     try {
       const collection = await this.donationBoxDonationRepository.findOne({
         where: { id },
-        relations: ['donation_box', 'collected_by', 'verified_by'],
+        relations: ["donation_box", "collected_by", "verified_by"],
       });
 
       if (!collection) {
@@ -336,8 +332,8 @@ export class DonationBoxDonationService {
     try {
       return await this.donationBoxDonationRepository.find({
         where: { donation_box_id: donationBoxId },
-        relations: ['donation_box', 'collected_by', 'verified_by'],
-        order: { collection_date: 'DESC' },
+        relations: ["donation_box", "collected_by", "verified_by"],
+        order: { collection_date: "DESC" },
       });
     } catch (error) {
       console.log("error", error);
@@ -375,7 +371,8 @@ export class DonationBoxDonationService {
       // If donation_box_id is being changed, validate the new box exists
       if (
         updateDonationBoxDonationDto.donation_box_id &&
-        updateDonationBoxDonationDto.donation_box_id !== collection.donation_box_id
+        updateDonationBoxDonationDto.donation_box_id !==
+          collection.donation_box_id
       ) {
         const newBox = await this.donationBoxRepository.findOne({
           where: { id: updateDonationBoxDonationDto.donation_box_id },
@@ -397,7 +394,7 @@ export class DonationBoxDonationService {
       // Return updated entity with relations
       return await this.donationBoxDonationRepository.findOne({
         where: { id },
-        relations: ['donation_box', 'collected_by', 'verified_by'],
+        relations: ["donation_box", "collected_by", "verified_by"],
       });
     } catch (error) {
       console.log("error", error);
@@ -428,7 +425,7 @@ export class DonationBoxDonationService {
         is_archived: true,
       });
 
-      return { message: 'Collection record archived successfully' };
+      return { message: "Collection record archived successfully" };
     } catch (error) {
       console.log("error", error);
       if (error instanceof NotFoundException) {
@@ -459,7 +456,7 @@ export class DonationBoxDonationService {
         await this.donationBoxRepository.save(box);
       }
     } catch (error) {
-      console.error('Failed to update donation box stats:', error);
+      console.error("Failed to update donation box stats:", error);
       // Don't throw error - collection should still succeed even if stats update fails
     }
   }
@@ -504,30 +501,37 @@ export class DonationBoxDonationService {
     return this.donationBoxRepository.findOne({ where: { id: boxId } });
   }
 
-  async getDonationBoxDonationListForDropdown(options?: { donationBoxId?: number; status?: string }) {
+  async getDonationBoxDonationListForDropdown(options?: {
+    donationBoxId?: number;
+    status?: string;
+  }) {
     const queryBuilder = this.donationBoxDonationRepository
-      .createQueryBuilder('collection')
+      .createQueryBuilder("collection")
       .select([
-        'collection.id',
-        'collection.collection_amount',
-        'collection.collection_date',
-        'collection.status',
-        'collection.donation_box_id'
+        "collection.id",
+        "collection.collection_amount",
+        "collection.collection_date",
+        "collection.status",
+        "collection.donation_box_id",
       ]);
 
     if (options?.donationBoxId) {
-      queryBuilder.andWhere('collection.donation_box_id = :donationBoxId', { donationBoxId: options.donationBoxId });
+      queryBuilder.andWhere("collection.donation_box_id = :donationBoxId", {
+        donationBoxId: options.donationBoxId,
+      });
     }
 
     if (options?.status) {
-      queryBuilder.andWhere('collection.status = :status', { status: options.status });
+      queryBuilder.andWhere("collection.status = :status", {
+        status: options.status,
+      });
     }
 
-    queryBuilder.orderBy('collection.collection_date', 'DESC');
+    queryBuilder.orderBy("collection.collection_date", "DESC");
 
     const collections = await queryBuilder.getMany();
 
-    return collections.map(collection => ({
+    return collections.map((collection) => ({
       id: collection.id,
       collection_amount: collection.collection_amount,
       collection_date: collection.collection_date,

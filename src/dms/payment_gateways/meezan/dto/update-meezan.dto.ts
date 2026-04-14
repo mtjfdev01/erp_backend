@@ -1,1 +1,1 @@
-export class UpdateMeezanDto  {}
+export class UpdateMeezanDto {}

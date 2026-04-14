@@ -6,38 +6,45 @@ import {
   HttpStatus,
   Res,
   UseGuards,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThanOrEqual } from 'typeorm';
-import {
-  DashboardMonthlyAgg,
-  DashboardEventAgg,
-} from './entities';
-import { DashboardAggregateService } from './dashboard-aggregate.service';
-import { DashboardRebuildService } from './dashboard-rebuild.service';
-import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from '../permissions/guards/permissions.guard';
-import { RequiredPermissions } from '../permissions';
+} from "@nestjs/common";
+import { Response } from "express";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, MoreThanOrEqual } from "typeorm";
+import { DashboardMonthlyAgg, DashboardEventAgg } from "./entities";
+import { DashboardAggregateService } from "./dashboard-aggregate.service";
+import { DashboardRebuildService } from "./dashboard-rebuild.service";
+import { ConditionalJwtGuard } from "../auth/guards/conditional-jwt.guard";
+import { PermissionsGuard } from "../permissions/guards/permissions.guard";
+import { RequiredPermissions } from "../permissions";
 import {
   DashboardSummaryQueryDto,
   DashboardMonthlyQueryDto,
   DashboardEventsQueryDto,
   DashboardFundraisingOverviewQueryDto,
-} from './dto/dashboard-query.dto';
+} from "./dto/dashboard-query.dto";
 
 const MONTH_NAMES = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
 function formatMonthLabel(date: Date): string {
-  return MONTH_NAMES[date.getUTCMonth()] + ' ' + date.getUTCFullYear();
+  return MONTH_NAMES[date.getUTCMonth()] + " " + date.getUTCFullYear();
 }
 
-@Controller('dashboard')
+@Controller("dashboard")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-@RequiredPermissions(['dms.dashboard.view', 'super_admin'])
+@RequiredPermissions(["dms.dashboard.view", "super_admin"])
 export class DashboardController {
   constructor(
     @InjectRepository(DashboardMonthlyAgg)
@@ -52,7 +59,7 @@ export class DashboardController {
    * GET /dashboard/summary?months=6
    * Returns latest month totals + last N months rows.
    */
-  @Get('summary')
+  @Get("summary")
   async getSummary(
     @Query() query: DashboardSummaryQueryDto,
     @Res() res: Response,
@@ -66,7 +73,7 @@ export class DashboardController {
 
       const rows = await this.monthlyAggRepo.find({
         where: { month_start_date: MoreThanOrEqual(cutoff) },
-        order: { month_start_date: 'ASC' },
+        order: { month_start_date: "ASC" },
       });
 
       const latest = rows.length > 0 ? rows[rows.length - 1] : null;
@@ -104,7 +111,7 @@ export class DashboardController {
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Dashboard summary retrieved',
+        message: "Dashboard summary retrieved",
         data: summary,
       });
     } catch (error: any) {
@@ -120,7 +127,7 @@ export class DashboardController {
    * GET /dashboard/monthly?months=12
    * Returns rows from dashboard_monthly_agg ordered by month_start_date asc.
    */
-  @Get('monthly')
+  @Get("monthly")
   async getMonthly(
     @Query() query: DashboardMonthlyQueryDto,
     @Res() res: Response,
@@ -134,7 +141,7 @@ export class DashboardController {
 
       const rows = await this.monthlyAggRepo.find({
         where: { month_start_date: MoreThanOrEqual(cutoff) },
-        order: { month_start_date: 'ASC' },
+        order: { month_start_date: "ASC" },
       });
 
       const data = rows.map((r) => ({
@@ -151,7 +158,7 @@ export class DashboardController {
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Monthly aggregates retrieved',
+        message: "Monthly aggregates retrieved",
         data,
       });
     } catch (error: any) {
@@ -167,7 +174,7 @@ export class DashboardController {
    * GET /dashboard/fundraising-overview?months=12 | ?year=2024
    * Returns cards (totals by category), cumulative series, and raised-per-month for charts.
    */
-  @Get('fundraising-overview')
+  @Get("fundraising-overview")
   async getFundraisingOverview(
     @Query() query: DashboardFundraisingOverviewQueryDto,
     @Res() res: Response,
@@ -186,7 +193,7 @@ export class DashboardController {
       });
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Fundraising overview retrieved',
+        message: "Fundraising overview retrieved",
         data,
       });
     } catch (error: any) {
@@ -202,7 +209,7 @@ export class DashboardController {
    * GET /dashboard/events?month=2025-06-01
    * Returns events for that month using dashboard_event_agg joined with events meta.
    */
-  @Get('events')
+  @Get("events")
   async getEvents(
     @Query() query: DashboardEventsQueryDto,
     @Res() res: Response,
@@ -220,8 +227,8 @@ export class DashboardController {
 
       const rows = await this.eventAggRepo.find({
         where: { month_start_date: monthStart },
-        relations: ['event'],
-        order: { total_event_collection: 'DESC' },
+        relations: ["event"],
+        order: { total_event_collection: "DESC" },
       });
 
       const data = rows.map((r) => ({
@@ -237,7 +244,7 @@ export class DashboardController {
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event aggregates retrieved',
+        message: "Event aggregates retrieved",
         data,
       });
     } catch (error: any) {
@@ -255,19 +262,19 @@ export class DashboardController {
    * donations (with donor), donation_box_donations (verified/deposited).
    * Call this once to backfill or reset dashboard aggregates.
    */
-  @Post('rebuild-aggregates')
+  @Post("rebuild-aggregates")
   async rebuildAggregates(@Res() res: Response) {
     try {
       await this.rebuildService.fullRebuild();
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Dashboard aggregates rebuilt successfully',
+        message: "Dashboard aggregates rebuilt successfully",
         data: null,
       });
     } catch (error: any) {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         success: false,
-        message: error.message ?? 'Rebuild failed',
+        message: error.message ?? "Rebuild failed",
         data: null,
       });
     }

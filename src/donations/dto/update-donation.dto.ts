@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsNumber } from "class-validator";
 
 /**
  * Partial update for donation core fields. In-kind line items are not updated via this DTO.

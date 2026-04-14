@@ -1,4 +1,11 @@
-import { IsString, IsEmail, IsOptional, IsBoolean, IsArray, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsBoolean,
+  IsArray,
+  IsDateString,
+} from "class-validator";
 
 export class CreateVolunteerDto {
   // Section 1: Personal Information

@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { RecurringDonationsController } from './recurring_donations.controller';
-import { RecurringDonationsService } from './recurring_donations.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { RecurringDonationsController } from "./recurring_donations.controller";
+import { RecurringDonationsService } from "./recurring_donations.service";
 
-describe('RecurringDonationsController', () => {
+describe("RecurringDonationsController", () => {
   let controller: RecurringDonationsController;
 
   beforeEach(async () => {
@@ -11,10 +11,12 @@ describe('RecurringDonationsController', () => {
       providers: [RecurringDonationsService],
     }).compile();
 
-    controller = module.get<RecurringDonationsController>(RecurringDonationsController);
+    controller = module.get<RecurringDonationsController>(
+      RecurringDonationsController,
+    );
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(controller).toBeDefined();
   });
 });

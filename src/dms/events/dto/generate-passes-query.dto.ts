@@ -1,5 +1,5 @@
-import { IsNumber, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsNumber, Min, Max } from "class-validator";
+import { Type } from "class-transformer";
 
 export class GeneratePassesQueryDto {
   @IsNumber()

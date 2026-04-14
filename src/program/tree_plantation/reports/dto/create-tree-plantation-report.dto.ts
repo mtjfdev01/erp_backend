@@ -1,5 +1,5 @@
-import { IsDate, IsNumber, IsString, Min, IsNotEmpty } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsNumber, IsString, Min, IsNotEmpty } from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateTreePlantationReportDto {
   @IsDate()
@@ -15,4 +15,4 @@ export class CreateTreePlantationReportDto {
   @Min(0)
   @IsNotEmpty()
   plants: number;
-} 
+}

@@ -1,9 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { UserDonor } from './entities/user_donor.entity';
-import { CreateUserDonorDto } from './dto/create-user_donor.dto';
-import { UpdateUserDonorDto, TransferDonorDto, AssignDonorDto } from './dto/update-user_donor.dto';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { UserDonor } from "./entities/user_donor.entity";
+import { CreateUserDonorDto } from "./dto/create-user_donor.dto";
+import {
+  UpdateUserDonorDto,
+  TransferDonorDto,
+  AssignDonorDto,
+} from "./dto/update-user_donor.dto";
 
 @Injectable()
 export class UserDonorsService {
@@ -15,34 +24,38 @@ export class UserDonorsService {
   async create(createUserDonorDto: CreateUserDonorDto): Promise<UserDonor> {
     // Check if assignment already exists
     const existing = await this.userDonorRepository.findOne({
-      where: { 
-        user_id: createUserDonorDto.user_id, 
-        donor_id: createUserDonorDto.donor_id 
-      }
+      where: {
+        user_id: createUserDonorDto.user_id,
+        donor_id: createUserDonorDto.donor_id,
+      },
     });
 
     if (existing) {
-      throw new ConflictException('Donor is already assigned to this user');
+      throw new ConflictException("Donor is already assigned to this user");
     }
 
     const assignment = this.userDonorRepository.create(createUserDonorDto);
     return await this.userDonorRepository.save(assignment);
   }
 
-  async findAll(page = 1, pageSize = 10, status?: string): Promise<{ data: UserDonor[], pagination: any }> {
+  async findAll(
+    page = 1,
+    pageSize = 10,
+    status?: string,
+  ): Promise<{ data: UserDonor[]; pagination: any }> {
     const queryBuilder = this.userDonorRepository
-      .createQueryBuilder('userDonor')
-      .leftJoinAndSelect('userDonor.user', 'user')
-      .leftJoinAndSelect('userDonor.donor', 'donor')
-      .leftJoinAndSelect('userDonor.assignedByUser', 'assignedByUser');
+      .createQueryBuilder("userDonor")
+      .leftJoinAndSelect("userDonor.user", "user")
+      .leftJoinAndSelect("userDonor.donor", "donor")
+      .leftJoinAndSelect("userDonor.assignedByUser", "assignedByUser");
 
     if (status) {
-      queryBuilder.andWhere('userDonor.status = :status', { status });
+      queryBuilder.andWhere("userDonor.status = :status", { status });
     }
 
     const skip = (page - 1) * pageSize;
     queryBuilder.skip(skip).take(pageSize);
-    queryBuilder.orderBy('userDonor.assigned_at', 'DESC');
+    queryBuilder.orderBy("userDonor.assigned_at", "DESC");
 
     const [data, total] = await queryBuilder.getManyAndCount();
     const totalPages = Math.ceil(total / pageSize);
@@ -63,74 +76,90 @@ export class UserDonorsService {
   async findOne(id: number): Promise<UserDonor> {
     const assignment = await this.userDonorRepository.findOne({
       where: { id },
-      relations: ['user', 'donor', 'assignedByUser'],
+      relations: ["user", "donor", "assignedByUser"],
     });
 
     if (!assignment) {
-      throw new NotFoundException('Assignment not found');
+      throw new NotFoundException("Assignment not found");
     }
 
     return assignment;
   }
 
-  async getUserAssignedDonors(userId: number, status = 'active'): Promise<UserDonor[]> {
+  async getUserAssignedDonors(
+    userId: number,
+    status = "active",
+  ): Promise<UserDonor[]> {
     return await this.userDonorRepository.find({
       where: { user_id: userId, status },
-      relations: ['donor'],
-      order: { assigned_at: 'DESC' },
+      relations: ["donor"],
+      order: { assigned_at: "DESC" },
     });
   }
 
-  async getDonorAssignedUsers(donorId: number, status = 'active'): Promise<UserDonor[]> {
+  async getDonorAssignedUsers(
+    donorId: number,
+    status = "active",
+  ): Promise<UserDonor[]> {
     return await this.userDonorRepository.find({
       where: { donor_id: donorId, status },
-      relations: ['user'],
-      order: { assigned_at: 'DESC' },
+      relations: ["user"],
+      order: { assigned_at: "DESC" },
     });
   }
 
-  async update(id: number, updateUserDonorDto: UpdateUserDonorDto): Promise<UserDonor> {
-    const assignment = await this.userDonorRepository.findOne({ where: { id } });
-    
+  async update(
+    id: number,
+    updateUserDonorDto: UpdateUserDonorDto,
+  ): Promise<UserDonor> {
+    const assignment = await this.userDonorRepository.findOne({
+      where: { id },
+    });
+
     if (!assignment) {
-      throw new NotFoundException('Assignment not found');
+      throw new NotFoundException("Assignment not found");
     }
 
     Object.assign(assignment, updateUserDonorDto);
     return await this.userDonorRepository.save(assignment);
   }
 
-  async transferDonor(transferDto: TransferDonorDto): Promise<{ oldAssignment: UserDonor, newAssignment: UserDonor }> {
+  async transferDonor(
+    transferDto: TransferDonorDto,
+  ): Promise<{ oldAssignment: UserDonor; newAssignment: UserDonor }> {
     // Find current assignment
     const currentAssignment = await this.userDonorRepository.findOne({
-      where: { 
-        user_id: transferDto.from_user_id, 
+      where: {
+        user_id: transferDto.from_user_id,
         donor_id: transferDto.donor_id,
-        status: 'active'
-      }
+        status: "active",
+      },
     });
 
     if (!currentAssignment) {
-      throw new NotFoundException('Active assignment not found');
+      throw new NotFoundException("Active assignment not found");
     }
 
     // Check if donor is already assigned to target user
     const existingAssignment = await this.userDonorRepository.findOne({
-      where: { 
-        user_id: transferDto.to_user_id, 
+      where: {
+        user_id: transferDto.to_user_id,
         donor_id: transferDto.donor_id,
-        status: 'active'
-      }
+        status: "active",
+      },
     });
 
     if (existingAssignment) {
-      throw new ConflictException('Donor is already assigned to the target user');
+      throw new ConflictException(
+        "Donor is already assigned to the target user",
+      );
     }
 
     // Deactivate current assignment
-    currentAssignment.status = 'transferred';
+    currentAssignment.status = "transferred";
     currentAssignment.notes = transferDto.notes || currentAssignment.notes;
-    const oldAssignment = await this.userDonorRepository.save(currentAssignment);
+    const oldAssignment =
+      await this.userDonorRepository.save(currentAssignment);
 
     // Create new assignment
     const newAssignment = this.userDonorRepository.create({
@@ -138,10 +167,11 @@ export class UserDonorsService {
       donor_id: transferDto.donor_id,
       assigned_by: transferDto.assigned_by,
       notes: transferDto.notes,
-      status: 'active',
+      status: "active",
     });
 
-    const savedNewAssignment = await this.userDonorRepository.save(newAssignment);
+    const savedNewAssignment =
+      await this.userDonorRepository.save(newAssignment);
 
     return {
       oldAssignment,
@@ -154,22 +184,29 @@ export class UserDonorsService {
   }
 
   async remove(id: number): Promise<UserDonor> {
-    const assignment = await this.userDonorRepository.findOne({ where: { id } });
-    
+    const assignment = await this.userDonorRepository.findOne({
+      where: { id },
+    });
+
     if (!assignment) {
-      throw new NotFoundException('Assignment not found');
+      throw new NotFoundException("Assignment not found");
     }
 
-    assignment.status = 'inactive';
+    assignment.status = "inactive";
     return await this.userDonorRepository.save(assignment);
   }
 
-  async getAssignmentStats(): Promise<{ total: number, active: number, inactive: number, transferred: number }> {
+  async getAssignmentStats(): Promise<{
+    total: number;
+    active: number;
+    inactive: number;
+    transferred: number;
+  }> {
     const [total, active, inactive, transferred] = await Promise.all([
       this.userDonorRepository.count(),
-      this.userDonorRepository.count({ where: { status: 'active' } }),
-      this.userDonorRepository.count({ where: { status: 'inactive' } }),
-      this.userDonorRepository.count({ where: { status: 'transferred' } }),
+      this.userDonorRepository.count({ where: { status: "active" } }),
+      this.userDonorRepository.count({ where: { status: "inactive" } }),
+      this.userDonorRepository.count({ where: { status: "transferred" } }),
     ]);
 
     return { total, active, inactive, transferred };

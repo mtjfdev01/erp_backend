@@ -1,3 +1,3 @@
-import { CreateDonorDto } from './create-donor.dto';
+import { CreateDonorDto } from "./create-donor.dto";
 
-export class UpdateDonorDto  {}
+export class UpdateDonorDto {}
