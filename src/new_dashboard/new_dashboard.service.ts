@@ -16,6 +16,15 @@ import { WaterReport } from '../program/water/reports/entities/water-report.enti
 import { WheelChairOrCrutchesReport } from '../program/wheel_chair_or_crutches/reports/entities/wheel-chair-or-crutches-report.entity';
 import { ProgramApplicationOverviewQueryDto } from './dto/program-application-overview-query.dto';
 import { DeliverablesOverviewQueryDto } from './dto/deliverables-overview-query.dto';
+import { StoreDailyReportEntity } from '../store/store_daily_reports/entities/store-daily-report.entity';
+import { StoreDailyLatestQueryDto } from './dto/store-daily-latest-query.dto';
+import { ProcurementsDailyReportEntity } from '../procurements/procurements_daily_reports/entities/procurements-daily-report.entity';
+import { AccountsAndFinanceDailyReportEntity } from '../accounts-and-finance/accounts_and_finance_daily_reports/entities/accounts-and-finance-daily-report.entity';
+import { MonthlySumQueryDto } from './dto/monthly-sum-query.dto';
+import { AlHasanainClg } from '../program/al_hasanain_clg/entities/al_hasanain_clg.entity';
+import { AasCollectionCentersReport } from '../program/aas_collection_centers_report/entities/aas_collection_centers_report.entity';
+import { DreamSchoolReport } from '../program/dream_school_reports/entities/dream_school_report.entity';
+import { HealthReport } from '../program/health/entities/health.entity';
 
 /** Per active program: total “delivered” units in range (program-specific definition). */
 export interface DeliverablesProgramRow {
@@ -78,6 +87,97 @@ export interface ProgramApplicationOverviewCard {
   rejected: number;
   pendingTotal?: number;
   isOverall?: boolean;
+}
+
+/** Latest store daily report snapshot (for dashboard cards). */
+export interface StoreDailyLatestPayload {
+  id: number;
+  date: string;
+  generated_demands: number;
+  pending_demands: number;
+  rejected_demands: number;
+  generated_grn: number;
+  pending_grn: number;
+}
+
+export interface StoreDailySumPayload {
+  from?: string;
+  to?: string;
+  generated_demands: number;
+  pending_demands: number;
+  rejected_demands: number;
+  generated_grn: number;
+  pending_grn: number;
+}
+
+export interface ProcurementsDailySumPayload {
+  from?: string;
+  to?: string;
+  total_generated_pos: number;
+  pending_pos: number;
+  fulfilled_pos: number;
+  total_generated_pis: number;
+  unpaid_pis: number;
+  total_paid_amount: number;
+  unpaid_amount: number;
+  tenders: number;
+}
+
+export interface AccountsAndFinanceDailySumPayload {
+  from?: string;
+  to?: string;
+  daily_inflow: number;
+  daily_outflow: number;
+  pending_payable: number;
+  petty_cash: number;
+  available_funds: number;
+}
+
+export interface AlHasanainClgSumPayload {
+  from?: string;
+  to?: string;
+  records: number;
+  total_students_sum: number;
+  active_teachers_sum: number;
+  fee_collection_sum: number;
+  attendance_percent_avg: number;
+  dropout_rate_avg: number;
+  pass_rate_avg: number;
+}
+
+export interface AasCollectionCentersReportSumPayload {
+  from?: string;
+  to?: string;
+  total_patients_sum: number;
+  tests_conducted_sum: number;
+  pending_tests_sum: number;
+  revenue_sum: number;
+  total_camps_sum: number;
+  on_time_delivery_percent_avg: number;
+  records: number;
+}
+
+export interface DreamSchoolReportsSumPayload {
+  from?: string;
+  to?: string;
+  records: number;
+  visits_sum: number;
+  excellent_count: number;
+  good_count: number;
+  medium_count: number;
+  poor_count: number;
+}
+
+export interface HealthReportsSumPayload {
+  from?: string;
+  to?: string;
+  records: number;
+  widows_sum: number;
+  divorced_sum: number;
+  disable_sum: number;
+  indegent_sum: number;
+  orphans_sum: number;
+  total_sum: number;
 }
 
 const PROGRAM_CARD_STYLE_BY_KEY: Record<
@@ -148,6 +248,39 @@ function applyDeliverablesDateFilter(
   }
 }
 
+function applyStoreDailyDateFilter(
+  qb: SelectQueryBuilder<StoreDailyReportEntity>,
+  alias: string,
+  from?: string,
+  to?: string,
+): void {
+  const col = `${alias}.date`;
+  if (from && to) {
+    qb.andWhere(`${col} BETWEEN :from AND :to`, { from, to });
+  } else if (from) {
+    qb.andWhere(`${col} >= :from`, { from });
+  } else if (to) {
+    qb.andWhere(`${col} <= :to`, { to });
+  }
+}
+
+function applyDateColumnFilter(
+  qb: SelectQueryBuilder<any>,
+  alias: string,
+  column: string,
+  from?: string,
+  to?: string,
+): void {
+  const col = `${alias}.${column}`;
+  if (from && to) {
+    qb.andWhere(`${col} BETWEEN :from AND :to`, { from, to });
+  } else if (from) {
+    qb.andWhere(`${col} >= :from`, { from });
+  } else if (to) {
+    qb.andWhere(`${col} <= :to`, { to });
+  }
+}
+
 @Injectable()
 export class NewDashboardService {
   constructor(
@@ -177,6 +310,20 @@ export class NewDashboardService {
     private readonly waterReportRepository: Repository<WaterReport>,
     @InjectRepository(WheelChairOrCrutchesReport)
     private readonly wheelChairOrCrutchesReportRepository: Repository<WheelChairOrCrutchesReport>,
+    @InjectRepository(StoreDailyReportEntity)
+    private readonly storeDailyReportRepository: Repository<StoreDailyReportEntity>,
+    @InjectRepository(ProcurementsDailyReportEntity)
+    private readonly procurementsDailyReportRepository: Repository<ProcurementsDailyReportEntity>,
+    @InjectRepository(AccountsAndFinanceDailyReportEntity)
+    private readonly accountsAndFinanceDailyReportRepository: Repository<AccountsAndFinanceDailyReportEntity>,
+    @InjectRepository(AlHasanainClg)
+    private readonly alHasanainClgRepository: Repository<AlHasanainClg>,
+    @InjectRepository(AasCollectionCentersReport)
+    private readonly aasCollectionCentersReportRepository: Repository<AasCollectionCentersReport>,
+    @InjectRepository(DreamSchoolReport)
+    private readonly dreamSchoolReportRepository: Repository<DreamSchoolReport>,
+    @InjectRepository(HealthReport)
+    private readonly healthReportRepository: Repository<HealthReport>,
   ) {}
 
   /**
@@ -236,6 +383,303 @@ export class NewDashboardService {
     });
 
     return { data: [overallCard, ...programCards] };
+  }
+
+  /**
+   * Latest Store daily report snapshot (for a single dashboard card).
+   * Optional query `from`, `to` filters by `store_daily_reports.date` (inclusive).
+   */
+  async getStoreDailyLatest(
+    query: StoreDailyLatestQueryDto,
+  ): Promise<{ data: StoreDailyLatestPayload | null }> {
+    const { from, to } = query || {};
+    const qb = this.storeDailyReportRepository
+      .createQueryBuilder('r')
+      .orderBy('r.date', 'DESC')
+      .addOrderBy('r.id', 'DESC')
+      .take(1);
+
+    applyStoreDailyDateFilter(qb, 'r', from, to);
+
+    const row = await qb.getOne();
+    if (!row) {
+      return { data: null };
+    }
+
+    const ymd =
+      row.date instanceof Date
+        ? row.date.toISOString().slice(0, 10)
+        : String(row.date ?? '').slice(0, 10);
+
+    return {
+      data: {
+        id: row.id,
+        date: ymd,
+        generated_demands: Number(row.generated_demands) || 0,
+        pending_demands: Number(row.pending_demands) || 0,
+        rejected_demands: Number(row.rejected_demands) || 0,
+        generated_grn: Number(row.generated_grn) || 0,
+        pending_grn: Number(row.pending_grn) || 0,
+      },
+    };
+  }
+
+  /** Sum store daily reports within optional date range. */
+  async getStoreDailyMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: StoreDailySumPayload }> {
+    const { from, to } = query || {};
+    const qb = this.storeDailyReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(SUM(r.generated_demands), 0)', 'generated_demands')
+      .addSelect('COALESCE(SUM(r.pending_demands), 0)', 'pending_demands')
+      .addSelect('COALESCE(SUM(r.rejected_demands), 0)', 'rejected_demands')
+      .addSelect('COALESCE(SUM(r.generated_grn), 0)', 'generated_grn')
+      .addSelect('COALESCE(SUM(r.pending_grn), 0)', 'pending_grn')
+      .where('r.is_archived = false');
+
+    applyDateColumnFilter(qb, 'r', 'date', from, to);
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    return {
+      data: {
+        from,
+        to,
+        generated_demands: Number(raw?.generated_demands ?? 0),
+        pending_demands: Number(raw?.pending_demands ?? 0),
+        rejected_demands: Number(raw?.rejected_demands ?? 0),
+        generated_grn: Number(raw?.generated_grn ?? 0),
+        pending_grn: Number(raw?.pending_grn ?? 0),
+      },
+    };
+  }
+
+  /** Sum procurements daily reports within optional date range. */
+  async getProcurementsMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: ProcurementsDailySumPayload }> {
+    const { from, to } = query || {};
+    const qb = this.procurementsDailyReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(SUM(r.total_generated_pos), 0)', 'total_generated_pos')
+      .addSelect('COALESCE(SUM(r.pending_pos), 0)', 'pending_pos')
+      .addSelect('COALESCE(SUM(r.fulfilled_pos), 0)', 'fulfilled_pos')
+      .addSelect('COALESCE(SUM(r.total_generated_pis), 0)', 'total_generated_pis')
+      .addSelect('COALESCE(SUM(r.unpaid_pis), 0)', 'unpaid_pis')
+      .addSelect('COALESCE(SUM(r.total_paid_amount), 0)', 'total_paid_amount')
+      .addSelect('COALESCE(SUM(r.unpaid_amount), 0)', 'unpaid_amount')
+      .addSelect('COALESCE(SUM(r.tenders), 0)', 'tenders')
+      .where('r.is_archived = false');
+
+    applyDateColumnFilter(qb, 'r', 'date', from, to);
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    return {
+      data: {
+        from,
+        to,
+        total_generated_pos: Number(raw?.total_generated_pos ?? 0),
+        pending_pos: Number(raw?.pending_pos ?? 0),
+        fulfilled_pos: Number(raw?.fulfilled_pos ?? 0),
+        total_generated_pis: Number(raw?.total_generated_pis ?? 0),
+        unpaid_pis: Number(raw?.unpaid_pis ?? 0),
+        total_paid_amount: Number(raw?.total_paid_amount ?? 0),
+        unpaid_amount: Number(raw?.unpaid_amount ?? 0),
+        tenders: Number(raw?.tenders ?? 0),
+      },
+    };
+  }
+
+  /** Sum accounts & finance daily reports within optional date range. */
+  async getAccountsAndFinanceMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: AccountsAndFinanceDailySumPayload }> {
+    const { from, to } = query || {};
+    const qb = this.accountsAndFinanceDailyReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(SUM(r.daily_inflow), 0)', 'daily_inflow')
+      .addSelect('COALESCE(SUM(r.daily_outflow), 0)', 'daily_outflow')
+      .addSelect('COALESCE(SUM(r.pending_payable), 0)', 'pending_payable')
+      .addSelect('COALESCE(SUM(r.petty_cash), 0)', 'petty_cash')
+      .addSelect('COALESCE(SUM(r.available_funds), 0)', 'available_funds')
+      .where('r.is_archived = false');
+
+    applyDateColumnFilter(qb, 'r', 'date', from, to);
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    return {
+      data: {
+        from,
+        to,
+        daily_inflow: Number(raw?.daily_inflow ?? 0),
+        daily_outflow: Number(raw?.daily_outflow ?? 0),
+        pending_payable: Number(raw?.pending_payable ?? 0),
+        petty_cash: Number(raw?.petty_cash ?? 0),
+        available_funds: Number(raw?.available_funds ?? 0),
+      },
+    };
+  }
+
+  /** Sum/avg Al Hasanain CLG records within optional date range (filters on `created_at`). */
+  async getAlHasanainClgMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: AlHasanainClgSumPayload }> {
+    const { from, to } = query || {};
+
+    const qb = this.alHasanainClgRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(COUNT(r.id), 0)', 'records')
+      .addSelect('COALESCE(SUM(r.total_students), 0)', 'total_students_sum')
+      .addSelect('COALESCE(SUM(r.active_teachers), 0)', 'active_teachers_sum')
+      .addSelect('COALESCE(SUM(r.fee_collection), 0)', 'fee_collection_sum')
+      .addSelect('COALESCE(AVG(r.attendance_percent), 0)', 'attendance_percent_avg')
+      .addSelect('COALESCE(AVG(r.dropout_rate), 0)', 'dropout_rate_avg')
+      .addSelect('COALESCE(AVG(r.pass_rate), 0)', 'pass_rate_avg')
+      .where('r.is_archived = false');
+
+    // Filter by created_at date (YYYY-MM-DD). Uses DATE() to ignore time.
+    if (from && to) {
+      qb.andWhere('DATE(r.created_at) BETWEEN :from AND :to', { from, to });
+    } else if (from) {
+      qb.andWhere('DATE(r.created_at) >= :from', { from });
+    } else if (to) {
+      qb.andWhere('DATE(r.created_at) <= :to', { to });
+    }
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+
+    const round1 = (v: any) => Math.round((Number(v) || 0) * 10) / 10;
+
+    return {
+      data: {
+        from,
+        to,
+        records: Number(raw?.records ?? 0),
+        total_students_sum: Number(raw?.total_students_sum ?? 0),
+        active_teachers_sum: Number(raw?.active_teachers_sum ?? 0),
+        fee_collection_sum: Number(raw?.fee_collection_sum ?? 0),
+        attendance_percent_avg: round1(raw?.attendance_percent_avg),
+        dropout_rate_avg: round1(raw?.dropout_rate_avg),
+        pass_rate_avg: round1(raw?.pass_rate_avg),
+      },
+    };
+  }
+
+  /** Sum/avg AAS collection centers reports within optional date range (filters on `created_at`). */
+  async getAasCollectionCentersReportMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: AasCollectionCentersReportSumPayload }> {
+    const { from, to } = query || {};
+
+    const qb = this.aasCollectionCentersReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(COUNT(r.id), 0)', 'records')
+      .addSelect('COALESCE(SUM(r.total_patients), 0)', 'total_patients_sum')
+      .addSelect('COALESCE(SUM(r.tests_conducted), 0)', 'tests_conducted_sum')
+      .addSelect('COALESCE(SUM(r.pending_tests), 0)', 'pending_tests_sum')
+      .addSelect('COALESCE(SUM(r.revenue), 0)', 'revenue_sum')
+      .addSelect('COALESCE(SUM(r.total_camps), 0)', 'total_camps_sum')
+      .addSelect('COALESCE(AVG(r.on_time_delivery_percent), 0)', 'on_time_delivery_percent_avg')
+      .where('r.is_archived = false');
+
+    if (from && to) {
+      qb.andWhere('DATE(r.created_at) BETWEEN :from AND :to', { from, to });
+    } else if (from) {
+      qb.andWhere('DATE(r.created_at) >= :from', { from });
+    } else if (to) {
+      qb.andWhere('DATE(r.created_at) <= :to', { to });
+    }
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    const round1 = (v: any) => Math.round((Number(v) || 0) * 10) / 10;
+
+    return {
+      data: {
+        from,
+        to,
+        records: Number(raw?.records ?? 0),
+        total_patients_sum: Number(raw?.total_patients_sum ?? 0),
+        tests_conducted_sum: Number(raw?.tests_conducted_sum ?? 0),
+        pending_tests_sum: Number(raw?.pending_tests_sum ?? 0),
+        revenue_sum: Number(raw?.revenue_sum ?? 0),
+        total_camps_sum: Number(raw?.total_camps_sum ?? 0),
+        on_time_delivery_percent_avg: round1(raw?.on_time_delivery_percent_avg),
+      },
+    };
+  }
+
+  /** Sum dream school reports within optional date range (filters on `created_at`). */
+  async getDreamSchoolReportsMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: DreamSchoolReportsSumPayload }> {
+    const { from, to } = query || {};
+
+    const qb = this.dreamSchoolReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(COUNT(r.id), 0)', 'records')
+      .addSelect('COALESCE(SUM(r.visits), 0)', 'visits_sum')
+      .addSelect(`COALESCE(SUM(CASE WHEN r.teacher_performance = 'excellent' THEN 1 ELSE 0 END), 0)`, 'excellent_count')
+      .addSelect(`COALESCE(SUM(CASE WHEN r.teacher_performance = 'good' THEN 1 ELSE 0 END), 0)`, 'good_count')
+      .addSelect(`COALESCE(SUM(CASE WHEN r.teacher_performance = 'medium' THEN 1 ELSE 0 END), 0)`, 'medium_count')
+      .addSelect(`COALESCE(SUM(CASE WHEN r.teacher_performance = 'poor' THEN 1 ELSE 0 END), 0)`, 'poor_count')
+      .where('r.is_archived = false');
+
+    if (from && to) {
+      qb.andWhere('DATE(r.created_at) BETWEEN :from AND :to', { from, to });
+    } else if (from) {
+      qb.andWhere('DATE(r.created_at) >= :from', { from });
+    } else if (to) {
+      qb.andWhere('DATE(r.created_at) <= :to', { to });
+    }
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    return {
+      data: {
+        from,
+        to,
+        records: Number(raw?.records ?? 0),
+        visits_sum: Number(raw?.visits_sum ?? 0),
+        excellent_count: Number(raw?.excellent_count ?? 0),
+        good_count: Number(raw?.good_count ?? 0),
+        medium_count: Number(raw?.medium_count ?? 0),
+        poor_count: Number(raw?.poor_count ?? 0),
+      },
+    };
+  }
+
+  /** Sum health reports within optional date range (filters on `date`). */
+  async getHealthReportsMonthlySum(
+    query: MonthlySumQueryDto,
+  ): Promise<{ data: HealthReportsSumPayload }> {
+    const { from, to } = query || {};
+
+    const qb = this.healthReportRepository
+      .createQueryBuilder('r')
+      .select('COALESCE(COUNT(r.id), 0)', 'records')
+      .addSelect('COALESCE(SUM(r.widows), 0)', 'widows_sum')
+      .addSelect('COALESCE(SUM(r.divorced), 0)', 'divorced_sum')
+      .addSelect('COALESCE(SUM(r.disable), 0)', 'disable_sum')
+      .addSelect('COALESCE(SUM(r.indegent), 0)', 'indegent_sum')
+      .addSelect('COALESCE(SUM(r.orphans), 0)', 'orphans_sum')
+      .addSelect('COALESCE(SUM(r.widows + r.divorced + r.disable + r.indegent + r.orphans), 0)', 'total_sum')
+      .where('r.is_archived = false');
+
+    applyDateColumnFilter(qb, 'r', 'date', from, to);
+
+    const raw = await qb.getRawOne<Record<string, string>>();
+    return {
+      data: {
+        from,
+        to,
+        records: Number(raw?.records ?? 0),
+        widows_sum: Number(raw?.widows_sum ?? 0),
+        divorced_sum: Number(raw?.divorced_sum ?? 0),
+        disable_sum: Number(raw?.disable_sum ?? 0),
+        indegent_sum: Number(raw?.indegent_sum ?? 0),
+        orphans_sum: Number(raw?.orphans_sum ?? 0),
+        total_sum: Number(raw?.total_sum ?? 0),
+      },
+    };
   }
 
   private async buildOverallTotals(

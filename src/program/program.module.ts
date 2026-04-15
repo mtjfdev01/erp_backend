@@ -25,6 +25,7 @@ import { DreamSchoolsModule } from './dream_schools/dream_schools.module';
 import { DreamSchoolReportsModule } from './dream_school_reports/dream_school_reports.module';
 import { AasCollectionCentersReportModule } from './aas_collection_centers_report/aas_collection_centers_report.module';
 import { AlHasanainClgModule } from './al_hasanain_clg/al_hasanain_clg.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { AlHasanainClgModule } from './al_hasanain_clg/al_hasanain_clg.module';
     DreamSchoolReportsModule,
     AasCollectionCentersReportModule,
     AlHasanainClgModule,
+    HealthModule,
   ],
   controllers: [],
   providers: [],
