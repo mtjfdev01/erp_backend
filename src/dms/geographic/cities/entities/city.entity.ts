@@ -1,17 +1,24 @@
-import { Entity, Column, ManyToOne, ManyToMany, JoinColumn, Index } from 'typeorm';
-import { BaseEntity } from '../../../../utils/base_utils/entities/baseEntity';
-import { Region } from '../../regions/entities/region.entity';
-import { Country } from '../../countries/entities/country.entity';
-import { District } from '../../districts/entities/district.entity';
-import { Tehsil } from '../../tehsils/entities/tehsil.entity';
-import { Route } from '../../routes/entities/route.entity';
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  ManyToMany,
+  JoinColumn,
+  Index,
+} from "typeorm";
+import { BaseEntity } from "../../../../utils/base_utils/entities/baseEntity";
+import { Region } from "../../regions/entities/region.entity";
+import { Country } from "../../countries/entities/country.entity";
+import { District } from "../../districts/entities/district.entity";
+import { Tehsil } from "../../tehsils/entities/tehsil.entity";
+import { Route } from "../../routes/entities/route.entity";
 
-@Entity('cities')
-@Index('idx_city_name', ['name'])
-@Index('idx_city_tehsil', ['tehsil_id'])
-@Index('idx_city_district', ['district_id'])
-@Index('idx_city_region', ['region_id'])
-@Index('idx_city_country', ['country_id'])
+@Entity("cities")
+@Index("idx_city_name", ["name"])
+@Index("idx_city_tehsil", ["tehsil_id"])
+@Index("idx_city_district", ["district_id"])
+@Index("idx_city_region", ["region_id"])
+@Index("idx_city_country", ["country_id"])
 export class City extends BaseEntity {
   @Column({ length: 100 })
   name: string;
@@ -19,16 +26,16 @@ export class City extends BaseEntity {
   @Column({ length: 10, nullable: true })
   code: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
   latitude: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
   longitude: number;
 
   @Column({ default: true })
   is_active: boolean;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: "text", nullable: true })
   description: string;
 
   // Foreign Keys
@@ -45,22 +52,28 @@ export class City extends BaseEntity {
   country_id: number;
 
   // Relationships
-  @ManyToOne(() => Tehsil, tehsil => tehsil.cities, { nullable: true, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'tehsil_id' })
+  @ManyToOne(() => Tehsil, (tehsil) => tehsil.cities, {
+    nullable: true,
+    onDelete: "CASCADE",
+  })
+  @JoinColumn({ name: "tehsil_id" })
   tehsil: Tehsil;
 
-  @ManyToOne(() => District, { nullable: true, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'district_id' })
+  @ManyToOne(() => District, { nullable: true, onDelete: "CASCADE" })
+  @JoinColumn({ name: "district_id" })
   district: District;
 
-  @ManyToOne(() => Region, region => region.cities, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'region_id' })
+  @ManyToOne(() => Region, (region) => region.cities, {
+    nullable: false,
+    onDelete: "CASCADE",
+  })
+  @JoinColumn({ name: "region_id" })
   region: Region;
 
-  @ManyToOne(() => Country, { nullable: false, onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'country_id' })
+  @ManyToOne(() => Country, { nullable: false, onDelete: "CASCADE" })
+  @JoinColumn({ name: "country_id" })
   country: Country;
 
-  @ManyToMany(() => Route, route => route.cities)
+  @ManyToMany(() => Route, (route) => route.cities)
   routes: Route[];
 }

@@ -1,21 +1,21 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
-import { Donation } from '../donations/entities/donation.entity';
-import { Donor } from '../dms/donor/entities/donor.entity';
+import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Between } from "typeorm";
+import { Donation } from "../donations/entities/donation.entity";
+import { Donor } from "../dms/donor/entities/donor.entity";
 import {
   DonationBoxDonation,
   CollectionStatus,
-} from '../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity';
+} from "../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity";
 import {
   DashboardMonthlyAgg,
   DashboardEventAgg,
   DashboardMonthDonorUnique,
   DashboardMonthEvents,
-} from './entities';
-import { DashboardAggregateService } from './dashboard-aggregate.service';
+} from "./entities";
+import { DashboardAggregateService } from "./dashboard-aggregate.service";
 
-const COMPLETED_STATUS = 'completed';
+const COMPLETED_STATUS = "completed";
 
 /** Rebuild last N months of aggregates from raw donations. */
 const REBUILD_MONTHS = 18;
@@ -77,8 +77,8 @@ export class DashboardRebuildService {
         status: COMPLETED_STATUS,
         date: Between(startDate, endDate),
       },
-      relations: ['donor'],
-      order: { date: 'ASC' },
+      relations: ["donor"],
+      order: { date: "ASC" },
     });
 
     const monthStarts = new Set<string>();
@@ -86,7 +86,7 @@ export class DashboardRebuildService {
       const ms = this.aggregateService.getMonthStart(
         d.date ? new Date(d.date) : d.created_at,
       );
-      monthStarts.add(ms.toISOString().split('T')[0]);
+      monthStarts.add(ms.toISOString().split("T")[0]);
     }
 
     const monthsToProcess = Array.from(monthStarts).map((s) => new Date(s));
@@ -173,17 +173,17 @@ export class DashboardRebuildService {
         (d.amount != null ? Number(d.amount) : 0);
       if (amount <= 0) continue;
 
-      const channel = this.aggregateService['deriveChannel'](d);
-      const donorType = this.aggregateService['deriveDonorType'](d);
+      const channel = this.aggregateService["deriveChannel"](d);
+      const donorType = this.aggregateService["deriveDonorType"](d);
 
       total_raised += amount;
-      if (donorType === 'individual') total_individual_raised += amount;
-      if (donorType === 'csr') total_csr_raised += amount;
+      if (donorType === "individual") total_individual_raised += amount;
+      if (donorType === "csr") total_csr_raised += amount;
       if (d.event_id != null) total_events_raised += amount;
-      if (channel === 'online') total_online_raised += amount;
-      if (channel === 'phone') total_phone_raised += amount;
-      if (channel === 'corporate') total_corporate_raised += amount;
-      if (channel === 'event') total_event_channel_raised += amount;
+      if (channel === "online") total_online_raised += amount;
+      if (channel === "phone") total_phone_raised += amount;
+      if (channel === "corporate") total_corporate_raised += amount;
+      if (channel === "event") total_event_channel_raised += amount;
     }
 
     return {
@@ -267,28 +267,31 @@ export class DashboardRebuildService {
         status: COMPLETED_STATUS,
         date: Between(startDate, endDate),
       },
-      relations: ['donor'],
-      order: { date: 'ASC' },
+      relations: ["donor"],
+      order: { date: "ASC" },
     });
 
     // 3. Load donation box donations (verified/deposited) in range
     const boxRows = await this.donationBoxDonationRepo
-      .createQueryBuilder('d')
-      .select("DATE_TRUNC('month', d.collection_date)", 'month_start')
-      .addSelect('SUM(d.collection_amount)', 'total')
-      .addSelect('COUNT(*)', 'count')
-      .where('d.collection_date >= :start', { start: startDate })
-      .andWhere('d.collection_date <= :end', { end: endDate })
-      .andWhere('d.status IN (:...statuses)', {
+      .createQueryBuilder("d")
+      .select("DATE_TRUNC('month', d.collection_date)", "month_start")
+      .addSelect("SUM(d.collection_amount)", "total")
+      .addSelect("COUNT(*)", "count")
+      .where("d.collection_date >= :start", { start: startDate })
+      .andWhere("d.collection_date <= :end", { end: endDate })
+      .andWhere("d.status IN (:...statuses)", {
         statuses: [CollectionStatus.VERIFIED, CollectionStatus.DEPOSITED],
       })
       .groupBy("DATE_TRUNC('month', d.collection_date)")
       .getRawMany<{ month_start: string; total: string; count: string }>();
 
-    const donationBoxByMonth = new Map<string, { amount: number; count: number }>();
+    const donationBoxByMonth = new Map<
+      string,
+      { amount: number; count: number }
+    >();
     for (const row of boxRows) {
       const ms = new Date(row.month_start);
-      const key = ms.toISOString().split('T')[0];
+      const key = ms.toISOString().split("T")[0];
       donationBoxByMonth.set(key, {
         amount: Number(row.total ?? 0),
         count: Number(row.count ?? 0),
@@ -301,15 +304,17 @@ export class DashboardRebuildService {
       const ms = this.aggregateService.getMonthStart(
         d.date ? new Date(d.date) : d.created_at,
       );
-      monthKeys.add(ms.toISOString().split('T')[0]);
+      monthKeys.add(ms.toISOString().split("T")[0]);
     }
     for (const key of donationBoxByMonth.keys()) monthKeys.add(key);
-    const monthsToProcess = Array.from(monthKeys).map((s) => new Date(s)).sort((a, b) => a.getTime() - b.getTime());
+    const monthsToProcess = Array.from(monthKeys)
+      .map((s) => new Date(s))
+      .sort((a, b) => a.getTime() - b.getTime());
 
     for (const ms of monthsToProcess) {
       const nextMonth = new Date(ms);
       nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
-      const monthKey = ms.toISOString().split('T')[0];
+      const monthKey = ms.toISOString().split("T")[0];
 
       const monthDonations = donations.filter((d) => {
         const dDate = d.date ? new Date(d.date) : d.created_at;
@@ -327,7 +332,10 @@ export class DashboardRebuildService {
           .map((d) => d.event_id)
           .filter((id): id is number => id != null),
       );
-      const boxForMonth = donationBoxByMonth.get(monthKey) ?? { amount: 0, count: 0 };
+      const boxForMonth = donationBoxByMonth.get(monthKey) ?? {
+        amount: 0,
+        count: 0,
+      };
 
       await this.monthlyAggRepo.save(
         this.monthlyAggRepo.create({

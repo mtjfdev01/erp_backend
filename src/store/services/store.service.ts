@@ -1,15 +1,19 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CreateStoreDto } from '../dto/create-store.dto/create-store.dto';
-import { User, UserRole } from '../../users/user.entity';
-import { StoreDailyReportEntity } from '../store_daily_reports/entities/store-daily-report.entity';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { CreateStoreDto } from "../dto/create-store.dto/create-store.dto";
+import { User, UserRole } from "../../users/user.entity";
+import { StoreDailyReportEntity } from "../store_daily_reports/entities/store-daily-report.entity";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField: string;
-  sortOrder: 'asc' | 'desc';
+  sortOrder: "asc" | "desc";
 }
 
 @Injectable()
@@ -26,17 +30,22 @@ export class StoreService {
 
   async findAll(user: User, options?: PaginationOptions) {
     try {
-      const { page = 1, pageSize = 10, sortField = 'created_at', sortOrder = 'desc' } = options || {};
-      
+      const {
+        page = 1,
+        pageSize = 10,
+        sortField = "created_at",
+        sortOrder = "desc",
+      } = options || {};
+
       const skip = (page - 1) * pageSize;
-      
+
       const [data, total] = await this.storeReportsRepository.findAndCount({
         skip,
         take: pageSize,
         order: {
-          [sortField]: sortOrder.toUpperCase()
+          [sortField]: sortOrder.toUpperCase(),
         },
-        relations: ['user']
+        relations: ["user"],
       });
 
       const totalPages = Math.ceil(total / pageSize);
@@ -49,8 +58,8 @@ export class StoreService {
           total,
           totalPages,
           hasNext: page < totalPages,
-          hasPrev: page > 1
-        }
+          hasPrev: page > 1,
+        },
       };
     } catch (error) {
       throw new Error(error.message);
@@ -60,7 +69,7 @@ export class StoreService {
   async findOne(id: number, user: User) {
     const entity = await this.storeReportsRepository.findOne({ where: { id } });
     if (!entity) {
-      throw new NotFoundException('Store record not found');
+      throw new NotFoundException("Store record not found");
     }
     return entity;
   }

@@ -22,4 +22,3 @@ export class CreateProgramDto {
   @IsOptional()
   applicationable?: boolean;
 }
-

@@ -1,7 +1,7 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
 import { Column, Entity } from "typeorm";
 
-@Entity('newsletter_subscribers')
+@Entity("newsletter_subscribers")
 export class NewsletterSubscriber extends BaseEntity {
   @Column({ nullable: true, default: null })
   email: string;

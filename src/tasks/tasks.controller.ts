@@ -43,11 +43,7 @@ export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Post()
-  @RequiredPermissions([
-    "tasking.tasks.create",
-    "tasks.create",
-    'super_admin'
-  ])
+  @RequiredPermissions(["tasking.tasks.create", "tasks.create", "super_admin"])
   async create(
     @Body() dto: CreateTaskDto,
     @CurrentUser() user: User,
@@ -61,8 +57,10 @@ export class TasksController {
   @RequiredPermissions([
     "tasking.tasks.list_view",
     "tasks.list_view",
-    "super_admin"
-  ]) 
+    "tasking.tasks.view",
+    "tasks.view",
+    "super_admin",
+  ])
   async findAll(
     @Body() payload: any,
     @CurrentUser() user: User,
@@ -89,11 +87,7 @@ export class TasksController {
   }
 
   @Get("reports")
-  @RequiredPermissions([
-    "tasking.tasks.view",
-    "tasks.view",
-    "super_admin",
-  ])
+  @RequiredPermissions(["tasking.tasks.view", "tasks.view", "super_admin"])
   async getReports(
     @Query() query: any,
     @CurrentUser() user: User,
@@ -105,11 +99,7 @@ export class TasksController {
   }
 
   @Get(":id")
-  @RequiredPermissions([
-    "tasking.tasks.view",
-    "tasks.view",
-    "super_admin",
-  ])
+  @RequiredPermissions(["tasking.tasks.view", "tasks.view", "super_admin"])
   async findOne(
     @Param("id") id: string,
     @CurrentUser() user: User,
@@ -120,11 +110,7 @@ export class TasksController {
   }
 
   @Get(":id/approval")
-  @RequiredPermissions([
-    "tasking.tasks.view",
-    "tasks.view",
-    "super_admin",
-  ])
+  @RequiredPermissions(["tasking.tasks.view", "tasks.view", "super_admin"])
   async getApprovalState(
     @Param("id") id: string,
     @CurrentUser() user: User,
@@ -149,11 +135,7 @@ export class TasksController {
   }
 
   @Patch(":id")
-  @RequiredPermissions([
-    "tasking.tasks.update",
-    "tasks.update",
-    "super_admin",
-  ])
+  @RequiredPermissions(["tasking.tasks.update", "tasks.update", "super_admin"])
   async update(
     @Param("id") id: string,
     @Body() dto: UpdateTaskDto,
@@ -454,10 +436,7 @@ export class TasksController {
   }
 
   @Patch(":id/progress")
-  @RequiredPermissions([
-    "tasking.tasks.update",
-    "tasks.update",
-  ])
+  @RequiredPermissions(["tasking.tasks.update", "tasks.update"])
   async updateProgress(
     @Param("id") id: string,
     @Body() dto: UpdateTaskProgressDto,

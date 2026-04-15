@@ -2,17 +2,18 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, Not, In } from 'typeorm';
-import { Campaign, CampaignStatus } from './entities/campaign.entity';
-import { Donation } from '../../donations/entities/donation.entity';
-import { CreateCampaignDto } from './dto/create-campaign.dto';
-import { UpdateCampaignDto } from './dto/update-campaign.dto';
-import { CampaignFiltersDto } from './dto/campaign-filters.dto';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Between, Not, In } from "typeorm";
+import { Campaign, CampaignStatus } from "./entities/campaign.entity";
+import { Donation } from "../../donations/entities/donation.entity";
+import { CreateCampaignDto } from "./dto/create-campaign.dto";
+import { UpdateCampaignDto } from "./dto/update-campaign.dto";
+import { CampaignFiltersDto } from "./dto/campaign-filters.dto";
 
 /** Allow new donations to ended campaigns by default */
-const ALLOW_DONATIONS_AFTER_ENDED = process.env.CAMPAIGN_ALLOW_DONATIONS_AFTER_ENDED !== 'false';
+const ALLOW_DONATIONS_AFTER_ENDED =
+  process.env.CAMPAIGN_ALLOW_DONATIONS_AFTER_ENDED !== "false";
 
 @Injectable()
 export class CampaignsService {
@@ -27,12 +28,15 @@ export class CampaignsService {
     return title
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '')
-      .replace(/[\s_-]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[\s_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
   }
 
-  private async ensureUniqueSlug(slug: string, excludeId?: number): Promise<string> {
+  private async ensureUniqueSlug(
+    slug: string,
+    excludeId?: number,
+  ): Promise<string> {
     let uniqueSlug = slug;
     let counter = 1;
 
@@ -52,11 +56,16 @@ export class CampaignsService {
 
   private validateDateRange(start_at: Date | null, end_at: Date | null): void {
     if (start_at && end_at && start_at > end_at) {
-      throw new BadRequestException('start_at must be before or equal to end_at');
+      throw new BadRequestException(
+        "start_at must be before or equal to end_at",
+      );
     }
   }
 
-  async create(dto: CreateCampaignDto, createdBy: number | null): Promise<Campaign> {
+  async create(
+    dto: CreateCampaignDto,
+    createdBy: number | null,
+  ): Promise<Campaign> {
     this.validateDateRange(
       dto.start_at ? new Date(dto.start_at) : null,
       dto.end_at ? new Date(dto.end_at) : null,
@@ -71,7 +80,7 @@ export class CampaignsService {
       description: dto.description ?? null,
       status: dto.status ?? CampaignStatus.DRAFT,
       goal_amount: dto.goal_amount ?? null,
-      currency: dto.currency ?? 'PKR',
+      currency: dto.currency ?? "PKR",
       start_at: dto.start_at ? new Date(dto.start_at) : null,
       end_at: dto.end_at ? new Date(dto.end_at) : null,
       project_id: dto.project_id ?? null,
@@ -84,24 +93,28 @@ export class CampaignsService {
   }
 
   async findAll(filters?: CampaignFiltersDto): Promise<Campaign[]> {
-    const qb = this.campaignRepo.createQueryBuilder('c').orderBy('c.created_at', 'DESC');
+    const qb = this.campaignRepo
+      .createQueryBuilder("c")
+      .orderBy("c.created_at", "DESC");
 
     if (filters?.status) {
-      qb.andWhere('c.status = :status', { status: filters.status });
+      qb.andWhere("c.status = :status", { status: filters.status });
     }
     if (filters?.project_id != null) {
-      qb.andWhere('c.project_id = :projectId', { projectId: filters.project_id });
+      qb.andWhere("c.project_id = :projectId", {
+        projectId: filters.project_id,
+      });
     }
     if (filters?.search?.trim()) {
-      qb.andWhere('(c.title ILIKE :search OR c.description ILIKE :search)', {
+      qb.andWhere("(c.title ILIKE :search OR c.description ILIKE :search)", {
         search: `%${filters.search.trim()}%`,
       });
     }
     if (filters?.from) {
-      qb.andWhere('c.start_at >= :from', { from: filters.from });
+      qb.andWhere("c.start_at >= :from", { from: filters.from });
     }
     if (filters?.to) {
-      qb.andWhere('c.end_at <= :to', { to: filters.to });
+      qb.andWhere("c.end_at <= :to", { to: filters.to });
     }
 
     return qb.getMany();
@@ -115,7 +128,8 @@ export class CampaignsService {
 
   async findBySlug(slug: string): Promise<Campaign> {
     const campaign = await this.campaignRepo.findOne({ where: { slug } });
-    if (!campaign) throw new NotFoundException(`Campaign with slug '${slug}' not found`);
+    if (!campaign)
+      throw new NotFoundException(`Campaign with slug '${slug}' not found`);
     return campaign;
   }
 
@@ -127,11 +141,17 @@ export class CampaignsService {
     return this.findBySlug(String(identifier));
   }
 
-  async update(id: number, dto: UpdateCampaignDto, updatedBy: number | null): Promise<Campaign> {
+  async update(
+    id: number,
+    dto: UpdateCampaignDto,
+    updatedBy: number | null,
+  ): Promise<Campaign> {
     const campaign = await this.findOne(id);
 
-    if (dto.start_at !== undefined) campaign.start_at = dto.start_at ? new Date(dto.start_at) : null;
-    if (dto.end_at !== undefined) campaign.end_at = dto.end_at ? new Date(dto.end_at) : null;
+    if (dto.start_at !== undefined)
+      campaign.start_at = dto.start_at ? new Date(dto.start_at) : null;
+    if (dto.end_at !== undefined)
+      campaign.end_at = dto.end_at ? new Date(dto.end_at) : null;
     this.validateDateRange(campaign.start_at, campaign.end_at);
 
     if (dto.title !== undefined) campaign.title = dto.title;
@@ -140,21 +160,28 @@ export class CampaignsService {
     if (dto.goal_amount !== undefined) campaign.goal_amount = dto.goal_amount;
     if (dto.currency !== undefined) campaign.currency = dto.currency;
     if (dto.project_id !== undefined) campaign.project_id = dto.project_id;
-    if (dto.cover_image_url !== undefined) campaign.cover_image_url = dto.cover_image_url;
+    if (dto.cover_image_url !== undefined)
+      campaign.cover_image_url = dto.cover_image_url;
     if (dto.is_featured !== undefined) campaign.is_featured = dto.is_featured;
 
     if (dto.slug !== undefined && dto.slug !== campaign.slug) {
       campaign.slug = await this.ensureUniqueSlug(dto.slug, id);
     }
 
-    campaign.updated_by = updatedBy != null ? ({ id: updatedBy } as any) : undefined;
+    campaign.updated_by =
+      updatedBy != null ? ({ id: updatedBy } as any) : undefined;
     return this.campaignRepo.save(campaign);
   }
 
-  async setStatus(id: number, status: CampaignStatus, updatedBy: number | null): Promise<Campaign> {
+  async setStatus(
+    id: number,
+    status: CampaignStatus,
+    updatedBy: number | null,
+  ): Promise<Campaign> {
     const campaign = await this.findOne(id);
     campaign.status = status;
-    campaign.updated_by = updatedBy != null ? ({ id: updatedBy } as any) : undefined;
+    campaign.updated_by =
+      updatedBy != null ? ({ id: updatedBy } as any) : undefined;
     return this.campaignRepo.save(campaign);
   }
 
@@ -168,14 +195,14 @@ export class CampaignsService {
   async getActiveFeatured(): Promise<Campaign[]> {
     return this.campaignRepo.find({
       where: { status: CampaignStatus.ACTIVE, is_featured: true },
-      order: { created_at: 'DESC' },
+      order: { created_at: "DESC" },
     });
   }
 
   async getPublicActive(): Promise<Campaign[]> {
     return this.campaignRepo.find({
       where: { status: CampaignStatus.ACTIVE },
-      order: { is_featured: 'DESC', created_at: 'DESC' },
+      order: { is_featured: "DESC", created_at: "DESC" },
     });
   }
 
@@ -183,7 +210,8 @@ export class CampaignsService {
     const campaign = await this.campaignRepo.findOne({
       where: { slug, status: CampaignStatus.ACTIVE },
     });
-    if (!campaign) throw new NotFoundException(`Campaign with slug '${slug}' not found`);
+    if (!campaign)
+      throw new NotFoundException(`Campaign with slug '${slug}' not found`);
     return campaign;
   }
 
@@ -191,7 +219,8 @@ export class CampaignsService {
   canAcceptDonation(campaign: Campaign, isAdmin: boolean): boolean {
     if (isAdmin) return campaign.status !== CampaignStatus.ARCHIVED;
     if (campaign.status === CampaignStatus.ACTIVE) return true;
-    if (campaign.status === CampaignStatus.ENDED && ALLOW_DONATIONS_AFTER_ENDED) return true;
+    if (campaign.status === CampaignStatus.ENDED && ALLOW_DONATIONS_AFTER_ENDED)
+      return true;
     return false;
   }
 
@@ -214,21 +243,25 @@ export class CampaignsService {
     const donations = await this.donationRepo.find({
       where: {
         campaign_id: id,
-        status: In(['paid', 'completed']),
+        status: In(["paid", "completed"]),
         date: Between(fromDate, toDate),
       },
-      select: ['amount', 'paid_amount', 'donor_id', 'date'],
+      select: ["amount", "paid_amount", "donor_id", "date"],
     });
 
     const amountField = (d: Donation) => Number(d.paid_amount ?? d.amount ?? 0);
     const totalAmount = donations.reduce((sum, d) => sum + amountField(d), 0);
     const totalDonations = donations.length;
-    const uniqueDonors = new Set(donations.map((d) => d.donor_id).filter(Boolean)).size;
+    const uniqueDonors = new Set(
+      donations.map((d) => d.donor_id).filter(Boolean),
+    ).size;
     const avgDonation = totalDonations > 0 ? totalAmount / totalDonations : 0;
 
     const byDate = new Map<string, { amount: number; count: number }>();
     for (const d of donations) {
-      const dateStr = d.date ? new Date(d.date).toISOString().split('T')[0] : 'unknown';
+      const dateStr = d.date
+        ? new Date(d.date).toISOString().split("T")[0]
+        : "unknown";
       const existing = byDate.get(dateStr) || { amount: 0, count: 0 };
       existing.amount += amountField(d);
       existing.count += 1;

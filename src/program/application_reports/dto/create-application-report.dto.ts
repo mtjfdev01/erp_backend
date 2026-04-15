@@ -1,6 +1,16 @@
-import { IsString, IsDate, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsNumber, Min, IsObject } from 'class-validator';
-import { Type } from 'class-transformer';
-import { User } from '../../../users/user.entity';
+import {
+  IsString,
+  IsDate,
+  IsOptional,
+  IsArray,
+  ValidateNested,
+  IsNotEmpty,
+  IsNumber,
+  Min,
+  IsObject,
+} from "class-validator";
+import { Type } from "class-transformer";
+import { User } from "../../../users/user.entity";
 
 export class CreateApplicationDto {
   @IsString()
@@ -63,4 +73,4 @@ export class CreateApplicationReportDto {
   @IsOptional()
   @IsObject()
   updated_by?: User;
-} 
+}

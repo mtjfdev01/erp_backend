@@ -1,19 +1,26 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
-import { DonationBox } from './entities/donation-box.entity';
-import { CreateDonationBoxDto } from './dto/create-donation-box.dto';
-import { UpdateDonationBoxDto } from './dto/update-donation-box.dto';
-import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
-import { Route } from '../geographic/routes/entities/route.entity';
-import { City } from '../geographic/cities/entities/city.entity';
-import { User, Department } from '../../users/user.entity';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, In } from "typeorm";
+import { DonationBox } from "./entities/donation-box.entity";
+import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
+import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
+import {
+  applyCommonFilters,
+  FilterPayload,
+} from "../../utils/filters/common-filter.util";
+import { Route } from "../geographic/routes/entities/route.entity";
+import { City } from "../geographic/cities/entities/city.entity";
+import { User, Department } from "../../users/user.entity";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField?: string;
-  sortOrder?: 'ASC' | 'DESC';
+  sortOrder?: "ASC" | "DESC";
   search?: string;
   region?: string;
   city?: string;
@@ -73,51 +80,51 @@ export class DonationBoxService {
       const allCityIds: Set<number> = new Set();
 
       // 1. Direct city IDs
-      assignedCities.forEach(id => allCityIds.add(id));
+      assignedCities.forEach((id) => allCityIds.add(id));
 
       // 2. Tehsil IDs → get all cities under those tehsils
       if (assignedTehsils.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       // 3. District IDs → get all cities under those districts
       if (assignedDistricts.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       // 4. Region IDs → get all cities under those regions
       if (assignedRegions.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       // 5. Country IDs → get all cities under those countries
       if (assignedCountries.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.id')
-          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .createQueryBuilder("city")
+          .select("city.id")
+          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
           .getMany();
-        cities.forEach(c => allCityIds.add(c.id));
+        cities.forEach((c) => allCityIds.add(c.id));
       }
 
       return allCityIds.size > 0 ? Array.from(allCityIds) : null;
     } catch (error) {
-      console.error('Error resolving user geography city IDs:', error);
+      console.error("Error resolving user geography city IDs:", error);
       return null;
     }
   }
@@ -125,27 +132,42 @@ export class DonationBoxService {
   /**
    * Create a new donation box
    */
-  async create(createDonationBoxDto: CreateDonationBoxDto, currentUser: any): Promise<DonationBox> {
+  async create(
+    createDonationBoxDto: CreateDonationBoxDto,
+    currentUser: any,
+  ): Promise<DonationBox> {
     try {
       // Validate that route exists
       const route = await this.routeRepository.findOne({
-        where: { id: createDonationBoxDto.route_id }
+        where: { id: createDonationBoxDto.route_id },
       });
 
       if (!route) {
-        throw new NotFoundException(`Route with ID ${createDonationBoxDto.route_id} not found`);
+        throw new NotFoundException(
+          `Route with ID ${createDonationBoxDto.route_id} not found`,
+        );
       }
-
 
       // Validate assigned users if provided
       let assignedUsers: User[] = [];
-      if (createDonationBoxDto.assigned_user_ids && createDonationBoxDto.assigned_user_ids.length > 0) {
-        assignedUsers = await this.userRepository.findBy({ id: In(createDonationBoxDto.assigned_user_ids) });
-        
-        if (assignedUsers.length !== createDonationBoxDto.assigned_user_ids.length) {
-          const foundIds = assignedUsers.map(user => user.id);
-          const missingIds = createDonationBoxDto.assigned_user_ids.filter(id => !foundIds.includes(id));
-          throw new NotFoundException(`Users with IDs ${missingIds.join(', ')} not found`);
+      if (
+        createDonationBoxDto.assigned_user_ids &&
+        createDonationBoxDto.assigned_user_ids.length > 0
+      ) {
+        assignedUsers = await this.userRepository.findBy({
+          id: In(createDonationBoxDto.assigned_user_ids),
+        });
+
+        if (
+          assignedUsers.length !== createDonationBoxDto.assigned_user_ids.length
+        ) {
+          const foundIds = assignedUsers.map((user) => user.id);
+          const missingIds = createDonationBoxDto.assigned_user_ids.filter(
+            (id) => !foundIds.includes(id),
+          );
+          throw new NotFoundException(
+            `Users with IDs ${missingIds.join(", ")} not found`,
+          );
         }
       }
 
@@ -159,10 +181,10 @@ export class DonationBoxService {
 
       // Save and return
       const savedBox = await this.donationBoxRepository.save(donationBox);
-      
+
       return savedBox;
     } catch (error) {
-      console.error('Error creating donation box:', error);
+      console.error("Error creating donation box:", error);
       throw new Error(`Failed to create donation box: ${error.message}`);
     }
   }
@@ -175,14 +197,14 @@ export class DonationBoxService {
       const {
         page = 1,
         pageSize = 10,
-        sortField = 'created_at',
-        sortOrder = 'DESC',
-        search = '',
-        region = '',
-        city = '',
-        box_type = '',
-        status = '',
-        frequency = '',
+        sortField = "created_at",
+        sortOrder = "DESC",
+        search = "",
+        region = "",
+        city = "",
+        box_type = "",
+        status = "",
+        frequency = "",
         is_active,
         start_date,
         end_date,
@@ -192,22 +214,23 @@ export class DonationBoxService {
 
       // Define searchable fields (only string fields that can be used with LOWER())
       const searchFields = [
-        'key_no',
-        'shop_name',
-        'shopkeeper',
-        'cell_no',
-        'landmark_marketplace',
-        'route.name', // Search in route name from joined table
+        "key_no",
+        "shop_name",
+        "shopkeeper",
+        "cell_no",
+        "landmark_marketplace",
+        "route.name", // Search in route name from joined table
       ];
 
       // Build query with filters and relations
-      const query = this.donationBoxRepository.createQueryBuilder('donation_box')
-        .leftJoinAndSelect('donation_box.route', 'route')
-        .leftJoinAndSelect('route.cities', 'cities')
-        .leftJoinAndSelect('route.region', 'region')
-        .leftJoinAndSelect('route.country', 'country')
-        .leftJoinAndSelect('donation_box.assignedUsers', 'assignedUsers');
-        
+      const query = this.donationBoxRepository
+        .createQueryBuilder("donation_box")
+        .leftJoinAndSelect("donation_box.route", "route")
+        .leftJoinAndSelect("route.cities", "cities")
+        .leftJoinAndSelect("route.region", "region")
+        .leftJoinAndSelect("route.country", "country")
+        .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers");
+
       // Apply common filters
       const filters: FilterPayload = {
         search,
@@ -224,11 +247,13 @@ export class DonationBoxService {
         filters.is_active = is_active;
       }
 
-      applyCommonFilters(query, filters, searchFields, 'donation_box');
+      applyCommonFilters(query, filters, searchFields, "donation_box");
 
       // Apply geographic restriction if user has assigned cities
       if (assignedCityIds && assignedCityIds.length > 0) {
-        query.andWhere('donation_box.city_id IN (:...assignedCityIds)', { assignedCityIds });
+        query.andWhere("donation_box.city_id IN (:...assignedCityIds)", {
+          assignedCityIds,
+        });
       }
 
       // Apply sorting
@@ -253,7 +278,7 @@ export class DonationBoxService {
         },
       };
     } catch (error) {
-      console.error('Error retrieving donation boxes:', error);
+      console.error("Error retrieving donation boxes:", error);
       throw new Error(`Failed to retrieve donation boxes: ${error.message}`);
     }
   }
@@ -263,22 +288,30 @@ export class DonationBoxService {
    */
   async findOne(id: number): Promise<DonationBox> {
     try {
-      const donationBox = await this.donationBoxRepository.findOne({ 
+      const donationBox = await this.donationBoxRepository.findOne({
         where: { id },
-        relations: ['route', 'route.cities', 'route.region', 'route.country', 'assignedUsers']
+        relations: [
+          "route",
+          "route.cities",
+          "route.region",
+          "route.country",
+          "assignedUsers",
+        ],
       });
-      
+
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
-      
+
       return donationBox;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      console.error('Error retrieving donation box:', error.message);
-      throw new NotFoundException(`Failed to retrieve donation box: ${error.message}`);
+      console.error("Error retrieving donation box:", error.message);
+      throw new NotFoundException(
+        `Failed to retrieve donation box: ${error.message}`,
+      );
     }
   }
 
@@ -287,8 +320,10 @@ export class DonationBoxService {
    */
   async update(id: number, updateDonationBoxDto: any): Promise<DonationBox> {
     try {
-      const donationBox = await this.donationBoxRepository.findOne({ where: { id } });
-      
+      const donationBox = await this.donationBoxRepository.findOne({
+        where: { id },
+      });
+
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
@@ -296,31 +331,45 @@ export class DonationBoxService {
       // Validate route if it's being updated
       if (updateDonationBoxDto.route_id) {
         const route = await this.routeRepository.findOne({
-          where: { id: updateDonationBoxDto.route_id }
+          where: { id: updateDonationBoxDto.route_id },
         });
 
         if (!route) {
-          throw new NotFoundException(`Route with ID ${updateDonationBoxDto.route_id} not found`);
+          throw new NotFoundException(
+            `Route with ID ${updateDonationBoxDto.route_id} not found`,
+          );
         }
       }
 
       // Handle user assignments if provided
       if (updateDonationBoxDto.assigned_user_ids !== undefined) {
         let assignedUsers: User[] = [];
-        if (updateDonationBoxDto.assigned_user_ids && updateDonationBoxDto.assigned_user_ids.length > 0) {
-          assignedUsers = await this.userRepository.findBy({ id: In(updateDonationBoxDto.assigned_user_ids) });
-          
-          if (assignedUsers.length !== updateDonationBoxDto.assigned_user_ids.length) {
-            const foundIds = assignedUsers.map(user => user.id);
-            const missingIds = updateDonationBoxDto.assigned_user_ids.filter(id => !foundIds.includes(id));
-            throw new NotFoundException(`Users with IDs ${missingIds.join(', ')} not found`);
+        if (
+          updateDonationBoxDto.assigned_user_ids &&
+          updateDonationBoxDto.assigned_user_ids.length > 0
+        ) {
+          assignedUsers = await this.userRepository.findBy({
+            id: In(updateDonationBoxDto.assigned_user_ids),
+          });
+
+          if (
+            assignedUsers.length !==
+            updateDonationBoxDto.assigned_user_ids.length
+          ) {
+            const foundIds = assignedUsers.map((user) => user.id);
+            const missingIds = updateDonationBoxDto.assigned_user_ids.filter(
+              (id) => !foundIds.includes(id),
+            );
+            throw new NotFoundException(
+              `Users with IDs ${missingIds.join(", ")} not found`,
+            );
           }
         }
 
         // Update user assignments
-        const donationBox = await this.donationBoxRepository.findOne({ 
+        const donationBox = await this.donationBoxRepository.findOne({
           where: { id },
-          relations: ['assignedUsers']
+          relations: ["assignedUsers"],
         });
         donationBox.assignedUsers = assignedUsers;
         await this.donationBoxRepository.save(donationBox);
@@ -331,17 +380,23 @@ export class DonationBoxService {
       if (Object.keys(updateData).length > 0) {
         await this.donationBoxRepository.update(id, updateData);
       }
-      
+
       // Return updated entity with relations
-      return await this.donationBoxRepository.findOne({ 
+      return await this.donationBoxRepository.findOne({
         where: { id },
-        relations: ['route', 'route.cities', 'route.region', 'route.country', 'assignedUsers']
+        relations: [
+          "route",
+          "route.cities",
+          "route.region",
+          "route.country",
+          "assignedUsers",
+        ],
       });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      console.error('Error updating donation box:', error.message);
+      console.error("Error updating donation box:", error.message);
       throw new Error(`Failed to update donation box: ${error.message}`);
     }
   }
@@ -351,21 +406,23 @@ export class DonationBoxService {
    */
   async remove(id: number) {
     try {
-      const donationBox = await this.donationBoxRepository.findOne({ where: { id } });
-      
+      const donationBox = await this.donationBoxRepository.findOne({
+        where: { id },
+      });
+
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
 
       // Soft delete by setting is_archived to true
       await this.donationBoxRepository.update(id, { is_archived: true });
-      
-      return { message: 'Donation box archived successfully' };
+
+      return { message: "Donation box archived successfully" };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      console.error('Error archiving donation box:', error.message);
+      console.error("Error archiving donation box:", error.message);
       throw new Error(`Failed to archive donation box: ${error.message}`);
     }
   }
@@ -375,23 +432,28 @@ export class DonationBoxService {
    */
   async updateCollectionStats(id: number, amount: number) {
     try {
-      const donationBox = await this.donationBoxRepository.findOne({ where: { id } });
-      
+      const donationBox = await this.donationBoxRepository.findOne({
+        where: { id },
+      });
+
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
 
       // Update statistics
-      donationBox.total_collected = Number(donationBox.total_collected) + Number(amount);
+      donationBox.total_collected =
+        Number(donationBox.total_collected) + Number(amount);
       donationBox.collection_count = donationBox.collection_count + 1;
       donationBox.last_collection_date = new Date();
 
       await this.donationBoxRepository.save(donationBox);
-      
+
       return donationBox;
     } catch (error) {
-      console.error('Error updating collection statistics:', error.message);
-      throw new Error(`Failed to update collection statistics: ${error.message}`);
+      console.error("Error updating collection statistics:", error.message);
+      throw new Error(
+        `Failed to update collection statistics: ${error.message}`,
+      );
     }
   }
 
@@ -410,10 +472,10 @@ export class DonationBoxService {
           is_active: true,
           is_archived: false,
         },
-        order: { shop_name: 'ASC' },
+        order: { shop_name: "ASC" },
       });
     } catch (error) {
-      console.error('Error retrieving active boxes:', error.message);
+      console.error("Error retrieving active boxes:", error.message);
       throw new Error(`Failed to retrieve active boxes: ${error.message}`);
     }
   }
@@ -421,40 +483,49 @@ export class DonationBoxService {
   // i want to get by key number
   async findByKeyNumber(key_number: string): Promise<DonationBox> {
     try {
-      return await this.donationBoxRepository.findOne({ where: { key_no: key_number } });
+      return await this.donationBoxRepository.findOne({
+        where: { key_no: key_number },
+      });
     } catch (error) {
-      console.error('Error retrieving donation box by key number:', error);
-      throw new Error(`Failed to retrieve donation box by key number: ${error.message}`);
+      console.error("Error retrieving donation box by key number:", error);
+      throw new Error(
+        `Failed to retrieve donation box by key number: ${error.message}`,
+      );
     }
   }
 
-  async getDonationBoxListForDropdown(options?: { activeOnly?: boolean; status?: string }) {
+  async getDonationBoxListForDropdown(options?: {
+    activeOnly?: boolean;
+    status?: string;
+  }) {
     const queryBuilder = this.donationBoxRepository
-      .createQueryBuilder('box')
-      .leftJoin('box.route', 'route')
+      .createQueryBuilder("box")
+      .leftJoin("box.route", "route")
       .select([
-        'box.id',
-        'box.key_no',
-        'box.shop_name',
-        'box.status',
-        'box.is_active',
-        'route.id',
-        'route.name'
+        "box.id",
+        "box.key_no",
+        "box.shop_name",
+        "box.status",
+        "box.is_active",
+        "route.id",
+        "route.name",
       ]);
 
     if (options?.activeOnly !== undefined) {
-      queryBuilder.andWhere('box.is_active = :isActive', { isActive: options.activeOnly });
+      queryBuilder.andWhere("box.is_active = :isActive", {
+        isActive: options.activeOnly,
+      });
     }
 
     if (options?.status) {
-      queryBuilder.andWhere('box.status = :status', { status: options.status });
+      queryBuilder.andWhere("box.status = :status", { status: options.status });
     }
 
-    queryBuilder.orderBy('box.shop_name', 'ASC');
+    queryBuilder.orderBy("box.shop_name", "ASC");
 
     const boxes = await queryBuilder.getMany();
 
-    return boxes.map(box => ({
+    return boxes.map((box) => ({
       id: box.id,
       key_no: box.key_no,
       shop_name: box.shop_name,
@@ -465,4 +536,3 @@ export class DonationBoxService {
     }));
   }
 }
-

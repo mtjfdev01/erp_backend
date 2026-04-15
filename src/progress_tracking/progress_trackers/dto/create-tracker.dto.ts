@@ -1,5 +1,5 @@
-import { IsBoolean, IsEnum, IsNumber, IsOptional } from 'class-validator';
-import { ParentEntityType } from '../../common/progress-tracking.enum';
+import { IsBoolean, IsEnum, IsNumber, IsOptional } from "class-validator";
+import { ParentEntityType } from "../../common/progress-tracking.enum";
 
 export class CreateTrackerDto {
   @IsNumber()
@@ -21,4 +21,3 @@ export class CreateTrackerDto {
   @IsBoolean()
   donor_visible?: boolean;
 }
-

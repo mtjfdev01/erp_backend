@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { EmailService } from './email.service';
-import donationReceiptInKindEmailTemplate from './donationReceiptInKindEmailTemplate';
-import horizontalDonationReceiptEmailTemplate from './horizontalDonationReceiptEmailTemplate';
+import { Injectable, Logger } from "@nestjs/common";
+import { EmailService } from "./email.service";
+import donationReceiptInKindEmailTemplate from "./donationReceiptInKindEmailTemplate";
+import horizontalDonationReceiptEmailTemplate from "./horizontalDonationReceiptEmailTemplate";
 
 @Injectable()
 export class DonationReceiptsService {
@@ -45,8 +45,8 @@ export class DonationReceiptsService {
     const subject = `Donation In-Kind Receipt - Donation #${donationId}`;
     const amountLine =
       amount != null
-        ? `Amount: ${amount} ${currency || 'PKR'}`
-        : 'Amount: (not specified)';
+        ? `Amount: ${amount} ${currency || "PKR"}`
+        : "Amount: (not specified)";
 
     const receiptData = {
       ...data,
@@ -55,14 +55,16 @@ export class DonationReceiptsService {
     };
 
     const html = donationReceiptInKindEmailTemplate({
-      logoUrl: logoUrl || '',
+      logoUrl: logoUrl || "",
       data: receiptData,
       products: products || [],
     });
 
     const text = `In-Kind Donation Receipt\nDonation ID: ${donationId}\n${amountLine}`;
 
-    this.logger.log(`Sending in-kind receipt for donation #${donationId} to ${donorEmail}`);
+    this.logger.log(
+      `Sending in-kind receipt for donation #${donationId} to ${donorEmail}`,
+    );
 
     const sent = await this.emailService.sendReportEmail({
       to: donorEmail,
@@ -90,14 +92,23 @@ export class DonationReceiptsService {
     receipt?: any;
     donationId?: number | string;
   }): Promise<boolean> {
-    const { donorEmail, logoUrl, title, accreditationLines, offices, donor, receipt, donationId } = params;
+    const {
+      donorEmail,
+      logoUrl,
+      title,
+      accreditationLines,
+      offices,
+      donor,
+      receipt,
+      donationId,
+    } = params;
 
     if (!donorEmail) return false;
 
-    const receiptNo = receipt?.receiptNo ?? donationId ?? '-';
+    const receiptNo = receipt?.receiptNo ?? donationId ?? "-";
 
     const html = horizontalDonationReceiptEmailTemplate({
-      logoUrl: logoUrl || '',
+      logoUrl: logoUrl || "",
       title,
       accreditationLines,
       offices,
@@ -114,12 +125,14 @@ export class DonationReceiptsService {
     const subject = `Donation Receipt - ${receiptNo}`;
     const amountLine =
       receipt?.amount != null
-        ? `Amount: ${receipt.amount} ${receipt.currency || 'PKR'}`
-        : 'Amount: (not specified)';
+        ? `Amount: ${receipt.amount} ${receipt.currency || "PKR"}`
+        : "Amount: (not specified)";
 
     const text = `Donation Receipt\nReceipt #: ${receiptNo}\n${amountLine}`;
 
-    this.logger.log(`Sending horizontal donation receipt for receipt #${receiptNo} to ${donorEmail}`);
+    this.logger.log(
+      `Sending horizontal donation receipt for receipt #${receiptNo} to ${donorEmail}`,
+    );
 
     const sent = await this.emailService.sendReportEmail({
       to: donorEmail,
@@ -138,4 +151,3 @@ export class DonationReceiptsService {
 
 // Backward-compat alias for the misspelling requested by the user.
 export { DonationReceiptsService as DonationReciptsService };
-

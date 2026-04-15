@@ -1,4 +1,11 @@
-import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Min,
+} from "class-validator";
 
 export class CreateSubprogramDto {
   @IsInt()
@@ -15,7 +22,6 @@ export class CreateSubprogramDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['active', 'inactive'])
-  status?: 'active' | 'inactive';
+  @IsIn(["active", "inactive"])
+  status?: "active" | "inactive";
 }
-

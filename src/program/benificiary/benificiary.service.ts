@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateBenificiaryDto } from './dto/create-benificiary.dto';
-import { UpdateBenificiaryDto } from './dto/update-benificiary.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateBenificiaryDto } from "./dto/create-benificiary.dto";
+import { UpdateBenificiaryDto } from "./dto/update-benificiary.dto";
 
 @Injectable()
 export class BenificiaryService {
   create(createBenificiaryDto: CreateBenificiaryDto) {
-    return 'This action adds a new benificiary';
+    return "This action adds a new benificiary";
   }
 
   findAll() {

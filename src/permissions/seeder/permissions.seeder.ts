@@ -37,7 +37,7 @@
 
 //       // Get default permissions for user type
 //       const defaultPermissions = getDefaultPermissions(userType);
-      
+
 //       // Merge with custom permissions if provided
 //       const finalPermissions = Object.keys(customPermissions).length > 0
 //         ? mergePermissions(userType, customPermissions)
@@ -122,13 +122,13 @@
 //     try {
 //       // Get all users
 //       const allUsers = await this.userRepository.find();
-      
+
 //       // Get users who already have permissions
 //       const usersWithPermissions = await this.permissionsRepository.find({
 //         select: ['user_id'],
 //       });
 //       const userIdsWithPermissions = usersWithPermissions.map(p => p.user_id);
-      
+
 //       // Filter users without permissions
 //       const usersWithoutPermissions = allUsers.filter(
 //         user => !userIdsWithPermissions.includes(user.id)
@@ -166,4 +166,4 @@
 //       throw error;
 //     }
 //   }
-// } 
+// }

@@ -1,11 +1,18 @@
-import { IsDateString, IsString, IsIn, IsNumber, Min, IsOptional } from 'class-validator';
+import {
+  IsDateString,
+  IsString,
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+} from "class-validator";
 
 export class CreateKasbTrainingReportDto {
   @IsDateString()
   date: string;
 
   @IsString()
-  @IsIn(['expert', 'medium_expert', 'new trainee'])
+  @IsIn(["expert", "medium_expert", "new trainee"])
   skill_level: string;
 
   @IsNumber()
@@ -27,4 +34,4 @@ export class CreateKasbTrainingReportDto {
   @Min(0)
   @IsOptional()
   total?: number;
-} 
+}

@@ -3,26 +3,26 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { DonationInKindItem } from './entities/donation_in_kind_item.entity';
-import { CreateDonationInKindItemDto } from './dto/create-donation_in_kind_item.dto';
-import { UpdateDonationInKindItemDto } from './dto/update-donation_in_kind_item.dto';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { DonationInKindItem } from "./entities/donation_in_kind_item.entity";
+import { CreateDonationInKindItemDto } from "./dto/create-donation_in_kind_item.dto";
+import { UpdateDonationInKindItemDto } from "./dto/update-donation_in_kind_item.dto";
 import {
   applyCommonFilters,
   FilterPayload,
   applyHybridFilters,
   HybridFilter,
-} from '../../../utils/filters/common-filter.util';
-import { ProcurementsService } from 'src/procurements/services/procurements.service';
-import { CreateProcurementsDto } from 'src/procurements/dto/create-procurements.dto/create-procurements.dto';
+} from "../../../utils/filters/common-filter.util";
+import { ProcurementsService } from "src/procurements/services/procurements.service";
+import { CreateProcurementsDto } from "src/procurements/dto/create-procurements.dto/create-procurements.dto";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField?: string;
-  sortOrder?: 'ASC' | 'DESC';
+  sortOrder?: "ASC" | "DESC";
   search?: string;
   category?: string;
   condition?: string;
@@ -62,7 +62,7 @@ export class DonationInKindItemsService {
         createDonationInKindItemDto.estimated_value &&
         createDonationInKindItemDto.estimated_value < 0
       ) {
-        throw new BadRequestException('Estimated value cannot be negative');
+        throw new BadRequestException("Estimated value cannot be negative");
       }
 
       // Create the item
@@ -89,7 +89,7 @@ export class DonationInKindItemsService {
           };
           await this.procurementsService.create(purchaseDto);
         } catch (error) {
-          console.error('Failed to create automatic purchase record:', error);
+          console.error("Failed to create automatic purchase record:", error);
           // Don't throw error - item creation should succeed even if purchase creation fails
         }
       }
@@ -99,10 +99,15 @@ export class DonationInKindItemsService {
         where: { id: savedItem.id },
       });
     } catch (error) {
-      if (error instanceof ConflictException || error instanceof BadRequestException) {
+      if (
+        error instanceof ConflictException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      throw new Error(`Failed to create donation in kind item: ${error.message}`);
+      throw new Error(
+        `Failed to create donation in kind item: ${error.message}`,
+      );
     }
   }
 
@@ -120,8 +125,8 @@ export class DonationInKindItemsService {
       const {
         page = 1,
         pageSize = 10,
-        sortField = 'created_at',
-        sortOrder = 'DESC',
+        sortField = "created_at",
+        sortOrder = "DESC",
         search,
         category,
         condition,
@@ -131,7 +136,8 @@ export class DonationInKindItemsService {
       } = options;
 
       // Build query
-      const queryBuilder = this.donationInKindItemRepository.createQueryBuilder('item');
+      const queryBuilder =
+        this.donationInKindItemRepository.createQueryBuilder("item");
 
       // Apply filters
       const filters: FilterPayload = {
@@ -145,33 +151,33 @@ export class DonationInKindItemsService {
 
       // Apply specific filters
       if (category) {
-        queryBuilder.andWhere('item.category = :category', { category });
+        queryBuilder.andWhere("item.category = :category", { category });
       }
 
       if (condition) {
-        queryBuilder.andWhere('item.condition = :condition', { condition });
+        queryBuilder.andWhere("item.condition = :condition", { condition });
       }
 
       if (status) {
-        queryBuilder.andWhere('item.status = :status', { status });
+        queryBuilder.andWhere("item.status = :status", { status });
       }
 
       // Apply sorting
       const allowedSortFields = [
-        'name',
-        'category',
-        'condition',
-        'status',
-        'quantity',
-        'estimated_value',
-        'created_at',
-        'updated_at',
+        "name",
+        "category",
+        "condition",
+        "status",
+        "quantity",
+        "estimated_value",
+        "created_at",
+        "updated_at",
       ];
 
       if (allowedSortFields.includes(sortField)) {
         queryBuilder.orderBy(`item.${sortField}`, sortOrder);
       } else {
-        queryBuilder.orderBy('item.created_at', 'DESC');
+        queryBuilder.orderBy("item.created_at", "DESC");
       }
 
       // Apply pagination
@@ -189,7 +195,9 @@ export class DonationInKindItemsService {
         totalPages: Math.ceil(total / pageSize),
       };
     } catch (error) {
-      throw new Error(`Failed to retrieve donation in kind items: ${error.message}`);
+      throw new Error(
+        `Failed to retrieve donation in kind items: ${error.message}`,
+      );
     }
   }
 
@@ -203,7 +211,9 @@ export class DonationInKindItemsService {
       });
 
       if (!item) {
-        throw new NotFoundException(`Donation in kind item with ID ${id} not found`);
+        throw new NotFoundException(
+          `Donation in kind item with ID ${id} not found`,
+        );
       }
 
       return item;
@@ -211,7 +221,9 @@ export class DonationInKindItemsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new Error(`Failed to retrieve donation in kind item: ${error.message}`);
+      throw new Error(
+        `Failed to retrieve donation in kind item: ${error.message}`,
+      );
     }
   }
 
@@ -254,21 +266,30 @@ export class DonationInKindItemsService {
         updateDonationInKindItemDto.estimated_value &&
         updateDonationInKindItemDto.estimated_value < 0
       ) {
-        throw new BadRequestException('Estimated value cannot be negative');
+        throw new BadRequestException("Estimated value cannot be negative");
       }
 
       // Update the entity
-      await this.donationInKindItemRepository.update(id, updateDonationInKindItemDto);
+      await this.donationInKindItemRepository.update(
+        id,
+        updateDonationInKindItemDto,
+      );
 
       // Return updated entity
       return await this.donationInKindItemRepository.findOne({
         where: { id },
       });
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ConflictException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ConflictException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
-      throw new Error(`Failed to update donation in kind item: ${error.message}`);
+      throw new Error(
+        `Failed to update donation in kind item: ${error.message}`,
+      );
     }
   }
 
@@ -293,7 +314,9 @@ export class DonationInKindItemsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new Error(`Failed to delete donation in kind item: ${error.message}`);
+      throw new Error(
+        `Failed to delete donation in kind item: ${error.message}`,
+      );
     }
   }
 
@@ -304,7 +327,7 @@ export class DonationInKindItemsService {
     try {
       return await this.donationInKindItemRepository.find({
         where: { category: category as any },
-        order: { created_at: 'DESC' },
+        order: { created_at: "DESC" },
       });
     } catch (error) {
       throw new Error(`Failed to retrieve items by category: ${error.message}`);
@@ -329,7 +352,6 @@ export class DonationInKindItemsService {
       // const disposedItems = await this.donationInKindItemRepository.count({
       //   where: { status: 'disposed' },
       // });
-
       // // Get category breakdown
       // const categoryBreakdown = await this.donationInKindItemRepository
       //   .createQueryBuilder('item')
@@ -337,7 +359,6 @@ export class DonationInKindItemsService {
       //   .addSelect('COUNT(*)', 'count')
       //   .groupBy('item.category')
       //   .getRawMany();
-
       // return {
       //   totalItems,
       //   availableItems,

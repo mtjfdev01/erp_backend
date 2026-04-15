@@ -1,15 +1,17 @@
-import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
-import { BaseEntity } from '../../utils/base_utils/entities/baseEntity';
-import { ProgressWorkflowTemplate } from './progress_workflow_template.entity';
+import { Entity, Column, Index, ManyToOne, JoinColumn } from "typeorm";
+import { BaseEntity } from "../../utils/base_utils/entities/baseEntity";
+import { ProgressWorkflowTemplate } from "./progress_workflow_template.entity";
 
-@Entity('progress_workflow_template_steps')
-@Index(['template_id', 'step_key'], { unique: true })
+@Entity("progress_workflow_template_steps")
+@Index(["template_id", "step_key"], { unique: true })
 export class ProgressWorkflowTemplateStep extends BaseEntity {
-  @ManyToOne(() => ProgressWorkflowTemplate, (template) => template.steps, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'template_id' })
+  @ManyToOne(() => ProgressWorkflowTemplate, (template) => template.steps, {
+    onDelete: "CASCADE",
+  })
+  @JoinColumn({ name: "template_id" })
   template: ProgressWorkflowTemplate;
 
-  @Column({ type: 'bigint' })
+  @Column({ type: "bigint" })
   template_id: number;
 
   @Column()
@@ -18,7 +20,7 @@ export class ProgressWorkflowTemplateStep extends BaseEntity {
   @Column()
   title: string;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: "text", nullable: true })
   description: string;
 
   @Column()
@@ -36,7 +38,7 @@ export class ProgressWorkflowTemplateStep extends BaseEntity {
   @Column({ default: false })
   allow_metadata: boolean;
 
-  @Column({ type: 'jsonb', nullable: true })
+  @Column({ type: "jsonb", nullable: true })
   metadata_schema: object; // JSON schema for step-specific metadata
 
   @Column({ default: false })

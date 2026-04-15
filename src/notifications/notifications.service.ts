@@ -1,18 +1,28 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, Optional, forwardRef } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Notification, NotificationType } from './entities/notification.entity';
-import { UserNotification } from './entities/user-notification.entity';
-import { CreateNotificationDto } from './dto/create-notification.dto';
-import { UpdateNotificationDto } from './dto/update-notification.dto';
-import { applyCommonFilters, FilterPayload } from '../utils/filters/common-filter.util';
-import { NotificationsGateway } from './notifications.gateway';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Notification, NotificationType } from "./entities/notification.entity";
+import { UserNotification } from "./entities/user-notification.entity";
+import { CreateNotificationDto } from "./dto/create-notification.dto";
+import { UpdateNotificationDto } from "./dto/update-notification.dto";
+import {
+  applyCommonFilters,
+  FilterPayload,
+} from "../utils/filters/common-filter.util";
+import { NotificationsGateway } from "./notifications.gateway";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField?: string;
-  sortOrder?: 'ASC' | 'DESC';
+  sortOrder?: "ASC" | "DESC";
   search?: string;
   type?: string;
   is_read?: boolean;
@@ -22,7 +32,7 @@ interface PaginationOptions {
 @Injectable()
 export class NotificationsService {
   // Define searchable columns for notification search
-  private readonly searchableColumns = ['title', 'message'];
+  private readonly searchableColumns = ["title", "message"];
 
   constructor(
     @InjectRepository(Notification)
@@ -40,7 +50,11 @@ export class NotificationsService {
    * @param userIds - Array of user IDs to send notification to
    * @param user - User creating the notification (for created_by)
    */
-  async create(createNotificationDto: CreateNotificationDto, userIds?: number[], user?: any): Promise<Notification> {
+  async create(
+    createNotificationDto: CreateNotificationDto,
+    userIds?: number[],
+    user?: any,
+  ): Promise<Notification> {
     try {
       // Create the notification (one record)
       const notification = this.notificationRepository.create({
@@ -56,20 +70,21 @@ export class NotificationsService {
         notification.created_by = user;
       }
 
-      const savedNotification = await this.notificationRepository.save(notification);
+      const savedNotification =
+        await this.notificationRepository.save(notification);
 
       // Determine which users to notify
       const usersToNotify: number[] = [];
-      
+
       // Create user_notification records for each user
       if (userIds && userIds.length > 0) {
         usersToNotify.push(...userIds);
-        const userNotifications = userIds.map(userId => 
+        const userNotifications = userIds.map((userId) =>
           this.userNotificationRepository.create({
             notification_id: savedNotification.id,
             user_id: userId,
             is_read: false,
-          })
+          }),
         );
         await this.userNotificationRepository.save(userNotifications);
       } else if (createNotificationDto.user_id) {
@@ -86,96 +101,125 @@ export class NotificationsService {
       // Send real-time notification via WebSocket
       if (usersToNotify.length > 0 && this.notificationsGateway) {
         try {
-          await this.notificationsGateway.sendNotificationToUsers(usersToNotify, {
-            id: savedNotification.id,
-            title: savedNotification.title,
-            message: savedNotification.message,
-            type: savedNotification.type,
-            link: savedNotification.link,
-            metadata: savedNotification.metadata,
-            created_at: savedNotification.created_at,
-            is_read: false,
-          });
+          await this.notificationsGateway.sendNotificationToUsers(
+            usersToNotify,
+            {
+              id: savedNotification.id,
+              title: savedNotification.title,
+              message: savedNotification.message,
+              type: savedNotification.type,
+              link: savedNotification.link,
+              metadata: savedNotification.metadata,
+              created_at: savedNotification.created_at,
+              is_read: false,
+            },
+          );
         } catch (error) {
-          console.error('Failed to send WebSocket notification:', error.message);
+          console.error(
+            "Failed to send WebSocket notification:",
+            error.message,
+          );
           // Don't throw - notification is already saved
         }
       }
 
       return savedNotification;
     } catch (error) {
-      throw new BadRequestException(`Failed to create notification: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to create notification: ${error.message}`,
+      );
     }
   }
 
   async findAll(
     page = 1,
     pageSize = 10,
-    sortField = 'created_at',
-    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    sortField = "created_at",
+    sortOrder: "ASC" | "DESC" = "DESC",
     filters: FilterPayload = {},
-    user?: any
+    user?: any,
   ) {
     try {
       const skip = (page - 1) * pageSize;
       const userId = filters.user_id || (user && user.id ? user.id : null);
 
       if (!userId) {
-        throw new BadRequestException('User ID is required to fetch notifications');
+        throw new BadRequestException(
+          "User ID is required to fetch notifications",
+        );
       }
 
       // Query notifications through user_notifications junction table
       const queryBuilder = this.notificationRepository
-        .createQueryBuilder('notification')
-        .innerJoin('notification.userNotifications', 'userNotification')
-        .leftJoinAndSelect('notification.created_by', 'created_by')
-        .where('userNotification.user_id = :userId', { userId })
-        .andWhere('notification.is_archived = :is_archived', { is_archived: false });
+        .createQueryBuilder("notification")
+        .innerJoin("notification.userNotifications", "userNotification")
+        .leftJoinAndSelect("notification.created_by", "created_by")
+        .where("userNotification.user_id = :userId", { userId })
+        .andWhere("notification.is_archived = :is_archived", {
+          is_archived: false,
+        });
 
       // Apply common filters using utility
       // Exclude user_id from common filters since it's handled via userNotification join
       const filtersForCommon = { ...filters };
       delete filtersForCommon.user_id; // Remove user_id as it's handled separately
-      applyCommonFilters(queryBuilder, filtersForCommon, this.searchableColumns, 'notification');
+      applyCommonFilters(
+        queryBuilder,
+        filtersForCommon,
+        this.searchableColumns,
+        "notification",
+      );
 
       // Apply type filter if provided
       if (filters.type) {
-        queryBuilder.andWhere('notification.type = :type', { type: filters.type });
+        queryBuilder.andWhere("notification.type = :type", {
+          type: filters.type,
+        });
       }
 
       // Apply is_read filter if provided (from user_notification)
       if (filters.is_read !== undefined) {
-        queryBuilder.andWhere('userNotification.is_read = :is_read', { is_read: filters.is_read });
+        queryBuilder.andWhere("userNotification.is_read = :is_read", {
+          is_read: filters.is_read,
+        });
       }
 
       // Apply sorting
-      const validSortFields = ['title', 'type', 'created_at'];
-      const sortFieldName = validSortFields.includes(sortField) ? sortField : 'created_at';
+      const validSortFields = ["title", "type", "created_at"];
+      const sortFieldName = validSortFields.includes(sortField)
+        ? sortField
+        : "created_at";
       queryBuilder.orderBy(`notification.${sortFieldName}`, sortOrder);
 
       // Add is_read and read_at from user_notification to the select
-      queryBuilder.addSelect('userNotification.is_read', 'user_is_read');
-      queryBuilder.addSelect('userNotification.read_at', 'user_read_at');
-      queryBuilder.addSelect('userNotification.id', 'user_notification_id');
+      queryBuilder.addSelect("userNotification.is_read", "user_is_read");
+      queryBuilder.addSelect("userNotification.read_at", "user_read_at");
+      queryBuilder.addSelect("userNotification.id", "user_notification_id");
 
       // Apply pagination
       queryBuilder.skip(skip).take(pageSize);
 
       // Execute query - get both notification and user_notification data
-      queryBuilder.addSelect('notification.id', 'notification_id');
-      queryBuilder.addSelect('notification.title', 'notification_title');
-      queryBuilder.addSelect('notification.message', 'notification_message');
-      queryBuilder.addSelect('notification.type', 'notification_type');
-      queryBuilder.addSelect('notification.link', 'notification_link');
-      queryBuilder.addSelect('notification.metadata', 'notification_metadata');
-      queryBuilder.addSelect('notification.created_at', 'notification_created_at');
-      queryBuilder.addSelect('notification.updated_at', 'notification_updated_at');
+      queryBuilder.addSelect("notification.id", "notification_id");
+      queryBuilder.addSelect("notification.title", "notification_title");
+      queryBuilder.addSelect("notification.message", "notification_message");
+      queryBuilder.addSelect("notification.type", "notification_type");
+      queryBuilder.addSelect("notification.link", "notification_link");
+      queryBuilder.addSelect("notification.metadata", "notification_metadata");
+      queryBuilder.addSelect(
+        "notification.created_at",
+        "notification_created_at",
+      );
+      queryBuilder.addSelect(
+        "notification.updated_at",
+        "notification_updated_at",
+      );
 
       const rawResults = await queryBuilder.getRawMany();
       const total = await queryBuilder.getCount();
 
       // Transform results to include user notification data
-      const data = rawResults.map(row => ({
+      const data = rawResults.map((row) => ({
         id: row.notification_id,
         title: row.notification_title,
         message: row.notification_message,
@@ -203,7 +247,9 @@ export class NotificationsService {
         },
       };
     } catch (error) {
-      throw new BadRequestException(`Failed to retrieve notifications: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to retrieve notifications: ${error.message}`,
+      );
     }
   }
 
@@ -211,7 +257,7 @@ export class NotificationsService {
     try {
       const notification = await this.notificationRepository.findOne({
         where: { id },
-        relations: ['created_by', 'userNotifications'],
+        relations: ["created_by", "userNotifications"],
       });
 
       if (!notification) {
@@ -236,13 +282,21 @@ export class NotificationsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(`Failed to retrieve notification: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to retrieve notification: ${error.message}`,
+      );
     }
   }
 
-  async update(id: number, updateNotificationDto: UpdateNotificationDto, user?: any): Promise<Notification> {
+  async update(
+    id: number,
+    updateNotificationDto: UpdateNotificationDto,
+    user?: any,
+  ): Promise<Notification> {
     try {
-      const notification = await this.notificationRepository.findOne({ where: { id } });
+      const notification = await this.notificationRepository.findOne({
+        where: { id },
+      });
       if (!notification) {
         throw new NotFoundException(`Notification with ID ${id} not found`);
       }
@@ -274,30 +328,40 @@ export class NotificationsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(`Failed to update notification: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to update notification: ${error.message}`,
+      );
     }
   }
 
   async remove(id: number): Promise<{ message: string }> {
     try {
-      const notification = await this.notificationRepository.findOne({ where: { id } });
+      const notification = await this.notificationRepository.findOne({
+        where: { id },
+      });
       if (!notification) {
         throw new NotFoundException(`Notification with ID ${id} not found`);
       }
       // Cascade delete will handle user_notifications
       await this.notificationRepository.delete(id);
-      return { message: 'Notification deleted successfully' };
+      return { message: "Notification deleted successfully" };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(`Failed to delete notification: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to delete notification: ${error.message}`,
+      );
     }
   }
 
-  async markAsRead(notificationId: number, userId: number, user?: any): Promise<UserNotification> {
+  async markAsRead(
+    notificationId: number,
+    userId: number,
+    user?: any,
+  ): Promise<UserNotification> {
     try {
-      let userNotification = await this.userNotificationRepository.findOne({
+      const userNotification = await this.userNotificationRepository.findOne({
         where: { notification_id: notificationId, user_id: userId },
       });
 
@@ -312,16 +376,19 @@ export class NotificationsService {
         userNotification.updated_by = user;
       }
 
-      const saved = await this.userNotificationRepository.save(userNotification);
+      const saved =
+        await this.userNotificationRepository.save(userNotification);
 
       // Update unread count via WebSocket
       if (this.notificationsGateway) {
         try {
           const unreadCount = await this.getUnreadCount(userId);
           // Emit unread count update to user's room
-          this.notificationsGateway.server.to(`user_${userId}`).emit('unread_count', { count: unreadCount });
+          this.notificationsGateway.server
+            .to(`user_${userId}`)
+            .emit("unread_count", { count: unreadCount });
         } catch (error) {
-          console.error('Failed to send WebSocket update:', error.message);
+          console.error("Failed to send WebSocket update:", error.message);
         }
       }
 
@@ -330,11 +397,16 @@ export class NotificationsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(`Failed to mark notification as read: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to mark notification as read: ${error.message}`,
+      );
     }
   }
 
-  async markAllAsRead(userId: number, user?: any): Promise<{ message: string; count: number }> {
+  async markAllAsRead(
+    userId: number,
+    user?: any,
+  ): Promise<{ message: string; count: number }> {
     try {
       const result = await this.userNotificationRepository
         .createQueryBuilder()
@@ -343,17 +415,19 @@ export class NotificationsService {
           is_read: true,
           read_at: new Date(),
         })
-        .where('user_id = :userId', { userId })
-        .andWhere('is_read = :is_read', { is_read: false })
-        .andWhere('is_archived = :is_archived', { is_archived: false })
+        .where("user_id = :userId", { userId })
+        .andWhere("is_read = :is_read", { is_read: false })
+        .andWhere("is_archived = :is_archived", { is_archived: false })
         .execute();
 
       return {
-        message: 'All notifications marked as read',
+        message: "All notifications marked as read",
         count: result.affected || 0,
       };
     } catch (error) {
-      throw new BadRequestException(`Failed to mark all notifications as read: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to mark all notifications as read: ${error.message}`,
+      );
     }
   }
 
@@ -367,7 +441,9 @@ export class NotificationsService {
         },
       });
     } catch (error) {
-      throw new BadRequestException(`Failed to get unread count: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to get unread count: ${error.message}`,
+      );
     }
   }
 }

@@ -1,14 +1,18 @@
-import { 
-  IsString, 
-  IsOptional, 
-  IsEnum, 
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
   IsNotEmpty,
   IsDateString,
   IsPhoneNumber,
   IsNumber,
-  IsArray
-} from 'class-validator';
-import { BoxType, BoxStatus, CollectionFrequency } from '../entities/donation-box.entity';
+  IsArray,
+} from "class-validator";
+import {
+  BoxType,
+  BoxStatus,
+  CollectionFrequency,
+} from "../entities/donation-box.entity";
 
 export class CreateDonationBoxDto {
   // Box Identification (Required)
@@ -19,7 +23,7 @@ export class CreateDonationBoxDto {
 
   // Location Details (Required) - Geographic Reference
   @IsNumber()
-  @IsNotEmpty({ message: 'Route ID is required' })
+  @IsNotEmpty({ message: "Route ID is required" })
   route_id: number;
 
   @IsNumber()
@@ -28,7 +32,7 @@ export class CreateDonationBoxDto {
 
   // Shop Details (Required shop_name)
   @IsString()
-  @IsNotEmpty({ message: 'Shop name is required' })
+  @IsNotEmpty({ message: "Shop name is required" })
   shop_name: string;
 
   @IsString()
@@ -44,15 +48,22 @@ export class CreateDonationBoxDto {
   landmark_marketplace?: string;
 
   // Box Details
-  @IsEnum(BoxType, { message: 'Box type must be small, medium, large, or custom' })
-  @IsNotEmpty({ message: 'Box type is required' })
+  @IsEnum(BoxType, {
+    message: "Box type must be small, medium, large, or custom",
+  })
+  @IsNotEmpty({ message: "Box type is required" })
   box_type: BoxType;
 
-  @IsEnum(BoxStatus, { message: 'Status must be active, inactive, maintenance, or retired' })
-  @IsNotEmpty({ message: 'Status is required' })
+  @IsEnum(BoxStatus, {
+    message: "Status must be active, inactive, maintenance, or retired",
+  })
+  @IsNotEmpty({ message: "Status is required" })
   status: BoxStatus;
 
-  @IsEnum(CollectionFrequency, { message: 'Frequency must be daily, weekly, bi-weekly, monthly, quarterly, or as-needed' })
+  @IsEnum(CollectionFrequency, {
+    message:
+      "Frequency must be daily, weekly, bi-weekly, monthly, quarterly, or as-needed",
+  })
   @IsOptional()
   frequency?: CollectionFrequency;
 
@@ -62,7 +73,7 @@ export class CreateDonationBoxDto {
   frd_officer_reference?: string;
 
   @IsDateString()
-  @IsNotEmpty({ message: 'Active since date is required' })
+  @IsNotEmpty({ message: "Active since date is required" })
   active_since: Date;
 
   @IsString()
@@ -75,4 +86,3 @@ export class CreateDonationBoxDto {
   @IsOptional()
   assigned_user_ids?: number[];
 }
-

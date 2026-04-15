@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { GoldSilverPriceController } from './gold_silver_price.controller';
-import { GoldSilverPriceService } from './gold_silver_price.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { GoldSilverPriceController } from "./gold_silver_price.controller";
+import { GoldSilverPriceService } from "./gold_silver_price.service";
 
-describe('GoldSilverPriceController', () => {
+describe("GoldSilverPriceController", () => {
   let controller: GoldSilverPriceController;
 
   beforeEach(async () => {
@@ -11,10 +11,12 @@ describe('GoldSilverPriceController', () => {
       providers: [GoldSilverPriceService],
     }).compile();
 
-    controller = module.get<GoldSilverPriceController>(GoldSilverPriceController);
+    controller = module.get<GoldSilverPriceController>(
+      GoldSilverPriceController,
+    );
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(controller).toBeDefined();
   });
 });

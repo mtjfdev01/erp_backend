@@ -8,16 +8,16 @@ import {
   NotFoundException,
   UseGuards,
   HttpStatus,
-} from '@nestjs/common';
-import { Response } from 'express';
-import * as QRCode from 'qrcode';
-import { QrCodeService } from './qr_code.service';
-import { CreateQrCodeDto } from './dto/create-qr_code.dto';
-import { JwtGuard } from '../auth/jwt.guard';
-import { PermissionsGuard } from '../permissions/guards/permissions.guard';
+} from "@nestjs/common";
+import { Response } from "express";
+import * as QRCode from "qrcode";
+import { QrCodeService } from "./qr_code.service";
+import { CreateQrCodeDto } from "./dto/create-qr_code.dto";
+import { JwtGuard } from "../auth/jwt.guard";
+import { PermissionsGuard } from "../permissions/guards/permissions.guard";
 // import { RequiredPermissions } from '../permissions';
 
-@Controller('qr-codes')
+@Controller("qr-codes")
 export class QrCodeController {
   constructor(private readonly service: QrCodeService) {}
 
@@ -30,34 +30,34 @@ export class QrCodeController {
       const result = await this.service.create(dto);
       return {
         success: true,
-        message: 'QR code created successfully',
+        message: "QR code created successfully",
         data: result,
       };
     } catch (error: any) {
       return {
         success: false,
-        message: error.message || 'Failed to create QR code',
+        message: error.message || "Failed to create QR code",
         data: null,
       };
     }
   }
 
-  @Get(':id')
+  @Get(":id")
   @UseGuards(JwtGuard, PermissionsGuard)
   // @RequiredPermissions(['fund_raising.donations.view', 'super_admin', 'fund_raising_manager'])
-  async getOne(@Param('id') id: string, @Res() res: Response) {
+  async getOne(@Param("id") id: string, @Res() res: Response) {
     try {
       const qr = await this.service.findOne(Number(id));
       if (!qr) {
         return res.status(HttpStatus.NOT_FOUND).json({
           success: false,
-          message: 'QR code not found',
+          message: "QR code not found",
           data: null,
         });
       }
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'QR code retrieved successfully',
+        message: "QR code retrieved successfully",
         data: {
           id: qr.id,
           targetUrl: qr.target_url,
@@ -71,59 +71,67 @@ export class QrCodeController {
     } catch (error: any) {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         success: false,
-        message: error.message || 'Failed to retrieve QR code',
+        message: error.message || "Failed to retrieve QR code",
         data: null,
       });
     }
   }
 
   // Serve QR as PNG image (public endpoint - no auth required for image serving)
-  @Get(':id/image')
-  async image(@Param('id') id: string, @Res() res: Response) {
+  @Get(":id/image")
+  async image(@Param("id") id: string, @Res() res: Response) {
     try {
       const qr = await this.service.findOne(Number(id));
       if (!qr || !qr.is_active) {
-        return res.status(HttpStatus.NOT_FOUND).send('QR code not found or inactive');
+        return res
+          .status(HttpStatus.NOT_FOUND)
+          .send("QR code not found or inactive");
       }
 
       // Cache: browsers/CDN can cache this (change if you need instant disable)
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "public, max-age=86400"); // 1 day
 
       const buffer = await QRCode.toBuffer(qr.target_url, {
-        type: 'png',
+        type: "png",
         width: 512,
         margin: 2,
-        errorCorrectionLevel: 'M',
+        errorCorrectionLevel: "M",
       });
 
       return res.send(buffer);
     } catch (error: any) {
-      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Failed to generate QR image');
+      return res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .send("Failed to generate QR image");
     }
   }
 
   // OPTIONAL: Serve SVG for super-sharp printing
-  @Get(':id/svg')
-  async svg(@Param('id') id: string, @Res() res: Response) {
+  @Get(":id/svg")
+  async svg(@Param("id") id: string, @Res() res: Response) {
     try {
       const qr = await this.service.findOne(Number(id));
       if (!qr || !qr.is_active) {
-        return res.status(HttpStatus.NOT_FOUND).send('QR code not found or inactive');
+        return res
+          .status(HttpStatus.NOT_FOUND)
+          .send("QR code not found or inactive");
       }
 
-      res.setHeader('Content-Type', 'image/svg+xml');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.setHeader("Cache-Control", "public, max-age=86400");
 
       const svg = await QRCode.toString(qr.target_url, {
-        type: 'svg',
+        type: "svg",
         margin: 2,
-        errorCorrectionLevel: 'M',
+        errorCorrectionLevel: "M",
       });
 
       return res.send(svg);
     } catch (error: any) {
-      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Failed to generate QR SVG');
+      return res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .send("Failed to generate QR SVG");
     }
   }
 }

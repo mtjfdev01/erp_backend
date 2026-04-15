@@ -1,9 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CreateNewsletterDto } from './dto/create-newsletter.dto';
-import { UpdateNewsletterDto } from './dto/update-newsletter.dto';
-import { NewsletterSubscriber } from './entities/newsletter.entity';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { CreateNewsletterDto } from "./dto/create-newsletter.dto";
+import { UpdateNewsletterDto } from "./dto/update-newsletter.dto";
+import { NewsletterSubscriber } from "./entities/newsletter.entity";
 
 @Injectable()
 export class NewsletterService {
@@ -12,7 +12,9 @@ export class NewsletterService {
     private readonly newsletterRepository: Repository<NewsletterSubscriber>,
   ) {}
 
-  async create(createNewsletterDto: CreateNewsletterDto): Promise<NewsletterSubscriber> {
+  async create(
+    createNewsletterDto: CreateNewsletterDto,
+  ): Promise<NewsletterSubscriber> {
     const subscriber = this.newsletterRepository.create(createNewsletterDto);
     return await this.newsletterRepository.save(subscriber);
   }
@@ -20,7 +22,7 @@ export class NewsletterService {
   async findAll(): Promise<NewsletterSubscriber[]> {
     return await this.newsletterRepository.find({
       where: { is_archived: false },
-      order: { created_at: 'DESC' },
+      order: { created_at: "DESC" },
     });
   }
 
@@ -29,12 +31,17 @@ export class NewsletterService {
       where: { id, is_archived: false },
     });
     if (!subscriber) {
-      throw new NotFoundException(`Newsletter subscriber with ID ${id} not found`);
+      throw new NotFoundException(
+        `Newsletter subscriber with ID ${id} not found`,
+      );
     }
     return subscriber;
   }
 
-  async update(id: number, updateNewsletterDto: UpdateNewsletterDto): Promise<NewsletterSubscriber> {
+  async update(
+    id: number,
+    updateNewsletterDto: UpdateNewsletterDto,
+  ): Promise<NewsletterSubscriber> {
     const subscriber = await this.findOne(id);
     Object.assign(subscriber, updateNewsletterDto);
     return await this.newsletterRepository.save(subscriber);

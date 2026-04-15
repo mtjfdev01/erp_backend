@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ProgressNotificationLog } from './progress_notification_log.entity';
-import { NotificationChannel } from '../common/progress-tracking.enum';
-import { ProgressTracker } from '../progress_trackers/progress_tracker.entity';
-import { ProgressTrackerStep } from '../progress_trackers/progress_tracker_step.entity';
+import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { ProgressNotificationLog } from "./progress_notification_log.entity";
+import { NotificationChannel } from "../common/progress-tracking.enum";
+import { ProgressTracker } from "../progress_trackers/progress_tracker.entity";
+import { ProgressTrackerStep } from "../progress_trackers/progress_tracker_step.entity";
 
 type NotificationAttempt = {
   tracker: ProgressTracker;
@@ -23,7 +23,14 @@ export class ProgressNotificationsService {
     private readonly logsRepo: Repository<ProgressNotificationLog>,
   ) {}
 
-  async logAttempt(params: NotificationAttempt & { status: 'queued' | 'sent' | 'failed'; provider_response?: any; failure_reason?: string | null; sent_at?: Date | null }) {
+  async logAttempt(
+    params: NotificationAttempt & {
+      status: "queued" | "sent" | "failed";
+      provider_response?: any;
+      failure_reason?: string | null;
+      sent_at?: Date | null;
+    },
+  ) {
     const log = this.logsRepo.create({
       tracker_id: params.tracker?.id || null,
       tracker_step_id: params.step?.id || null,
@@ -52,7 +59,8 @@ export class ProgressNotificationsService {
     recipientPhone?: string | null;
     publicUrl?: string | null;
   }): Promise<void> {
-    const title = params.step?.title || params.step?.step_key || 'Progress Update';
+    const title =
+      params.step?.title || params.step?.step_key || "Progress Update";
     const message = params.publicUrl
       ? `Your progress has been updated: ${title}. Track here: ${params.publicUrl}`
       : `Your progress has been updated: ${title}.`;
@@ -65,8 +73,12 @@ export class ProgressNotificationsService {
         recipient: params.recipientEmail,
         subject: `Progress update: ${title}`,
         message,
-        payload: { trackerId: params.tracker.id, stepId: params.step.id, publicUrl: params.publicUrl },
-        status: 'queued',
+        payload: {
+          trackerId: params.tracker.id,
+          stepId: params.step.id,
+          publicUrl: params.publicUrl,
+        },
+        status: "queued",
       });
     }
 
@@ -78,10 +90,13 @@ export class ProgressNotificationsService {
         recipient: params.recipientPhone,
         subject: null,
         message,
-        payload: { trackerId: params.tracker.id, stepId: params.step.id, publicUrl: params.publicUrl },
-        status: 'queued',
+        payload: {
+          trackerId: params.tracker.id,
+          stepId: params.step.id,
+          publicUrl: params.publicUrl,
+        },
+        status: "queued",
       });
     }
   }
 }
-

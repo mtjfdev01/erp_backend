@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateDmDto } from './dto/create-dm.dto';
-import { UpdateDmDto } from './dto/update-dm.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateDmDto } from "./dto/create-dm.dto";
+import { UpdateDmDto } from "./dto/update-dm.dto";
 
 @Injectable()
 export class DmsService {
   create(createDmDto: CreateDmDto) {
-    return 'This action adds a new dm';
+    return "This action adds a new dm";
   }
 
   findAll() {

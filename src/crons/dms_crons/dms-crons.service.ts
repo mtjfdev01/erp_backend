@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Not, IsNull, FindOperator } from 'typeorm';
-import { Donation } from '../../donations/entities/donation.entity';
-import { DonationsService } from '../../donations/donations.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { Cron } from "@nestjs/schedule";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, In, Not, IsNull, FindOperator } from "typeorm";
+import { Donation } from "../../donations/entities/donation.entity";
+import { DonationsService } from "../../donations/donations.service";
 
 @Injectable()
 export class DmsCronsService {
@@ -19,12 +19,12 @@ export class DmsCronsService {
    * Nightly cron - Runs at 1:30 AM every day (Asia/Karachi)
    * Syncs all pending/registered Meezan donations with the Meezan API
    */
-  @Cron('30 1 * * *', {
-    name: 'meezan-nightly-status-sync',
-    timeZone: 'Asia/Karachi',
+  @Cron("30 1 * * *", {
+    name: "meezan-nightly-status-sync",
+    timeZone: "Asia/Karachi",
   })
   async handleNightlyMeezanSync() {
-    this.logger.log('⏰ Nightly Meezan status sync cron started');
+    this.logger.log("⏰ Nightly Meezan status sync cron started");
     await this.syncMeezanDonations();
   }
 
@@ -32,12 +32,12 @@ export class DmsCronsService {
    * Nightly cron - Runs at 2:00 AM every day (Asia/Karachi)
    * Cleans up multiple pending donations for donors on the same day.
    */
-  @Cron('0 2 * * *', {
-    name: 'daily-pending-donations-cleanup',
-    timeZone: 'Asia/Karachi',
+  @Cron("0 2 * * *", {
+    name: "daily-pending-donations-cleanup",
+    timeZone: "Asia/Karachi",
   })
   async handleDailyPendingDonationsCleanup() {
-    this.logger.log('⏰ Daily pending donations cleanup cron started');
+    this.logger.log("⏰ Daily pending donations cleanup cron started");
     await this.cleanupPendingDonations();
   }
 
@@ -64,26 +64,28 @@ export class DmsCronsService {
 
     try {
       const statusFilter = allNonCompleted
-        ? Not(In(['completed']))
-        : In(['pending', 'registered', 'failed', 'cancelled', 'refunded']);
+        ? Not(In(["completed"]))
+        : In(["pending", "registered", "failed", "cancelled", "refunded"]);
 
-      const label = allNonCompleted ? 'non-completed' : 'pending/registered/failed/cancelled/refunded';
+      const label = allNonCompleted
+        ? "non-completed"
+        : "pending/registered/failed/cancelled/refunded";
 
       const pendingMeezanDonations = await this.donationRepository.find({
         where: {
-          donation_method: 'meezan',
+          donation_method: "meezan",
           status: statusFilter,
           orderId: Not(IsNull()),
         },
-        select: ['id', 'orderId', 'status', 'amount', 'created_at'],
-        order: { created_at: 'DESC' },
+        select: ["id", "orderId", "status", "amount", "created_at"],
+        order: { created_at: "DESC" },
       });
 
       const total = pendingMeezanDonations.length;
       this.logger.log(`Found ${total} ${label} Meezan donations to sync`);
 
       if (total === 0) {
-        this.logger.log('No pending Meezan donations found. Sync complete.');
+        this.logger.log("No pending Meezan donations found. Sync complete.");
         return { total: 0, synced: 0, updated: 0, failed: 0, results: [] };
       }
 
@@ -95,7 +97,9 @@ export class DmsCronsService {
       // Process each donation sequentially to avoid overwhelming the Meezan API
       for (const donation of pendingMeezanDonations) {
         try {
-          const result = await this.donationsService.getProviderStatus(donation.id);
+          const result = await this.donationsService.getProviderStatus(
+            donation.id,
+          );
           synced++;
 
           if (result.dbUpdated) {
@@ -136,7 +140,10 @@ export class DmsCronsService {
 
       return { total, synced, updated, failed, results };
     } catch (error) {
-      this.logger.error(`Meezan sync cron failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Meezan sync cron failed: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -156,18 +163,18 @@ export class DmsCronsService {
     results: any[];
   }> {
     const startTime = Date.now();
-    this.logger.log('Starting daily pending donations cleanup...');
+    this.logger.log("Starting daily pending donations cleanup...");
 
     try {
       // 1. Find all donors who have multiple donations (pending or completed) on the current day.
       const donorsWithMultipleDonations = await this.donationRepository
-        .createQueryBuilder('donation')
-        .select('donation.donor_id', 'donor_id')
-        .addSelect('COUNT(donation.id)', 'donation_count')
-        .where('donation.date = CURRENT_DATE')
-        .andWhere('donation.donor_id IS NOT NULL')
-        .groupBy('donation.donor_id')
-        .having('COUNT(donation.id) > 1')
+        .createQueryBuilder("donation")
+        .select("donation.donor_id", "donor_id")
+        .addSelect("COUNT(donation.id)", "donation_count")
+        .where("donation.date = CURRENT_DATE")
+        .andWhere("donation.donor_id IS NOT NULL")
+        .groupBy("donation.donor_id")
+        .having("COUNT(donation.id) > 1")
         .getRawMany();
 
       let processedDonors = 0;
@@ -180,17 +187,17 @@ export class DmsCronsService {
 
         // Get all donations for this donor on the current day
         const allDonationsForDonor = await this.donationRepository
-          .createQueryBuilder('donation')
-          .where('donation.donor_id = :donorId', { donorId })
-          .andWhere('donation.date = CURRENT_DATE')
-          .orderBy('donation.id', 'ASC') // Order by ID to identify the 'first' pending
+          .createQueryBuilder("donation")
+          .where("donation.donor_id = :donorId", { donorId })
+          .andWhere("donation.date = CURRENT_DATE")
+          .orderBy("donation.id", "ASC") // Order by ID to identify the 'first' pending
           .getMany();
 
         const completedDonations = allDonationsForDonor.filter(
-          (d) => d.status === 'completed',
+          (d) => d.status === "completed",
         );
         const pendingDonations = allDonationsForDonor.filter(
-          (d) => d.status === 'pending',
+          (d) => d.status === "pending",
         );
 
         if (completedDonations.length > 0) {
@@ -201,8 +208,8 @@ export class DmsCronsService {
             results.push({
               donorId,
               donationId: pending.id,
-              action: 'deleted',
-              reason: 'completed donation exists',
+              action: "deleted",
+              reason: "completed donation exists",
             });
             this.logger.log(
               `Deleted pending donation #${pending.id} for donor ${donorId} (completed donation exists)`,
@@ -218,8 +225,8 @@ export class DmsCronsService {
             results.push({
               donorId,
               donationId: pendingToDelete.id,
-              action: 'deleted',
-              reason: 'multiple pending, kept first',
+              action: "deleted",
+              reason: "multiple pending, kept first",
               keptDonationId: firstPending.id,
             });
             this.logger.log(

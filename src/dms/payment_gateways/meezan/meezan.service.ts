@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateMeezanDto } from './dto/create-meezan.dto';
-import { UpdateMeezanDto } from './dto/update-meezan.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateMeezanDto } from "./dto/create-meezan.dto";
+import { UpdateMeezanDto } from "./dto/update-meezan.dto";
 
 @Injectable()
 export class MeezanService {
   create(createMeezanDto: CreateMeezanDto) {
-    return 'This action adds a new meezan';
+    return "This action adds a new meezan";
   }
 
   findAll() {

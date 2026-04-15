@@ -1,4 +1,12 @@
-import { IsString, IsEmail, IsOptional, IsNumber, IsUrl, MinLength, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsNumber,
+  IsUrl,
+  MinLength,
+  MaxLength,
+} from "class-validator";
 
 export class CreateApplicationDto {
   @IsString()

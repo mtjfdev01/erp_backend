@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateDonationInKindDto } from './dto/create-donation_in_kind.dto';
-import { UpdateDonationInKindDto } from './dto/update-donation_in_kind.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateDonationInKindDto } from "./dto/create-donation_in_kind.dto";
+import { UpdateDonationInKindDto } from "./dto/update-donation_in_kind.dto";
 
 @Injectable()
 export class DonationInKindService {
   create(createDonationInKindDto: CreateDonationInKindDto) {
-    return 'This action adds a new donationInKind';
+    return "This action adds a new donationInKind";
   }
 
   findAll() {
@@ -23,5 +23,4 @@ export class DonationInKindService {
   remove(id: number) {
     return `This action removes a #${id} donationInKind`;
   }
-
 }

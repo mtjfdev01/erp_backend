@@ -1,6 +1,12 @@
-import { IsOptional, IsString, IsEnum, IsNumber, IsDateString } from 'class-validator';
-import { Type } from 'class-transformer';
-import { EventStatus } from '../entities/event.entity';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsNumber,
+  IsDateString,
+} from "class-validator";
+import { Type } from "class-transformer";
+import { EventStatus } from "../entities/event.entity";
 
 export class EventFiltersDto {
   @IsOptional()

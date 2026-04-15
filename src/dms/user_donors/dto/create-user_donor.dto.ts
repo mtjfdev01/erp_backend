@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsIn, MinLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsIn,
+  MinLength,
+} from "class-validator";
 
 export class CreateUserDonorDto {
   @IsNumber()
@@ -11,12 +18,14 @@ export class CreateUserDonorDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['active', 'inactive'], { message: 'Status must be either active or inactive' })
-  status?: string = 'active';
+  @IsIn(["active", "inactive"], {
+    message: "Status must be either active or inactive",
+  })
+  status?: string = "active";
 
   @IsString()
   @IsOptional()
-  @MinLength(3, { message: 'Notes must be at least 3 characters long' })
+  @MinLength(3, { message: "Notes must be at least 3 characters long" })
   notes?: string;
 
   @IsNumber()

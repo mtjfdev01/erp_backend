@@ -1,5 +1,13 @@
-import { IsString, IsDate, IsOptional, IsArray, ValidateNested, IsNumber, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsString,
+  IsDate,
+  IsOptional,
+  IsArray,
+  ValidateNested,
+  IsNumber,
+  Min,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateApplicationDto {
   @IsString()
@@ -61,4 +69,4 @@ export class UpdateApplicationReportDto {
   @Type(() => UpdateApplicationDto)
   @IsOptional()
   applications?: UpdateApplicationDto[];
-} 
+}

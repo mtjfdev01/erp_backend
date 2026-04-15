@@ -1,5 +1,5 @@
-import { IsDate, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsNumber, Min, IsOptional } from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateFinancialAssistanceReportDto {
   @IsDate()
@@ -25,4 +25,4 @@ export class CreateFinancialAssistanceReportDto {
   @Min(0)
   @IsOptional()
   extreme_poor?: number;
-} 
+}

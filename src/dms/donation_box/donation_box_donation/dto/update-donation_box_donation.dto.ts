@@ -1,4 +1,3 @@
-
 import {
   IsNumber,
   IsDateString,
@@ -7,8 +6,11 @@ import {
   IsEnum,
   IsArray,
   Min,
-} from 'class-validator';
-import { CollectionStatus, PaymentMethod } from '../entities/donation_box_donation.entity';
+} from "class-validator";
+import {
+  CollectionStatus,
+  PaymentMethod,
+} from "../entities/donation_box_donation.entity";
 
 export class UpdateDonationBoxDonationDto {
   // All fields are optional for updates
@@ -18,7 +20,7 @@ export class UpdateDonationBoxDonationDto {
 
   @IsNumber()
   @IsOptional()
-  @Min(0, { message: 'Collection amount must be greater than or equal to 0' })
+  @Min(0, { message: "Collection amount must be greater than or equal to 0" })
   collection_amount?: number;
 
   @IsDateString()
@@ -34,7 +36,7 @@ export class UpdateDonationBoxDonationDto {
   collector_name?: string;
 
   @IsEnum(CollectionStatus, {
-    message: 'Status must be pending, verified, deposited, or cancelled',
+    message: "Status must be pending, verified, deposited, or cancelled",
   })
   @IsOptional()
   status?: CollectionStatus;
@@ -56,7 +58,7 @@ export class UpdateDonationBoxDonationDto {
   bank_deposit_slip_no?: string;
 
   @IsEnum(PaymentMethod, {
-    message: 'Payment method must be cash, cheque, bank_transfer, or other',
+    message: "Payment method must be cash, cheque, bank_transfer, or other",
   })
   @IsOptional()
   payment_method?: PaymentMethod;

@@ -62,7 +62,7 @@ export class TasksService {
     private readonly taskApprovalRepo: Repository<TaskApproval>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
-  ) { }
+  ) {}
 
   private userDisplayName(u?: User | null): string | null {
     if (!u) return null;
@@ -78,8 +78,8 @@ export class TasksService {
     );
     const deptKey =
       user.department &&
-        permissions?.[user.department] &&
-        permissions[user.department]?.tasks
+      permissions?.[user.department] &&
+      permissions[user.department]?.tasks
         ? user.department
         : null;
     const modulePermissions =
@@ -228,10 +228,10 @@ export class TasksService {
     taskId: number,
     meta:
       | {
-        user_id: number;
-        decision: "approved" | "rejected" | "pending";
-        decided_at?: Date;
-      }[]
+          user_id: number;
+          decision: "approved" | "rejected" | "pending";
+          decided_at?: Date;
+        }[]
       | null,
   ): Promise<void> {
     if (!taskId) return;
@@ -256,39 +256,54 @@ export class TasksService {
     qb.andWhere(
       new Brackets((mainQb) => {
         // A. Super Admin & Admin: Always see all tasks
-        if (user.role === UserRole.SUPER_ADMIN || user.role === UserRole.ADMIN) {
+        const roleStr = String(user.role).toLowerCase();
+        if (roleStr === UserRole.SUPER_ADMIN || roleStr === UserRole.ADMIN) {
           mainQb.where("1=1");
           return;
         }
 
         // B. Required Approver: See tasks they need to approve (even across departments)
-        mainQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
-          userId: user.id,
-        });
+        mainQb.where(
+          "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+          {
+            userId: user.id,
+          },
+        );
 
         // C. Direct Involvement: See tasks where user is assigned, creator, or reporter (regardless of department)
-        mainQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", { userId: user.id });
+        mainQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
+          userId: user.id,
+        });
         mainQb.orWhere("task.created_by_id = :userId", { userId: user.id });
         mainQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
 
         // D. Role-based Department Visibility: Leaders see all tasks within their department
+        const leadershipRoles = [
+          UserRole.DEPT_HEAD,
+          UserRole.MANAGER,
+          UserRole.ASSISTANT_MANAGER,
+          UserRole.TEAM_LEAD,
+          UserRole.COORDINATOR,
+          UserRole.SYSTEM_ADMIN,
+        ];
+
         if (
           user.department &&
-          (user.role === UserRole.DEPT_HEAD ||
-            user.role === UserRole.MANAGER ||
-            user.role === UserRole.TEAM_LEAD)
+          roleStr &&
+          leadershipRoles.map((r) => r.toLowerCase()).includes(roleStr)
         ) {
-          mainQb.orWhere("task.department::text = :userDept", {
-            userDept: user.department,
+          mainQb.orWhere("task.department = :userDept", {
+            userDept: user.department.toLowerCase(),
           });
 
           // E. Cross-department visibility for Managers:
           // If a task is assigned to a user who belongs to the manager's department,
           // the manager should see it even if the task's primary department is different.
-          mainQb.orWhere(
-            "task.assigned_users_meta @> :deptMeta::jsonb",
-            { deptMeta: JSON.stringify([{ department: user.department }]) },
-          );
+          mainQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
+            deptMeta: JSON.stringify([
+              { department: String(user.department).toLowerCase() },
+            ]),
+          });
         }
       }),
     );
@@ -296,7 +311,9 @@ export class TasksService {
 
   private async getAssignedUsersMeta(
     userIds?: number[],
-  ): Promise<{ user_id: number; department: Department; name: string }[] | null> {
+  ): Promise<
+    { user_id: number; department: Department; name: string }[] | null
+  > {
     if (!Array.isArray(userIds) || userIds.length === 0) {
       return null;
     }
@@ -313,13 +330,18 @@ export class TasksService {
     return users.map((u) => ({
       user_id: u.id,
       department: u.department,
-      name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || `User #${u.id}`,
+      name:
+        `${u.first_name || ""} ${u.last_name || ""}`.trim() ||
+        u.email ||
+        `User #${u.id}`,
     }));
   }
 
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
     try {
-      const assignedUsersMeta = await this.getAssignedUsersMeta(dto.assigned_users);
+      const assignedUsersMeta = await this.getAssignedUsersMeta(
+        dto.assigned_users,
+      );
 
       const task = this.taskRepo.create({
         title: dto.title,
@@ -342,8 +364,8 @@ export class TasksService {
                 dto.recurrence_rule,
               )
             : dto.recurrence_next_date
-            ? new Date(dto.recurrence_next_date)
-            : null,
+              ? new Date(dto.recurrence_next_date)
+              : null,
         recurrence_end_type: dto.recurrence_end_type || RecurrenceEndType.NEVER,
         recurrence_end_date: dto.recurrence_end_date
           ? new Date(dto.recurrence_end_date)
@@ -409,7 +431,7 @@ export class TasksService {
     let lastDate: Date | null = null;
     let remainingCount: number | null = null;
 
-    let current = task.recurrence_next_date
+    const current = task.recurrence_next_date
       ? new Date(task.recurrence_next_date)
       : new Date();
 
@@ -500,41 +522,97 @@ export class TasksService {
         delete safeFilters.view_type;
       }
 
-      const isStrictDept = payload?.strictDepartment === true;
       delete safeFilters.strictDepartment;
+
+      const startDate = safeFilters.start_date;
+      const endDate = safeFilters.end_date;
+      const exactDate = safeFilters.date;
+      delete safeFilters.start_date;
+      delete safeFilters.end_date;
+      delete safeFilters.date;
+
+      const assigneeIdRaw =
+        safeFilters.assignee_id ?? safeFilters.assigned_user_id;
+      delete safeFilters.assignee_id;
+      delete safeFilters.assigned_user_id;
+
+      if (startDate) {
+        qb.andWhere("task.created_at >= :start_date", {
+          start_date: startDate,
+        });
+      }
+      if (endDate) {
+        qb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+      }
+      if (exactDate) {
+        qb.andWhere("DATE(task.created_at) = :exact_date", {
+          exact_date: exactDate,
+        });
+      }
+
+      if (
+        assigneeIdRaw !== undefined &&
+        assigneeIdRaw !== null &&
+        assigneeIdRaw !== ""
+      ) {
+        const assigneeId = Number(assigneeIdRaw);
+        if (!isNaN(assigneeId)) {
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.assigned_user_ids @> ARRAY[:assigneeId]::int[]", {
+                assigneeId,
+              });
+              dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+                metaObj: JSON.stringify([{ user_id: assigneeId }]),
+              });
+            }),
+          );
+        }
+      }
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
       if (viewTypeFilter === "created" && currentUser) {
-        qb.andWhere("task.created_by_id = :currentUserId", { currentUserId: currentUser.id });
+        qb.andWhere("task.created_by_id = :currentUserId", {
+          currentUserId: currentUser.id,
+        });
       } else if (viewTypeFilter === "assigned" && currentUser) {
-        qb.andWhere(new Brackets((dqb) => {
-          dqb.where("task.assigned_user_ids @> ARRAY[:currentUserId]::int[]", { currentUserId: currentUser.id });
-          dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", { 
-            metaObj: JSON.stringify([{ user_id: currentUser.id }]) 
-          });
-        }));
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
+            });
+          }),
+        );
       }
 
       if (departmentFilter) {
+        const lowerDept = String(departmentFilter).toLowerCase();
         // This checks if any of the assigned users belong to the filtered department.
-        qb.andWhere(new Brackets((dqb) => {
-          dqb.where(
-            "task.assigned_users_meta @> :deptMeta::jsonb",
-            { deptMeta: JSON.stringify([{ department: departmentFilter }]) }
-          );
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+              deptMeta: JSON.stringify([{ department: lowerDept }]),
+            });
 
-          // Optionally, if there are no assigned users, you might still want to see tasks 
-          // that are explicitly labeled with that department (the current behavior).
-          // But according to the user request, they want it based on the assignee's department.
-          // To be safe and comprehensive, we can keep the direct department check as well
-          // OR remove it if they ONLY want assignee-based filtering.
-          // The request says: "It should filter tasks based on the assignee’s department, 
-          // but it is currently filtering by the task creator’s department."
-          // Note: task.department is usually set at creation time.
-          
-          dqb.orWhere("task.department::text = :department", { department: departmentFilter });
-        }));
+            // Optionally, if there are no assigned users, you might still want to see tasks
+            // that are explicitly labeled with that department (the current behavior).
+            // But according to the user request, they want it based on the assignee's department.
+            // To be safe and comprehensive, we can keep the direct department check as well
+            // OR remove it if they ONLY want assignee-based filtering.
+            // The request says: "It should filter tasks based on the assignee’s department,
+            // but it is currently filtering by the task creator’s department."
+            // Note: task.department is usually set at creation time.
+
+            dqb.orWhere("task.department = :department", {
+              department: lowerDept,
+            });
+          }),
+        );
       }
 
       const validSort = [
@@ -584,20 +662,27 @@ export class TasksService {
         });
       }
       if (filters.department) {
-        if (filters.strictDepartment === true || filters.strictDepartment === "true") {
-          qb.andWhere("task.department::text = :filterDept", { filterDept: filters.department });
+        const lowerDept = String(filters.department).toLowerCase();
+        if (
+          filters.strictDepartment === true ||
+          filters.strictDepartment === "true"
+        ) {
+          qb.andWhere("task.department = :filterDept", {
+            filterDept: lowerDept,
+          });
         } else {
-          qb.andWhere(new Brackets((dqb) => {
-            // Filter by the department of the assigned users (assignee's department)
-            dqb.where(
-              "task.assigned_users_meta @> :deptMeta::jsonb",
-              { deptMeta: JSON.stringify([{ department: filters.department }]) }
-            );
+          qb.andWhere(
+            new Brackets((dqb) => {
+              // We cannot easily do case-insensitive JSONB containment, so we'll just check exact
+              dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                deptMeta: JSON.stringify([{ department: lowerDept }]),
+              });
 
-            // Keep the direct department check as well for backward compatibility and
-            // to include tasks explicitly labeled with that department.
-            dqb.orWhere("task.department::text = :filterDept", { filterDept: filters.department });
-          }));
+              dqb.orWhere("task.department = :filterDept", {
+                filterDept: lowerDept,
+              });
+            }),
+          );
         }
       }
       if (filters.project_id) {
@@ -607,14 +692,21 @@ export class TasksService {
       }
 
       if (filters.view_type === "created" && currentUser) {
-        qb.andWhere("task.created_by_id = :currentUserId", { currentUserId: currentUser.id });
+        qb.andWhere("task.created_by_id = :currentUserId", {
+          currentUserId: currentUser.id,
+        });
       } else if (filters.view_type === "assigned" && currentUser) {
-        qb.andWhere(new Brackets((dqb) => {
-          dqb.where("task.assigned_user_ids @> ARRAY[:currentUserId]::int[]", { currentUserId: currentUser.id });
-          dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", { 
-            metaObj: JSON.stringify([{ user_id: currentUser.id }]) 
-          });
-        }));
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
+            });
+          }),
+        );
       }
 
       const totalTasks = await qb.getCount();
@@ -640,6 +732,18 @@ export class TasksService {
         .groupBy("task.department")
         .getRawMany();
 
+      const departmentStatusBreakdown = await qb
+        .clone()
+        .select("task.department", "department")
+        .addSelect("task.status", "status")
+        .addSelect(
+          "json_agg(json_build_object('id', task.id, 'title', task.title))",
+          "tasks",
+        )
+        .groupBy("task.department")
+        .addGroupBy("task.status")
+        .getRawMany();
+
       const overdueTasks = await qb
         .clone()
         .andWhere("task.due_date < CURRENT_DATE")
@@ -655,8 +759,12 @@ export class TasksService {
 
       const completedTasks = await qb
         .clone()
-        .andWhere("task.status = :completedStatus", {
-          completedStatus: TaskStatus.CLOSED,
+        .andWhere("task.status IN (:...completedStatuses)", {
+          completedStatuses: [
+            TaskStatus.CLOSED,
+            TaskStatus.COMPLETED,
+            TaskStatus.APPROVED,
+          ],
         })
         .getCount();
 
@@ -675,6 +783,19 @@ export class TasksService {
         ),
         department_breakdown: departmentBreakdown.reduce(
           (acc, item) => ({ ...acc, [item.department]: +item.count }),
+          {},
+        ),
+        department_status_breakdown: departmentStatusBreakdown.reduce(
+          (acc, item) => {
+            if (!acc[item.department]) {
+              acc[item.department] = {};
+            }
+            acc[item.department][item.status] = {
+              count: item.tasks.length,
+              tasks: item.tasks,
+            };
+            return acc;
+          },
           {},
         ),
         overdue_tasks: overdueTasks,
@@ -703,20 +824,25 @@ export class TasksService {
         qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
       }
       if (query.department) {
-        if (query.strictDepartment === true || query.strictDepartment === "true") {
-          qb.andWhere("task.department::text = :filterDept", { filterDept: query.department });
+        const lowerDept = String(query.department).toLowerCase();
+        if (
+          query.strictDepartment === true ||
+          query.strictDepartment === "true"
+        ) {
+          qb.andWhere("task.department = :filterDept", {
+            filterDept: lowerDept,
+          });
         } else {
-          qb.andWhere(new Brackets((dqb) => {
-            // Filter by the department of the assigned users (assignee's department)
-            dqb.where(
-              "task.assigned_users_meta @> :deptMeta::jsonb",
-              { deptMeta: JSON.stringify([{ department: query.department }]) }
-            );
-
-            // Keep the direct department check as well for backward compatibility and
-            // to include tasks explicitly labeled with that department.
-            dqb.orWhere("task.department::text = :filterDept", { filterDept: query.department });
-          }));
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                deptMeta: JSON.stringify([{ department: lowerDept }]),
+              });
+              dqb.orWhere("task.department = :filterDept", {
+                filterDept: lowerDept,
+              });
+            }),
+          );
         }
       }
       if (query.project_id) {
@@ -726,63 +852,190 @@ export class TasksService {
       }
 
       if (query.view_type === "created" && currentUser) {
-        qb.andWhere("task.created_by_id = :currentUserId", { currentUserId: currentUser.id });
+        qb.andWhere("task.created_by_id = :currentUserId", {
+          currentUserId: currentUser.id,
+        });
       } else if (query.view_type === "assigned" && currentUser) {
-        qb.andWhere(new Brackets((dqb) => {
-          dqb.where("task.assigned_user_ids @> ARRAY[:currentUserId]::int[]", { currentUserId: currentUser.id });
-          dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", { 
-            metaObj: JSON.stringify([{ user_id: currentUser.id }]) 
-          });
-        }));
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
+            });
+          }),
+        );
       }
 
       const tasks = await qb.getMany();
 
-      const userCountsMap: Record<string, { label: string; count: number }> = {};
+      const userCountsMap: Record<
+        string,
+        {
+          label: string;
+          count: number;
+          in_progress_count: number;
+          completed_count: number;
+          overdue_count: number;
+          role: string;
+        }
+      > = {};
       const projectCountsMap: Record<string, number> = {};
       let totalDays = 0;
       let completedCount = 0;
 
-      // Pre-fetch user names to avoid multiple queries or complex joins if preferred, 
+      // Pre-fetch user names to avoid multiple queries or complex joins if preferred,
       // but let's just collect all unique user IDs first.
       const allUserIds = new Set<number>();
       for (const t of tasks) {
         if (Array.isArray(t.assigned_user_ids)) {
-          t.assigned_user_ids.forEach(id => allUserIds.add(Number(id)));
+          t.assigned_user_ids.forEach((id) => allUserIds.add(Number(id)));
         }
       }
 
-      const usersList = allUserIds.size > 0
-        ? await this.userRepo.createQueryBuilder("user")
-          .where("user.id IN (:...ids)", { ids: Array.from(allUserIds) })
-          .getMany()
-        : [];
+      const usersListQuery = this.userRepo
+        .createQueryBuilder("user")
+        .where("(user.isActive = true OR user.isActive IS NULL)");
 
-      const userNamesMap = new Map<number, string>();
-      usersList.forEach(u => {
-        const name = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.email || `User #${u.id}`;
-        userNamesMap.set(Number(u.id), name);
+      if (query.department) {
+        const lowerDept = String(query.department).toLowerCase();
+        usersListQuery.andWhere(
+          new Brackets((bqb) => {
+            bqb.where("user.department = :dept", { dept: lowerDept });
+            if (allUserIds.size > 0) {
+              bqb.orWhere("user.id IN (:...ids)", {
+                ids: Array.from(allUserIds),
+              });
+            }
+          }),
+        );
+      } else if (allUserIds.size > 0) {
+        usersListQuery.andWhere("user.id IN (:...ids)", {
+          ids: Array.from(allUserIds),
+        });
+      } else if (
+        currentUser &&
+        currentUser.role !== UserRole.SUPER_ADMIN &&
+        currentUser.role !== UserRole.ADMIN
+      ) {
+        if (currentUser.department) {
+          usersListQuery.andWhere(
+            "LOWER(user.department::text) = LOWER(:dept)",
+            { dept: currentUser.department },
+          );
+        } else {
+          usersListQuery.andWhere("user.id = :id", { id: currentUser.id });
+        }
+      }
+
+      const usersList = await usersListQuery.getMany();
+
+      const userNamesMap = new Map<
+        number,
+        { name: string; role: string; id: number }
+      >();
+      usersList.forEach((u) => {
+        const name =
+          `${u.first_name || ""} ${u.last_name || ""}`.trim() ||
+          u.email ||
+          `User #${u.id}`;
+        userNamesMap.set(Number(u.id), { name, role: u.role, id: u.id });
       });
 
+      // Initialize userCountsMap with all fetched users to show 0-task users as well
+      usersList.forEach((u) => {
+        const userId = Number(u.id);
+        const name =
+          `${u.first_name || ""} ${u.last_name || ""}`.trim() ||
+          u.email ||
+          `User #${u.id}`;
+        userCountsMap[userId] = {
+          label: name,
+          role: u.role,
+          count: 0,
+          in_progress_count: 0,
+          completed_count: 0,
+          overdue_count: 0,
+        };
+      });
+
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+
       for (const t of tasks) {
+        const isOverdue =
+          t.due_date &&
+          new Date(t.due_date) < now &&
+          ![
+            TaskStatus.CLOSED,
+            TaskStatus.COMPLETED,
+            TaskStatus.CANCELLED,
+            TaskStatus.APPROVED,
+          ].includes(t.status);
+
         if (
           Array.isArray(t.assigned_user_ids) &&
           t.assigned_user_ids.length > 0
         ) {
           for (const uid of t.assigned_user_ids) {
             const userId = Number(uid);
-            const name = userNamesMap.get(userId) || `User #${userId}`;
             if (!userCountsMap[userId]) {
-              userCountsMap[userId] = { label: name, count: 0 };
+              const userMeta = userNamesMap.get(userId) || {
+                name: `User #${userId}`,
+                role: "Staff",
+              };
+              userCountsMap[userId] = {
+                label: userMeta.name,
+                role: userMeta.role,
+                count: 0,
+                in_progress_count: 0,
+                completed_count: 0,
+                overdue_count: 0,
+              };
             }
             userCountsMap[userId].count++;
+            if (t.status === TaskStatus.IN_PROGRESS) {
+              userCountsMap[userId].in_progress_count++;
+            }
+            if (
+              t.status === TaskStatus.CLOSED ||
+              t.status === TaskStatus.COMPLETED ||
+              t.status === TaskStatus.APPROVED
+            ) {
+              userCountsMap[userId].completed_count++;
+            }
+            if (isOverdue) {
+              userCountsMap[userId].overdue_count++;
+            }
           }
         } else {
           const label = "Unassigned";
           if (!userCountsMap[label]) {
-            userCountsMap[label] = { label: "Unassigned", count: 0 };
+            userCountsMap[label] = {
+              label: "Unassigned",
+              count: 0,
+              in_progress_count: 0,
+              completed_count: 0,
+              overdue_count: 0,
+              role: "",
+            };
           }
           userCountsMap[label].count++;
+          if (t.status === TaskStatus.IN_PROGRESS) {
+            userCountsMap[label].in_progress_count++;
+          }
+          if (
+            t.status === TaskStatus.CLOSED ||
+            t.status === TaskStatus.COMPLETED ||
+            t.status === TaskStatus.APPROVED
+          ) {
+            userCountsMap[label].completed_count++;
+          }
+          if (isOverdue) {
+            userCountsMap[label].overdue_count++;
+          }
         }
 
         const projectKey = t.project_name || "No Project";
@@ -800,10 +1053,23 @@ export class TasksService {
         }
       }
 
-      const users = Object.values(userCountsMap).map((item) => ({
-        label: item.label,
-        count: item.count,
-      }));
+      const users = Object.entries(userCountsMap).map(
+        ([id, item]: [string, any]) => ({
+          id: isNaN(Number(id)) ? null : Number(id),
+          label: item.label,
+          count: item.count,
+          in_progress_count: item.in_progress_count,
+          completed_count: item.completed_count,
+          overdue_count: item.overdue_count,
+          role: item.role,
+          rate:
+            item.count > 0
+              ? parseFloat(
+                  ((item.completed_count / item.count) * 100).toFixed(1),
+                )
+              : 0,
+        }),
+      );
       const projects = Object.entries(projectCountsMap).map(
         ([label, count]) => ({
           label,
@@ -858,21 +1124,22 @@ export class TasksService {
         const perms = await this.getTaskPermissionsForUser(currentUser);
         const userId = Number(currentUser.id);
         const assignedIds = Array.isArray(task.assigned_user_ids)
-          ? task.assigned_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
+          ? task.assigned_user_ids
+              .map((v) => Number(v))
+              .filter((v) => !isNaN(v))
           : [];
         const approverIds = Array.isArray(task.approval_required_user_ids)
           ? task.approval_required_user_ids
-            .map((v) => Number(v))
-            .filter((v) => !isNaN(v))
+              .map((v) => Number(v))
+              .filter((v) => !isNaN(v))
           : [];
         const isAssignee = assignedIds.includes(userId);
         const isApprover = approverIds.includes(userId);
         const isReporterOrCreator =
           (task.reported_by_id != null &&
             Number(task.reported_by_id) === userId) ||
-          (task.created_by_id != null &&
-            Number(task.created_by_id) === userId);
-        
+          (task.created_by_id != null && Number(task.created_by_id) === userId);
+
         // E. Check if user is a manager of any assigned user's department
         const isManagerOfAssignee =
           currentUser.department &&
@@ -936,13 +1203,20 @@ export class TasksService {
       }
 
       // If user is trying to CLOSE a COMPLETED task, allow it if they are the creator or reporter
-      if (task.status === TaskStatus.COMPLETED && dto.status === TaskStatus.CLOSED) {
+      if (
+        task.status === TaskStatus.COMPLETED &&
+        dto.status === TaskStatus.CLOSED
+      ) {
         const isCreator = task.created_by_id === currentUser.id;
         const isReporter = task.reported_by_id === currentUser.id;
-        const isAdmin = currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN;
+        const isAdmin =
+          currentUser.role === UserRole.SUPER_ADMIN ||
+          currentUser.role === UserRole.ADMIN;
 
         if (!isCreator && !isReporter && !isAdmin) {
-          throw new ForbiddenException("Only the creator, assigner, or an Admin can close this task.");
+          throw new ForbiddenException(
+            "Only the creator, assigner, or an Admin can close this task.",
+          );
         }
       }
 
@@ -1043,8 +1317,8 @@ export class TasksService {
       if (shouldResetApprovalWorkflow || shouldResetApprovalsForRework) {
         const approvers = Array.isArray(task.approval_required_user_ids)
           ? task.approval_required_user_ids
-            .map((v) => Number(v))
-            .filter((v) => !isNaN(v))
+              .map((v) => Number(v))
+              .filter((v) => !isNaN(v))
           : [];
         if (approvers.length > 0) {
           await this.setTaskApprovalMeta(
@@ -1098,11 +1372,13 @@ export class TasksService {
         recurrence_next_date: dto.recurrence_next_date
           ? new Date(dto.recurrence_next_date)
           : task.recurrence_next_date,
-        recurrence_end_type: dto.recurrence_end_type ?? task.recurrence_end_type,
+        recurrence_end_type:
+          dto.recurrence_end_type ?? task.recurrence_end_type,
         recurrence_end_date: dto.recurrence_end_date
           ? new Date(dto.recurrence_end_date)
           : task.recurrence_end_date,
-        recurrence_end_occurrences: dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
+        recurrence_end_occurrences:
+          dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
         progress: newProgress,
         reported_by_id:
           typeof dto.reported_by_id === "number"
@@ -1137,8 +1413,8 @@ export class TasksService {
 
         const approverIds = Array.isArray(saved.approval_required_user_ids)
           ? saved.approval_required_user_ids
-            .map((v) => Number(v))
-            .filter((v) => !isNaN(v))
+              .map((v) => Number(v))
+              .filter((v) => !isNaN(v))
           : [];
         if (approverIds.length > 0) {
           const approvers = await this.userRepo
@@ -1173,8 +1449,8 @@ export class TasksService {
       : [];
     const metaIds = Array.isArray(task.assigned_users_meta)
       ? (task.assigned_users_meta
-        .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
-        .filter((v) => v !== null && !isNaN(v as number)) as number[])
+          .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
+          .filter((v) => v !== null && !isNaN(v as number)) as number[])
       : [];
     const allAssignedIds = [...assignedIds, ...metaIds];
     const currentUserId = Number(currentUser.id);
@@ -1307,13 +1583,17 @@ export class TasksService {
   ): Promise<Task> {
     try {
       const task = await this.findOne(id, currentUser);
+      const currRole = String(currentUser.role).toLowerCase();
       if (
-        currentUser.role !== UserRole.SUPER_ADMIN &&
-        currentUser.role !== UserRole.ADMIN &&
-        currentUser.role !== UserRole.MANAGER
+        currRole !== UserRole.SUPER_ADMIN &&
+        currRole !== UserRole.ADMIN &&
+        currRole !== UserRole.MANAGER &&
+        currRole !== UserRole.ASSISTANT_MANAGER &&
+        currRole !== UserRole.TEAM_LEAD &&
+        currRole !== UserRole.DEPT_HEAD
       ) {
         throw new ForbiddenException(
-          "Only Admin/Manager roles can reassign tasks",
+          "Only Admin/Manager/Lead roles can reassign tasks",
         );
       }
 
@@ -1431,8 +1711,8 @@ export class TasksService {
       }
       const approvers = Array.isArray(task.approval_required_user_ids)
         ? task.approval_required_user_ids
-          .map((v) => Number(v))
-          .filter((v) => !isNaN(v))
+            .map((v) => Number(v))
+            .filter((v) => !isNaN(v))
         : [];
       const isAdminRole =
         currentUser.role === UserRole.SUPER_ADMIN ||
@@ -1452,24 +1732,24 @@ export class TasksService {
       });
       const existingMeta = Array.isArray(approvalState?.approvals_meta)
         ? (approvalState!.approvals_meta as {
-          user_id: number;
-          decision: "approved" | "rejected" | "pending";
-          decided_at?: Date;
-        }[])
+            user_id: number;
+            decision: "approved" | "rejected" | "pending";
+            decided_at?: Date;
+          }[])
         : [];
       const normalizedMeta = approvers.length
         ? approvers.map((userId) => {
-          const existing = existingMeta.find(
-            (m) => m && Number(m.user_id) === Number(userId),
-          );
-          if (existing) {
-            return existing;
-          }
-          return {
-            user_id: userId,
-            decision: "pending" as const,
-          };
-        })
+            const existing = existingMeta.find(
+              (m) => m && Number(m.user_id) === Number(userId),
+            );
+            if (existing) {
+              return existing;
+            }
+            return {
+              user_id: userId,
+              decision: "pending" as const,
+            };
+          })
         : existingMeta;
 
       const updatedMeta: {
@@ -1613,7 +1893,9 @@ export class TasksService {
     const qb = this.taskApprovalRepo
       .createQueryBuilder("ta")
       .leftJoinAndSelect("ta.task", "task")
-      .where("ta.approval_required_user_ids @> ARRAY[:userId]::int[]", { userId })
+      .where("ta.approval_required_user_ids @> ARRAY[:userId]::int[]", {
+        userId,
+      })
       .andWhere("ta.approval_status IS NOT NULL");
 
     const approvals = await qb.getMany();
@@ -1758,9 +2040,9 @@ export class TasksService {
       total_seconds: totalSeconds,
       active_entry: active
         ? {
-          id: active.id,
-          started_at: active.started_at,
-        }
+            id: active.id,
+            started_at: active.started_at,
+          }
         : null,
     };
   }
@@ -1860,7 +2142,10 @@ export class TasksService {
 
     // Automatically transition to IN_PROGRESS if the task is currently OPEN or DRAFT
     // and progress is being made (value > 0)
-    if (value > 0 && (task.status === TaskStatus.OPEN || task.status === TaskStatus.DRAFT)) {
+    if (
+      value > 0 &&
+      (task.status === TaskStatus.OPEN || task.status === TaskStatus.DRAFT)
+    ) {
       task.status = TaskStatus.IN_PROGRESS;
     }
 
@@ -1871,7 +2156,8 @@ export class TasksService {
       await this.logActivity(task, currentUser, "status_transition", {
         from_status: oldStatus,
         to_status: task.status,
-        notes: "Status automatically updated to In Progress due to MOV checklist activity.",
+        notes:
+          "Status automatically updated to In Progress due to MOV checklist activity.",
       });
     }
 
@@ -1946,12 +2232,19 @@ export class TasksService {
       for (const master of recurringTasks) {
         // Check end conditions
         let shouldStop = false;
-        if (master.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES) {
-          if (master.recurrence_created_count >= master.recurrence_end_occurrences) {
+        if (
+          master.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES
+        ) {
+          if (
+            master.recurrence_created_count >= master.recurrence_end_occurrences
+          ) {
             shouldStop = true;
           }
         } else if (master.recurrence_end_type === RecurrenceEndType.ON_DATE) {
-          if (master.recurrence_end_date && master.recurrence_next_date > master.recurrence_end_date) {
+          if (
+            master.recurrence_end_date &&
+            master.recurrence_next_date > master.recurrence_end_date
+          ) {
             shouldStop = true;
           }
         }
@@ -1965,7 +2258,11 @@ export class TasksService {
 
         // Calculate next due date: Next Start + (Original Due - Original Start)
         let childDueDate = null;
-        if (master.start_date && master.due_date && master.recurrence_next_date) {
+        if (
+          master.start_date &&
+          master.due_date &&
+          master.recurrence_next_date
+        ) {
           const duration =
             master.due_date.getTime() - master.start_date.getTime();
           childDueDate = new Date(
@@ -2003,11 +2300,18 @@ export class TasksService {
 
         // Re-check end condition for the NEW next date
         if (master.recurrence_end_type === RecurrenceEndType.ON_DATE) {
-          if (master.recurrence_end_date && master.recurrence_next_date > master.recurrence_end_date) {
+          if (
+            master.recurrence_end_date &&
+            master.recurrence_next_date > master.recurrence_end_date
+          ) {
             master.recurrence_next_date = null;
           }
-        } else if (master.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES) {
-          if (master.recurrence_created_count >= master.recurrence_end_occurrences) {
+        } else if (
+          master.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES
+        ) {
+          if (
+            master.recurrence_created_count >= master.recurrence_end_occurrences
+          ) {
             master.recurrence_next_date = null;
           }
         }
@@ -2022,7 +2326,11 @@ export class TasksService {
             .where("user.id IN (:...ids)", { ids: master.assigned_user_ids })
             .getMany();
           for (const u of users) {
-            await this.createNotification(child, u, TaskNotificationType.ASSIGNED);
+            await this.createNotification(
+              child,
+              u,
+              TaskNotificationType.ASSIGNED,
+            );
             // Also send email
             await this.emailService.sendTaskAssignmentEmail(u, child, master);
           }

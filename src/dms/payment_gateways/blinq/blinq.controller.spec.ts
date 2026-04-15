@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { BlinqController } from './blinq.controller';
-import { BlinqService } from './blinq.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { BlinqController } from "./blinq.controller";
+import { BlinqService } from "./blinq.service";
 
-describe('BlinqController', () => {
+describe("BlinqController", () => {
   let controller: BlinqController;
 
   beforeEach(async () => {
@@ -14,7 +14,7 @@ describe('BlinqController', () => {
     controller = module.get<BlinqController>(BlinqController);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(controller).toBeDefined();
   });
 });

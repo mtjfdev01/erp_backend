@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, Min, IsOptional } from 'class-validator';
+import { IsDateString, IsNumber, Min, IsOptional } from "class-validator";
 
 export class UpdateEducationReportDto {
   @IsDateString()
@@ -46,4 +46,4 @@ export class UpdateEducationReportDto {
   @Min(0)
   @IsOptional()
   female_indegent?: number;
-} 
+}

@@ -59,6 +59,19 @@ import { HealthModule } from './health/health.module';
   ],
   controllers: [],
   providers: [],
-  exports: [ApplicationReportsModule, RationModule, MarriageGiftsModule, FinancialAssistanceModule, SewingMachineModule, WheelChairOrCrutchesModule, WaterReportsModule, KasbReportsModule, KasbTrainingReportsModule, EducationReportsModule, TreePlantationReportsModule, AreaRationReportsModule],
+  exports: [
+    ApplicationReportsModule,
+    RationModule,
+    MarriageGiftsModule,
+    FinancialAssistanceModule,
+    SewingMachineModule,
+    WheelChairOrCrutchesModule,
+    WaterReportsModule,
+    KasbReportsModule,
+    KasbTrainingReportsModule,
+    EducationReportsModule,
+    TreePlantationReportsModule,
+    AreaRationReportsModule,
+  ],
 })
-export class ProgramModule {} 
+export class ProgramModule {}

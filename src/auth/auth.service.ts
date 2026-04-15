@@ -1,7 +1,7 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { UsersService } from '../users/users.service';
-import { User } from '../users/user.entity';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { UsersService } from "../users/users.service";
+import { User } from "../users/user.entity";
 
 @Injectable()
 export class AuthService {
@@ -47,7 +47,7 @@ export class AuthService {
         blood_group: user.blood_group,
         is_archived: user?.is_archived,
       },
-      permissions // Include permissions in login response
+      permissions, // Include permissions in login response
     };
   }
 
@@ -56,11 +56,13 @@ export class AuthService {
       const payload = await this.jwtService.verifyAsync(token);
       const user = await this.usersService.findByEmail(payload.email);
       if (!user || !user.isActive || user?.is_archived) {
-        throw new UnauthorizedException('User not found or inactive or archived');
+        throw new UnauthorizedException(
+          "User not found or inactive or archived",
+        );
       }
       return user;
     } catch {
-      throw new UnauthorizedException('Invalid token');
+      throw new UnauthorizedException("Invalid token");
     }
   }
-} 
+}

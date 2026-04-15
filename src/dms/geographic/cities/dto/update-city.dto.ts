@@ -1,14 +1,22 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, MaxLength, Length, IsDecimal } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  MaxLength,
+  Length,
+  IsDecimal,
+} from "class-validator";
 
 export class UpdateCityDto {
   @IsString()
   @IsOptional()
-  @MaxLength(100, { message: 'City name must not exceed 100 characters' })
+  @MaxLength(100, { message: "City name must not exceed 100 characters" })
   name?: string;
 
   @IsString()
   @IsOptional()
-  @Length(1, 10, { message: 'City code must be 1-10 characters' })
+  @Length(1, 10, { message: "City code must be 1-10 characters" })
   code?: string;
 
   @IsNumber()
@@ -27,11 +35,11 @@ export class UpdateCityDto {
   @IsOptional()
   country_id?: number;
 
-  @IsDecimal({ decimal_digits: '7' })
+  @IsDecimal({ decimal_digits: "7" })
   @IsOptional()
   latitude?: number;
 
-  @IsDecimal({ decimal_digits: '7' })
+  @IsDecimal({ decimal_digits: "7" })
   @IsOptional()
   longitude?: number;
 

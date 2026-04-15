@@ -1,20 +1,27 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Donor, DonorType } from './entities/donor.entity';
-import { CreateDonorDto } from './dto/create-donor.dto';
-import { UpdateDonorDto } from './dto/update-donor.dto';
-import { applyCommonFilters, FilterPayload } from '../../utils/filters/common-filter.util';
-import * as bcrypt from 'bcrypt';
-import { User, Department } from 'src/users/user.entity';
-import { UsersService } from 'src/users/users.service';
-import { City } from '../geographic/cities/entities/city.entity';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Donor, DonorType } from "./entities/donor.entity";
+import { CreateDonorDto } from "./dto/create-donor.dto";
+import { UpdateDonorDto } from "./dto/update-donor.dto";
+import {
+  applyCommonFilters,
+  FilterPayload,
+} from "../../utils/filters/common-filter.util";
+import * as bcrypt from "bcrypt";
+import { User, Department } from "src/users/user.entity";
+import { UsersService } from "src/users/users.service";
+import { City } from "../geographic/cities/entities/city.entity";
 
 interface PaginationOptions {
   page: number;
   pageSize: number;
   sortField?: string;
-  sortOrder?: 'ASC' | 'DESC';
+  sortOrder?: "ASC" | "DESC";
   search?: string;
   donor_type?: string;
   city?: string;
@@ -34,7 +41,7 @@ export class DonorService {
     @InjectRepository(City)
     private readonly cityRepository: Repository<City>,
     private readonly usersService: UsersService,
-    ) {}
+  ) {}
 
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
@@ -69,52 +76,52 @@ export class DonorService {
 
       if (assignedCities.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.id IN (:...ids)', { ids: assignedCities })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.id IN (:...ids)", { ids: assignedCities })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       if (assignedTehsils.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.tehsil_id IN (:...ids)', { ids: assignedTehsils })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       if (assignedDistricts.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.district_id IN (:...ids)', { ids: assignedDistricts })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       if (assignedRegions.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.region_id IN (:...ids)', { ids: assignedRegions })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       if (assignedCountries.length) {
         const cities = await this.cityRepository
-          .createQueryBuilder('city')
-          .select('city.name')
-          .where('city.country_id IN (:...ids)', { ids: assignedCountries })
+          .createQueryBuilder("city")
+          .select("city.name")
+          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
           .getMany();
-        cities.forEach(c => allCityNames.add(c.name.toLowerCase().trim()));
+        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
       }
 
       return allCityNames.size > 0 ? Array.from(allCityNames) : null;
     } catch (error) {
-      console.error('Error resolving user geography:', error);
+      console.error("Error resolving user geography:", error);
       return null;
     }
   }
@@ -130,25 +137,29 @@ export class DonorService {
       });
 
       if (existingDonor) {
-        throw new ConflictException('Email already exists');
+        throw new ConflictException("Email already exists");
       }
       let assigned_to = null;
       let referred_by = null;
-      if(createDonorDto?.referrer_user_id){
-      // Check if referrer user exists
-      referred_by = await this.userRepository.findOne({ where: { id: createDonorDto.referrer_user_id } });
-      if (!referred_by) {
-        throw new NotFoundException('Referrer user not found');
+      if (createDonorDto?.referrer_user_id) {
+        // Check if referrer user exists
+        referred_by = await this.userRepository.findOne({
+          where: { id: createDonorDto.referrer_user_id },
+        });
+        if (!referred_by) {
+          throw new NotFoundException("Referrer user not found");
+        }
       }
-    }
 
-    if(createDonorDto?.assigned_to_user_id){
-      // Check if assigned to user exists
-      assigned_to = await this.usersService.findOne(createDonorDto.assigned_to_user_id);
-      if (!assigned_to) {
-        throw new NotFoundException('Assigned to user not found');
+      if (createDonorDto?.assigned_to_user_id) {
+        // Check if assigned to user exists
+        assigned_to = await this.usersService.findOne(
+          createDonorDto.assigned_to_user_id,
+        );
+        if (!assigned_to) {
+          throw new NotFoundException("Assigned to user not found");
+        }
       }
-    }
       // Hash the password only if provided
       let hashedPassword = null;
       if (createDonorDto.password) {
@@ -161,15 +172,15 @@ export class DonorService {
         password: hashedPassword,
         assigned_to,
         referred_by,
-        created_by: user
+        created_by: user,
       });
 
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
-      
+
       // Remove password from response
       delete savedDonor.password;
-      
+
       return savedDonor;
     } catch (error) {
       if (error instanceof ConflictException) {
@@ -182,17 +193,21 @@ export class DonorService {
   /**
    * Find all donors with pagination and filtering
    */
-async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: { online: boolean; offline: boolean }) {
+  async findAll(
+    options: any,
+    assignedCityNames?: string[] | null,
+    sourceAccess?: { online: boolean; offline: boolean },
+  ) {
     try {
       const {
         page = 1,
         pageSize = 10,
-        sortField = 'created_at',
-        sortOrder = 'DESC',
-        search = '',
-        donor_type = '',
-        city = '',
-        country = '',
+        sortField = "created_at",
+        sortOrder = "DESC",
+        search = "",
+        donor_type = "",
+        city = "",
+        country = "",
         is_active,
         start_date,
         end_date,
@@ -203,19 +218,19 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
 
       // Define searchable fields based on donor type
       const searchFields = [
-        'name',
-        'first_name',
-        'last_name',
-        'email',
-        'phone',
-        'company_name',
-        'contact_person',
-        'city',
-        'country',
+        "name",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "company_name",
+        "contact_person",
+        "city",
+        "country",
       ];
 
       // Create base query
-      const queryBuilder = this.donorRepository.createQueryBuilder('donor');
+      const queryBuilder = this.donorRepository.createQueryBuilder("donor");
 
       // Apply common filters using our utility
       const filters: FilterPayload = {
@@ -228,14 +243,15 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
         multi_time_donor,
       };
 
-      applyCommonFilters(queryBuilder, filters, searchFields, 'donor');
+      applyCommonFilters(queryBuilder, filters, searchFields, "donor");
 
-      queryBuilder.andWhere('donor.is_archived = :is_archived', { is_archived: false });
-
+      queryBuilder.andWhere("donor.is_archived = :is_archived", {
+        is_archived: false,
+      });
 
       // Apply is_active filter
       if (is_active !== undefined) {
-        queryBuilder.andWhere('donor.is_active = :is_active', { is_active });
+        queryBuilder.andWhere("donor.is_active = :is_active", { is_active });
       }
 
       // Apply online/offline source filter based on user permissions
@@ -252,23 +268,28 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
 
       // Geographic filter — restrict donors to user's assigned city names
       if (assignedCityNames && assignedCityNames.length > 0) {
-        queryBuilder.andWhere('LOWER(TRIM(donor.city)) IN (:...assignedCityNames)', { assignedCityNames });
+        queryBuilder.andWhere(
+          "LOWER(TRIM(donor.city)) IN (:...assignedCityNames)",
+          { assignedCityNames },
+        );
       }
 
       // Apply sorting
       const validSortFields = [
-        'name',
-        'company_name',
-        'email',
-        'city',
-        'country',
-        'donor_type',
-        'created_at',
-        'total_donated',
-        'donation_count',
-        'last_donation_date'
+        "name",
+        "company_name",
+        "email",
+        "city",
+        "country",
+        "donor_type",
+        "created_at",
+        "total_donated",
+        "donation_count",
+        "last_donation_date",
       ];
-      const sortFieldName = validSortFields.includes(sortField) ? sortField : 'created_at';
+      const sortFieldName = validSortFields.includes(sortField)
+        ? sortField
+        : "created_at";
       queryBuilder.orderBy(`donor.${sortFieldName}`, sortOrder);
 
       // Apply pagination only if pageSize > 0
@@ -280,7 +301,7 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
       const [data, total] = await queryBuilder.getManyAndCount();
 
       // Remove passwords from response
-      data.forEach(donor => delete donor.password);
+      data.forEach((donor) => delete donor.password);
 
       return {
         data,
@@ -294,7 +315,9 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
         },
       };
     } catch (error) {
-      throw new NotFoundException(`Failed to retrieve donors: ${error.message}`);
+      throw new NotFoundException(
+        `Failed to retrieve donors: ${error.message}`,
+      );
     }
   }
 
@@ -304,15 +327,18 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
   /**
    * Find donor by email AND phone (for auto-registration check)
    */
-  async findByEmailAndPhone(email: string, phone: string): Promise<Donor | null> {
+  async findByEmailAndPhone(
+    email: string,
+    phone: string,
+  ): Promise<Donor | null> {
     try {
       const donor = await this.donorRepository.findOne({
         where: { email, phone, is_archived: false },
       });
-      
+
       return donor || null;
     } catch (error) {
-      console.error('Error finding donor by email and phone:', error);
+      console.error("Error finding donor by email and phone:", error);
       return null;
     }
   }
@@ -323,10 +349,13 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
    * - If only email: find by email.
    * - If both: find first donor where email or phone matches.
    */
-  async findByEmailOrPhone(email?: string, phone?: string): Promise<Donor | null> {
+  async findByEmailOrPhone(
+    email?: string,
+    phone?: string,
+  ): Promise<Donor | null> {
     try {
-      const hasEmail = email != null && String(email).trim() !== '';
-      const hasPhone = phone != null && String(phone).trim() !== '';
+      const hasEmail = email != null && String(email).trim() !== "";
+      const hasPhone = phone != null && String(phone).trim() !== "";
 
       if (!hasEmail && !hasPhone) {
         return null;
@@ -350,9 +379,9 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
 
       // Both provided: first donor where email OR phone matches
       const donor = await this.donorRepository
-        .createQueryBuilder('donor')
-        .where('donor.is_archived = :is_archived', { is_archived: false })
-        .andWhere('(donor.email = :email OR donor.phone = :phone)', {
+        .createQueryBuilder("donor")
+        .where("donor.is_archived = :is_archived", { is_archived: false })
+        .andWhere("(donor.email = :email OR donor.phone = :phone)", {
           email: email!.trim(),
           phone: phone!.trim(),
         })
@@ -361,7 +390,7 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
       if (donor) delete donor.password;
       return donor ?? null;
     } catch (error) {
-      console.error('Error finding donor by email or phone:', error);
+      console.error("Error finding donor by email or phone:", error);
       return null;
     }
   }
@@ -379,11 +408,19 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
     notification_subscription?: boolean;
   }): Promise<Donor | null> {
     try {
-      const { donor_name, donor_email, donor_phone, city, country, address, notification_subscription } = donationData;
+      const {
+        donor_name,
+        donor_email,
+        donor_phone,
+        city,
+        country,
+        address,
+        notification_subscription,
+      } = donationData;
 
       // Validate required fields
       if (!donor_email || !donor_phone) {
-        console.warn('Cannot auto-register donor: missing email or phone');
+        console.warn("Cannot auto-register donor: missing email or phone");
         return null;
       }
 
@@ -394,39 +431,44 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
         email: donor_email,
         password: null, // No password for auto-registered donors
         phone: donor_phone,
-        name: donor_name || 'Anonymous Donor',
+        name: donor_name || "Anonymous Donor",
         city: city || null,
         country: country || null,
         address: address || null,
         is_active: true,
-        notes: 'Auto-registered from donation - Password not set',
+        notes: "Auto-registered from donation - Password not set",
         notification_subscription: notification_subscription !== false,
       });
 
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
-      
-      console.log(`✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`);
-      
+
+      console.log(
+        `✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`,
+      );
+
       return savedDonor;
     } catch (error) {
-      console.error('Error auto-registering donor:', error.message);
+      console.error("Error auto-registering donor:", error.message);
       return null;
     }
   }
 
   async findOne(id: number): Promise<Donor> {
     try {
-      // i want donations also here 
-      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false }, relations: ['donations'] });
-      
+      // i want donations also here
+      const donor = await this.donorRepository.findOne({
+        where: { id, is_archived: false },
+        relations: ["donations"],
+      });
+
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
 
       // Remove password from response
       delete donor.password;
-      
+
       return donor;
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -440,7 +482,9 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
    * Find donor by email (for authentication)
    */
   async findByEmail(email: string): Promise<Donor | null> {
-    return await this.donorRepository.findOne({ where: { email, is_archived: false } });
+    return await this.donorRepository.findOne({
+      where: { email, is_archived: false },
+    });
   }
 
   /**
@@ -448,20 +492,20 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
    */
   async validateDonor(email: string, password: string): Promise<Donor> {
     const donor = await this.findByEmail(email);
-    
+
     if (!donor) {
-      throw new NotFoundException('Donor not found');
+      throw new NotFoundException("Donor not found");
     }
 
     const isPasswordValid = await bcrypt.compare(password, donor.password);
-    
+
     if (!isPasswordValid) {
-      throw new NotFoundException('Invalid credentials');
+      throw new NotFoundException("Invalid credentials");
     }
 
     // Remove password from response
     delete donor.password;
-    
+
     return donor;
   }
 
@@ -470,8 +514,10 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
    */
   async update(id: number, updateDonorDto: UpdateDonorDto): Promise<Donor> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
-      
+      const donor = await this.donorRepository.findOne({
+        where: { id, is_archived: false },
+      });
+
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
@@ -487,7 +533,7 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
 
       // Remove password from response
       delete updatedDonor.password;
-      
+
       return updatedDonor;
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -506,25 +552,30 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
     newPassword: string,
   ): Promise<{ message: string }> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id: donorId, is_archived: false } });
-      
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId, is_archived: false },
+      });
+
       if (!donor) {
-        throw new NotFoundException('Donor not found');
+        throw new NotFoundException("Donor not found");
       }
 
       // Verify current password
-      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, donor.password);
-      
+      const isCurrentPasswordValid = await bcrypt.compare(
+        currentPassword,
+        donor.password,
+      );
+
       if (!isCurrentPasswordValid) {
-        throw new ConflictException('Current password is incorrect');
+        throw new ConflictException("Current password is incorrect");
       }
 
       // Validate new password strength
       const passwordValidation = this.validatePasswordStrength(newPassword);
-      
+
       if (!passwordValidation.isValid) {
         throw new ConflictException(
-          `Password requirements not met: ${passwordValidation.errors.join(', ')}`,
+          `Password requirements not met: ${passwordValidation.errors.join(", ")}`,
         );
       }
 
@@ -532,22 +583,27 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
       donor.password = await bcrypt.hash(newPassword, 10);
       await this.donorRepository.save(donor);
 
-      return { message: 'Password changed successfully' };
+      return { message: "Password changed successfully" };
     } catch (error) {
-      if (error instanceof ConflictException || error instanceof NotFoundException) {
+      if (
+        error instanceof ConflictException ||
+        error instanceof NotFoundException
+      ) {
         throw error;
       }
-      throw new ConflictException('Failed to change password');
+      throw new ConflictException("Failed to change password");
     }
   }
 
   /**
    * Soft delete (deactivate) donor
    */
-  async remove(id: number, user:any): Promise<{ message: string }> {
+  async remove(id: number, user: any): Promise<{ message: string }> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id, is_archived: false } });
-      
+      const donor = await this.donorRepository.findOne({
+        where: { id, is_archived: false },
+      });
+
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
@@ -556,9 +612,9 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
       donor.is_active = false;
       donor.is_archived = true;
       donor.updated_by = user;
-      await this.donorRepository.save(donor); 
+      await this.donorRepository.save(donor);
 
-      return { message: 'Donor deactivated successfully' };
+      return { message: "Donor deactivated successfully" };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -570,13 +626,12 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
   /**
    * Update donation statistics
    */
-  async updateDonationStats(
-    donorId: number,
-    amount: number,
-  ): Promise<void> {
+  async updateDonationStats(donorId: number, amount: number): Promise<void> {
     try {
-      const donor = await this.donorRepository.findOne({ where: { id: donorId, is_archived: false } });
-      
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId, is_archived: false },
+      });
+
       if (donor) {
         donor.total_donated = Number(donor.total_donated) + amount;
         donor.donation_count += 1;
@@ -584,34 +639,37 @@ async findAll(options: any, assignedCityNames?: string[] | null, sourceAccess?: 
         await this.donorRepository.save(donor);
       }
     } catch (error) {
-      console.error('Failed to update donation stats:', error);
+      console.error("Failed to update donation stats:", error);
     }
   }
 
   /**
    * Validate password strength
    */
-  private validatePasswordStrength(password: string): { isValid: boolean; errors: string[] } {
+  private validatePasswordStrength(password: string): {
+    isValid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     if (password.length < 8) {
-      errors.push('Minimum 8 characters');
+      errors.push("Minimum 8 characters");
     }
 
     if (!/[A-Z]/.test(password)) {
-      errors.push('At least one uppercase letter');
+      errors.push("At least one uppercase letter");
     }
 
     if (!/[a-z]/.test(password)) {
-      errors.push('At least one lowercase letter');
+      errors.push("At least one lowercase letter");
     }
 
     if (!/\d/.test(password)) {
-      errors.push('At least one number');
+      errors.push("At least one number");
     }
 
     if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-      errors.push('At least one special character');
+      errors.push("At least one special character");
     }
 
     return {

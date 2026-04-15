@@ -1,10 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ApplicationReport } from './entities/application-report.entity';
-import { CreateApplicationReportDto } from './dto/create-application-report.dto';
-import { UpdateApplicationReportDto } from './dto/update-application-report.dto';
-import { User } from '../../users/user.entity';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { ApplicationReport } from "./entities/application-report.entity";
+import { CreateApplicationReportDto } from "./dto/create-application-report.dto";
+import { UpdateApplicationReportDto } from "./dto/update-application-report.dto";
+import { User } from "../../users/user.entity";
 
 @Injectable()
 export class ApplicationReportsService {
@@ -15,12 +19,17 @@ export class ApplicationReportsService {
     private userRepository: Repository<User>,
   ) {}
 
-  async create(createApplicationReportDto: CreateApplicationReportDto, user: any): Promise<any> {
+  async create(
+    createApplicationReportDto: CreateApplicationReportDto,
+    user: any,
+  ): Promise<any> {
     try {
       const { applications, ...reportData } = createApplicationReportDto;
       // Fetch the full user entity if needed (optional, if user is not already a full entity)
-      const dbUser = user.id ? await this.userRepository.findOne({ where: { id: user.id } }) : null;
-      if(!dbUser) throw new BadRequestException('User not found');
+      const dbUser = user.id
+        ? await this.userRepository.findOne({ where: { id: user.id } })
+        : null;
+      if (!dbUser) throw new BadRequestException("User not found");
       // Create one record for each application
       const createdReports = [];
       for (const app of applications) {
@@ -31,7 +40,8 @@ export class ApplicationReportsService {
           updated_by: dbUser,
           is_archived: false,
         });
-        const savedReport = await this.applicationReportRepository.save(applicationReport);
+        const savedReport =
+          await this.applicationReportRepository.save(applicationReport);
         createdReports.push(savedReport);
       }
       // Return data in frontend-expected format
@@ -39,7 +49,7 @@ export class ApplicationReportsService {
         id: createdReports[0]?.id || 1,
         report_date: reportData.report_date,
         notes: reportData.notes,
-        applications: createdReports.map(report => ({
+        applications: createdReports.map((report) => ({
           id: report.id,
           project: report.project,
           subprogram: report.subprogram,
@@ -49,29 +59,39 @@ export class ApplicationReportsService {
           verified_count: report.verified_count,
           approved_count: report.approved_count,
           rejected_count: report.rejected_count,
-          pending_count: report.pending_count
-        }))
+          pending_count: report.pending_count,
+        })),
       };
     } catch (error) {
-      console.log(error)
-      throw new BadRequestException('Failed to create application report: ' + error.message);
+      console.log(error);
+      throw new BadRequestException(
+        "Failed to create application report: " + error.message,
+      );
     }
   }
 
-  async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'created_at', sortOrder: 'ASC' | 'DESC' = 'DESC'): Promise<{ data: any[]; pagination: any }> {
+  async findAll(
+    page: number = 1,
+    pageSize: number = 10,
+    sortField: string = "created_at",
+    sortOrder: "ASC" | "DESC" = "DESC",
+  ): Promise<{ data: any[]; pagination: any }> {
     try {
       const skip = (page - 1) * pageSize;
       const whereClause = { is_archived: false };
       const queryBuilder = this.applicationReportRepository
-        .createQueryBuilder('report')
+        .createQueryBuilder("report")
         .where(whereClause)
-        .orderBy(`report.${sortField}`, sortOrder)
+        .orderBy(`report.${sortField}`, sortOrder);
 
       const reports = await queryBuilder.getMany();
 
       // Group all rows first so pagination/count reflects grouped report records.
       const groupedReports = this.groupReportsByDate(reports);
-      const paginatedGroupedReports = groupedReports.slice(skip, skip + pageSize);
+      const paginatedGroupedReports = groupedReports.slice(
+        skip,
+        skip + pageSize,
+      );
       const total = groupedReports.length;
       const totalPages = Math.ceil(total / pageSize);
 
@@ -85,7 +105,9 @@ export class ApplicationReportsService {
         },
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch application reports: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch application reports: " + error.message,
+      );
     }
   }
 
@@ -97,7 +119,9 @@ export class ApplicationReportsService {
       });
 
       if (!report) {
-        throw new NotFoundException(`Application report with ID ${id} not found`);
+        throw new NotFoundException(
+          `Application report with ID ${id} not found`,
+        );
       }
 
       // Find all related reports (same date and notes)
@@ -105,9 +129,9 @@ export class ApplicationReportsService {
         where: {
           report_date: report.report_date,
           notes: report.notes,
-          is_archived: false
+          is_archived: false,
         },
-        order: { id: 'ASC' }
+        order: { id: "ASC" },
       });
 
       // Return in frontend-expected format
@@ -115,7 +139,7 @@ export class ApplicationReportsService {
         id: report.id,
         report_date: report.report_date,
         notes: report.notes,
-        applications: relatedReports.map(r => ({
+        applications: relatedReports.map((r) => ({
           id: r.id,
           project: r.project,
           subprogram: r.subprogram,
@@ -125,14 +149,16 @@ export class ApplicationReportsService {
           verified_count: r.verified_count,
           approved_count: r.approved_count,
           rejected_count: r.rejected_count,
-          pending_count: r.pending_count
-        }))
+          pending_count: r.pending_count,
+        })),
       };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException('Failed to fetch application report: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch application report: " + error.message,
+      );
     }
   }
 
@@ -140,11 +166,11 @@ export class ApplicationReportsService {
     try {
       const latestRow = await this.applicationReportRepository.findOne({
         where: { is_archived: false },
-        order: { created_at: 'DESC' },
+        order: { created_at: "DESC" },
       });
 
       if (!latestRow) {
-        throw new NotFoundException('No application reports found');
+        throw new NotFoundException("No application reports found");
       }
 
       // Find all related reports (same date and notes)
@@ -154,7 +180,7 @@ export class ApplicationReportsService {
           notes: latestRow.notes,
           is_archived: false,
         },
-        order: { id: 'ASC' },
+        order: { id: "ASC" },
       });
 
       return {
@@ -176,54 +202,71 @@ export class ApplicationReportsService {
       };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
-      throw new BadRequestException('Failed to fetch latest application report: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch latest application report: " + error.message,
+      );
     }
   }
 
-  async update(id: number, updateApplicationReportDto: UpdateApplicationReportDto, user: User): Promise<any> {
+  async update(
+    id: number,
+    updateApplicationReportDto: UpdateApplicationReportDto,
+    user: User,
+  ): Promise<any> {
     try {
       const existingReport = await this.findOne(id);
       const { applications, ...reportData } = updateApplicationReportDto;
-      const dbUser = user.id ? await this.userRepository.findOne({ where: { id: user.id } }) : null;
+      const dbUser = user.id
+        ? await this.userRepository.findOne({ where: { id: user.id } })
+        : null;
       // Find all related reports to update
       const relatedReports = await this.applicationReportRepository.find({
         where: {
           report_date: existingReport.report_date,
           notes: existingReport.notes,
-          is_archived: false
+          is_archived: false,
         },
-        order: { id: 'ASC' }
+        order: { id: "ASC" },
       });
       // Submit Report metadata for all related reports
       if (Object.keys(reportData).length > 0) {
         for (const report of relatedReports) {
           await this.applicationReportRepository.update(report.id, {
             ...reportData,
-            updated_by: dbUser
+            updated_by: dbUser,
           });
         }
       }
       // Update applications if provided
       if (applications && applications.length > 0) {
-        for (let i = 0; i < Math.max(relatedReports.length, applications.length); i++) {
+        for (
+          let i = 0;
+          i < Math.max(relatedReports.length, applications.length);
+          i++
+        ) {
           if (i < applications.length) {
             const app = applications[i];
             if (i < relatedReports.length) {
               // Update existing record
-              await this.applicationReportRepository.update(relatedReports[i].id, {
-                ...reportData,
-                ...app,
-                updated_by: dbUser
-              });
+              await this.applicationReportRepository.update(
+                relatedReports[i].id,
+                {
+                  ...reportData,
+                  ...app,
+                  updated_by: dbUser,
+                },
+              );
             } else {
               // Create new record if we have more applications than existing records
-              const applicationReport = this.applicationReportRepository.create({
-                ...reportData,
-                ...app,
-                created_by: dbUser,
-                updated_by: dbUser,
-                is_archived: false,
-              });
+              const applicationReport = this.applicationReportRepository.create(
+                {
+                  ...reportData,
+                  ...app,
+                  created_by: dbUser,
+                  updated_by: dbUser,
+                  is_archived: false,
+                },
+              );
               await this.applicationReportRepository.save(applicationReport);
             }
           } else {
@@ -237,37 +280,45 @@ export class ApplicationReportsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException('Failed to update application report: ' + error.message);
+      throw new BadRequestException(
+        "Failed to update application report: " + error.message,
+      );
     }
   }
 
   async remove(id: number): Promise<void> {
     try {
-      const report = await this.applicationReportRepository.findOne({ where: { id, is_archived: false } });
-      if(!report){
-        throw new NotFoundException(`Application report with ID ${id} not found`);
+      const report = await this.applicationReportRepository.findOne({
+        where: { id, is_archived: false },
+      });
+      if (!report) {
+        throw new NotFoundException(
+          `Application report with ID ${id} not found`,
+        );
       }
       await this.applicationReportRepository.update(id, { is_archived: true });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException('Failed to delete application report: ' + error.message);
+      throw new BadRequestException(
+        "Failed to delete application report: " + error.message,
+      );
     }
   }
 
   private groupReportsByDate(reports: ApplicationReport[]): any[] {
     const grouped = new Map<string, any>();
 
-    reports.forEach(report => {
-      const key = `${report.report_date}_${report.notes || ''}`;
-      
+    reports.forEach((report) => {
+      const key = `${report.report_date}_${report.notes || ""}`;
+
       if (!grouped.has(key)) {
         grouped.set(key, {
           id: report.id,
           report_date: report.report_date,
           notes: report.notes,
-          applications: []
+          applications: [],
         });
       }
 
@@ -282,10 +333,10 @@ export class ApplicationReportsService {
         verified_count: report.verified_count,
         approved_count: report.approved_count,
         rejected_count: report.rejected_count,
-        pending_count: report.pending_count
+        pending_count: report.pending_count,
       });
     });
 
     return Array.from(grouped.values());
   }
-} 
+}

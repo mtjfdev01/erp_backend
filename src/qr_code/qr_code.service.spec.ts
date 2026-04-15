@@ -1,7 +1,7 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { QrCodeService } from './qr_code.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { QrCodeService } from "./qr_code.service";
 
-describe('QrCodeService', () => {
+describe("QrCodeService", () => {
   let service: QrCodeService;
 
   beforeEach(async () => {
@@ -12,7 +12,7 @@ describe('QrCodeService', () => {
     service = module.get<QrCodeService>(QrCodeService);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(service).toBeDefined();
   });
 });

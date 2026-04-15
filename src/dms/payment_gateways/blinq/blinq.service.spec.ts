@@ -1,7 +1,7 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { BlinqService } from './blinq.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { BlinqService } from "./blinq.service";
 
-describe('BlinqService', () => {
+describe("BlinqService", () => {
   let service: BlinqService;
 
   beforeEach(async () => {
@@ -12,7 +12,7 @@ describe('BlinqService', () => {
     service = module.get<BlinqService>(BlinqService);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(service).toBeDefined();
   });
 });

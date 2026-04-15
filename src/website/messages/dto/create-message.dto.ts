@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean } from "class-validator";
 
 export class CreateMessageDto {
   @IsOptional()

@@ -1,13 +1,13 @@
-import { Controller, Post, Get, HttpStatus, Res } from '@nestjs/common';
-import { Response } from 'express';
-import { DonationsService } from './donations.service';
-import { DonorService } from '../dms/donor/donor.service';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
-import { Donation } from './entities/donation.entity';
-import { Donor } from '../dms/donor/entities/donor.entity';
+import { Controller, Post, Get, HttpStatus, Res } from "@nestjs/common";
+import { Response } from "express";
+import { DonationsService } from "./donations.service";
+import { DonorService } from "../dms/donor/donor.service";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Not } from "typeorm";
+import { Donation } from "./entities/donation.entity";
+import { Donor } from "../dms/donor/entities/donor.entity";
 
-@Controller('donations/migration')
+@Controller("donations/migration")
 export class MigrationController {
   constructor(
     private readonly donationsService: DonationsService,
@@ -22,7 +22,7 @@ export class MigrationController {
    * Step 1: Create donors from existing donations
    * GET /donations/migration/create-donors
    */
-  @Post('create-donors')
+  @Post("create-donors")
   // async createDonorsFromDonations(@Res() res: Response) {
   //   try {
   //     console.log('🚀 Starting donor migration from donations...');
@@ -34,7 +34,6 @@ export class MigrationController {
   //     .where('d.donor_email IS NOT NULL')
   //     .andWhere("TRIM(d.donor_email) <> ''")
   //     .getMany();
-    
 
   //     console.log(`📊 Found ${donations.length} donations with donor info`);
 
@@ -136,7 +135,7 @@ export class MigrationController {
    * Step 2: Link donations to donors using donor_id
    * POST /donations/migration/link-donations
    */
-  @Post('link-donations')
+  @Post("link-donations")
   // async linkDonationsToDonors(@Res() res: Response) {
   //   try {
   //     console.log('🔗 Starting donation linking...');
@@ -215,7 +214,7 @@ export class MigrationController {
    * Step 3: Get migration status/report
    * GET /donations/migration/status
    */
-  @Get('status')
+  @Get("status")
   async getMigrationStatus(@Res() res: Response) {
     try {
       // Count donations
@@ -234,9 +233,9 @@ export class MigrationController {
 
       // Get unique donor emails in donations
       const uniqueDonorEmails = await this.donationRepository
-        .createQueryBuilder('donation')
-        .select('DISTINCT donation.donor_email', 'email')
-        .where('donation.donor_email IS NOT NULL')
+        .createQueryBuilder("donation")
+        .select("DISTINCT donation.donor_email", "email")
+        .where("donation.donor_email IS NOT NULL")
         .getRawMany();
 
       const report = {
@@ -244,7 +243,8 @@ export class MigrationController {
           total: totalDonations,
           with_donor_id: donationsWithDonorId,
           without_donor_id: donationsWithoutDonorId,
-          migration_percentage: ((donationsWithDonorId / totalDonations) * 100).toFixed(2) + '%',
+          migration_percentage:
+            ((donationsWithDonorId / totalDonations) * 100).toFixed(2) + "%",
         },
         donors: {
           total: totalDonors,
@@ -258,11 +258,11 @@ export class MigrationController {
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Migration status retrieved',
+        message: "Migration status retrieved",
         report,
       });
     } catch (error) {
-      console.error('❌ Status error:', error);
+      console.error("❌ Status error:", error);
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         success: false,
         message: error.message,
@@ -270,4 +270,3 @@ export class MigrationController {
     }
   }
 }
-

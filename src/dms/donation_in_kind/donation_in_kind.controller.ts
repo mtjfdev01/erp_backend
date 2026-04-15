@@ -1,9 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { DonationInKindService } from './donation_in_kind.service';
-import { CreateDonationInKindDto } from './dto/create-donation_in_kind.dto';
-import { UpdateDonationInKindDto } from './dto/update-donation_in_kind.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from "@nestjs/common";
+import { DonationInKindService } from "./donation_in_kind.service";
+import { CreateDonationInKindDto } from "./dto/create-donation_in_kind.dto";
+import { UpdateDonationInKindDto } from "./dto/update-donation_in_kind.dto";
 
-@Controller('donation-in-kind')
+@Controller("donation-in-kind")
 export class DonationInKindController {
   constructor(private readonly donationInKindService: DonationInKindService) {}
 
@@ -17,18 +25,21 @@ export class DonationInKindController {
     return this.donationInKindService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Get(":id")
+  findOne(@Param("id") id: string) {
     return this.donationInKindService.findOne(+id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateDonationInKindDto: UpdateDonationInKindDto) {
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() updateDonationInKindDto: UpdateDonationInKindDto,
+  ) {
     return this.donationInKindService.update(+id, updateDonationInKindDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
+  @Delete(":id")
+  remove(@Param("id") id: string) {
     return this.donationInKindService.remove(+id);
   }
 }

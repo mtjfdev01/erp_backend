@@ -3,17 +3,20 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, LessThan, Not } from 'typeorm';
-import { Job, JobType, JobStatus } from './entities/job.entity';
-import { CreateJobDto } from './dto/create-job.dto';
-import { UpdateJobDto } from './dto/update-job.dto';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Like, LessThan, Not } from "typeorm";
+import { Job, JobType, JobStatus } from "./entities/job.entity";
+import { CreateJobDto } from "./dto/create-job.dto";
+import { UpdateJobDto } from "./dto/update-job.dto";
 
-import { applyCommonFilters, FilterPayload } from 'src/utils/filters/common-filter.util';
-import { EmailService } from 'src/email/email.service';
-import * as fs from 'fs';
-import * as path from 'path';
+import {
+  applyCommonFilters,
+  FilterPayload,
+} from "src/utils/filters/common-filter.util";
+import { EmailService } from "src/email/email.service";
+import * as fs from "fs";
+import * as path from "path";
 
 @Injectable()
 export class JobsService {
@@ -30,15 +33,18 @@ export class JobsService {
     return title
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '') // Remove special characters
-      .replace(/[\s_-]+/g, '-') // Replace spaces and underscores with hyphens
-      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+      .replace(/[^\w\s-]/g, "") // Remove special characters
+      .replace(/[\s_-]+/g, "-") // Replace spaces and underscores with hyphens
+      .replace(/^-+|-+$/g, ""); // Remove leading/trailing hyphens
   }
 
   /**
    * Ensure unique slug by appending number if needed
    */
-  private async ensureUniqueSlug(slug: string, excludeId?: number): Promise<string> {
+  private async ensureUniqueSlug(
+    slug: string,
+    excludeId?: number,
+  ): Promise<string> {
     let uniqueSlug = slug;
     let counter = 1;
 
@@ -105,9 +111,9 @@ export class JobsService {
       const savedJob = await this.jobRepository.save(job);
       return savedJob;
     } catch (error) {
-      if (error.code === '23505') {
+      if (error.code === "23505") {
         // Unique constraint violation
-        throw new ConflictException('A job with this slug already exists');
+        throw new ConflictException("A job with this slug already exists");
       }
       throw new BadRequestException(`Failed to create job: ${error.message}`);
     }
@@ -128,7 +134,7 @@ export class JobsService {
   ) {
     try {
       const skip = (page - 1) * limit;
-      const queryBuilder = this.jobRepository.createQueryBuilder('job');
+      const queryBuilder = this.jobRepository.createQueryBuilder("job");
 
       // Default to active jobs for public access
       // if (!user) {
@@ -137,16 +143,20 @@ export class JobsService {
 
       // Apply department filter
       if (filters.department) {
-        queryBuilder.andWhere('job.department = :department', { department: filters.department });
+        queryBuilder.andWhere("job.department = :department", {
+          department: filters.department,
+        });
       }
 
       // Apply type filter
       if (filters.type) {
-        queryBuilder.andWhere('job.type = :type', { type: filters.type });
+        queryBuilder.andWhere("job.type = :type", { type: filters.type });
       }
 
       // Exclude archived jobs
-      queryBuilder.andWhere('job.is_archived = :is_archived', { is_archived: false });
+      queryBuilder.andWhere("job.is_archived = :is_archived", {
+        is_archived: false,
+      });
 
       // Order by priority:
       // 1. Featured + Active (priority 0)
@@ -160,9 +170,9 @@ export class JobsService {
           WHEN job.status = '${JobStatus.CLOSED}' THEN 2
           ELSE 3
         END`,
-        'ASC'
+        "ASC",
       );
-      queryBuilder.addOrderBy('job.posted_date', 'DESC');
+      queryBuilder.addOrderBy("job.posted_date", "DESC");
 
       // Get total count
       const totalItems = await queryBuilder.getCount();
@@ -186,7 +196,9 @@ export class JobsService {
         },
       };
     } catch (error) {
-      throw new BadRequestException(`Failed to retrieve jobs: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to retrieve jobs: ${error.message}`,
+      );
     }
   }
 
@@ -199,18 +211,20 @@ export class JobsService {
 
       const where: any = { is_archived: false };
 
-      if (typeof identifier === 'number' || !isNaN(Number(identifier))) {
+      if (typeof identifier === "number" || !isNaN(Number(identifier))) {
         where.id = Number(identifier);
       } else {
         where.slug = identifier;
       }
 
       const job = await this.jobRepository.findOne({
-        where
+        where,
       });
 
       if (!job) {
-        throw new NotFoundException(`Job with identifier ${identifier} not found`);
+        throw new NotFoundException(
+          `Job with identifier ${identifier} not found`,
+        );
       }
 
       return job;
@@ -225,9 +239,15 @@ export class JobsService {
   /**
    * Update a job
    */
-  async update(id: number, updateJobDto: UpdateJobDto, user: any): Promise<Job> {
+  async update(
+    id: number,
+    updateJobDto: UpdateJobDto,
+    user: any,
+  ): Promise<Job> {
     try {
-      const job = await this.jobRepository.findOne({ where: { id, is_archived: false } });
+      const job = await this.jobRepository.findOne({
+        where: { id, is_archived: false },
+      });
 
       if (!job) {
         throw new NotFoundException(`Job with ID ${id} not found`);
@@ -259,7 +279,9 @@ export class JobsService {
    */
   async remove(id: number, user: any): Promise<void> {
     try {
-      const job = await this.jobRepository.findOne({ where: { id, is_archived: false } });
+      const job = await this.jobRepository.findOne({
+        where: { id, is_archived: false },
+      });
 
       if (!job) {
         throw new NotFoundException(`Job with ID ${id} not found`);
@@ -278,5 +300,4 @@ export class JobsService {
       throw new BadRequestException(`Failed to delete job: ${error.message}`);
     }
   }
-
 }

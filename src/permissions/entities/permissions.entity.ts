@@ -6,45 +6,45 @@ import {
   UpdateDateColumn,
   OneToOne,
   JoinColumn,
-} from 'typeorm';
-import { User } from '../../users/user.entity';
+} from "typeorm";
+import { User } from "../../users/user.entity";
 
-@Entity('user_permissions')
+@Entity("user_permissions")
 export class PermissionsEntity {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ name: 'user_id' })
+  @Column({ name: "user_id" })
   user_id: number;
 
-  @Column({ 
-    type: 'jsonb', 
-    name: 'permissions',
+  @Column({
+    type: "jsonb",
+    name: "permissions",
     nullable: false,
-    default: '{}'
+    default: "{}",
   })
   permissions: Record<string, any>;
 
   @OneToOne(() => User, (user) => user.permissions, {
     nullable: false,
-    onDelete: 'CASCADE',
+    onDelete: "CASCADE",
   })
-  @JoinColumn({ name: 'user_id' })
+  @JoinColumn({ name: "user_id" })
   user: User;
 
-  @CreateDateColumn({ 
-    name: 'created_at',
-    type: 'timestamp',
+  @CreateDateColumn({
+    name: "created_at",
+    type: "timestamp",
     precision: 6,
-    default: () => 'CURRENT_TIMESTAMP'
+    default: () => "CURRENT_TIMESTAMP",
   })
   created_at: Date;
 
-  @UpdateDateColumn({ 
-    name: 'updated_at',
-    type: 'timestamp',
+  @UpdateDateColumn({
+    name: "updated_at",
+    type: "timestamp",
     precision: 6,
-    default: () => 'CURRENT_TIMESTAMP'
+    default: () => "CURRENT_TIMESTAMP",
   })
   updated_at: Date;
-} 
+}

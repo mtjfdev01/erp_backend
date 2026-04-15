@@ -1,9 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { QrCode } from './entities/qr_code.entity';
-import { CreateQrCodeDto } from './dto/create-qr_code.dto';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, BadRequestException } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { QrCode } from "./entities/qr_code.entity";
+import { CreateQrCodeDto } from "./dto/create-qr_code.dto";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class QrCodeService {
@@ -17,24 +17,24 @@ export class QrCodeService {
     private readonly configService: ConfigService,
   ) {
     this.donationBaseUrl =
-      this.configService.get<string>('DONATION_BASE_URL') ||
-      'https://mtjfoundation.org/donate';
+      this.configService.get<string>("DONATION_BASE_URL") ||
+      "https://mtjfoundation.org/donate";
   }
 
   private buildTargetUrl(dto: CreateQrCodeDto): string {
     const url = new URL(this.donationBaseUrl);
 
     // tracking source fixed
-    url.searchParams.set('source', 'qr');
+    url.searchParams.set("source", "qr");
 
     if (dto.projectId) {
-      url.searchParams.set('projectId', dto.projectId);
+      url.searchParams.set("projectId", dto.projectId);
     }
     if (dto.campaign) {
-      url.searchParams.set('ref', dto.campaign);
+      url.searchParams.set("ref", dto.campaign);
     }
     if (dto.label) {
-      url.searchParams.set('qr', dto.label);
+      url.searchParams.set("qr", dto.label);
     }
 
     return url.toString();
@@ -43,8 +43,8 @@ export class QrCodeService {
   async create(dto: CreateQrCodeDto) {
     const targetUrl = this.buildTargetUrl(dto);
 
-    if (!targetUrl.startsWith('http')) {
-      throw new BadRequestException('Invalid target URL generated.');
+    if (!targetUrl.startsWith("http")) {
+      throw new BadRequestException("Invalid target URL generated.");
     }
 
     const record = this.repo.create({
@@ -58,9 +58,9 @@ export class QrCodeService {
 
     // image endpoint that frontend can use directly
     const apiBase =
-      this.configService.get<string>('API_BASE_URL') ||
-      this.configService.get<string>('BASE_API_URL') ||
-      'http://localhost:3000';
+      this.configService.get<string>("API_BASE_URL") ||
+      this.configService.get<string>("BASE_API_URL") ||
+      "http://localhost:3000";
     const imageUrl = `${apiBase}/qr-codes/${saved.id}/image`;
 
     return {

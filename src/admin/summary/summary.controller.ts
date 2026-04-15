@@ -1,9 +1,18 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query  } from '@nestjs/common';
-import { SummaryService } from './summary.service';
-import { CreateSummaryDto } from './dto/create-summary.dto';
-import { UpdateSummaryDto } from './dto/update-summary.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+} from "@nestjs/common";
+import { SummaryService } from "./summary.service";
+import { CreateSummaryDto } from "./dto/create-summary.dto";
+import { UpdateSummaryDto } from "./dto/update-summary.dto";
 
-@Controller('summary')
+@Controller("summary")
 export class SummaryController {
   constructor(private readonly summaryService: SummaryService) {}
 
@@ -13,22 +22,22 @@ export class SummaryController {
   }
 
   @Get()
-  findAll(@Query('year') year: string) {
-    return this.summaryService.findAll(year); 
+  findAll(@Query("year") year: string) {
+    return this.summaryService.findAll(year);
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Get(":id")
+  findOne(@Param("id") id: string) {
     return this.summaryService.findOne(+id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSummaryDto: UpdateSummaryDto) {
+  @Patch(":id")
+  update(@Param("id") id: string, @Body() updateSummaryDto: UpdateSummaryDto) {
     return this.summaryService.update(+id, updateSummaryDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
+  @Delete(":id")
+  remove(@Param("id") id: string) {
     return this.summaryService.remove(+id);
   }
 }

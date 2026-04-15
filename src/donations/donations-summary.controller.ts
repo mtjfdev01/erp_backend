@@ -5,15 +5,15 @@ import {
   HttpStatus,
   Res,
   UseGuards,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { DonationsService } from './donations.service';
-import { ConditionalJwtGuard } from 'src/auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
-import { RequiredPermissions } from 'src/permissions';
-import { DateRangeOptions } from 'src/utils/summary/date-range.util';
+} from "@nestjs/common";
+import { Response } from "express";
+import { DonationsService } from "./donations.service";
+import { ConditionalJwtGuard } from "src/auth/guards/conditional-jwt.guard";
+import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
+import { RequiredPermissions } from "src/permissions";
+import { DateRangeOptions } from "src/utils/summary/date-range.util";
 
-@Controller('donations-summary')
+@Controller("donations-summary")
 // @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonationsSummaryController {
   constructor(private readonly donationsService: DonationsService) {}
@@ -90,4 +90,3 @@ export class DonationsSummaryController {
   //   }
   // }
 }
-

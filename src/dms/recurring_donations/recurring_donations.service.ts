@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateRecurringDonationDto } from './dto/create-recurring_donation.dto';
-import { UpdateRecurringDonationDto } from './dto/update-recurring_donation.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateRecurringDonationDto } from "./dto/create-recurring_donation.dto";
+import { UpdateRecurringDonationDto } from "./dto/update-recurring_donation.dto";
 
 @Injectable()
 export class RecurringDonationsService {
   create(createRecurringDonationDto: CreateRecurringDonationDto) {
-    return 'This action adds a new recurringDonation';
+    return "This action adds a new recurringDonation";
   }
 
   findAll() {

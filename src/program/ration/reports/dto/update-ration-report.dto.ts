@@ -1,5 +1,5 @@
-import { IsDate, IsBoolean, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDate, IsBoolean, IsNumber, Min, IsOptional } from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateRationReportDto {
   @IsDate()
@@ -65,4 +65,4 @@ export class UpdateRationReportDto {
   @Min(0)
   @IsOptional()
   life_time?: number;
-} 
+}

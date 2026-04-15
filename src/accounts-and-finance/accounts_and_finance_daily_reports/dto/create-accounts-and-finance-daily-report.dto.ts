@@ -1,4 +1,4 @@
-import { IsDate, IsNumber, IsNotEmpty } from 'class-validator';
+import { IsDate, IsNumber, IsNotEmpty } from "class-validator";
 
 export class CreateAccountsAndFinanceDailyReportDto {
   @IsDate()
@@ -40,4 +40,4 @@ export class CreateAccountsAndFinanceDailyReportDto {
   @IsNumber()
   @IsNotEmpty()
   payment_commitment_party_vise: number;
-} 
+}

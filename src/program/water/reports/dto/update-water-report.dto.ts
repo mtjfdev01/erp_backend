@@ -1,5 +1,12 @@
-import { IsDate, IsString, IsIn, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsDate,
+  IsString,
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateWaterReportDto {
   @IsDate()
@@ -8,12 +15,19 @@ export class UpdateWaterReportDto {
   date?: Date;
 
   @IsString()
-  @IsIn(['Survey', 'Installation', 'Monitoring'])
+  @IsIn(["Survey", "Installation", "Monitoring"])
   @IsOptional()
   activity?: string;
 
   @IsString()
-  @IsIn(['Hand Pump Indoor', 'Hand Pump Outdoor', 'Water Motor Indoor', 'Water Motor Outdoor', 'Affrideve HP', 'WF PLANT'])
+  @IsIn([
+    "Hand Pump Indoor",
+    "Hand Pump Outdoor",
+    "Water Motor Indoor",
+    "Water Motor Outdoor",
+    "Affrideve HP",
+    "WF PLANT",
+  ])
   @IsOptional()
   system?: string;
 
@@ -21,4 +35,4 @@ export class UpdateWaterReportDto {
   @Min(0)
   @IsOptional()
   quantity?: number;
-} 
+}

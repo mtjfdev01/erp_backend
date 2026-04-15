@@ -1,9 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { MeezanService } from './meezan.service';
-import { CreateMeezanDto } from './dto/create-meezan.dto';
-import { UpdateMeezanDto } from './dto/update-meezan.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from "@nestjs/common";
+import { MeezanService } from "./meezan.service";
+import { CreateMeezanDto } from "./dto/create-meezan.dto";
+import { UpdateMeezanDto } from "./dto/update-meezan.dto";
 
-@Controller('meezan')
+@Controller("meezan")
 export class MeezanController {
   constructor(private readonly meezanService: MeezanService) {}
 
@@ -17,18 +25,18 @@ export class MeezanController {
     return this.meezanService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Get(":id")
+  findOne(@Param("id") id: string) {
     return this.meezanService.findOne(+id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateMeezanDto: UpdateMeezanDto) {
+  @Patch(":id")
+  update(@Param("id") id: string, @Body() updateMeezanDto: UpdateMeezanDto) {
     return this.meezanService.update(+id, updateMeezanDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
+  @Delete(":id")
+  remove(@Param("id") id: string) {
     return this.meezanService.remove(+id);
   }
 }

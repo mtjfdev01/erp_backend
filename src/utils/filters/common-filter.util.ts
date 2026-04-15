@@ -1,4 +1,4 @@
-import { SelectQueryBuilder } from 'typeorm';
+import { SelectQueryBuilder } from "typeorm";
 
 export interface FilterPayload {
   search?: string;
@@ -11,7 +11,7 @@ export interface FilterPayload {
 
 export interface RangeFilter {
   column: string;
-  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
+  operator: "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
   value: string | number;
 }
 
@@ -21,7 +21,23 @@ export interface RangeFilterPayload {
 
 export interface HybridFilter {
   value?: any; // Generic value - can be number, string, date, etc.
-  operator?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | '=' | 'neq' | '!=' | '>' | '>=' | '<' | '<=' | 'like' | 'ilike' | 'in' | 'not_in';
+  operator?:
+    | "gt"
+    | "gte"
+    | "lt"
+    | "lte"
+    | "eq"
+    | "="
+    | "neq"
+    | "!="
+    | ">"
+    | ">="
+    | "<"
+    | "<="
+    | "like"
+    | "ilike"
+    | "in"
+    | "not_in";
   column: string;
   [key: string]: any; // Allow additional properties
 }
@@ -42,28 +58,32 @@ export function applyCommonFilters(
   queryBuilder: SelectQueryBuilder<any>,
   filters: FilterPayload,
   searchFields: string[],
-  entityAlias: string = 'entity'
+  entityAlias: string = "entity",
 ): void {
   if (!filters || Object.keys(filters).length === 0) {
     return;
   }
 
   // Apply search filter
-  if (filters.search && filters.search.trim() !== '') {
+  if (filters.search && filters.search.trim() !== "") {
     applySearchFilter(queryBuilder, filters.search, searchFields, entityAlias);
   }
 
   // Apply equality filters for all other fields except search, date, start_date, end_date
-  const excludeFields = ['search', 'date', 'start_date', 'end_date'];
-  Object.keys(filters).forEach(field => {
-    if (!excludeFields.includes(field) && filters[field] !== undefined && filters[field] !== '') {
+  const excludeFields = ["search", "date", "start_date", "end_date"];
+  Object.keys(filters).forEach((field) => {
+    if (
+      !excludeFields.includes(field) &&
+      filters[field] !== undefined &&
+      filters[field] !== ""
+    ) {
       applyEqualityFilter(queryBuilder, field, filters[field], entityAlias);
     }
   });
 
   // Apply date filtering
   applyDateFilter(queryBuilder, filters, entityAlias);
-  
+
   // Apply range filters if provided
   if (filters.range_filters && Array.isArray(filters.range_filters)) {
     applyRangeFilters(queryBuilder, filters.range_filters, entityAlias);
@@ -77,19 +97,19 @@ function applySearchFilter(
   queryBuilder: SelectQueryBuilder<any>,
   searchTerm: string,
   searchFields: string[],
-  entityAlias: string
+  entityAlias: string,
 ): void {
   if (!searchFields || searchFields.length === 0) {
     return;
   }
 
-  const searchConditions = searchFields.map(field => {
-    const fieldPath = field.includes('.') ? field : `${entityAlias}.${field}`;
+  const searchConditions = searchFields.map((field) => {
+    const fieldPath = field.includes(".") ? field : `${entityAlias}.${field}`;
     return `LOWER(${fieldPath}) LIKE LOWER(:searchTerm)`;
   });
 
-  queryBuilder.andWhere(`(${searchConditions.join(' OR ')})`, {
-    searchTerm: `%${searchTerm}%`
+  queryBuilder.andWhere(`(${searchConditions.join(" OR ")})`, {
+    searchTerm: `%${searchTerm}%`,
   });
 }
 
@@ -100,13 +120,13 @@ function applyEqualityFilter(
   queryBuilder: SelectQueryBuilder<any>,
   field: string,
   value: any,
-  entityAlias: string
+  entityAlias: string,
 ): void {
-  const fieldPath = field.includes('.') ? field : `${entityAlias}.${field}`;
+  const fieldPath = field.includes(".") ? field : `${entityAlias}.${field}`;
   const paramName = `filter_${field}`;
-  
+
   queryBuilder.andWhere(`${fieldPath} = :${paramName}`, {
-    [paramName]: value
+    [paramName]: value,
   });
 }
 
@@ -121,12 +141,18 @@ export function applyRelationsFilter(
   queryBuilder: SelectQueryBuilder<any>,
   filters: FilterPayload,
   relationsFilter: RelationsFilterConfig,
-  entityAlias: string = 'entity'
+  entityAlias: string = "entity",
 ): void {
   if (!filters || !relationsFilter) return;
 
   // Exclude standard keys handled elsewhere
-  const excluded = new Set(['search', 'date', 'start_date', 'end_date', 'range_filters']);
+  const excluded = new Set([
+    "search",
+    "date",
+    "start_date",
+    "end_date",
+    "range_filters",
+  ]);
 
   Object.entries(relationsFilter).forEach(([relationAlias, columns]) => {
     if (!Array.isArray(columns) || columns.length === 0) return;
@@ -135,17 +161,31 @@ export function applyRelationsFilter(
       // Support both plain key ('email') and namespaced key ('donor.email')
       const namespacedKey = `${relationAlias}.${column}`;
 
-      const hasNamespaced = Object.prototype.hasOwnProperty.call(filters, namespacedKey) &&
-        filters[namespacedKey] !== undefined && filters[namespacedKey] !== '';
+      const hasNamespaced =
+        Object.prototype.hasOwnProperty.call(filters, namespacedKey) &&
+        filters[namespacedKey] !== undefined &&
+        filters[namespacedKey] !== "";
 
-      const hasPlain = !excluded.has(column) &&
+      const hasPlain =
+        !excluded.has(column) &&
         Object.prototype.hasOwnProperty.call(filters, column) &&
-        filters[column] !== undefined && filters[column] !== '';
+        filters[column] !== undefined &&
+        filters[column] !== "";
 
       if (hasNamespaced) {
-        applyEqualityFilter(queryBuilder, namespacedKey, (filters as any)[namespacedKey], entityAlias);
+        applyEqualityFilter(
+          queryBuilder,
+          namespacedKey,
+          (filters as any)[namespacedKey],
+          entityAlias,
+        );
       } else if (hasPlain) {
-        applyEqualityFilter(queryBuilder, namespacedKey, (filters as any)[column], entityAlias);
+        applyEqualityFilter(
+          queryBuilder,
+          namespacedKey,
+          (filters as any)[column],
+          entityAlias,
+        );
       }
     });
   });
@@ -160,7 +200,7 @@ export function applyRelationsSearch(
   queryBuilder: SelectQueryBuilder<any>,
   searchTerm: string,
   relationsSearch: RelationsFilterConfig,
-  entityAlias: string = 'entity'
+  entityAlias: string = "entity",
 ): void {
   if (!searchTerm || !relationsSearch) return;
 
@@ -173,7 +213,12 @@ export function applyRelationsSearch(
   });
 
   if (relationSearchFields.length > 0) {
-    applySearchFilter(queryBuilder, searchTerm, relationSearchFields, entityAlias);
+    applySearchFilter(
+      queryBuilder,
+      searchTerm,
+      relationSearchFields,
+      entityAlias,
+    );
   }
 }
 
@@ -184,15 +229,17 @@ export function applyRelationsSearch(
  */
 export function normalizeRelationsFilters(
   relationsFilters?: Record<string, Record<string, any>>,
-  relationsConfig?: RelationsFilterConfig
+  relationsConfig?: RelationsFilterConfig,
 ): Record<string, any> {
   const normalized: Record<string, any> = {};
   if (!relationsFilters) return normalized;
 
   Object.entries(relationsFilters).forEach(([alias, cols]) => {
-    const allowed = relationsConfig ? new Set(relationsConfig[alias] || []) : undefined;
+    const allowed = relationsConfig
+      ? new Set(relationsConfig[alias] || [])
+      : undefined;
     Object.entries(cols || {}).forEach(([col, val]) => {
-      if (val === undefined || val === '') return;
+      if (val === undefined || val === "") return;
       if (allowed && !allowed.has(col)) return;
       normalized[`${alias}.${col}`] = val;
     });
@@ -207,33 +254,33 @@ export function normalizeRelationsFilters(
 function applyDateFilter(
   queryBuilder: SelectQueryBuilder<any>,
   filters: FilterPayload,
-  entityAlias: string
+  entityAlias: string,
 ): void {
   const dateField = `${entityAlias}.date`;
-  
+
   // If both start_date and end_date are provided
   if (filters.start_date && filters.end_date) {
     queryBuilder.andWhere(`${dateField} BETWEEN :startDate AND :endDate`, {
       startDate: filters.start_date,
-      endDate: filters.end_date
+      endDate: filters.end_date,
     });
   }
   // If only start_date is provided
   else if (filters.start_date && !filters.end_date) {
     queryBuilder.andWhere(`${dateField} >= :startDate`, {
-      startDate: filters.start_date
+      startDate: filters.start_date,
     });
   }
   // If only end_date is provided
   else if (filters.end_date && !filters.start_date) {
     queryBuilder.andWhere(`${dateField} <= :endDate`, {
-      endDate: filters.end_date
+      endDate: filters.end_date,
     });
   }
   // If only date is provided (exact match)
   else if (filters.date) {
     queryBuilder.andWhere(`${dateField} = :exactDate`, {
-      exactDate: filters.date
+      exactDate: filters.date,
     });
   }
 }
@@ -244,7 +291,7 @@ function applyDateFilter(
 function applyRangeFilters(
   queryBuilder: SelectQueryBuilder<any>,
   rangeFilters: RangeFilter[],
-  entityAlias: string
+  entityAlias: string,
 ): void {
   if (!rangeFilters || rangeFilters.length === 0) {
     return;
@@ -252,16 +299,18 @@ function applyRangeFilters(
 
   rangeFilters.forEach((filter, index) => {
     const { column, operator, value } = filter;
-    
+
     // Validate filter
     if (!column || !operator || value === undefined || value === null) {
       console.warn(`Invalid range filter at index ${index}:`, filter);
       return;
     }
 
-    const fieldPath = column.includes('.') ? column : `${entityAlias}.${column}`;
+    const fieldPath = column.includes(".")
+      ? column
+      : `${entityAlias}.${column}`;
     const paramName = `range_${column}_${index}`;
-    
+
     // Map operator to SQL operator
     const sqlOperator = getSqlOperator(operator);
     if (!sqlOperator) {
@@ -270,7 +319,7 @@ function applyRangeFilters(
     }
 
     queryBuilder.andWhere(`${fieldPath} ${sqlOperator} :${paramName}`, {
-      [paramName]: value
+      [paramName]: value,
     });
   });
 }
@@ -281,27 +330,27 @@ function applyRangeFilters(
 function getSqlOperator(operator: string): string | null {
   const operatorMap: Record<string, string> = {
     // Comparison operators
-    'gt': '>',
-    'gte': '>=',
-    'lt': '<',
-    'lte': '<=',
-    'eq': '=',
-    '=': '=',  // Support both 'eq' and '=' for equality
-    'neq': '!=',
-    '!=': '!=', // Support both 'neq' and '!=' for inequality
+    gt: ">",
+    gte: ">=",
+    lt: "<",
+    lte: "<=",
+    eq: "=",
+    "=": "=", // Support both 'eq' and '=' for equality
+    neq: "!=",
+    "!=": "!=", // Support both 'neq' and '!=' for inequality
     // Direct SQL operators
-    '>': '>',
-    '>=': '>=',
-    '<': '<',
-    '<=': '<=',
+    ">": ">",
+    ">=": ">=",
+    "<": "<",
+    "<=": "<=",
     // String operators
-    'like': 'LIKE',
-    'ilike': 'ILIKE',
+    like: "LIKE",
+    ilike: "ILIKE",
     // Array operators
-    'in': 'IN',
-    'not_in': 'NOT IN'
+    in: "IN",
+    not_in: "NOT IN",
   };
-  
+
   return operatorMap[operator] || null;
 }
 
@@ -314,7 +363,7 @@ function getSqlOperator(operator: string): string | null {
 export function applyHybridFilters(
   queryBuilder: SelectQueryBuilder<any>,
   hybridFilters: HybridFilter[],
-  entityAlias: string = 'entity'
+  entityAlias: string = "entity",
 ): void {
   if (!hybridFilters || hybridFilters.length === 0) {
     return;
@@ -322,16 +371,18 @@ export function applyHybridFilters(
 
   hybridFilters.forEach((filter, index) => {
     const { value, operator, column } = filter;
-    
+
     // Validate required fields
     if (value === undefined || value === null || !operator || !column) {
       console.warn(`Invalid hybrid filter at index ${index}:`, filter);
       return;
     }
 
-    const fieldPath = column.includes('.') ? column : `${entityAlias}.${column}`;
+    const fieldPath = column.includes(".")
+      ? column
+      : `${entityAlias}.${column}`;
     const paramName = `hybrid_${column}_${index}`;
-    
+
     // Map operator to SQL operator
     const sqlOperator = getSqlOperator(operator);
     if (!sqlOperator) {
@@ -340,24 +391,24 @@ export function applyHybridFilters(
     }
 
     // Handle different operator types
-    if (operator === 'like' || operator === 'ilike') {
+    if (operator === "like" || operator === "ilike") {
       // For LIKE/ILIKE operators, wrap value with wildcards
       queryBuilder.andWhere(`${fieldPath} ${sqlOperator} :${paramName}`, {
-        [paramName]: `%${value}%`
+        [paramName]: `%${value}%`,
       });
-    } else if (operator === 'in' || operator === 'not_in') {
+    } else if (operator === "in" || operator === "not_in") {
       // For IN/NOT IN operators, value should be an array
       if (!Array.isArray(value)) {
         console.warn(`Value for IN/NOT IN operator must be an array:`, value);
         return;
       }
       queryBuilder.andWhere(`${fieldPath} ${sqlOperator} (:...${paramName})`, {
-        [paramName]: value
+        [paramName]: value,
       });
     } else {
       // For comparison operators (=, >, <, etc.)
       queryBuilder.andWhere(`${fieldPath} ${sqlOperator} :${paramName}`, {
-        [paramName]: value
+        [paramName]: value,
       });
     }
   });
@@ -376,48 +427,48 @@ export function createFilteredQuery<T>(
   entityAlias: string,
   filters: FilterPayload,
   searchFields: string[],
-  relations: string[] = []
+  relations: string[] = [],
 ): SelectQueryBuilder<T> {
   const queryBuilder = repository.createQueryBuilder(entityAlias);
-  
+
   // Add relations
-  relations.forEach(relation => {
+  relations.forEach((relation) => {
     queryBuilder.leftJoinAndSelect(`${entityAlias}.${relation}`, relation);
   });
-  
+
   // Apply common filters
   applyCommonFilters(queryBuilder, filters, searchFields, entityAlias);
-  
+
   return queryBuilder;
 }
 
-
-
-//multiselect filters 
+//multiselect filters
 export function applyMultiselectFilters(
   queryBuilder: SelectQueryBuilder<any>,
   multiselectFilters: any,
-  entityAlias: string = 'entity'
+  entityAlias: string = "entity",
 ): void {
   try {
     if (!multiselectFilters || Object.keys(multiselectFilters).length === 0) {
       return;
     }
-  
+
     // multiselectFilters is an object where key is column name and value is an array of values
     // Example: { columnName: ['1', '2', '3'] }
     Object.keys(multiselectFilters).forEach((column, index) => {
       const value = multiselectFilters[column];
-      
+
       // Ensure value is an array
       if (!Array.isArray(value) || value.length === 0) {
         return;
       }
-      
-      const fieldPath = column.includes('.') ? column : `${entityAlias}.${column}`;
+
+      const fieldPath = column.includes(".")
+        ? column
+        : `${entityAlias}.${column}`;
       const paramName = `multiselect_${column}_${index}`;
       queryBuilder.andWhere(`${fieldPath} IN (:...${paramName})`, {
-        [paramName]: value
+        [paramName]: value,
       });
     });
   } catch (error) {

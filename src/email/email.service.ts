@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Resend } from 'resend';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Resend } from "resend";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -13,45 +13,51 @@ export class EmailService implements OnModuleInit {
   }
 
   private initializeResend() {
-    const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
-    
+    const apiKey = this.configService.get<string>("RESEND_API_KEY", "");
+
     if (!apiKey) {
-      this.logger.warn('RESEND_API_KEY not configured - email service will not work');
+      this.logger.warn(
+        "RESEND_API_KEY not configured - email service will not work",
+      );
     } else {
       this.resend = new Resend(apiKey);
-      this.logger.log('Resend client initialized successfully');
+      this.logger.log("Resend client initialized successfully");
     }
   }
 
   async onModuleInit() {
     // Resend doesn't need connection verification like SMTP
     // API key validation happens on first send
-    const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
-    
+    const apiKey = this.configService.get<string>("RESEND_API_KEY", "");
+
     if (!apiKey) {
-      this.logger.warn('RESEND_API_KEY not set - email service will not work');
-      this.logger.warn('Set RESEND_API_KEY in environment variables');
+      this.logger.warn("RESEND_API_KEY not set - email service will not work");
+      this.logger.warn("Set RESEND_API_KEY in environment variables");
     } else {
-      this.logger.log('Resend email service ready');
+      this.logger.log("Resend email service ready");
     }
   }
 
   private validateConfiguration() {
-    const resendApiKey = this.configService.get<string>('RESEND_API_KEY', '');
-    
+    const resendApiKey = this.configService.get<string>("RESEND_API_KEY", "");
+
     if (resendApiKey) {
-      this.logger.log('Resend email service configured');
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', ''); 
+      this.logger.log("Resend email service configured");
+      const fromEmail = this.configService.get<string>("RESEND_FROM_EMAIL", "");
       if (!fromEmail) {
-        this.logger.warn('RESEND_FROM_EMAIL not configured');
-        this.logger.warn('Make sure the from email domain is verified in Resend dashboard');
+        this.logger.warn("RESEND_FROM_EMAIL not configured");
+        this.logger.warn(
+          "Make sure the from email domain is verified in Resend dashboard",
+        );
       }
     } else {
-      this.logger.error('No email service configured - RESEND_API_KEY not found');
-      this.logger.warn('Get Resend API key from https://resend.com/api-keys');
+      this.logger.error(
+        "No email service configured - RESEND_API_KEY not found",
+      );
+      this.logger.warn("Get Resend API key from https://resend.com/api-keys");
     }
-    
-    this.logger.log('Email service configuration validated');
+
+    this.logger.log("Email service configuration validated");
   }
 
   /**
@@ -66,12 +72,18 @@ export class EmailService implements OnModuleInit {
   }): Promise<boolean> {
     try {
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       // Replace placeholders in subject and body
       const replacePlaceholders = (text: string, data: Record<string, any>) => {
@@ -89,13 +101,15 @@ export class EmailService implements OnModuleInit {
         subject: renderedSubject,
         html: renderedBody,
         headers: {
-          'X-Mailer': 'MTJ Foundation Dynamic Email System',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Dynamic Email System",
+          "Reply-To": fromEmail,
         },
       });
 
       if (result.error !== null) {
-        this.logger.warn(`Resend error sending dynamic email: ${JSON.stringify(result.error)}`);
+        this.logger.warn(
+          `Resend error sending dynamic email: ${JSON.stringify(result.error)}`,
+        );
         return false;
       }
 
@@ -108,9 +122,9 @@ export class EmailService implements OnModuleInit {
   }
 
   private donationLabel(type?: string) {
-    if (type === 'zakat') return 'Zakat';
-    if (type === 'sadqa' || type === 'sadaqah') return 'Sadqa';
-    return 'General';
+    if (type === "zakat") return "Zakat";
+    if (type === "sadqa" || type === "sadaqah") return "Sadqa";
+    return "General";
   }
 
   async sendDonationConfirmation(d: {
@@ -124,44 +138,55 @@ export class EmailService implements OnModuleInit {
     orderId?: string;
   }): Promise<boolean> {
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'donations@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "donations@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
       const typeLabel = this.donationLabel(d.donationType);
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [d.donorEmail],
-        subject: `${typeLabel} Donation Confirmation - ${d.orderId || 'Pending'}`,
-        html: this.generateDonationConfirmationTemplate({ ...d, donationType: typeLabel }),
-        text: this.generateDonationConfirmationText({ ...d, donationType: typeLabel }),
+        subject: `${typeLabel} Donation Confirmation - ${d.orderId || "Pending"}`,
+        html: this.generateDonationConfirmationTemplate({
+          ...d,
+          donationType: typeLabel,
+        }),
+        text: this.generateDonationConfirmationText({
+          ...d,
+          donationType: typeLabel,
+        }),
         headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Donation System",
+          "List-Unsubscribe": `<mailto:unsubscribe@${fromEmail.split("@")[1]}>`,
+          "Reply-To": fromEmail,
         },
       });
-      const messageId =
-      result.error === null ? result.data.id : 'unknown';
-    
-    this.logger.log(
-      `Sent donation confirmation via Resend to ${d.donorEmail} (id: ${messageId})`,
-    );
-    
-    if (result.error !== null) {
-      this.logger.warn(
-        `Resend error: ${JSON.stringify(result.error)}`,
+      const messageId = result.error === null ? result.data.id : "unknown";
+
+      this.logger.log(
+        `Sent donation confirmation via Resend to ${d.donorEmail} (id: ${messageId})`,
       );
-    }
+
+      if (result.error !== null) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
       return true;
     } catch (error: any) {
       this.logger.error(`Email send failed: ${error?.message}`);
       if (error?.response) {
-        this.logger.error(`Resend API error: ${JSON.stringify(error.response)}`);
+        this.logger.error(
+          `Resend API error: ${JSON.stringify(error.response)}`,
+        );
       }
       return false;
     }
@@ -210,7 +235,7 @@ export class EmailService implements OnModuleInit {
               <p><strong>Type:</strong> ${donationData.donationType}</p>
               <p><strong>Amount:</strong> ${donationData.currency} ${donationData.amount}</p>
               <p><strong>Payment Method:</strong> ${donationData.donationMethod.toUpperCase()}</p>
-              ${donationData.orderId ? `<p><strong>Transaction ID:</strong> ${donationData.orderId}</p>` : ''}
+              ${donationData.orderId ? `<p><strong>Transaction ID:</strong> ${donationData.orderId}</p>` : ""}
               <p><strong>Status:</strong> Pending Payment</p>
             </div>
             
@@ -256,7 +281,7 @@ export class EmailService implements OnModuleInit {
       - Type: ${donationData.donationType}
       - Amount: ${donationData.currency} ${donationData.amount}
       - Payment Method: ${donationData.donationMethod.toUpperCase()}
-      ${donationData.orderId ? `- Transaction ID: ${donationData.orderId}` : ''}
+      ${donationData.orderId ? `- Transaction ID: ${donationData.orderId}` : ""}
       - Status: Pending Payment
       
       To complete your donation, please visit: ${donationData.paymentUrl}
@@ -272,23 +297,33 @@ export class EmailService implements OnModuleInit {
   }
 
   // Send donation success notification (defaults to admin, can send to donor if recipientEmail provided)
-  async sendDonationSuccessEmail(donation: any, donor: any, recipientEmail?: string): Promise<boolean> {
+  async sendDonationSuccessEmail(
+    donation: any,
+    donor: any,
+    recipientEmail?: string,
+  ): Promise<boolean> {
     try {
-      const defaultEmail = 'dev@mtjfoundation.org';
+      const defaultEmail = "dev@mtjfoundation.org";
       const toEmail = recipientEmail || defaultEmail;
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
       // Use different subject for donor vs admin
       const isDonorEmail = recipientEmail && recipientEmail !== defaultEmail;
       const subject = isDonorEmail
-        ? `❤️ Thank You for Your Generous Donation - ${donation.amount} ${donation.currency || 'PKR'}`
-        : `✅ Donation Success - ${donation.donor_name || donor?.name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`;
+        ? `❤️ Thank You for Your Generous Donation - ${donation.amount} ${donation.currency || "PKR"}`
+        : `✅ Donation Success - ${donation.donor_name || donor?.name || "Anonymous"} - ${donation.amount} ${donation.currency || "PKR"}`;
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
@@ -297,18 +332,24 @@ export class EmailService implements OnModuleInit {
         html: this.generateDonationSuccessTemplate(donation, donor),
         // text: this.generateDonationSuccessText(donation),
         headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Donation System",
+          "Reply-To": fromEmail,
         },
       });
-      const messageId = result.data?.id || 'unknown';
-      this.logger.log(`Sent donation success notification via Resend to ${toEmail} (id: ${messageId})`);
+      const messageId = result.data?.id || "unknown";
+      this.logger.log(
+        `Sent donation success notification via Resend to ${toEmail} (id: ${messageId})`,
+      );
       if (!result.data?.id) {
-        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+        this.logger.warn(
+          `Resend response missing message ID. Full response: ${JSON.stringify(result)}`,
+        );
       }
       return true;
     } catch (error: any) {
-      this.logger.error(`Donation success email send failed: ${error?.message}`);
+      this.logger.error(
+        `Donation success email send failed: ${error?.message}`,
+      );
       return false;
     }
   }
@@ -316,34 +357,46 @@ export class EmailService implements OnModuleInit {
   // Send donation failure notification to admin
   async sendDonationFailureEmail(donation: any): Promise<boolean> {
     try {
-      const staticEmailAddress = 'dev@mtjfoundation.org';
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const staticEmailAddress = "dev@mtjfoundation.org";
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [donation?.donor?.email || staticEmailAddress],
-        subject: `⚠️ Incomplete Donation - ${donation?.donor?.name || 'Anonymous'} - ${donation.amount} ${donation.currency || 'PKR'}`,
+        subject: `⚠️ Incomplete Donation - ${donation?.donor?.name || "Anonymous"} - ${donation.amount} ${donation.currency || "PKR"}`,
         html: this.generateDonationFailureTemplate(donation),
         // text: this.generateDonationFailureText(donation, errorDetails),
         headers: {
-          'X-Mailer': 'MTJ Foundation Donation System',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Donation System",
+          "Reply-To": fromEmail,
         },
       });
-      const messageId = result.data?.id || 'unknown';
-      this.logger.log(`Sent donation failure notification via Resend to ${staticEmailAddress} (id: ${messageId})`);
+      const messageId = result.data?.id || "unknown";
+      this.logger.log(
+        `Sent donation failure notification via Resend to ${staticEmailAddress} (id: ${messageId})`,
+      );
       if (!result.data?.id) {
-        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+        this.logger.warn(
+          `Resend response missing message ID. Full response: ${JSON.stringify(result)}`,
+        );
       }
       return true;
     } catch (error: any) {
-      this.logger.error(`Donation failure email send failed: ${error?.message}`);
+      this.logger.error(
+        `Donation failure email send failed: ${error?.message}`,
+      );
       return false;
     }
   }
@@ -375,7 +428,7 @@ export class EmailService implements OnModuleInit {
           <div class="content">
   
             <p>
-              Dear <strong>${donor.name || 'Valued Supporter'}</strong>,
+              Dear <strong>${donor.name || "Valued Supporter"}</strong>,
             </p>
   
             <p>
@@ -392,9 +445,9 @@ export class EmailService implements OnModuleInit {
             <div class="donation-details">
               <h3>Donation Details</h3>
               <p><strong>Donation ID:</strong> ${donation.id}</p>
-              <p><strong>Donor Name:</strong> ${donor.name || 'Anonymous'}</p>
-              <p><strong>Donor Email:</strong> ${donor.email || 'N/A'}</p>
-              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || 'PKR'}</p>
+              <p><strong>Donor Name:</strong> ${donor.name || "Anonymous"}</p>
+              <p><strong>Donor Email:</strong> ${donor.email || "N/A"}</p>
+              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || "PKR"}</p>
               <p><strong>Payment Date:</strong> ${donation?.date}</p>
               <p>
                 <strong>Status:</strong>
@@ -429,16 +482,16 @@ export class EmailService implements OnModuleInit {
       </html>
     `;
   }
-  
+
   private generateDonationSuccessText(donation: any): string {
     return `
       🎉 Donation Successfully Processed
       
       Donation Details:
       - Donation ID: ${donation.id}
-      - Donor Name: ${donation.donor_name || 'Anonymous'}
-      - Donor Email: ${donation.donor_email || 'N/A'}
-      - Amount: ${donation.amount} ${donation.currency || 'PKR'}
+      - Donor Name: ${donation.donor_name || "Anonymous"}
+      - Donor Email: ${donation.donor_email || "N/A"}
+      - Amount: ${donation.amount} ${donation.currency || "PKR"}
       - Payment Date: ${donation?.date}
       - Status: Completed
       
@@ -446,10 +499,8 @@ export class EmailService implements OnModuleInit {
     `;
   }
 
-  private generateDonationFailureTemplate(
-    donation: any,
-  ): string {
-    const donationURl= `https://mtjfoundation.org/checkout?donationId=${donation?.id}`
+  private generateDonationFailureTemplate(donation: any): string {
+    const donationURl = `https://mtjfoundation.org/checkout?donationId=${donation?.id}`;
     return `
       <!DOCTYPE html>
       <html>
@@ -488,7 +539,7 @@ export class EmailService implements OnModuleInit {
           <div class="content">
   
             <p>
-              Dear <strong>${donation.donor_name || 'Valued Supporter'}</strong>,
+              Dear <strong>${donation.donor_name || "Valued Supporter"}</strong>,
             </p>
   
             <div class="message-box">
@@ -505,7 +556,7 @@ export class EmailService implements OnModuleInit {
             <div class="donation-details">
               <h3>Donation Summary</h3>
               <p><strong>Donation ID:</strong> ${donation.id}</p>
-              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || 'PKR'}</p>
+              <p><strong>Amount:</strong> ${donation.amount} ${donation.currency || "PKR"}</p>
               <p>
                 <strong>Status:</strong>
                 <span style="color: #dc3545; font-weight: bold;">Not Completed</span>
@@ -539,20 +590,22 @@ export class EmailService implements OnModuleInit {
       </html>
     `;
   }
-  
 
-  private generateDonationFailureText(donation: any, errorDetails: any): string {
+  private generateDonationFailureText(
+    donation: any,
+    errorDetails: any,
+  ): string {
     return `
       ⚠️ Donation Processing Failed
       
       Donation Details:
       - Donation ID: ${donation.id}
-      - Donor Name: ${donation.donor_name || 'Anonymous'}
-      - Donor Email: ${donation.donor_email || 'N/A'}
-      - Amount: ${donation.amount} ${donation.currency || 'PKR'}
+      - Donor Name: ${donation.donor_name || "Anonymous"}
+      - Donor Email: ${donation.donor_email || "N/A"}
+      - Amount: ${donation.amount} ${donation.currency || "PKR"}
       - Error Code: ${errorDetails.err_code}
-      - Error Message: ${errorDetails.err_msg || 'Unknown error'}
-      - Transaction ID: ${errorDetails.transaction_id || 'N/A'}
+      - Error Message: ${errorDetails.err_msg || "Unknown error"}
+      - Transaction ID: ${errorDetails.transaction_id || "N/A"}
       - Status: Failed
       
       This is an automated notification from your donation system.
@@ -575,11 +628,17 @@ export class EmailService implements OnModuleInit {
     applicationId: number;
   }): Promise<boolean> {
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'careers@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "careers@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
@@ -590,18 +649,24 @@ export class EmailService implements OnModuleInit {
         html: this.generateJobApplicationConfirmationTemplate(data),
         text: this.generateJobApplicationConfirmationText(data),
         headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Career Portal",
+          "Reply-To": fromEmail,
         },
       });
-      const messageId = result.data?.id || 'unknown';
-      this.logger.log(`Sent job application confirmation via Resend to ${data.applicantEmail} (id: ${messageId})`);
+      const messageId = result.data?.id || "unknown";
+      this.logger.log(
+        `Sent job application confirmation via Resend to ${data.applicantEmail} (id: ${messageId})`,
+      );
       if (!result.data?.id) {
-        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+        this.logger.warn(
+          `Resend response missing message ID. Full response: ${JSON.stringify(result)}`,
+        );
       }
       return true;
     } catch (error: any) {
-      this.logger.error(`Job application confirmation email send failed: ${error?.message}`);
+      this.logger.error(
+        `Job application confirmation email send failed: ${error?.message}`,
+      );
       return false;
     }
   }
@@ -616,12 +681,18 @@ export class EmailService implements OnModuleInit {
     applicationId: number;
   }): Promise<boolean> {
     try {
-      const staticEmailAddress = 'dev@mtjfoundation.org';
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'careers@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const staticEmailAddress = "dev@mtjfoundation.org";
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "careers@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
@@ -632,18 +703,24 @@ export class EmailService implements OnModuleInit {
         html: this.generateNewJobApplicationNotificationTemplate(data),
         text: this.generateNewJobApplicationNotificationText(data),
         headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Career Portal",
+          "Reply-To": fromEmail,
         },
       });
-      const messageId = result.data?.id || 'unknown';
-      this.logger.log(`Sent new job application notification via Resend to ${staticEmailAddress} (id: ${messageId})`);
+      const messageId = result.data?.id || "unknown";
+      this.logger.log(
+        `Sent new job application notification via Resend to ${staticEmailAddress} (id: ${messageId})`,
+      );
       if (!result.data?.id) {
-        this.logger.warn(`Resend response missing message ID. Full response: ${JSON.stringify(result)}`);
+        this.logger.warn(
+          `Resend response missing message ID. Full response: ${JSON.stringify(result)}`,
+        );
       }
       return true;
     } catch (error: any) {
-      this.logger.error(`New job application notification email send failed: ${error?.message}`);
+      this.logger.error(
+        `New job application notification email send failed: ${error?.message}`,
+      );
       return false;
     }
   }
@@ -659,11 +736,17 @@ export class EmailService implements OnModuleInit {
     newStatus: string;
   }): Promise<boolean> {
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'careers@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "careers@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
@@ -674,17 +757,21 @@ export class EmailService implements OnModuleInit {
         html: this.generateJobApplicationStatusUpdateTemplate(data),
         text: this.generateJobApplicationStatusUpdateText(data),
         headers: {
-          'X-Mailer': 'MTJ Foundation Career Portal',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation Career Portal",
+          "Reply-To": fromEmail,
         },
       });
-      
-      console.log("result 1234567", result)
-      const messageId = result.data?.id || result?.data?.id || 'unknown';
-      this.logger.log(`Sent job application status update via Resend to ${data.applicantEmail} (id: ${messageId})`);
+
+      console.log("result 1234567", result);
+      const messageId = result.data?.id || result?.data?.id || "unknown";
+      this.logger.log(
+        `Sent job application status update via Resend to ${data.applicantEmail} (id: ${messageId})`,
+      );
       return true;
     } catch (error: any) {
-      this.logger.error(`Job application status update email send failed: ${error?.message}`);
+      this.logger.error(
+        `Job application status update email send failed: ${error?.message}`,
+      );
       return false;
     }
   }
@@ -837,13 +924,17 @@ export class EmailService implements OnModuleInit {
     newStatus: string;
   }): string {
     const statusMessages: { [key: string]: string } = {
-      reviewed: 'Your application has been reviewed by our team.',
-      shortlisted: 'Congratulations! You have been shortlisted for this position.',
-      rejected: 'Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.',
-      hired: 'Congratulations! We are pleased to offer you this position.',
+      reviewed: "Your application has been reviewed by our team.",
+      shortlisted:
+        "Congratulations! You have been shortlisted for this position.",
+      rejected:
+        "Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.",
+      hired: "Congratulations! We are pleased to offer you this position.",
     };
 
-    const message = statusMessages[data.newStatus] || 'Your application status has been updated.';
+    const message =
+      statusMessages[data.newStatus] ||
+      "Your application status has been updated.";
 
     return `
       <!DOCTYPE html>
@@ -892,13 +983,17 @@ export class EmailService implements OnModuleInit {
     newStatus: string;
   }): string {
     const statusMessages: { [key: string]: string } = {
-      reviewed: 'Your application has been reviewed by our team.',
-      shortlisted: 'Congratulations! You have been shortlisted for this position.',
-      rejected: 'Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.',
-      hired: 'Congratulations! We are pleased to offer you this position.',
+      reviewed: "Your application has been reviewed by our team.",
+      shortlisted:
+        "Congratulations! You have been shortlisted for this position.",
+      rejected:
+        "Thank you for your interest. Unfortunately, we are unable to proceed with your application at this time.",
+      hired: "Congratulations! We are pleased to offer you this position.",
     };
 
-    const message = statusMessages[data.newStatus] || 'Your application status has been updated.';
+    const message =
+      statusMessages[data.newStatus] ||
+      "Your application status has been updated.";
 
     return `
       Application Update
@@ -924,52 +1019,78 @@ export class EmailService implements OnModuleInit {
   /**
    * Test email service connection - for debugging
    */
-  async testConnection(): Promise<{ success: boolean; message: string; details?: any }> {
+  async testConnection(): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+  }> {
     if (!this.resend) {
       return {
         success: false,
-        message: 'Resend is not configured',
+        message: "Resend is not configured",
         details: {
-          service: 'Resend',
+          service: "Resend",
           apiKeyConfigured: false,
-          fromEmail: this.configService.get<string>('RESEND_FROM_EMAIL', 'not configured'),
-        }
+          fromEmail: this.configService.get<string>(
+            "RESEND_FROM_EMAIL",
+            "not configured",
+          ),
+        },
       };
     }
 
     // Resend doesn't have a connection test endpoint, but we can verify API key by checking if it's set
-    const apiKey = this.configService.get<string>('RESEND_API_KEY', '');
+    const apiKey = this.configService.get<string>("RESEND_API_KEY", "");
     return {
       success: !!apiKey,
-      message: apiKey ? 'Resend API key configured' : 'Resend API key not configured',
+      message: apiKey
+        ? "Resend API key configured"
+        : "Resend API key not configured",
       details: {
-        service: 'Resend',
+        service: "Resend",
         apiKeyConfigured: !!apiKey,
-        fromEmail: this.configService.get<string>('RESEND_FROM_EMAIL', 'not configured'),
-      }
+        fromEmail: this.configService.get<string>(
+          "RESEND_FROM_EMAIL",
+          "not configured",
+        ),
+      },
     };
   }
 
   /**
    * Send test email - for debugging email configuration
    */
-  async sendTestEmail(to: string = 'dev@mtjfoundation.org'): Promise<{ success: boolean; message: string; details?: any; error?: any; troubleshooting?: any; timestamp?: string }> {
+  async sendTestEmail(to: string = "dev@mtjfoundation.org"): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+    error?: any;
+    troubleshooting?: any;
+    timestamp?: string;
+  }> {
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'mtjfoundation.org'); 
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "mtjfoundation.org",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
         return {
           success: false,
-          message: 'Resend is not configured - cannot send test email',
+          message: "Resend is not configured - cannot send test email",
           error: {
-            message: 'RESEND_API_KEY not set',
+            message: "RESEND_API_KEY not set",
           },
           troubleshooting: {
-            service: 'Resend',
-            suggestion: 'Set RESEND_API_KEY in environment variables. Get API key from https://resend.com/api-keys'
+            service: "Resend",
+            suggestion:
+              "Set RESEND_API_KEY in environment variables. Get API key from https://resend.com/api-keys",
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         };
       }
 
@@ -1025,46 +1146,52 @@ export class EmailService implements OnModuleInit {
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [to],
-        subject: 'Test Email - Hello from MTJ Foundation',
+        subject: "Test Email - Hello from MTJ Foundation",
         html: htmlContent,
         text: textContent,
         headers: {
-          'X-Mailer': 'MTJ Foundation ERP Test',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation ERP Test",
+          "Reply-To": fromEmail,
         },
       });
-      console.log("result 1234567", result)
-      this.logger.log(`Test email sent via Resend to ${to} (id: ${result.data?.id})`);
-      
+      console.log("result 1234567", result);
+      this.logger.log(
+        `Test email sent via Resend to ${to} (id: ${result.data?.id})`,
+      );
+
       return {
         success: true,
-        message: 'Test email sent successfully via Resend',
+        message: "Test email sent successfully via Resend",
         details: {
           to: to,
           messageId: result.data?.id,
-          service: 'Resend',
-          timestamp: new Date().toISOString()
-        }
+          service: "Resend",
+          timestamp: new Date().toISOString(),
+        },
       };
     } catch (error: any) {
       this.logger.error(`Test email send failed: ${error?.message}`);
       if (error?.response) {
-        this.logger.error(`Resend API error: ${JSON.stringify(error.response)}`);
+        this.logger.error(
+          `Resend API error: ${JSON.stringify(error.response)}`,
+        );
       }
-      
+
       return {
         success: false,
-        message: error?.message || 'Resend API error. Check your RESEND_API_KEY.',
+        message:
+          error?.message || "Resend API error. Check your RESEND_API_KEY.",
         error: {
           message: error?.message,
           code: error?.code,
-          response: error?.response
+          response: error?.response,
         },
         troubleshooting: {
-          service: 'Resend',
-          suggestion: 'Check RESEND_API_KEY configuration and ensure RESEND_FROM_EMAIL domain is verified in Resend dashboard'
+          service: "Resend",
+          suggestion:
+            "Check RESEND_API_KEY configuration and ensure RESEND_FROM_EMAIL domain is verified in Resend dashboard",
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     }
   }
@@ -1080,21 +1207,27 @@ export class EmailService implements OnModuleInit {
     text: string;
   }): Promise<boolean> {
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
       // Normalize to array: if string, convert to array; if already array, use as-is
       let recipients: string[];
-      
+
       // Handle case where data.to might be a stringified array
-      if (typeof data.to === 'string') {
+      if (typeof data.to === "string") {
         // Check if it's a JSON array string
-        if (data.to.trim().startsWith('[') && data.to.trim().endsWith(']')) {
+        if (data.to.trim().startsWith("[") && data.to.trim().endsWith("]")) {
           try {
             recipients = JSON.parse(data.to);
           } catch {
@@ -1111,20 +1244,22 @@ export class EmailService implements OnModuleInit {
         this.logger.error(`Invalid email format: ${typeof data.to}`);
         return false;
       }
-      
+
       // Filter out any empty or invalid emails and ensure they're strings
       const validRecipients = recipients
-        .filter(email => email && typeof email === 'string' && email.includes('@'))
-        .map(email => email.trim());
+        .filter(
+          (email) => email && typeof email === "string" && email.includes("@"),
+        )
+        .map((email) => email.trim());
 
       if (validRecipients.length === 0) {
-        this.logger.error('No valid email recipients provided');
+        this.logger.error("No valid email recipients provided");
         return false;
       }
 
       // Ensure we're passing a proper array to Resend
       this.logger.log(
-        `Resend sendReportEmail inputs: to=${validRecipients.join(', ')} | from=${fromEmail} | subject=${data.subject}`,
+        `Resend sendReportEmail inputs: to=${validRecipients.join(", ")} | from=${fromEmail} | subject=${data.subject}`,
       );
 
       const result: any = await this.resend.emails.send({
@@ -1134,13 +1269,13 @@ export class EmailService implements OnModuleInit {
         html: data.html,
         text: data.text,
         headers: {
-          'X-Mailer': 'MTJ Foundation ERP System',
-          'Reply-To': fromEmail,
+          "X-Mailer": "MTJ Foundation ERP System",
+          "Reply-To": fromEmail,
         },
       });
 
-      const messageId = result?.data?.id || 'unknown';
-      const recipientsList = validRecipients.join(', ');
+      const messageId = result?.data?.id || "unknown";
+      const recipientsList = validRecipients.join(", ");
       this.logger.log(
         `Resend sendReportEmail response: to=${recipientsList} | messageId=${messageId} | hasError=${result?.error != null}`,
       );
@@ -1163,14 +1298,20 @@ export class EmailService implements OnModuleInit {
     } catch (error: any) {
       this.logger.error(`Report email send failed: ${error?.message}`);
       if (error?.response) {
-        this.logger.error(`Resend API error: ${JSON.stringify(error.response)}`);
+        this.logger.error(
+          `Resend API error: ${JSON.stringify(error.response)}`,
+        );
       }
       return false;
     }
   }
 
-//  Tasks Section 
-  async sendTaskAssignmentEmail(user: any, task: any, master?: any): Promise<boolean> {
+  //  Tasks Section
+  async sendTaskAssignmentEmail(
+    user: any,
+    task: any,
+    master?: any,
+  ): Promise<boolean> {
     /*
     try {
       const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');

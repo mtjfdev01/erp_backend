@@ -1,4 +1,11 @@
-import { IsBoolean, IsNumber, IsObject, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Min,
+} from "class-validator";
 
 export class CreateTemplateStepDto {
   @IsString()
@@ -39,4 +46,3 @@ export class CreateTemplateStepDto {
   @IsBoolean()
   notify_donor_on_complete?: boolean;
 }
-

@@ -1,7 +1,7 @@
-import { Entity, Column } from 'typeorm';
-import { BaseEntity } from '../../../utils/base_utils/entities/baseEntity';
+import { Entity, Column } from "typeorm";
+import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 
-@Entity('email_templates')
+@Entity("email_templates")
 export class EmailTemplate extends BaseEntity {
   @Column({ unique: true })
   name: string;
@@ -9,13 +9,13 @@ export class EmailTemplate extends BaseEntity {
   @Column()
   subject: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: "text" })
   body: string;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: "text", nullable: true })
   description: string;
 
-  @Column({ default: 'general' })
+  @Column({ default: "general" })
   category: string;
 
   @Column({ default: true })

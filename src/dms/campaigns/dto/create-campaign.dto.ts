@@ -8,9 +8,9 @@ import {
   MaxLength,
   Min,
   ValidateIf,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-import { CampaignStatus } from '../entities/campaign.entity';
+} from "class-validator";
+import { Type } from "class-transformer";
+import { CampaignStatus } from "../entities/campaign.entity";
 
 export class CreateCampaignDto {
   @IsString()

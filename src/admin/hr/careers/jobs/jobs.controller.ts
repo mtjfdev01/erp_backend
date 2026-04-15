@@ -12,27 +12,27 @@ import {
   UseInterceptors,
   UploadedFile,
   UseGuards,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { Response } from 'express';
-import { JobsService } from './jobs.service';
-import { CreateJobDto } from './dto/create-job.dto';
-import { UpdateJobDto } from './dto/update-job.dto';
-import { CreateApplicationDto } from '../applications/dto/create-application.dto';
-import { UpdateApplicationDto } from '../applications/dto/update-application.dto';
-import { JobStatus, JobType } from './entities/job.entity';
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { Response } from "express";
+import { JobsService } from "./jobs.service";
+import { CreateJobDto } from "./dto/create-job.dto";
+import { UpdateJobDto } from "./dto/update-job.dto";
+import { CreateApplicationDto } from "../applications/dto/create-application.dto";
+import { UpdateApplicationDto } from "../applications/dto/update-application.dto";
+import { JobStatus, JobType } from "./entities/job.entity";
 // import { ConditionalJwtGuard } from '../../../../auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from '../../../../permissions/guards/permissions.guard'; 
-import { RequiredPermissions } from '../../../../permissions';
+import { PermissionsGuard } from "../../../../permissions/guards/permissions.guard";
+import { RequiredPermissions } from "../../../../permissions";
 
-@Controller('jobs')
+@Controller("jobs")
 export class JobsController {
   constructor(private readonly jobsService: JobsService) {}
 
   /**
    * GET /jobs - Get all jobs with filtering and pagination
    * Public endpoint (no auth required)
-   * 
+   *
    * Query Parameters:
    * - page: number (default: 1)
    * - limit: number (default: 10)
@@ -41,10 +41,10 @@ export class JobsController {
    */
   @Get()
   async findAll(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('department') department?: string,
-    @Query('type') type?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+    @Query("department") department?: string,
+    @Query("type") type?: string,
     @Res() res?: Response,
   ) {
     try {
@@ -55,9 +55,9 @@ export class JobsController {
       let jobType: JobType | undefined;
       if (type) {
         const typeMap: { [key: string]: JobType } = {
-          'FULL_TIME': JobType.FULL_TIME,
-          'PART_TIME': JobType.PART_TIME,
-          'CONTRACT': JobType.CONTRACT,
+          FULL_TIME: JobType.FULL_TIME,
+          PART_TIME: JobType.PART_TIME,
+          CONTRACT: JobType.CONTRACT,
         };
         jobType = typeMap[type.toUpperCase()];
         if (!jobType) {
@@ -103,8 +103,8 @@ export class JobsController {
    * GET /jobs/:id - Get single job by ID or slug
    * Public endpoint (no auth required)
    */
-  @Get(':id')
-  async findOne(@Param('id') id: string, @Res() res: Response) {
+  @Get(":id")
+  async findOne(@Param("id") id: string, @Res() res: Response) {
     try {
       const job = await this.jobsService.findOne(id);
       return res.status(HttpStatus.OK).json({
@@ -112,8 +112,9 @@ export class JobsController {
         data: job,
       });
     } catch (error) {
-      const status =
-        error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -127,13 +128,13 @@ export class JobsController {
    */
   @Post()
   // @UseGuards( PermissionsGuard)
-  @RequiredPermissions(['hr.jobs.create', 'super_admin'])
+  @RequiredPermissions(["hr.jobs.create", "super_admin"])
   async create(@Body() createJobDto: CreateJobDto, @Res() res: Response) {
     try {
       const job = await this.jobsService.create(createJobDto, null);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'Job created successfully',
+        message: "Job created successfully",
         data: job,
       });
     } catch (error) {
@@ -148,11 +149,11 @@ export class JobsController {
   /**
    * PATCH /jobs/:id - Update existing job
    */
-  @Patch(':id')
+  @Patch(":id")
   // @UseGuards( PermissionsGuard)
-  @RequiredPermissions(['hr.jobs.update', 'super_admin'])
+  @RequiredPermissions(["hr.jobs.update", "super_admin"])
   async update(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() updateJobDto: UpdateJobDto,
     @Res() res: Response,
   ) {
@@ -160,12 +161,13 @@ export class JobsController {
       const job = await this.jobsService.update(+id, updateJobDto, null);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Job updated successfully',
+        message: "Job updated successfully",
         data: job,
       });
     } catch (error) {
-      const status =
-        error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -175,21 +177,22 @@ export class JobsController {
   }
 
   /**
-   * DELETE /jobs/:id - Soft delete (archive) a job 
+   * DELETE /jobs/:id - Soft delete (archive) a job
    */
-  @Delete(':id')
+  @Delete(":id")
   // @UseGuards( PermissionsGuard)
-  @RequiredPermissions(['hr.jobs.delete', 'super_admin'])
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  @RequiredPermissions(["hr.jobs.delete", "super_admin"])
+  async remove(@Param("id") id: string, @Res() res: Response) {
     try {
       await this.jobsService.remove(+id, null);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Job deleted successfully',
+        message: "Job deleted successfully",
       });
     } catch (error) {
-      const status =
-        error.message.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -232,5 +235,4 @@ export class JobsController {
   //     });
   //   }
   // }
-
 }

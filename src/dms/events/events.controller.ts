@@ -11,40 +11,45 @@ import {
   Req,
   HttpStatus,
   Res,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { EventsService } from './events.service';
-import { CreateEventDto } from './dto/create-event.dto';
-import { UpdateEventDto } from './dto/update-event.dto';
-import { EventFiltersDto } from './dto/event-filters.dto';
-import { SetEventStatusDto } from './dto/set-event-status.dto';
-import { ScanPassDto } from './dto/scan-pass.dto';
-import { PassesQueryDto } from './dto/passes-query.dto';
-import { GeneratePassesQueryDto } from './dto/generate-passes-query.dto';
-import { EventDonationsReportQueryDto } from './dto/donations-report-query.dto';
-import { ConditionalJwtGuard } from '../../auth/guards/conditional-jwt.guard';
-import { PermissionsGuard } from '../../permissions/guards/permissions.guard';
-import { RequiredPermissions } from '../../permissions';
+} from "@nestjs/common";
+import { Response } from "express";
+import { EventsService } from "./events.service";
+import { CreateEventDto } from "./dto/create-event.dto";
+import { UpdateEventDto } from "./dto/update-event.dto";
+import { EventFiltersDto } from "./dto/event-filters.dto";
+import { SetEventStatusDto } from "./dto/set-event-status.dto";
+import { ScanPassDto } from "./dto/scan-pass.dto";
+import { PassesQueryDto } from "./dto/passes-query.dto";
+import { GeneratePassesQueryDto } from "./dto/generate-passes-query.dto";
+import { EventDonationsReportQueryDto } from "./dto/donations-report-query.dto";
+import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
+import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
+import { RequiredPermissions } from "../../permissions";
 
-@Controller('events')
+@Controller("events")
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
   @Post()
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.create', 'super_admin'])
-  async create(@Body() dto: CreateEventDto, @Req() req: any, @Res() res: Response) {
+  @RequiredPermissions(["dms.events.create", "super_admin"])
+  async create(
+    @Body() dto: CreateEventDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
       const userId = req?.user?.id ?? null;
       const result = await this.eventsService.create(dto, userId);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'Event created successfully',
+        message: "Event created successfully",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -55,13 +60,13 @@ export class EventsController {
 
   @Get()
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.list_view', 'super_admin'])
+  @RequiredPermissions(["dms.events.list_view", "super_admin"])
   async findAll(@Query() filters: EventFiltersDto, @Res() res: Response) {
     try {
       const result = await this.eventsService.findAll(filters);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Events retrieved successfully',
+        message: "Events retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -73,20 +78,21 @@ export class EventsController {
     }
   }
 
-  @Get(':eventId/stats')
+  @Get(":eventId/stats")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.view', 'super_admin'])
-  async getStats(@Param('eventId') eventId: string, @Res() res: Response) {
+  @RequiredPermissions(["dms.events.view", "super_admin"])
+  async getStats(@Param("eventId") eventId: string, @Res() res: Response) {
     try {
       const result = await this.eventsService.getStats(+eventId);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event stats retrieved',
+        message: "Event stats retrieved",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -95,11 +101,11 @@ export class EventsController {
     }
   }
 
-  @Get(':eventId/donations-report')
+  @Get(":eventId/donations-report")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.view', 'super_admin'])
+  @RequiredPermissions(["dms.events.view", "super_admin"])
   async getDonationsReport(
-    @Param('eventId') eventId: string,
+    @Param("eventId") eventId: string,
     @Query() query: EventDonationsReportQueryDto,
     @Res() res: Response,
   ) {
@@ -111,12 +117,13 @@ export class EventsController {
       );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event donations report retrieved',
+        message: "Event donations report retrieved",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -125,11 +132,11 @@ export class EventsController {
     }
   }
 
-  @Get(':eventId/passes')
+  @Get(":eventId/passes")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.view', 'super_admin'])
+  @RequiredPermissions(["dms.events.view", "super_admin"])
   async listPasses(
-    @Param('eventId') eventId: string,
+    @Param("eventId") eventId: string,
     @Query() query: PassesQueryDto,
     @Res() res: Response,
   ) {
@@ -137,13 +144,14 @@ export class EventsController {
       const result = await this.eventsService.listPasses(+eventId, query);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Passes retrieved',
+        message: "Passes retrieved",
         data: result.data,
         total: result.total,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -152,24 +160,28 @@ export class EventsController {
     }
   }
 
-  @Post(':eventId/passes/generate')
+  @Post(":eventId/passes/generate")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.update', 'super_admin'])
+  @RequiredPermissions(["dms.events.update", "super_admin"])
   async generatePasses(
-    @Param('eventId') eventId: string,
+    @Param("eventId") eventId: string,
     @Query() query: GeneratePassesQueryDto,
     @Res() res: Response,
   ) {
     try {
-      const result = await this.eventsService.generatePasses(+eventId, query.count);
+      const result = await this.eventsService.generatePasses(
+        +eventId,
+        query.count,
+      );
       return res.status(HttpStatus.CREATED).json({
         success: true,
         message: `${result.length} passes generated`,
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -178,11 +190,11 @@ export class EventsController {
     }
   }
 
-  @Post(':eventId/passes/scan')
+  @Post(":eventId/passes/scan")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.update', 'super_admin'])
+  @RequiredPermissions(["dms.events.update", "super_admin"])
   async scanPass(
-    @Param('eventId') eventId: string,
+    @Param("eventId") eventId: string,
     @Body() dto: ScanPassDto,
     @Req() req: any,
     @Res() res: Response,
@@ -199,7 +211,11 @@ export class EventsController {
           remaining: result.remaining,
         });
       }
-      const failResult = result as { ok: false; code: string; used_at?: string };
+      const failResult = result as {
+        ok: false;
+        code: string;
+        used_at?: string;
+      };
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         ok: false,
@@ -210,30 +226,31 @@ export class EventsController {
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         ok: false,
-        code: 'ERROR',
+        code: "ERROR",
         message: error.message,
       });
     }
   }
 
-  @Patch(':eventId/passes/:passId/revoke')
+  @Patch(":eventId/passes/:passId/revoke")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.update', 'super_admin'])
+  @RequiredPermissions(["dms.events.update", "super_admin"])
   async revokePass(
-    @Param('eventId') eventId: string,
-    @Param('passId') passId: string,
+    @Param("eventId") eventId: string,
+    @Param("passId") passId: string,
     @Res() res: Response,
   ) {
     try {
       const result = await this.eventsService.revokePass(+eventId, +passId);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Pass revoked',
+        message: "Pass revoked",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -242,20 +259,21 @@ export class EventsController {
     }
   }
 
-  @Get(':id')
+  @Get(":id")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.view', 'super_admin'])
-  async findOne(@Param('id') id: string, @Res() res: Response) {
+  @RequiredPermissions(["dms.events.view", "super_admin"])
+  async findOne(@Param("id") id: string, @Res() res: Response) {
     try {
       const result = await this.eventsService.getDetailWithRemaining(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event retrieved successfully',
+        message: "Event retrieved successfully",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -264,11 +282,11 @@ export class EventsController {
     }
   }
 
-  @Patch(':id')
+  @Patch(":id")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.update', 'super_admin'])
+  @RequiredPermissions(["dms.events.update", "super_admin"])
   async update(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() dto: UpdateEventDto,
     @Req() req: any,
     @Res() res: Response,
@@ -278,12 +296,13 @@ export class EventsController {
       const result = await this.eventsService.update(+id, dto, userId);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event updated successfully',
+        message: "Event updated successfully",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -292,26 +311,31 @@ export class EventsController {
     }
   }
 
-  @Patch(':id/status')
+  @Patch(":id/status")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.update', 'super_admin'])
+  @RequiredPermissions(["dms.events.update", "super_admin"])
   async setStatus(
-    @Param('id') id: string,
+    @Param("id") id: string,
     @Body() dto: SetEventStatusDto,
     @Req() req: any,
     @Res() res: Response,
   ) {
     try {
       const userId = req?.user?.id ?? null;
-      const result = await this.eventsService.setStatus(+id, dto.status, userId);
+      const result = await this.eventsService.setStatus(
+        +id,
+        dto.status,
+        userId,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event status updated',
+        message: "Event status updated",
         data: result,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,
@@ -320,20 +344,21 @@ export class EventsController {
     }
   }
 
-  @Delete(':id')
+  @Delete(":id")
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
-  @RequiredPermissions(['dms.events.delete', 'super_admin'])
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  @RequiredPermissions(["dms.events.delete", "super_admin"])
+  async remove(@Param("id") id: string, @Res() res: Response) {
     try {
       await this.eventsService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Event archived successfully',
+        message: "Event archived successfully",
         data: null,
       });
     } catch (error) {
-      const status =
-        error.message?.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error.message,

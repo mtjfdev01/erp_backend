@@ -1,5 +1,12 @@
-import { IsDate, IsString, IsIn, IsNumber, Min, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsDate,
+  IsString,
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class UpdateKasbReportDto {
   @IsDate()
@@ -8,7 +15,7 @@ export class UpdateKasbReportDto {
   date?: Date;
 
   @IsString()
-  @IsIn(['Tulamba', 'Abdul Hakim'])
+  @IsIn(["Tulamba", "Abdul Hakim"])
   @IsOptional()
   center?: string;
 
@@ -16,4 +23,4 @@ export class UpdateKasbReportDto {
   @Min(0)
   @IsOptional()
   delivery?: number;
-} 
+}

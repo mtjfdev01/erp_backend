@@ -1,37 +1,44 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Body, 
-  Patch, 
-  Param, 
-  Delete, 
-  Query, 
-  HttpStatus, 
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  HttpStatus,
   Res,
-  BadRequestException 
-} from '@nestjs/common';
-import { Response } from 'express';
-import { UserDonorsService } from './user_donors.service';
-import { CreateUserDonorDto } from './dto/create-user_donor.dto';
-import { UpdateUserDonorDto, TransferDonorDto, AssignDonorDto } from './dto/update-user_donor.dto';
-import { RequiredPermissions } from '../../permissions';
-import { JwtGuard } from '../../auth/jwt.guard';
-import { UseGuards } from '@nestjs/common';
+  BadRequestException,
+} from "@nestjs/common";
+import { Response } from "express";
+import { UserDonorsService } from "./user_donors.service";
+import { CreateUserDonorDto } from "./dto/create-user_donor.dto";
+import {
+  UpdateUserDonorDto,
+  TransferDonorDto,
+  AssignDonorDto,
+} from "./dto/update-user_donor.dto";
+import { RequiredPermissions } from "../../permissions";
+import { JwtGuard } from "../../auth/jwt.guard";
+import { UseGuards } from "@nestjs/common";
 
-@Controller('user-donors')
+@Controller("user-donors")
 @UseGuards(JwtGuard)
 export class UserDonorsController {
   constructor(private readonly userDonorsService: UserDonorsService) {}
 
   @Post()
-  @RequiredPermissions(['user_donors.create', 'super_admin'])
-  async create(@Body() createUserDonorDto: CreateUserDonorDto, @Res() res: Response) {
+  @RequiredPermissions(["user_donors.create", "super_admin"])
+  async create(
+    @Body() createUserDonorDto: CreateUserDonorDto,
+    @Res() res: Response,
+  ) {
     try {
       const result = await this.userDonorsService.create(createUserDonorDto);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'User-donor assignment created successfully',
+        message: "User-donor assignment created successfully",
         data: result,
       });
     } catch (error) {
@@ -44,25 +51,31 @@ export class UserDonorsController {
   }
 
   @Get()
-  @RequiredPermissions(['user_donors.view', 'super_admin'])
+  @RequiredPermissions(["user_donors.view", "super_admin"])
   async findAll(
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-    @Query('status') status?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Query("status") status?: string,
     @Res() res?: Response,
   ) {
     try {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
-      
+
       if (isNaN(pageNum) || isNaN(pageSizeNum)) {
-        throw new BadRequestException('Page and pageSize must be valid numbers');
+        throw new BadRequestException(
+          "Page and pageSize must be valid numbers",
+        );
       }
 
-      const result = await this.userDonorsService.findAll(pageNum, pageSizeNum, status);
+      const result = await this.userDonorsService.findAll(
+        pageNum,
+        pageSizeNum,
+        status,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'User-donor assignments retrieved successfully',
+        message: "User-donor assignments retrieved successfully",
         ...result,
       });
     } catch (error) {
@@ -75,14 +88,14 @@ export class UserDonorsController {
     }
   }
 
-  @Get('stats')
-  @RequiredPermissions(['user_donors.view', 'super_admin'])
+  @Get("stats")
+  @RequiredPermissions(["user_donors.view", "super_admin"])
   async getStats(@Res() res: Response) {
     try {
       const stats = await this.userDonorsService.getAssignmentStats();
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Assignment statistics retrieved successfully',
+        message: "Assignment statistics retrieved successfully",
         data: stats,
       });
     } catch (error) {
@@ -94,23 +107,26 @@ export class UserDonorsController {
     }
   }
 
-  @Get('user/:userId/donors')
-  @RequiredPermissions(['user_donors.view', 'super_admin'])
+  @Get("user/:userId/donors")
+  @RequiredPermissions(["user_donors.view", "super_admin"])
   async getUserDonors(
-    @Param('userId') userId: string,
-    @Query('status') status?: string,
+    @Param("userId") userId: string,
+    @Query("status") status?: string,
     @Res() res?: Response,
   ) {
     try {
       const numericId = parseInt(userId, 10);
       if (isNaN(numericId)) {
-        throw new BadRequestException('Invalid user ID. Must be a number.');
+        throw new BadRequestException("Invalid user ID. Must be a number.");
       }
 
-      const result = await this.userDonorsService.getUserAssignedDonors(numericId, status);
+      const result = await this.userDonorsService.getUserAssignedDonors(
+        numericId,
+        status,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'User assigned donors retrieved successfully',
+        message: "User assigned donors retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -122,23 +138,26 @@ export class UserDonorsController {
     }
   }
 
-  @Get('donor/:donorId/users')
-  @RequiredPermissions(['user_donors.view', 'super_admin'])
+  @Get("donor/:donorId/users")
+  @RequiredPermissions(["user_donors.view", "super_admin"])
   async getDonorUsers(
-    @Param('donorId') donorId: string,
-    @Query('status') status?: string,
+    @Param("donorId") donorId: string,
+    @Query("status") status?: string,
     @Res() res?: Response,
   ) {
     try {
       const numericId = parseInt(donorId, 10);
       if (isNaN(numericId)) {
-        throw new BadRequestException('Invalid donor ID. Must be a number.');
+        throw new BadRequestException("Invalid donor ID. Must be a number.");
       }
 
-      const result = await this.userDonorsService.getDonorAssignedUsers(numericId, status);
+      const result = await this.userDonorsService.getDonorAssignedUsers(
+        numericId,
+        status,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donor assigned users retrieved successfully',
+        message: "Donor assigned users retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -150,19 +169,21 @@ export class UserDonorsController {
     }
   }
 
-  @Get(':id')
-  @RequiredPermissions(['user_donors.view', 'super_admin'])
-  async findOne(@Param('id') id: string, @Res() res?: Response) {
+  @Get(":id")
+  @RequiredPermissions(["user_donors.view", "super_admin"])
+  async findOne(@Param("id") id: string, @Res() res?: Response) {
     try {
       const numericId = parseInt(id, 10);
       if (isNaN(numericId)) {
-        throw new BadRequestException('Invalid assignment ID. Must be a number.');
+        throw new BadRequestException(
+          "Invalid assignment ID. Must be a number.",
+        );
       }
 
       const result = await this.userDonorsService.findOne(numericId);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Assignment retrieved successfully',
+        message: "Assignment retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -174,14 +195,14 @@ export class UserDonorsController {
     }
   }
 
-  @Post('assign')
-  @RequiredPermissions(['user_donors.create', 'super_admin'])
+  @Post("assign")
+  @RequiredPermissions(["user_donors.create", "super_admin"])
   async assignDonor(@Body() assignDto: AssignDonorDto, @Res() res: Response) {
     try {
       const result = await this.userDonorsService.assignDonor(assignDto);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: 'Donor assigned successfully',
+        message: "Donor assigned successfully",
         data: result,
       });
     } catch (error) {
@@ -193,14 +214,17 @@ export class UserDonorsController {
     }
   }
 
-  @Post('transfer')
-  @RequiredPermissions(['user_donors.update', 'super_admin'])
-  async transferDonor(@Body() transferDto: TransferDonorDto, @Res() res: Response) {
+  @Post("transfer")
+  @RequiredPermissions(["user_donors.update", "super_admin"])
+  async transferDonor(
+    @Body() transferDto: TransferDonorDto,
+    @Res() res: Response,
+  ) {
     try {
       const result = await this.userDonorsService.transferDonor(transferDto);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Donor transferred successfully',
+        message: "Donor transferred successfully",
         data: result,
       });
     } catch (error) {
@@ -212,19 +236,28 @@ export class UserDonorsController {
     }
   }
 
-  @Patch(':id')
-  @RequiredPermissions(['user_donors.update', 'super_admin'])
-  async update(@Param('id') id: string, @Body() updateUserDonorDto: UpdateUserDonorDto, @Res() res?: Response) {
+  @Patch(":id")
+  @RequiredPermissions(["user_donors.update", "super_admin"])
+  async update(
+    @Param("id") id: string,
+    @Body() updateUserDonorDto: UpdateUserDonorDto,
+    @Res() res?: Response,
+  ) {
     try {
       const numericId = parseInt(id, 10);
       if (isNaN(numericId)) {
-        throw new BadRequestException('Invalid assignment ID. Must be a number.');
+        throw new BadRequestException(
+          "Invalid assignment ID. Must be a number.",
+        );
       }
 
-      const result = await this.userDonorsService.update(numericId, updateUserDonorDto);
+      const result = await this.userDonorsService.update(
+        numericId,
+        updateUserDonorDto,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Assignment updated successfully',
+        message: "Assignment updated successfully",
         data: result,
       });
     } catch (error) {
@@ -236,19 +269,21 @@ export class UserDonorsController {
     }
   }
 
-  @Delete(':id')
-  @RequiredPermissions(['user_donors.delete', 'super_admin'])
-  async remove(@Param('id') id: string, @Res() res?: Response) {
+  @Delete(":id")
+  @RequiredPermissions(["user_donors.delete", "super_admin"])
+  async remove(@Param("id") id: string, @Res() res?: Response) {
     try {
       const numericId = parseInt(id, 10);
       if (isNaN(numericId)) {
-        throw new BadRequestException('Invalid assignment ID. Must be a number.');
+        throw new BadRequestException(
+          "Invalid assignment ID. Must be a number.",
+        );
       }
 
       const result = await this.userDonorsService.remove(numericId);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: 'Assignment deactivated successfully',
+        message: "Assignment deactivated successfully",
         data: result,
       });
     } catch (error) {

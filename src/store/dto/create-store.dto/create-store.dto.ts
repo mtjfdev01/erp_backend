@@ -1,4 +1,4 @@
-import { IsDate, IsNumber, IsNotEmpty } from 'class-validator';
+import { IsDate, IsNumber, IsNotEmpty } from "class-validator";
 
 export class CreateStoreDto {
   @IsDate()

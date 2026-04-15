@@ -2,18 +2,18 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, In, Between } from 'typeorm';
-import * as crypto from 'crypto';
-import { Event, EventStatus } from './entities/event.entity';
-import { EventPass, EventPassStatus } from './entities/event_pass.entity';
-import { Donation } from '../../donations/entities/donation.entity';
-import { CreateEventDto } from './dto/create-event.dto';
-import { UpdateEventDto } from './dto/update-event.dto';
-import { EventFiltersDto } from './dto/event-filters.dto';
-import { ScanPassDto } from './dto/scan-pass.dto';
-import { PassesQueryDto } from './dto/passes-query.dto';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Not, In, Between } from "typeorm";
+import * as crypto from "crypto";
+import { Event, EventStatus } from "./entities/event.entity";
+import { EventPass, EventPassStatus } from "./entities/event_pass.entity";
+import { Donation } from "../../donations/entities/donation.entity";
+import { CreateEventDto } from "./dto/create-event.dto";
+import { UpdateEventDto } from "./dto/update-event.dto";
+import { EventFiltersDto } from "./dto/event-filters.dto";
+import { ScanPassDto } from "./dto/scan-pass.dto";
+import { PassesQueryDto } from "./dto/passes-query.dto";
 
 @Injectable()
 export class EventsService {
@@ -30,12 +30,15 @@ export class EventsService {
     return title
       .toLowerCase()
       .trim()
-      .replace(/[^\w\s-]/g, '')
-      .replace(/[\s_-]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[\s_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
   }
 
-  private async ensureUniqueSlug(slug: string, excludeId?: number): Promise<string> {
+  private async ensureUniqueSlug(
+    slug: string,
+    excludeId?: number,
+  ): Promise<string> {
     let uniqueSlug = slug;
     let counter = 1;
     while (true) {
@@ -53,12 +56,12 @@ export class EventsService {
 
   private validateDateRange(start_at: Date, end_at: Date): void {
     if (start_at >= end_at) {
-      throw new BadRequestException('start_at must be before end_at');
+      throw new BadRequestException("start_at must be before end_at");
     }
   }
 
   private generatePassCode(): string {
-    return crypto.randomUUID().replace(/-/g, '');
+    return crypto.randomUUID().replace(/-/g, "");
   }
 
   async create(dto: CreateEventDto, createdBy: number | null): Promise<Event> {
@@ -88,16 +91,21 @@ export class EventsService {
   }
 
   async findAll(filters?: EventFiltersDto): Promise<Event[]> {
-    const qb = this.eventRepo.createQueryBuilder('e').orderBy('e.created_at', 'DESC');
-    if (filters?.status) qb.andWhere('e.status = :status', { status: filters.status });
-    if (filters?.campaign_id != null) qb.andWhere('e.campaign_id = :cid', { cid: filters.campaign_id });
+    const qb = this.eventRepo
+      .createQueryBuilder("e")
+      .orderBy("e.created_at", "DESC");
+    if (filters?.status)
+      qb.andWhere("e.status = :status", { status: filters.status });
+    if (filters?.campaign_id != null)
+      qb.andWhere("e.campaign_id = :cid", { cid: filters.campaign_id });
     if (filters?.search?.trim()) {
-      qb.andWhere('(e.title ILIKE :search OR e.description ILIKE :search)', {
+      qb.andWhere("(e.title ILIKE :search OR e.description ILIKE :search)", {
         search: `%${filters.search.trim()}%`,
       });
     }
-    if (filters?.from) qb.andWhere('e.start_at >= :from', { from: filters.from });
-    if (filters?.to) qb.andWhere('e.end_at <= :to', { to: filters.to });
+    if (filters?.from)
+      qb.andWhere("e.start_at >= :from", { from: filters.from });
+    if (filters?.to) qb.andWhere("e.end_at <= :to", { to: filters.to });
     return qb.getMany();
   }
 
@@ -109,7 +117,8 @@ export class EventsService {
 
   async findBySlug(slug: string): Promise<Event> {
     const event = await this.eventRepo.findOne({ where: { slug } });
-    if (!event) throw new NotFoundException(`Event with slug '${slug}' not found`);
+    if (!event)
+      throw new NotFoundException(`Event with slug '${slug}' not found`);
     return event;
   }
 
@@ -119,13 +128,22 @@ export class EventsService {
     return this.findBySlug(String(identifier));
   }
 
-  async getDetailWithRemaining(id: number): Promise<Event & { remaining: number }> {
+  async getDetailWithRemaining(
+    id: number,
+  ): Promise<Event & { remaining: number }> {
     const event = await this.findOne(id);
-    const remaining = Math.max(0, event.allowed_attendees - event.attendees_count);
+    const remaining = Math.max(
+      0,
+      event.allowed_attendees - event.attendees_count,
+    );
     return { ...event, remaining };
   }
 
-  async update(id: number, dto: UpdateEventDto, updatedBy: number | null): Promise<Event> {
+  async update(
+    id: number,
+    dto: UpdateEventDto,
+    updatedBy: number | null,
+  ): Promise<Event> {
     const event = await this.findOne(id);
     if (dto.start_at !== undefined) event.start_at = new Date(dto.start_at);
     if (dto.end_at !== undefined) event.end_at = new Date(dto.end_at);
@@ -137,18 +155,25 @@ export class EventsService {
     if (dto.location !== undefined) event.location = dto.location;
     if (dto.campaign_id !== undefined) event.campaign_id = dto.campaign_id;
     if (dto.is_public !== undefined) event.is_public = dto.is_public;
-    if (dto.allowed_attendees !== undefined) event.allowed_attendees = dto.allowed_attendees;
+    if (dto.allowed_attendees !== undefined)
+      event.allowed_attendees = dto.allowed_attendees;
     if (dto.slug !== undefined && dto.slug !== event.slug) {
       event.slug = await this.ensureUniqueSlug(dto.slug, id);
     }
-    event.updated_by = updatedBy != null ? ({ id: updatedBy } as any) : undefined;
+    event.updated_by =
+      updatedBy != null ? ({ id: updatedBy } as any) : undefined;
     return this.eventRepo.save(event);
   }
 
-  async setStatus(id: number, status: EventStatus, updatedBy: number | null): Promise<Event> {
+  async setStatus(
+    id: number,
+    status: EventStatus,
+    updatedBy: number | null,
+  ): Promise<Event> {
     const event = await this.findOne(id);
     event.status = status;
-    event.updated_by = updatedBy != null ? ({ id: updatedBy } as any) : undefined;
+    event.updated_by =
+      updatedBy != null ? ({ id: updatedBy } as any) : undefined;
     return this.eventRepo.save(event);
   }
 
@@ -165,7 +190,7 @@ export class EventsService {
         is_public: true,
         status: In([EventStatus.UPCOMING, EventStatus.ONGOING]),
       },
-      order: { start_at: 'ASC' },
+      order: { start_at: "ASC" },
     });
   }
 
@@ -177,7 +202,8 @@ export class EventsService {
         status: In([EventStatus.UPCOMING, EventStatus.ONGOING]),
       },
     });
-    if (!event) throw new NotFoundException(`Event with slug '${slug}' not found`);
+    if (!event)
+      throw new NotFoundException(`Event with slug '${slug}' not found`);
     return event;
   }
 
@@ -211,12 +237,13 @@ export class EventsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const qb = this.passRepo
-      .createQueryBuilder('p')
-      .where('p.event_id = :eventId', { eventId })
-      .orderBy('p.created_at', 'DESC')
+      .createQueryBuilder("p")
+      .where("p.event_id = :eventId", { eventId })
+      .orderBy("p.created_at", "DESC")
       .skip((page - 1) * pageSize)
       .take(pageSize);
-    if (query.status) qb.andWhere('p.status = :status', { status: query.status });
+    if (query.status)
+      qb.andWhere("p.status = :status", { status: query.status });
     const [data, total] = await qb.getManyAndCount();
     return { data, total };
   }
@@ -226,7 +253,12 @@ export class EventsService {
     dto: ScanPassDto,
     usedBy: number | null,
   ): Promise<
-    | { ok: true; attendees_count: number; allowed_attendees: number; remaining: number }
+    | {
+        ok: true;
+        attendees_count: number;
+        allowed_attendees: number;
+        remaining: number;
+      }
     | { ok: false; code: string; used_at?: string }
   > {
     const event = await this.findOne(eventId);
@@ -234,18 +266,18 @@ export class EventsService {
       where: { pass_code: dto.pass_code },
     });
     if (!pass) {
-      return { ok: false, code: 'INVALID_PASS' };
+      return { ok: false, code: "INVALID_PASS" };
     }
     if (pass.event_id !== eventId) {
-      return { ok: false, code: 'INVALID_PASS' };
+      return { ok: false, code: "INVALID_PASS" };
     }
     if (pass.status === EventPassStatus.REVOKED) {
-      return { ok: false, code: 'PASS_REVOKED' };
+      return { ok: false, code: "PASS_REVOKED" };
     }
     if (pass.status === EventPassStatus.USED) {
       return {
         ok: false,
-        code: 'PASS_ALREADY_USED',
+        code: "PASS_ALREADY_USED",
         used_at: pass.used_at?.toISOString(),
       };
     }
@@ -264,9 +296,9 @@ export class EventsService {
           used_by: usedBy,
           device_id: dto.device_id ?? null,
         })
-        .where('event_id = :eventId', { eventId })
-        .andWhere('pass_code = :passCode', { passCode: dto.pass_code })
-        .andWhere('status = :status', { status: EventPassStatus.UNUSED })
+        .where("event_id = :eventId", { eventId })
+        .andWhere("pass_code = :passCode", { passCode: dto.pass_code })
+        .andWhere("status = :status", { status: EventPassStatus.UNUSED })
         .execute();
 
       if (passUpdate.affected === 0) {
@@ -275,31 +307,38 @@ export class EventsService {
           where: { pass_code: dto.pass_code },
         });
         if (recheck?.status === EventPassStatus.USED) {
-          return { ok: false, code: 'PASS_ALREADY_USED', used_at: recheck.used_at?.toISOString() };
+          return {
+            ok: false,
+            code: "PASS_ALREADY_USED",
+            used_at: recheck.used_at?.toISOString(),
+          };
         }
         if (recheck?.status === EventPassStatus.REVOKED) {
-          return { ok: false, code: 'PASS_REVOKED' };
+          return { ok: false, code: "PASS_REVOKED" };
         }
-        return { ok: false, code: 'INVALID_PASS' };
+        return { ok: false, code: "INVALID_PASS" };
       }
 
       const eventUpdate = await queryRunner.manager
         .createQueryBuilder()
         .update(Event)
-        .set({ attendees_count: () => 'attendees_count + 1' })
-        .where('id = :eventId', { eventId })
-        .andWhere('attendees_count < allowed_attendees')
+        .set({ attendees_count: () => "attendees_count + 1" })
+        .where("id = :eventId", { eventId })
+        .andWhere("attendees_count < allowed_attendees")
         .execute();
 
       if (eventUpdate.affected === 0) {
         await queryRunner.rollbackTransaction();
-        return { ok: false, code: 'EVENT_FULL' };
+        return { ok: false, code: "EVENT_FULL" };
       }
 
       await queryRunner.commitTransaction();
       const updated = await this.eventRepo.findOne({ where: { id: eventId } });
       const attendees_count = updated!.attendees_count;
-      const remaining = Math.max(0, updated!.allowed_attendees - attendees_count);
+      const remaining = Math.max(
+        0,
+        updated!.allowed_attendees - attendees_count,
+      );
       return {
         ok: true,
         attendees_count,
@@ -326,9 +365,15 @@ export class EventsService {
     const event = await this.findOne(eventId);
     const [total, used, unused, revoked] = await Promise.all([
       this.passRepo.count({ where: { event_id: eventId } }),
-      this.passRepo.count({ where: { event_id: eventId, status: EventPassStatus.USED } }),
-      this.passRepo.count({ where: { event_id: eventId, status: EventPassStatus.UNUSED } }),
-      this.passRepo.count({ where: { event_id: eventId, status: EventPassStatus.REVOKED } }),
+      this.passRepo.count({
+        where: { event_id: eventId, status: EventPassStatus.USED },
+      }),
+      this.passRepo.count({
+        where: { event_id: eventId, status: EventPassStatus.UNUSED },
+      }),
+      this.passRepo.count({
+        where: { event_id: eventId, status: EventPassStatus.REVOKED },
+      }),
     ]);
     return {
       allowed_attendees: event.allowed_attendees,
@@ -357,18 +402,22 @@ export class EventsService {
     const donations = await this.donationRepo.find({
       where: {
         event_id: eventId,
-        status: In(['paid', 'completed']),
+        status: In(["paid", "completed"]),
         date: Between(fromDate, toDate),
       },
-      select: ['amount', 'paid_amount', 'donor_id', 'date'],
+      select: ["amount", "paid_amount", "donor_id", "date"],
     });
     const amountField = (d: Donation) => Number(d.paid_amount ?? d.amount ?? 0);
     const totalAmount = donations.reduce((sum, d) => sum + amountField(d), 0);
     const totalDonations = donations.length;
-    const uniqueDonors = new Set(donations.map((d) => d.donor_id).filter(Boolean)).size;
+    const uniqueDonors = new Set(
+      donations.map((d) => d.donor_id).filter(Boolean),
+    ).size;
     const byDate = new Map<string, { amount: number; count: number }>();
     for (const d of donations) {
-      const dateStr = d.date ? new Date(d.date).toISOString().split('T')[0] : 'unknown';
+      const dateStr = d.date
+        ? new Date(d.date).toISOString().split("T")[0]
+        : "unknown";
       const existing = byDate.get(dateStr) || { amount: 0, count: 0 };
       existing.amount += amountField(d);
       existing.count += 1;

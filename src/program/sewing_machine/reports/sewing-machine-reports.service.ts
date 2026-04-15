@@ -1,10 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { SewingMachineReport } from './entities/sewing-machine-report.entity';
-import { CreateSewingMachineReportDto } from './dto/create-sewing-machine-report.dto';
-import { UpdateSewingMachineReportDto } from './dto/update-sewing-machine-report.dto';
-import { User } from '../../../users/user.entity';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { SewingMachineReport } from "./entities/sewing-machine-report.entity";
+import { CreateSewingMachineReportDto } from "./dto/create-sewing-machine-report.dto";
+import { UpdateSewingMachineReportDto } from "./dto/update-sewing-machine-report.dto";
+import { User } from "../../../users/user.entity";
 
 @Injectable()
 export class SewingMachineReportsService {
@@ -15,9 +19,14 @@ export class SewingMachineReportsService {
     private readonly userRepository: Repository<User>,
   ) {}
 
-  async create(createDto: CreateSewingMachineReportDto, user: User): Promise<SewingMachineReport> {
+  async create(
+    createDto: CreateSewingMachineReportDto,
+    user: User,
+  ): Promise<SewingMachineReport> {
     try {
-      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+      const dbUser = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
       const report = this.sewingMachineReportRepository.create({
         date: new Date(createDto.date),
         orphans: createDto.orphans || 0,
@@ -28,36 +37,42 @@ export class SewingMachineReportsService {
         updated_by: dbUser,
       });
       return await this.sewingMachineReportRepository.save(report);
-    }
-    catch (error) {
+    } catch (error) {
       throw new BadRequestException(error.message);
     }
   }
 
-  async findAll(page: number = 1, pageSize: number = 10, sortField: string = 'date', sortOrder: 'ASC' | 'DESC' = 'DESC'): Promise<{ data: any[]; pagination: any }> {
+  async findAll(
+    page: number = 1,
+    pageSize: number = 10,
+    sortField: string = "date",
+    sortOrder: "ASC" | "DESC" = "DESC",
+  ): Promise<{ data: any[]; pagination: any }> {
     try {
       const skip = (page - 1) * pageSize;
-      
+
       const queryBuilder = this.sewingMachineReportRepository
-        .createQueryBuilder('report')
+        .createQueryBuilder("report")
         .where({ is_archived: false })
         .orderBy(`report.${sortField}`, sortOrder)
         .skip(skip)
         .take(pageSize);
 
       const reports = await queryBuilder.getMany();
-      const total = await this.sewingMachineReportRepository.count({ where: { is_archived: false } });
+      const total = await this.sewingMachineReportRepository.count({
+        where: { is_archived: false },
+      });
       const totalPages = Math.ceil(total / pageSize);
 
-      const formattedReports = reports.map(report => ({
+      const formattedReports = reports.map((report) => ({
         id: report.id,
         date: report.date,
         assistance: {
-          'Orphans': report.orphans,
-          'Divorced': report.divorced,
-          'Disable': report.disable,
-          'Indegent': report.indegent
-        }
+          Orphans: report.orphans,
+          Divorced: report.divorced,
+          Disable: report.disable,
+          Indegent: report.indegent,
+        },
       }));
 
       return {
@@ -70,24 +85,37 @@ export class SewingMachineReportsService {
         },
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch sewing machine reports: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch sewing machine reports: " + error.message,
+      );
     }
   }
 
   async findOne(id: number): Promise<SewingMachineReport> {
-    const report = await this.sewingMachineReportRepository.findOne({ where: { id, is_archived: false } });
+    const report = await this.sewingMachineReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
     if (!report) {
-      throw new NotFoundException(`Sewing machine report with ID ${id} not found`);
+      throw new NotFoundException(
+        `Sewing machine report with ID ${id} not found`,
+      );
     }
     return report;
   }
 
-  async update(id: number, updateDto: UpdateSewingMachineReportDto): Promise<SewingMachineReport> {
-    const report = await this.sewingMachineReportRepository.findOne({ where: { id, is_archived: false } });
-    if(!report){
-      throw new NotFoundException(`Sewing machine report with ID ${id} not found`);
+  async update(
+    id: number,
+    updateDto: UpdateSewingMachineReportDto,
+  ): Promise<SewingMachineReport> {
+    const report = await this.sewingMachineReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
+      throw new NotFoundException(
+        `Sewing machine report with ID ${id} not found`,
+      );
     }
-    
+
     if (updateDto.date) {
       report.date = updateDto.date;
     }
@@ -103,15 +131,19 @@ export class SewingMachineReportsService {
     if (updateDto.indegent !== undefined) {
       report.indegent = updateDto.indegent;
     }
-    
+
     return await this.sewingMachineReportRepository.save(report);
   }
 
   async remove(id: number): Promise<void> {
-    const report = await this.sewingMachineReportRepository.findOne({ where: { id, is_archived: false } });
-    if(!report){
-      throw new NotFoundException(`Sewing machine report with ID ${id} not found`);
+    const report = await this.sewingMachineReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report) {
+      throw new NotFoundException(
+        `Sewing machine report with ID ${id} not found`,
+      );
     }
     await this.sewingMachineReportRepository.update(id, { is_archived: true });
   }
-} 
+}

@@ -22,4 +22,3 @@ export class UpdateProgramDto {
   @IsOptional()
   applicationable?: boolean;
 }
-

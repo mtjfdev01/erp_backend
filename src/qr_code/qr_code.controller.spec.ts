@@ -1,8 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { QrCodeController } from './qr_code.controller';
-import { QrCodeService } from './qr_code.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { QrCodeController } from "./qr_code.controller";
+import { QrCodeService } from "./qr_code.service";
 
-describe('QrCodeController', () => {
+describe("QrCodeController", () => {
   let controller: QrCodeController;
 
   beforeEach(async () => {
@@ -14,7 +14,7 @@ describe('QrCodeController', () => {
     controller = module.get<QrCodeController>(QrCodeController);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(controller).toBeDefined();
   });
 });
