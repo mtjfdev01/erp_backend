@@ -40,6 +40,7 @@ export enum Department {
   HR = "hr",
   MARKETING = "marketing",
   AUDIO_VIDEO = "audio_video",
+  MEAL = "meal",
 }
 
 @Entity()
