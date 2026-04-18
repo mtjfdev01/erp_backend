@@ -31,6 +31,9 @@ export class StoreDailyReportEntity {
   @Column({ type: "int", default: 0 })
   rejected_demands: number;
 
+  @Column({ type: "boolean", default: false })
+  is_archived: boolean;
+  
   @ManyToOne(() => User, (user) => user.id, {
     nullable: true,
     eager: false, // Disable eager loading (optional)

@@ -290,9 +290,9 @@ export class AdminService {
           .addSelect("SUM(r_r_report.half_orphan)", "Half Orphan")
           .addSelect("SUM(r_r_report.life_time)", "Life Time")
           .addSelect(
-            "SUM(r_r_report.full_widows + r_r_report.full_divorced + r_r_report.full_disable + r_r_report.full_indegent + r_r_report.full_orphan + r_r_report.half_widows + r_r_report.half_divorced + r_r_report.half_disable + r_r_report.half_indegent + r_r_report.half_orphan + r_r_report.life_time)",
+            "SUM(r_r_report.full_widows + r_r_report.full_divorced + r_r_report.full_disable + r_r_report.full_indegent + r_r_report.full_orphan + r_r_report.half_widows + r_r_report.half_divorced + r_r_report.half_disable + r_r_report.half_indegent + r_r_report.half_orphan + r_r_report.life_time_full_widows + r_r_report.life_time_full_divorced + r_r_report.life_time_full_disable + r_r_report.life_time_full_indegent + r_r_report.life_time_full_orphan + r_r_report.life_time_half_widows + r_r_report.life_time_half_divorced + r_r_report.life_time_half_disable + r_r_report.life_time_half_indegent + r_r_report.life_time_half_orphan)",
             "Grand_Total",
-          ) // grand total ration
+          ) // grand total ration (life_time buckets; legacy r_r_report.life_time only is superseded after re-save)
           .where("r_r_report.report_date BETWEEN :fromDate AND :toDate", {
             fromDate: from,
             toDate: to,

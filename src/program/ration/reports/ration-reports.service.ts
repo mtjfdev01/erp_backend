@@ -10,6 +10,19 @@ import { CreateRationReportDto } from "./dto/create-ration-report.dto";
 import { UpdateRationReportDto } from "./dto/update-ration-report.dto";
 import { User } from "../../../users/user.entity";
 
+const LIFE_TIME_GRANULAR_KEYS = [
+  "life_time_full_widows",
+  "life_time_full_divorced",
+  "life_time_full_disable",
+  "life_time_full_indegent",
+  "life_time_full_orphan",
+  "life_time_half_widows",
+  "life_time_half_divorced",
+  "life_time_half_disable",
+  "life_time_half_indegent",
+  "life_time_half_orphan",
+] as const;
+
 @Injectable()
 export class RationReportsService {
   constructor(
@@ -19,6 +32,43 @@ export class RationReportsService {
     private readonly userRepository: Repository<User>,
   ) {}
 
+  private sumLifeTimeGranular(o: Record<string, unknown>): number {
+    return LIFE_TIME_GRANULAR_KEYS.reduce(
+      (s, k) => s + Number(o[k] ?? 0),
+      0,
+    );
+  }
+
+  private mapVulnerabilityBlock(
+    report: RationReport,
+    prefix: "full" | "half" | "life_time_full" | "life_time_half",
+  ) {
+    return {
+      Widows: Number(report[`${prefix}_widows` as keyof RationReport] ?? 0),
+      Divorced: Number(
+        report[`${prefix}_divorced` as keyof RationReport] ?? 0,
+      ),
+      Disable: Number(report[`${prefix}_disable` as keyof RationReport] ?? 0),
+      Indegent: Number(
+        report[`${prefix}_indegent` as keyof RationReport] ?? 0,
+      ),
+      Orphan: Number(report[`${prefix}_orphan` as keyof RationReport] ?? 0),
+    };
+  }
+
+  private formatReport(report: RationReport) {
+    return {
+      id: report.id,
+      date: report.report_date,
+      is_alternate: report.is_alternate,
+      full: this.mapVulnerabilityBlock(report, "full"),
+      half: this.mapVulnerabilityBlock(report, "half"),
+      life_time_full: this.mapVulnerabilityBlock(report, "life_time_full"),
+      life_time_half: this.mapVulnerabilityBlock(report, "life_time_half"),
+      life_time: report.life_time,
+    };
+  }
+
   async create(
     createRationReportDto: CreateRationReportDto,
     user: User,
@@ -27,33 +77,29 @@ export class RationReportsService {
       const dbUser = await this.userRepository.findOne({
         where: { id: user.id },
       });
+      const pad = Object.fromEntries(
+        LIFE_TIME_GRANULAR_KEYS.map((k) => [k, 0]),
+      ) as Record<string, unknown>;
+      const mergedLt = {
+        ...pad,
+        ...(createRationReportDto as unknown as Record<string, unknown>),
+      };
+      const lifeTimeTotal = this.sumLifeTimeGranular(mergedLt);
       const rationReport = this.rationReportRepository.create({
         ...createRationReportDto,
+        ...Object.fromEntries(
+          LIFE_TIME_GRANULAR_KEYS.map((k) => [
+            k,
+            Number(mergedLt[k] ?? 0),
+          ]),
+        ),
+        life_time: lifeTimeTotal,
         created_by: dbUser,
         updated_by: dbUser,
       });
       const savedReport = await this.rationReportRepository.save(rationReport);
 
-      return {
-        id: savedReport.id,
-        report_date: savedReport.report_date,
-        is_alternate: savedReport.is_alternate,
-        full: {
-          Widows: savedReport.full_widows,
-          Divorced: savedReport.full_divorced,
-          Disable: savedReport.full_disable,
-          Indegent: savedReport.full_indegent,
-          Orphan: savedReport.full_orphan,
-        },
-        half: {
-          Widows: savedReport.half_widows,
-          Divorced: savedReport.half_divorced,
-          Disable: savedReport.half_disable,
-          Indegent: savedReport.half_indegent,
-          Orphan: savedReport.half_orphan,
-        },
-        life_time: savedReport.life_time,
-      };
+      return this.formatReport(savedReport);
     } catch (error) {
       throw new BadRequestException(
         "Failed to create ration report: " + error.message,
@@ -83,26 +129,9 @@ export class RationReportsService {
       });
       const totalPages = Math.ceil(total / pageSize);
 
-      const formattedReports = reports.map((report) => ({
-        id: report.id,
-        date: report.report_date,
-        is_alternate: report.is_alternate,
-        full: {
-          Widows: report.full_widows,
-          Divorced: report.full_divorced,
-          Disable: report.full_disable,
-          Indegent: report.full_indegent,
-          Orphan: report.full_orphan,
-        },
-        half: {
-          Widows: report.half_widows,
-          Divorced: report.half_divorced,
-          Disable: report.half_disable,
-          Indegent: report.half_indegent,
-          Orphan: report.half_orphan,
-        },
-        life_time: report.life_time,
-      }));
+      const formattedReports = reports.map((report) =>
+        this.formatReport(report),
+      );
 
       return {
         data: formattedReports,
@@ -130,26 +159,7 @@ export class RationReportsService {
         throw new NotFoundException(`Ration report with ID ${id} not found`);
       }
 
-      return {
-        id: report.id,
-        date: report.report_date,
-        is_alternate: report.is_alternate,
-        full: {
-          Widows: report.full_widows,
-          Divorced: report.full_divorced,
-          Disable: report.full_disable,
-          Indegent: report.full_indegent,
-          Orphan: report.full_orphan,
-        },
-        half: {
-          Widows: report.half_widows,
-          Divorced: report.half_divorced,
-          Disable: report.half_disable,
-          Indegent: report.half_indegent,
-          Orphan: report.half_orphan,
-        },
-        life_time: report.life_time,
-      };
+      return this.formatReport(report);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -165,10 +175,17 @@ export class RationReportsService {
     updateRationReportDto: UpdateRationReportDto,
   ): Promise<any> {
     try {
-      const report = await this.findOne(id);
-
-      await this.rationReportRepository.update(id, updateRationReportDto);
-
+      const entity = await this.rationReportRepository.findOne({
+        where: { id, is_archived: false },
+      });
+      if (!entity) {
+        throw new NotFoundException(`Ration report with ID ${id} not found`);
+      }
+      Object.assign(entity, updateRationReportDto);
+      entity.life_time = this.sumLifeTimeGranular(
+        entity as unknown as Record<string, unknown>,
+      );
+      await this.rationReportRepository.save(entity);
       return this.findOne(id);
     } catch (error) {
       if (error instanceof NotFoundException) {

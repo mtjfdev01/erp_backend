@@ -64,4 +64,54 @@ export class CreateRationReportDto {
   @Min(0)
   @IsOptional()
   life_time?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_full_widows?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_full_divorced?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_full_disable?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_full_indegent?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_full_orphan?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_half_widows?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_half_divorced?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_half_disable?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_half_indegent?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  life_time_half_orphan?: number;
 }

@@ -4,7 +4,6 @@ import { Repository, SelectQueryBuilder } from 'typeorm';
 import { ProgramEntity } from '../program/programs/entities/program.entity';
 import { ApplicationReport } from '../program/application_reports/entities/application-report.entity';
 import { RationReport } from '../program/ration/reports/entities/ration-report.entity';
-import { AreaRationReport } from '../program/area_ration/reports/entities/area-ration-report.entity';
 import { EducationReport } from '../program/education/reports/entities/education-report.entity';
 import { FinancialAssistanceReport } from '../program/financial_assistance/reports/entities/financial-assistance-report.entity';
 import { MarriageGiftReport } from '../program/marriage_gifts/reports/entities/marriage-gift-report.entity';
@@ -186,13 +185,14 @@ const PROGRAM_CARD_STYLE_BY_KEY: Record<
 > = {
   food_security: { icon: 'bag', accent: '#16a34a', accentSoft: '#dcfce7' },
   community_services: { icon: 'users', accent: '#7c3aed', accentSoft: '#ede9fe' },
-  widows_and_orphans_care_program: { icon: 'heart', accent: '#ea580c', accentSoft: '#ffedd5' },
+  financial_assistance_reports: { icon: 'heart', accent: '#ea580c', accentSoft: '#ffedd5' },
   education: { icon: 'book', accent: '#2563eb', accentSoft: '#dbeafe' },
   water_clean_water: { icon: 'droplet', accent: '#0891b2', accentSoft: '#cffafe' },
   kasb: { icon: 'tool', accent: '#4f46e5', accentSoft: '#e0e7ff' },
   livelihood_support_program: { icon: 'tool', accent: '#0d9488', accentSoft: '#ccfbf1' },
   green_initiative: { icon: 'bag', accent: '#15803d', accentSoft: '#dcfce7' },
-  disaster_management: { icon: 'heart', accent: '#be123c', accentSoft: '#ffe4e6' },
+  wheel_chair_or_crutches_reports: { icon: 'heart', accent: '#be123c', accentSoft: '#ffe4e6' },
+  health_reports: { icon: 'heart', accent: '#0f766e', accentSoft: '#ccfbf1' },
 };
 
 function defaultStyleForProgramKey(key: string): { icon: string; accent: string; accentSoft: string } {
@@ -290,8 +290,6 @@ export class NewDashboardService {
     private readonly applicationReportRepository: Repository<ApplicationReport>,
     @InjectRepository(RationReport)
     private readonly rationReportRepository: Repository<RationReport>,
-    @InjectRepository(AreaRationReport)
-    private readonly areaRationReportRepository: Repository<AreaRationReport>,
     @InjectRepository(EducationReport)
     private readonly educationReportRepository: Repository<EducationReport>,
     @InjectRepository(FinancialAssistanceReport)
@@ -854,7 +852,8 @@ export class NewDashboardService {
     extremePoor: number;
   }> {
     switch (programKey) {
-      case 'food_security': {
+      // case 'food_security':
+      case 'ration_reports': {
         const [widows, orphans, divorced, disable, indegent] = await Promise.all([
           this.sumRationWidows(from, to),
           this.sumRationOrphans(from, to),
@@ -882,7 +881,7 @@ export class NewDashboardService {
         ]);
         return { widows: 0, orphans, divorced, disable, indegent, extremePoor: 0 };
       }
-      case 'widows_and_orphans_care_program': {
+      case 'financial_assistance_reports': {
         const [widows, divorced, disable, extremePoor] = await Promise.all([
           this.sumFinancialWidow(from, to),
           this.sumFinancialDivorced(from, to),
@@ -891,7 +890,7 @@ export class NewDashboardService {
         ]);
         return { widows, orphans: 0, divorced, disable, indegent: 0, extremePoor };
       }
-      case 'livelihood_support_program': {
+      case 'sewing_machine_reports': {
         const [orphans, divorced, disable, indegent] = await Promise.all([
           this.sumSewingOrphans(from, to),
           this.sumSewingDivorced(from, to),
@@ -900,7 +899,7 @@ export class NewDashboardService {
         ]);
         return { widows: 0, orphans, divorced, disable, indegent, extremePoor: 0 };
       }
-      case 'disaster_management': {
+      case 'wheel_chair_or_crutches_reports': {
         const [orphans, divorced, disable, indegent] = await Promise.all([
           this.sumWheelOrphans(from, to),
           this.sumWheelDivorced(from, to),
@@ -908,6 +907,16 @@ export class NewDashboardService {
           this.sumWheelIndegent(from, to),
         ]);
         return { widows: 0, orphans, divorced, disable, indegent, extremePoor: 0 };
+      }
+      case 'health_reports': {
+        const [widows, orphans, divorced, disable, indegent] = await Promise.all([
+          this.sumHealthWidows(from, to),
+          this.sumHealthOrphans(from, to),
+          this.sumHealthDivorced(from, to),
+          this.sumHealthDisable(from, to),
+          this.sumHealthIndegent(from, to),
+        ]);
+        return { widows, orphans, divorced, disable, indegent, extremePoor: 0 };
       }
       default:
         return {
@@ -946,17 +955,9 @@ export class NewDashboardService {
     to?: string,
   ): Promise<number> {
     switch (programKey) {
-      case 'food_security':
+      // case 'food_security':
+      case 'ration_reports':
         return this.sumRationTotalDelivered(from, to);
-      case 'area_ration':
-        return this.sumScalar(
-          this.areaRationReportRepository,
-          'r',
-          'report_date',
-          'COALESCE(SUM(r.quantity), 0)',
-          from,
-          to,
-        );
       case 'marriage_gift_reports':
         return this.sumMarriageTotal(from, to);
       case 'education':
@@ -997,12 +998,14 @@ export class NewDashboardService {
           from,
           to,
         );
-      case 'widows_and_orphans_care_program':
+      case 'financial_assistance_reports':
         return this.sumFinancialTotal(from, to);
-      case 'livelihood_support_program':
+      case 'sewing_machine_reports':
         return this.sumSewingTotal(from, to);
-      case 'disaster_management':
+      case 'wheel_chair_or_crutches_reports':
         return this.sumWheelTotal(from, to);
+      case 'health_reports':
+        return this.sumHealthTotal(from, to);
       default:
         return 0;
     }
@@ -1026,7 +1029,7 @@ export class NewDashboardService {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
       .select(
-        'COALESCE(SUM(r.full_widows + r.half_widows + r.full_divorced + r.half_divorced + r.full_disable + r.half_disable + r.full_indegent + r.half_indegent + r.full_orphan + r.half_orphan + r.life_time), 0)',
+        'COALESCE(SUM(r.full_widows + r.half_widows + r.full_divorced + r.half_divorced + r.full_disable + r.half_disable + r.full_indegent + r.half_indegent + r.full_orphan + r.half_orphan + r.life_time_full_widows + r.life_time_half_widows + r.life_time_full_divorced + r.life_time_half_divorced + r.life_time_full_disable + r.life_time_half_disable + r.life_time_full_indegent + r.life_time_half_indegent + r.life_time_full_orphan + r.life_time_half_orphan), 0)',
         'v',
       )
       .where('r.is_archived = false');
@@ -1078,6 +1081,16 @@ export class NewDashboardService {
     return Number(raw?.v ?? 0);
   }
 
+  private async sumHealthTotal(from?: string, to?: string): Promise<number> {
+    const qb = this.healthReportRepository
+      .createQueryBuilder('h')
+      .select('COALESCE(SUM(h.widows + h.divorced + h.disable + h.indegent + h.orphans), 0)', 'v')
+      .where('h.is_archived = false');
+    applyDeliverablesDateFilter(qb, 'h', 'date', from, to);
+    const raw = await qb.getRawOne<{ v: string }>();
+    return Number(raw?.v ?? 0);
+  }
+
   private async sumWheelTotal(from?: string, to?: string): Promise<number> {
     const qb = this.wheelChairOrCrutchesReportRepository
       .createQueryBuilder('w')
@@ -1093,33 +1106,39 @@ export class NewDashboardService {
     to?: string,
   ): Promise<DeliverablesVulnerabilityRow[]> {
     const widows =
-      (await this.sumRationWidows(from, to)) + (await this.sumFinancialWidow(from, to));
+      (await this.sumRationWidows(from, to)) +
+      (await this.sumFinancialWidow(from, to)) +
+      (await this.sumHealthWidows(from, to));
     const orphans =
       (await this.sumRationOrphans(from, to)) +
       (await this.sumMarriageOrphans(from, to)) +
       (await this.sumSewingOrphans(from, to)) +
       (await this.sumEducationOrphans(from, to)) +
-      (await this.sumWheelOrphans(from, to));
+      (await this.sumWheelOrphans(from, to)) +
+      (await this.sumHealthOrphans(from, to));
     const divorced =
       (await this.sumRationDivorced(from, to)) +
       (await this.sumMarriageDivorced(from, to)) +
       (await this.sumSewingDivorced(from, to)) +
       (await this.sumEducationDivorced(from, to)) +
       (await this.sumFinancialDivorced(from, to)) +
-      (await this.sumWheelDivorced(from, to));
+      (await this.sumWheelDivorced(from, to)) +
+      (await this.sumHealthDivorced(from, to));
     const disable =
       (await this.sumRationDisable(from, to)) +
       (await this.sumMarriageDisable(from, to)) +
       (await this.sumSewingDisable(from, to)) +
       (await this.sumEducationDisable(from, to)) +
       (await this.sumFinancialDisable(from, to)) +
-      (await this.sumWheelDisable(from, to));
+      (await this.sumWheelDisable(from, to)) +
+      (await this.sumHealthDisable(from, to));
     const indegent =
       (await this.sumRationIndegent(from, to)) +
       (await this.sumMarriageIndegent(from, to)) +
       (await this.sumSewingIndegent(from, to)) +
       (await this.sumEducationIndegent(from, to)) +
-      (await this.sumWheelIndegent(from, to));
+      (await this.sumWheelIndegent(from, to)) +
+      (await this.sumHealthIndegent(from, to));
     const extremePoor = await this.sumFinancialExtremePoor(from, to);
 
     return [
@@ -1135,7 +1154,10 @@ export class NewDashboardService {
   private async sumRationWidows(from?: string, to?: string): Promise<number> {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
-      .select('COALESCE(SUM(r.full_widows + r.half_widows), 0)', 'v')
+      .select(
+        'COALESCE(SUM(r.full_widows + r.half_widows + r.life_time_full_widows + r.life_time_half_widows), 0)',
+        'v',
+      )
       .where('r.is_archived = false');
     applyDeliverablesDateFilter(qb, 'r', 'report_date', from, to);
     return Number((await qb.getRawOne<{ v: string }>())?.v ?? 0);
@@ -1144,7 +1166,10 @@ export class NewDashboardService {
   private async sumRationOrphans(from?: string, to?: string): Promise<number> {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
-      .select('COALESCE(SUM(r.full_orphan + r.half_orphan), 0)', 'v')
+      .select(
+        'COALESCE(SUM(r.full_orphan + r.half_orphan + r.life_time_full_orphan + r.life_time_half_orphan), 0)',
+        'v',
+      )
       .where('r.is_archived = false');
     applyDeliverablesDateFilter(qb, 'r', 'report_date', from, to);
     return Number((await qb.getRawOne<{ v: string }>())?.v ?? 0);
@@ -1153,7 +1178,10 @@ export class NewDashboardService {
   private async sumRationDivorced(from?: string, to?: string): Promise<number> {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
-      .select('COALESCE(SUM(r.full_divorced + r.half_divorced), 0)', 'v')
+      .select(
+        'COALESCE(SUM(r.full_divorced + r.half_divorced + r.life_time_full_divorced + r.life_time_half_divorced), 0)',
+        'v',
+      )
       .where('r.is_archived = false');
     applyDeliverablesDateFilter(qb, 'r', 'report_date', from, to);
     return Number((await qb.getRawOne<{ v: string }>())?.v ?? 0);
@@ -1162,7 +1190,10 @@ export class NewDashboardService {
   private async sumRationDisable(from?: string, to?: string): Promise<number> {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
-      .select('COALESCE(SUM(r.full_disable + r.half_disable), 0)', 'v')
+      .select(
+        'COALESCE(SUM(r.full_disable + r.half_disable + r.life_time_full_disable + r.life_time_half_disable), 0)',
+        'v',
+      )
       .where('r.is_archived = false');
     applyDeliverablesDateFilter(qb, 'r', 'report_date', from, to);
     return Number((await qb.getRawOne<{ v: string }>())?.v ?? 0);
@@ -1171,7 +1202,10 @@ export class NewDashboardService {
   private async sumRationIndegent(from?: string, to?: string): Promise<number> {
     const qb = this.rationReportRepository
       .createQueryBuilder('r')
-      .select('COALESCE(SUM(r.full_indegent + r.half_indegent), 0)', 'v')
+      .select(
+        'COALESCE(SUM(r.full_indegent + r.half_indegent + r.life_time_full_indegent + r.life_time_half_indegent), 0)',
+        'v',
+      )
       .where('r.is_archived = false');
     applyDeliverablesDateFilter(qb, 'r', 'report_date', from, to);
     return Number((await qb.getRawOne<{ v: string }>())?.v ?? 0);
@@ -1243,6 +1277,26 @@ export class NewDashboardService {
 
   private async sumSewingIndegent(from?: string, to?: string): Promise<number> {
     return this.sumColumn(this.sewingMachineReportRepository, 's', 'date', 's.indegent', from, to);
+  }
+
+  private async sumHealthWidows(from?: string, to?: string): Promise<number> {
+    return this.sumColumn(this.healthReportRepository, 'h', 'date', 'h.widows', from, to);
+  }
+
+  private async sumHealthOrphans(from?: string, to?: string): Promise<number> {
+    return this.sumColumn(this.healthReportRepository, 'h', 'date', 'h.orphans', from, to);
+  }
+
+  private async sumHealthDivorced(from?: string, to?: string): Promise<number> {
+    return this.sumColumn(this.healthReportRepository, 'h', 'date', 'h.divorced', from, to);
+  }
+
+  private async sumHealthDisable(from?: string, to?: string): Promise<number> {
+    return this.sumColumn(this.healthReportRepository, 'h', 'date', 'h.disable', from, to);
+  }
+
+  private async sumHealthIndegent(from?: string, to?: string): Promise<number> {
+    return this.sumColumn(this.healthReportRepository, 'h', 'date', 'h.indegent', from, to);
   }
 
   private async sumEducationOrphans(from?: string, to?: string): Promise<number> {

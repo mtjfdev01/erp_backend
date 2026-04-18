@@ -116,7 +116,7 @@ export class SummaryService {
             SUM(COALESCE(half_orphan, 0))   AS total_half_orphan,
             SUM(COALESCE(full_disable, 0) + COALESCE(full_indegent, 0) + COALESCE(full_orphan, 0) + COALESCE(half_disable, 0) + COALESCE(half_indegent, 0) + COALESCE(half_orphan, 0)) AS male_achieved,
             SUM(COALESCE(full_widows, 0) + COALESCE(full_divorced, 0) + COALESCE(half_widows, 0) + COALESCE(half_divorced, 0)) AS female_achieved,
-            SUM(COALESCE(full_widows, 0) + COALESCE(full_divorced, 0) + COALESCE(half_widows, 0) + COALESCE(half_divorced, 0) + COALESCE(full_disable, 0) + COALESCE(full_indegent, 0) + COALESCE(full_orphan, 0) + COALESCE(half_disable, 0) + COALESCE(half_indegent, 0) + COALESCE(half_orphan, 0)) AS total_achieved
+            SUM(COALESCE(full_widows, 0) + COALESCE(full_divorced, 0) + COALESCE(half_widows, 0) + COALESCE(half_divorced, 0) + COALESCE(full_disable, 0) + COALESCE(full_indegent, 0) + COALESCE(full_orphan, 0) + COALESCE(half_disable, 0) + COALESCE(half_indegent, 0) + COALESCE(half_orphan, 0) + COALESCE(life_time_full_widows, 0) + COALESCE(life_time_full_divorced, 0) + COALESCE(life_time_full_disable, 0) + COALESCE(life_time_full_indegent, 0) + COALESCE(life_time_full_orphan, 0) + COALESCE(life_time_half_widows, 0) + COALESCE(life_time_half_divorced, 0) + COALESCE(life_time_half_disable, 0) + COALESCE(life_time_half_indegent, 0) + COALESCE(life_time_half_orphan, 0)) AS total_achieved
           FROM ration_reports 
           WHERE is_archived = false
            AND "report_date" >= make_date($1::int, 1, 1)

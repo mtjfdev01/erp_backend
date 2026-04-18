@@ -6,7 +6,6 @@ import { NewDashboardController } from './new_dashboard.controller';
 import { ProgramEntity } from '../program/programs/entities/program.entity';
 import { ApplicationReport } from '../program/application_reports/entities/application-report.entity';
 import { RationReport } from '../program/ration/reports/entities/ration-report.entity';
-import { AreaRationReport } from '../program/area_ration/reports/entities/area-ration-report.entity';
 import { EducationReport } from '../program/education/reports/entities/education-report.entity';
 import { FinancialAssistanceReport } from '../program/financial_assistance/reports/entities/financial-assistance-report.entity';
 import { MarriageGiftReport } from '../program/marriage_gifts/reports/entities/marriage-gift-report.entity';
@@ -31,7 +30,6 @@ import { PermissionsModule } from 'src/permissions';
       ProgramEntity,
       ApplicationReport,
       RationReport,
-      AreaRationReport,
       EducationReport,
       FinancialAssistanceReport,
       MarriageGiftReport,
