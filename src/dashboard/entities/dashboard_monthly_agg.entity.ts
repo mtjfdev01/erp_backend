@@ -36,6 +36,10 @@ export class DashboardMonthlyAgg {
   @Column({ type: "decimal", precision: 14, scale: 2, default: 0 })
   total_event_channel_raised: number;
 
+  /** Campaign totals (donations having campaign_id) */
+  @Column({ type: "decimal", precision: 14, scale: 2, default: 0 })
+  total_campaigns_raised: number;
+
   /** Counts (bigint) - use number in code; PG bigint maps via transformer */
   @Column({
     type: "bigint",
@@ -44,12 +48,41 @@ export class DashboardMonthlyAgg {
   })
   total_donations_count: number;
 
+  /** Counts by category (bigint) */
   @Column({
     type: "bigint",
     default: 0,
     transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) },
   })
-  total_donors_count: number;
+  total_online_donations_count: number;
+
+  @Column({
+    type: "bigint",
+    default: 0,
+    transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) },
+  })
+  total_events_donations_count: number;
+
+  @Column({
+    type: "bigint",
+    default: 0,
+    transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) },
+  })
+  total_csr_donations_count: number;
+
+  @Column({
+    type: "bigint",
+    default: 0,
+    transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) },
+  })
+  total_individual_donations_count: number;
+
+  @Column({
+    type: "bigint",
+    default: 0,
+    transformer: { from: (v) => Number(v ?? 0), to: (v) => String(v ?? 0) },
+  })
+  total_campaigns_donations_count: number;
 
   /** Donation box (verified/deposited) totals per month */
   @Column({ type: "decimal", precision: 14, scale: 2, default: 0 })

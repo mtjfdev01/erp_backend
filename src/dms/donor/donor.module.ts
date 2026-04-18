@@ -8,6 +8,7 @@ import { City } from "../geographic/cities/entities/city.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { User } from "src/users/user.entity";
 import { UsersModule } from "src/users/users.module";
+import { DashboardModule } from "../../dashboard/dashboard.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { UsersModule } from "src/users/users.module";
     }),
     PermissionsModule,
     UsersModule,
+    DashboardModule,
   ],
   controllers: [DonorController],
   providers: [DonorService],

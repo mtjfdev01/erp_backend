@@ -68,6 +68,36 @@ export class DonationsService {
     private progressTrackersService: ProgressTrackersService,
   ) {}
 
+  /**
+   * Keep fundraising dashboard aggregates in sync when a donation status changes.
+   * IMPORTANT: Must be idempotent across multiple gateway callbacks/webhooks.
+   *
+   * Rules:
+   * - Only apply "completed" when transitioning into completed.
+   * - Only apply "reversed/refunded" when transitioning out of completed.
+   */
+  private applyDashboardAggregationForStatusTransition(
+    donationId: number,
+    previousStatus: string | null | undefined,
+    nextStatus: string | null | undefined,
+  ) {
+    const prev = (previousStatus || "").toLowerCase();
+    const next = (nextStatus || "").toLowerCase();
+    if (!donationId || prev === next) return;
+
+    // Only count completed donations (gross). Ignore reversals/refunds here.
+    if (next === "completed" && prev !== "completed") {
+      this.dashboardAggregateService
+        .applyDonationCompleted(donationId)
+        .catch((e) =>
+          console.error(
+            `Dashboard applyDonationCompleted failed for ${donationId}:`,
+            e,
+          ),
+        );
+    }
+  }
+
   private async persistGatewayInvoiceError(
     donationId: number | undefined | null,
     message: string,
@@ -653,6 +683,7 @@ export class DonationsService {
     // Auto-update DB only when provider status differs from current DB status
     let dbUpdated = false;
     if (donationStatus !== donation.status) {
+      const previousStatus = donation.status;
       const updateData: any = { status: donationStatus };
       if (donationStatus === "completed") {
         updateData.paid_amount = donation.amount;
@@ -666,26 +697,11 @@ export class DonationsService {
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
-      // Dashboard aggregation
-      if (donationStatus === "completed") {
-        this.dashboardAggregateService
-          .applyDonationCompleted(donationId)
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationCompleted failed for ${donationId}:`,
-              e,
-            ),
-          );
-      } else if (["refunded", "reversed"].includes(donationStatus)) {
-        this.dashboardAggregateService
-          .applyDonationReversed(donationId)
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationReversed failed for ${donationId}:`,
-              e,
-            ),
-          );
-      }
+      this.applyDashboardAggregationForStatusTransition(
+        donationId,
+        previousStatus,
+        donationStatus,
+      );
     }
 
     return {
@@ -1778,26 +1794,11 @@ export class DonationsService {
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
 
-      // Dashboard aggregation: event-driven updates
-      if (newStatus === "completed") {
-        this.dashboardAggregateService
-          .applyDonationCompleted(donationId)
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationCompleted failed for ${donationId}:`,
-              e,
-            ),
-          );
-      } else if (["refunded", "reversed"].includes(newStatus)) {
-        this.dashboardAggregateService
-          .applyDonationReversed(donationId)
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationReversed failed for ${donationId}:`,
-              e,
-            ),
-          );
-      }
+      this.applyDashboardAggregationForStatusTransition(
+        donationId,
+        donation.status,
+        newStatus,
+      );
 
       return {
         donation: updatedDonation,
@@ -1949,26 +1950,11 @@ export class DonationsService {
       // Update the donation
       await this.donationRepository.update(parseInt(donationId), updateData);
 
-      // Dashboard aggregation: event-driven updates
-      if (newStatus === "completed") {
-        this.dashboardAggregateService
-          .applyDonationCompleted(parseInt(donationId))
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationCompleted failed for ${donationId}:`,
-              e,
-            ),
-          );
-      } else if (["refunded", "reversed"].includes(newStatus)) {
-        this.dashboardAggregateService
-          .applyDonationReversed(parseInt(donationId))
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationReversed failed for ${donationId}:`,
-              e,
-            ),
-          );
-      }
+      this.applyDashboardAggregationForStatusTransition(
+        parseInt(donationId),
+        donation.status,
+        newStatus,
+      );
 
       // Get updated donation
       const updatedDonation = await this.donationRepository.findOne({
@@ -2133,6 +2119,11 @@ export class DonationsService {
         message_sent,
         email_sent,
       });
+      this.applyDashboardAggregationForStatusTransition(
+        parseInt(basket_id),
+        donation.status,
+        newStatus,
+      );
       console.log(
         `Donation ${basket_id} updated successfully with status: ${newStatus}`,
       );
@@ -2258,6 +2249,9 @@ export class DonationsService {
           where: { id: donationId },
         });
         if (donation) {
+          if (donation.status === "completed") {
+            return { received: true, donationId };
+          }
           const orderIdForDonation =
             session.mode === "subscription" && session.subscription
               ? session.subscription
@@ -2266,14 +2260,11 @@ export class DonationsService {
             status: "completed",
             orderId: orderIdForDonation,
           });
-          this.dashboardAggregateService
-            .applyDonationCompleted(donationId)
-            .catch((e) =>
-              console.error(
-                `Dashboard applyDonationCompleted failed for ${donationId}:`,
-                e,
-              ),
-            );
+          this.applyDashboardAggregationForStatusTransition(
+            donationId,
+            donation.status,
+            "completed",
+          );
           console.log(
             `Stripe webhook: Donation ${donationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
           );
@@ -2293,18 +2284,18 @@ export class DonationsService {
           where: { id: donationId },
         });
         if (donation) {
+          if (donation.status === "completed") {
+            return { received: true, donationId };
+          }
           await this.donationRepository.update(donationId, {
             status: "completed",
             orderId: paymentIntent.id || donation.orderId,
           });
-          this.dashboardAggregateService
-            .applyDonationCompleted(donationId)
-            .catch((e) =>
-              console.error(
-                `Dashboard applyDonationCompleted failed for ${donationId}:`,
-                e,
-              ),
-            );
+          this.applyDashboardAggregationForStatusTransition(
+            donationId,
+            donation.status,
+            "completed",
+          );
           console.log(
             `Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`,
           );
@@ -2459,14 +2450,11 @@ export class DonationsService {
       });
 
       if (status === "completed") {
-        this.dashboardAggregateService
-          .applyDonationCompleted(parseInt(invoice_number))
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationCompleted failed for ${invoice_number}:`,
-              e,
-            ),
-          );
+        this.applyDashboardAggregationForStatusTransition(
+          parseInt(invoice_number),
+          donation.status,
+          status,
+        );
       }
 
       console.log(

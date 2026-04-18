@@ -16,6 +16,7 @@ import * as bcrypt from "bcrypt";
 import { User, Department } from "src/users/user.entity";
 import { UsersService } from "src/users/users.service";
 import { City } from "../geographic/cities/entities/city.entity";
+import { DashboardAggregateService } from "../../dashboard/dashboard-aggregate.service";
 
 interface PaginationOptions {
   page: number;
@@ -41,6 +42,7 @@ export class DonorService {
     @InjectRepository(City)
     private readonly cityRepository: Repository<City>,
     private readonly usersService: UsersService,
+    private readonly dashboardAggregateService: DashboardAggregateService,
   ) {}
 
   /**
@@ -177,6 +179,13 @@ export class DonorService {
 
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
+
+      // Dashboard donor count: track donors irrespective of donation status
+      this.dashboardAggregateService
+        .applyDonorSeen(savedDonor.id, savedDonor.created_at || new Date())
+        .catch((e) =>
+          console.error(`Dashboard applyDonorSeen failed for ${savedDonor.id}:`, e),
+        );
 
       // Remove password from response
       delete savedDonor.password;
@@ -442,6 +451,13 @@ export class DonorService {
 
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
+
+      // Dashboard donor count: track donors irrespective of donation status
+      this.dashboardAggregateService
+        .applyDonorSeen(savedDonor.id, savedDonor.created_at || new Date())
+        .catch((e) =>
+          console.error(`Dashboard applyDonorSeen failed for ${savedDonor.id}:`, e),
+        );
 
       console.log(
         `✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`,

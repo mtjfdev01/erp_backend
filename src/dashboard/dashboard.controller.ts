@@ -10,7 +10,12 @@ import {
 import { Response } from "express";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, MoreThanOrEqual } from "typeorm";
-import { DashboardMonthlyAgg, DashboardEventAgg } from "./entities";
+import {
+  DashboardMonthlyAgg,
+  DashboardEventAgg,
+  DashboardDonorTotal,
+  DashboardDonorMonthlyCount,
+} from "./entities";
 import { DashboardAggregateService } from "./dashboard-aggregate.service";
 import { DashboardRebuildService } from "./dashboard-rebuild.service";
 import { ConditionalJwtGuard } from "../auth/guards/conditional-jwt.guard";
@@ -51,6 +56,10 @@ export class DashboardController {
     private readonly monthlyAggRepo: Repository<DashboardMonthlyAgg>,
     @InjectRepository(DashboardEventAgg)
     private readonly eventAggRepo: Repository<DashboardEventAgg>,
+    @InjectRepository(DashboardDonorTotal)
+    private readonly donorTotalRepo: Repository<DashboardDonorTotal>,
+    @InjectRepository(DashboardDonorMonthlyCount)
+    private readonly donorMonthlyRepo: Repository<DashboardDonorMonthlyCount>,
     private readonly aggregateService: DashboardAggregateService,
     private readonly rebuildService: DashboardRebuildService,
   ) {}
@@ -77,6 +86,7 @@ export class DashboardController {
       });
 
       const latest = rows.length > 0 ? rows[rows.length - 1] : null;
+      const donorTotalRow = await this.donorTotalRepo.findOne({ where: { id: 1 } });
 
       const summary = {
         latest_month: latest
@@ -95,7 +105,7 @@ export class DashboardController {
                 latest.total_event_channel_raised,
               ),
               total_donations_count: Number(latest.total_donations_count),
-              total_donors_count: Number(latest.total_donors_count),
+              total_donors_count: Number(donorTotalRow?.total_donors_count ?? 0),
             }
           : null,
         months: rows.map((r) => ({
@@ -144,6 +154,17 @@ export class DashboardController {
         order: { month_start_date: "ASC" },
       });
 
+      const donorRows = await this.donorMonthlyRepo.find({
+        where: { month_start_date: MoreThanOrEqual(cutoff) },
+        order: { month_start_date: "ASC" },
+      });
+      const donorByMonth = new Map(
+        donorRows.map((r) => [
+          new Date(r.month_start_date).toISOString().slice(0, 10),
+          Number(r.donors_count ?? 0),
+        ]),
+      );
+
       const data = rows.map((r) => ({
         month: formatMonthLabel(new Date(r.month_start_date)),
         month_start_date: r.month_start_date,
@@ -153,7 +174,9 @@ export class DashboardController {
         corporate: Number(r.total_corporate_raised),
         total: Number(r.total_raised),
         total_donations_count: Number(r.total_donations_count),
-        total_donors_count: Number(r.total_donors_count),
+        total_donors_count:
+          donorByMonth.get(new Date(r.month_start_date).toISOString().slice(0, 10)) ??
+          0,
       }));
 
       return res.status(HttpStatus.OK).json({

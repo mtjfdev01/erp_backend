@@ -9,6 +9,7 @@ import { User } from "../../../users/user.entity";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { JwtModule } from "@nestjs/jwt";
 import { PermissionsModule } from "src/permissions";
+import { DashboardModule } from "../../../dashboard/dashboard.module";
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PermissionsModule } from "src/permissions";
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
+    DashboardModule,
   ],
   controllers: [DonationBoxDonationController],
   providers: [DonationBoxDonationService],

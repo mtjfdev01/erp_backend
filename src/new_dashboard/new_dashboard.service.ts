@@ -864,7 +864,7 @@ export class NewDashboardService {
         ]);
         return { widows, orphans, divorced, disable, indegent, extremePoor: 0 };
       }
-      case 'community_services': {
+      case 'marriage_gift_reports': {
         const [orphans, divorced, disable, indegent] = await Promise.all([
           this.sumMarriageOrphans(from, to),
           this.sumMarriageDivorced(from, to),
@@ -957,7 +957,7 @@ export class NewDashboardService {
           from,
           to,
         );
-      case 'community_services':
+      case 'marriage_gift_reports':
         return this.sumMarriageTotal(from, to);
       case 'education':
         return this.sumEducationTotal(from, to);
@@ -979,7 +979,7 @@ export class NewDashboardService {
           from,
           to,
         );
-      case 'kasb_training':
+      case 'kasb_training_reports':
         return this.sumScalar(
           this.kasbTrainingReportRepository,
           't',

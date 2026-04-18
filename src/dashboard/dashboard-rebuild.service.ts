@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, Between } from "typeorm";
 import { Donation } from "../donations/entities/donation.entity";
@@ -23,8 +23,12 @@ const REBUILD_MONTHS = 18;
 /** Full rebuild: look back this many years for donations / donation box data. */
 const FULL_REBUILD_YEARS = 10;
 
+const INSERT_CHUNK_SIZE = 500;
+
 @Injectable()
 export class DashboardRebuildService {
+  private readonly logger = new Logger(DashboardRebuildService.name);
+
   constructor(
     @InjectRepository(Donation)
     private readonly donationRepo: Repository<Donation>,
@@ -46,6 +50,8 @@ export class DashboardRebuildService {
    * Idempotent: clears affected months then recomputes. Safe to run multiple times.
    */
   async rebuild(): Promise<void> {
+    const t0 = Date.now();
+    this.logger.log("rebuild(): clearing aggregate window…");
     const now = new Date();
     const startDate = new Date(now);
     startDate.setUTCMonth(startDate.getUTCMonth() - REBUILD_MONTHS);
@@ -72,6 +78,9 @@ export class DashboardRebuildService {
       await this.monthEventsRepo.delete({ month_start_date: ms });
     }
 
+    this.logger.log(
+      `rebuild(): loading completed donations (${REBUILD_MONTHS}m window)…`,
+    );
     const donations = await this.donationRepo.find({
       where: {
         status: COMPLETED_STATUS,
@@ -116,7 +125,6 @@ export class DashboardRebuildService {
         this.monthlyAggRepo.create({
           month_start_date: ms,
           ...totals,
-          total_donors_count: uniqueDonors.size,
           total_donation_box_raised: 0,
           total_donation_box_count: 0,
         }),
@@ -139,7 +147,7 @@ export class DashboardRebuildService {
             month_start_date: ms,
             total_event_collection: agg.amount,
             total_donations_count: agg.count,
-            total_donors_count: agg.uniqueDonors,
+            total_donors_count: 0,
           }),
         );
       }
@@ -166,6 +174,13 @@ export class DashboardRebuildService {
     let total_phone_raised = 0;
     let total_corporate_raised = 0;
     let total_event_channel_raised = 0;
+    let total_campaigns_raised = 0;
+
+    let total_online_donations_count = 0;
+    let total_events_donations_count = 0;
+    let total_csr_donations_count = 0;
+    let total_individual_donations_count = 0;
+    let total_campaigns_donations_count = 0;
 
     for (const d of donations) {
       const amount =
@@ -184,6 +199,13 @@ export class DashboardRebuildService {
       if (channel === "phone") total_phone_raised += amount;
       if (channel === "corporate") total_corporate_raised += amount;
       if (channel === "event") total_event_channel_raised += amount;
+      if (d.campaign_id != null) total_campaigns_raised += amount;
+
+      if (channel === "online") total_online_donations_count += 1;
+      if (d.event_id != null) total_events_donations_count += 1;
+      if (donorType === "csr") total_csr_donations_count += 1;
+      if (donorType === "individual") total_individual_donations_count += 1;
+      if (d.campaign_id != null) total_campaigns_donations_count += 1;
     }
 
     return {
@@ -195,7 +217,13 @@ export class DashboardRebuildService {
       total_phone_raised,
       total_corporate_raised,
       total_event_channel_raised,
+      total_campaigns_raised,
       total_donations_count: donations.length,
+      total_online_donations_count,
+      total_events_donations_count,
+      total_csr_donations_count,
+      total_individual_donations_count,
+      total_campaigns_donations_count,
     };
   }
 
@@ -341,7 +369,6 @@ export class DashboardRebuildService {
         this.monthlyAggRepo.create({
           month_start_date: ms,
           ...totals,
-          total_donors_count: uniqueDonors.size,
           total_donation_box_raised: boxForMonth.amount,
           total_donation_box_count: boxForMonth.count,
         }),
@@ -364,7 +391,7 @@ export class DashboardRebuildService {
             month_start_date: ms,
             total_event_collection: agg.amount,
             total_donations_count: agg.count,
-            total_donors_count: agg.uniqueDonors,
+            total_donors_count: 0,
           }),
         );
       }

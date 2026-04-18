@@ -9,6 +9,9 @@ import {
   DashboardEventAgg,
   DashboardMonthDonorUnique,
   DashboardMonthEvents,
+  DashboardDonorTotal,
+  DashboardDonorMonthlyCount,
+  DashboardDonorSeen,
 } from "./entities";
 import { DashboardAggregateService } from "./dashboard-aggregate.service";
 import { DashboardRebuildService } from "./dashboard-rebuild.service";
@@ -24,6 +27,9 @@ import { DashboardController } from "./dashboard.controller";
       DashboardEventAgg,
       DashboardMonthDonorUnique,
       DashboardMonthEvents,
+      DashboardDonorTotal,
+      DashboardDonorMonthlyCount,
+      DashboardDonorSeen,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -36,6 +42,7 @@ import { DashboardController } from "./dashboard.controller";
     DashboardAggregateService,
     DashboardRebuildService,
     DashboardRebuildCronService,
+    // DashboardBootstrapService — re-add to providers when startup rebuild is ready
   ],
   exports: [DashboardAggregateService],
 })

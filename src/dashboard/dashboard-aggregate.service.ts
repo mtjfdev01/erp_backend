@@ -3,26 +3,19 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, DataSource, Between } from "typeorm";
 import { Donation } from "../donations/entities/donation.entity";
 import { Donor } from "../dms/donor/entities/donor.entity";
-import {
-  DonationBoxDonation,
-  CollectionStatus,
-} from "../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity";
+import { DonationBoxDonation } from "../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity";
+import { DashboardMonthDonorUnique } from "./entities/dashboard_month_donor_unique.entity";
 import {
   DashboardMonthlyAgg,
   DashboardEventAgg,
-  DashboardMonthDonorUnique,
   DashboardMonthEvents,
+  DashboardDonorTotal,
+  DashboardDonorMonthlyCount,
+  DashboardDonorSeen,
 } from "./entities";
-import {
-  applyCommonFilters,
-  applyMultiselectFilters,
-} from "../utils/filters/common-filter.util";
 
 /** Donation status considered "COMPLETED" for aggregation */
 const COMPLETED_STATUS = "completed";
-
-/** Donation statuses considered "REVERSED" (subtract from aggregates) */
-const REVERSED_STATUSES = ["refunded", "reversed"];
 
 /** Channel derivation: online | phone | event | corporate */
 type Channel = "online" | "phone" | "event" | "corporate";
@@ -38,8 +31,12 @@ export class DashboardAggregateService {
     private readonly monthlyAggRepo: Repository<DashboardMonthlyAgg>,
     @InjectRepository(DashboardEventAgg)
     private readonly eventAggRepo: Repository<DashboardEventAgg>,
-    @InjectRepository(DashboardMonthDonorUnique)
-    private readonly monthDonorRepo: Repository<DashboardMonthDonorUnique>,
+    @InjectRepository(DashboardDonorTotal)
+    private readonly donorTotalRepo: Repository<DashboardDonorTotal>,
+    @InjectRepository(DashboardDonorMonthlyCount)
+    private readonly donorMonthlyRepo: Repository<DashboardDonorMonthlyCount>,
+    @InjectRepository(DashboardDonorSeen)
+    private readonly donorSeenRepo: Repository<DashboardDonorSeen>,
     @InjectRepository(DashboardMonthEvents)
     private readonly monthEventsRepo: Repository<DashboardMonthEvents>,
     private readonly dataSource: DataSource,
@@ -140,8 +137,15 @@ export class DashboardAggregateService {
           total_phone_raised: 0,
           total_corporate_raised: 0,
           total_event_channel_raised: 0,
+          total_campaigns_raised: 0,
           total_donations_count: 0,
-          total_donors_count: 0,
+          total_online_donations_count: 0,
+          total_events_donations_count: 0,
+          total_csr_donations_count: 0,
+          total_individual_donations_count: 0,
+          total_campaigns_donations_count: 0,
+          total_donation_box_raised: 0,
+          total_donation_box_count: 0,
         });
         await monthlyRepo.save(monthly);
       }
@@ -175,38 +179,29 @@ export class DashboardAggregateService {
           total_event_channel_raised:
             Number(monthly.total_event_channel_raised) +
             (channel === "event" ? amount : 0),
+          total_campaigns_raised:
+            Number(monthly.total_campaigns_raised ?? 0) +
+            (donation.campaign_id != null ? amount : 0),
           total_donations_count: currDonations,
+          total_online_donations_count:
+            Number(monthly.total_online_donations_count ?? 0) +
+            (channel === "online" ? 1 : 0),
+          total_events_donations_count:
+            Number(monthly.total_events_donations_count ?? 0) +
+            (donation.event_id != null ? 1 : 0),
+          total_csr_donations_count:
+            Number(monthly.total_csr_donations_count ?? 0) +
+            (donorType === "csr" ? 1 : 0),
+          total_individual_donations_count:
+            Number(monthly.total_individual_donations_count ?? 0) +
+            (donorType === "individual" ? 1 : 0),
+          total_campaigns_donations_count:
+            Number(monthly.total_campaigns_donations_count ?? 0) +
+            (donation.campaign_id != null ? 1 : 0),
         },
       );
 
-      // Distinct donors: try insert (month_start_date, donor_id)
-      // If insert succeeds (no conflict), increment total_donors_count.
-      // NOTE: donors_count decrement on reversal is NOT done here; nightly rebuild corrects it.
-      let donorInserted = false;
-      if (donation.donor_id != null) {
-        try {
-          await monthDonorRepo.insert({
-            month_start_date: monthStart,
-            donor_id: donation.donor_id,
-          });
-          donorInserted = true;
-        } catch (e: any) {
-          // Unique violation = donor already counted this month, ignore
-          if (e?.code !== "23505") throw e;
-        }
-      }
-
-      if (donorInserted) {
-        const updated = await monthlyRepo.findOne({
-          where: { month_start_date: monthStart },
-        });
-        await monthlyRepo.update(
-          { month_start_date: monthStart },
-          {
-            total_donors_count: Number(updated?.total_donors_count ?? 0) + 1,
-          },
-        );
-      }
+      // Donor counts are maintained independently of donation status.
 
       // Event aggregates
       if (donation.event_id != null) {
@@ -254,117 +249,151 @@ export class DashboardAggregateService {
   }
 
   /**
-   * Event-driven: apply when donation is reversed/refunded.
-   * Subtracts amounts and decrements donation count.
-   * NOTE: total_donors_count is NOT decremented here; the nightly rebuild job
-   * recomputes it correctly via COUNT(DISTINCT donor_id). Realtime decrement
-   * would require knowing if the donor had other donations that month.
+   * Donor count is maintained irrespective of donation status.
+   * We count donors who exist because they created at least one donation attempt.
+   * Called from DonorService.register and autoRegisterFromDonation callers.
    */
-  async applyDonationReversed(donationId: number): Promise<void> {
-    const donation = await this.donationRepo.findOne({
-      where: { id: donationId },
-      relations: ["donor"],
+  async applyDonorSeen(donorId: number, at: Date = new Date()): Promise<void> {
+    if (!donorId) return;
+    const monthStart = this.getMonthStart(at);
+
+    await this.dataSource.transaction(async (manager) => {
+      const monthDonorRepo = manager.getRepository(DashboardMonthDonorUnique);
+      const donorSeenRepo = manager.getRepository(DashboardDonorSeen);
+      const donorTotalRepo = manager.getRepository(DashboardDonorTotal);
+      const donorMonthlyRepo = manager.getRepository(DashboardDonorMonthlyCount);
+
+      // Total donors (all time) — unique by donor_id
+      let totalInserted = false;
+      try {
+        await donorSeenRepo.insert({ donor_id: donorId });
+        totalInserted = true;
+      } catch (e: any) {
+        if (e?.code !== "23505") throw e;
+      }
+      if (totalInserted) {
+        const existing = await donorTotalRepo.findOne({ where: { id: 1 } });
+        if (!existing) {
+          await donorTotalRepo.save(
+            donorTotalRepo.create({ id: 1, total_donors_count: 1 }),
+          );
+        } else {
+          await donorTotalRepo.update(
+            { id: 1 },
+            { total_donors_count: Number(existing.total_donors_count ?? 0) + 1 },
+          );
+        }
+      }
+
+      // Insert donor-month uniqueness; if new, increment total_donors_count
+      let inserted = false;
+      try {
+        await monthDonorRepo.insert({ month_start_date: monthStart, donor_id: donorId });
+        inserted = true;
+      } catch (e: any) {
+        if (e?.code !== "23505") throw e;
+      }
+      if (inserted) {
+        const existingMonth = await donorMonthlyRepo.findOne({
+          where: { month_start_date: monthStart },
+        });
+        if (!existingMonth) {
+          await donorMonthlyRepo.save(
+            donorMonthlyRepo.create({ month_start_date: monthStart, donors_count: 1 }),
+          );
+        } else {
+          await donorMonthlyRepo.update(
+            { month_start_date: monthStart },
+            { donors_count: Number(existingMonth.donors_count ?? 0) + 1 },
+          );
+        }
+      }
     });
+  }
 
-    if (!donation) return;
+  /**
+   * Donation-box collections aggregation (verified/deposited count toward totals).
+   * Called from DonationBoxDonationService on status transitions.
+   */
+  async applyDonationBoxCounted(collectionId: number): Promise<void> {
+    const row = await this.donationBoxDonationRepo.findOne({
+      where: { id: collectionId },
+    });
+    if (!row) return;
 
-    const status = (donation.status || "").toLowerCase();
-    if (!REVERSED_STATUSES.includes(status)) {
-      return;
-    }
+    const status = (row.status || "").toString().toLowerCase();
+    if (status !== "verified" && status !== "deposited") return;
 
-    const amount = this.getAmount(donation);
-    const monthStart = this.getMonthStart(this.getCompletionDate(donation));
-    const channel = this.deriveChannel(donation);
-    const donorType = this.deriveDonorType(donation);
+    const amount = Number(row.collection_amount) || 0;
+    const date = row.collection_date ? new Date(row.collection_date) : new Date();
+    const monthStart = this.getMonthStart(date);
 
     await this.dataSource.transaction(async (manager) => {
       const monthlyRepo = manager.getRepository(DashboardMonthlyAgg);
-      const eventAggRepo = manager.getRepository(DashboardEventAgg);
-
-      const monthly = await monthlyRepo.findOne({
-        where: { month_start_date: monthStart },
-      });
-
-      if (!monthly) return;
-
-      const newRaised = Math.max(0, Number(monthly.total_raised) - amount);
-      const newDonations = Math.max(
-        0,
-        Number(monthly.total_donations_count) - 1,
-      );
+      let monthly = await monthlyRepo.findOne({ where: { month_start_date: monthStart } });
+      if (!monthly) {
+        monthly = monthlyRepo.create({
+          month_start_date: monthStart,
+          total_raised: 0,
+          total_individual_raised: 0,
+          total_csr_raised: 0,
+          total_events_raised: 0,
+          total_online_raised: 0,
+          total_phone_raised: 0,
+          total_corporate_raised: 0,
+          total_event_channel_raised: 0,
+          total_campaigns_raised: 0,
+          total_donations_count: 0,
+          total_online_donations_count: 0,
+          total_events_donations_count: 0,
+          total_csr_donations_count: 0,
+          total_individual_donations_count: 0,
+          total_campaigns_donations_count: 0,
+          total_donation_box_raised: 0,
+          total_donation_box_count: 0,
+        }) as DashboardMonthlyAgg;
+        await monthlyRepo.save(monthly);
+      }
 
       await monthlyRepo.update(
         { month_start_date: monthStart },
         {
-          total_raised: newRaised,
-          total_individual_raised: Math.max(
-            0,
-            Number(monthly.total_individual_raised) -
-              (donorType === "individual" ? amount : 0),
-          ),
-          total_csr_raised: Math.max(
-            0,
-            Number(monthly.total_csr_raised) -
-              (donorType === "csr" ? amount : 0),
-          ),
-          total_events_raised: Math.max(
-            0,
-            Number(monthly.total_events_raised) -
-              (donation.event_id != null ? amount : 0),
-          ),
-          total_online_raised: Math.max(
-            0,
-            Number(monthly.total_online_raised) -
-              (channel === "online" ? amount : 0),
-          ),
-          total_phone_raised: Math.max(
-            0,
-            Number(monthly.total_phone_raised) -
-              (channel === "phone" ? amount : 0),
-          ),
-          total_corporate_raised: Math.max(
-            0,
-            Number(monthly.total_corporate_raised) -
-              (channel === "corporate" ? amount : 0),
-          ),
-          total_event_channel_raised: Math.max(
-            0,
-            Number(monthly.total_event_channel_raised) -
-              (channel === "event" ? amount : 0),
-          ),
-          total_donations_count: newDonations,
-          // total_donors_count: left unchanged - nightly rebuild corrects it
+          total_donation_box_raised:
+            Number(monthly.total_donation_box_raised ?? 0) + amount,
+          total_donation_box_count:
+            Number(monthly.total_donation_box_count ?? 0) + 1,
         },
       );
+    });
+  }
 
-      if (donation.event_id != null) {
-        const eventAgg = await eventAggRepo.findOne({
-          where: {
-            event_id: donation.event_id,
-            month_start_date: monthStart,
-          },
-        });
+  async applyDonationBoxUncounted(collectionId: number): Promise<void> {
+    const row = await this.donationBoxDonationRepo.findOne({
+      where: { id: collectionId },
+    });
+    if (!row) return;
 
-        if (eventAgg) {
-          await eventAggRepo.update(
-            {
-              event_id: donation.event_id,
-              month_start_date: monthStart,
-            },
-            {
-              total_event_collection: Math.max(
-                0,
-                Number(eventAgg.total_event_collection) - amount,
-              ),
-              total_donations_count: Math.max(
-                0,
-                Number(eventAgg.total_donations_count) - 1,
-              ),
-            },
-          );
-        }
-      }
+    const amount = Number(row.collection_amount) || 0;
+    const date = row.collection_date ? new Date(row.collection_date) : new Date();
+    const monthStart = this.getMonthStart(date);
+
+    await this.dataSource.transaction(async (manager) => {
+      const monthlyRepo = manager.getRepository(DashboardMonthlyAgg);
+      const monthly = await monthlyRepo.findOne({ where: { month_start_date: monthStart } });
+      if (!monthly) return;
+      await monthlyRepo.update(
+        { month_start_date: monthStart },
+        {
+          total_donation_box_raised: Math.max(
+            0,
+            Number(monthly.total_donation_box_raised ?? 0) - amount,
+          ),
+          total_donation_box_count: Math.max(
+            0,
+            Number(monthly.total_donation_box_count ?? 0) - 1,
+          ),
+        },
+      );
     });
   }
 
@@ -398,220 +427,6 @@ export class DashboardAggregateService {
       start.setUTCHours(0, 0, 0, 0);
     }
     return { start, end };
-  }
-
-  /**
-   * Returns true if any donation-level filter is set in the query.
-   */
-  private hasFilters(query: any): boolean {
-    return !!(
-      query.donation_type ||
-      query.donation_method ||
-      query.ref ||
-      query.projects ||
-      query.date ||
-      query.start_date ||
-      query.end_date
-    );
-  }
-
-  /**
-   * Builds a base query on the donations table with common filters applied.
-   */
-  private buildFilteredDonationQuery(
-    start: Date,
-    end: Date,
-    query: {
-      donation_type?: string;
-      donation_method?: string;
-      ref?: string;
-      projects?: string;
-      date?: string;
-      start_date?: string;
-      end_date?: string;
-    },
-  ) {
-    const qb = this.donationRepo
-      .createQueryBuilder("d")
-      .leftJoinAndSelect("d.donor", "donor")
-      .where("d.status = :status", { status: COMPLETED_STATUS });
-
-    const effectiveStart = query.start_date || start.toISOString().slice(0, 10);
-    const effectiveEnd = query.end_date || end.toISOString().slice(0, 10);
-
-    applyCommonFilters(
-      qb,
-      {
-        donation_type: query.donation_type || "",
-        donation_method: query.donation_method || "",
-        date: query.date || "",
-        start_date: query.date ? "" : effectiveStart,
-        end_date: query.date ? "" : effectiveEnd,
-      },
-      [],
-      "d",
-    );
-
-    const refs = (query.ref || "")
-      .split(",")
-      .map((r) => r.trim())
-      .filter(Boolean);
-    const projectIds = (query.projects || "")
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
-
-    applyMultiselectFilters(
-      qb,
-      {
-        ...(refs.length ? { ref: refs } : {}),
-        ...(projectIds.length ? { project_id: projectIds } : {}),
-      },
-      "d",
-    );
-
-    return qb;
-  }
-
-  /**
-   * Computes the fundraising overview from raw donations when filters are active.
-   */
-  private async getFilteredOverview(
-    start: Date,
-    end: Date,
-    query: any,
-    formatMonth: (d: Date) => string,
-  ) {
-    const donations = await this.buildFilteredDonationQuery(
-      start,
-      end,
-      query,
-    ).getMany();
-
-    let totalRaised = 0;
-    let onlineAmount = 0;
-    let phoneAmount = 0;
-    let eventsAmount = 0;
-    let corporateAmount = 0;
-    let csrAmount = 0;
-    let individualAmount = 0;
-    let campaignsAmount = 0;
-    let onlineCount = 0;
-    let csrCount = 0;
-    let individualCount = 0;
-    let eventsCount = 0;
-    let campaignsCount = 0;
-    const donorIds = new Set<number>();
-
-    const monthBuckets = new Map<
-      string,
-      {
-        online: number;
-        phone: number;
-        events: number;
-        corporate: number;
-        campaigns: number;
-        total: number;
-      }
-    >();
-
-    for (const d of donations) {
-      const amt = this.getAmount(d);
-      totalRaised += amt;
-
-      if (d.donor_id) donorIds.add(d.donor_id);
-
-      const channel = this.deriveChannel(d);
-      const donorType = this.deriveDonorType(d);
-
-      if (channel === "online") {
-        onlineAmount += amt;
-        onlineCount += 1;
-      }
-      if (channel === "phone") phoneAmount += amt;
-      if (channel === "event") {
-        eventsAmount += amt;
-        eventsCount += 1;
-      }
-      if (channel === "corporate") corporateAmount += amt;
-      if (donorType === "csr") {
-        csrAmount += amt;
-        csrCount += 1;
-      }
-      if (donorType === "individual") {
-        individualAmount += amt;
-        individualCount += 1;
-      }
-      if (d.campaign_id) {
-        campaignsAmount += amt;
-        campaignsCount += 1;
-      }
-
-      const ms = this.getMonthStart(this.getCompletionDate(d));
-      const key = ms.toISOString().slice(0, 7);
-      const bucket = monthBuckets.get(key) ?? {
-        online: 0,
-        phone: 0,
-        events: 0,
-        corporate: 0,
-        campaigns: 0,
-        total: 0,
-      };
-      bucket.total += amt;
-      if (channel === "online") bucket.online += amt;
-      if (channel === "phone") bucket.phone += amt;
-      if (channel === "event") bucket.events += amt;
-      if (channel === "corporate") bucket.corporate += amt;
-      if (d.campaign_id) bucket.campaigns += amt;
-      monthBuckets.set(key, bucket);
-    }
-
-    const cards = {
-      total_donations_amount: totalRaised,
-      total_donations_count: donations.length,
-      total_donors_count: donorIds.size,
-      online_donations_amount: onlineAmount,
-      online_donations_count: onlineCount,
-      donation_box_amount: 0,
-      donation_box_count: 0,
-      csr_amount: csrAmount,
-      csr_count: csrCount,
-      individual_amount: individualAmount,
-      individual_count: individualCount,
-      events_amount: eventsAmount,
-      events_count: eventsCount,
-      campaigns_amount: campaignsAmount,
-      campaigns_count: campaignsCount,
-    };
-
-    const sortedMonths = Array.from(monthBuckets.keys()).sort();
-    const raisedPerMonth = sortedMonths.map((key) => {
-      const bucket = monthBuckets.get(key)!;
-      const monthStart = new Date(key + "-01");
-      return {
-        month: formatMonth(monthStart),
-        month_start_date: monthStart.toISOString().slice(0, 10),
-        online: bucket.online,
-        phone: bucket.phone,
-        events: bucket.events,
-        corporate: bucket.corporate,
-        donation_box: 0,
-        campaigns: bucket.campaigns,
-        total: bucket.total,
-      };
-    });
-
-    let running = 0;
-    const cumulative = raisedPerMonth.map((row) => {
-      running += row.total;
-      return {
-        month: row.month,
-        month_start_date: row.month_start_date,
-        total_cumulative: running,
-      };
-    });
-
-    return { cards, cumulative, raised_per_month: raisedPerMonth };
   }
 
   /**
@@ -683,11 +498,9 @@ export class DashboardAggregateService {
 
     const { start, end } = this.getFundraisingDateRange(query);
 
-    if (this.hasFilters(query)) {
-      return this.getFilteredOverview(start, end, query, formatMonth);
-    }
-
-    // ── Unfiltered path: use precomputed aggregation tables ──
+    // ── Stored-only path: use precomputed aggregation tables ──
+    // Donation-level filters (method/type/ref/projects/date) are intentionally ignored here.
+    // This endpoint is designed to be fast and read from stored month-wise aggregates.
 
     const monthlyRows = await this.monthlyAggRepo.find({
       where: {
@@ -713,41 +526,8 @@ export class DashboardAggregateService {
       }
     }
 
-    const totalDonorsResult = await this.donationRepo
-      .createQueryBuilder("d")
-      .select("COUNT(DISTINCT d.donor_id)", "count")
-      .where("d.status = :status", { status: COMPLETED_STATUS })
-      .andWhere("d.date >= :start", { start })
-      .andWhere("d.date <= :end", { end })
-      .andWhere("d.donor_id IS NOT NULL")
-      .getRawOne<{ count: string }>();
-    const totalDonorsCount = Number(totalDonorsResult?.count ?? 0);
-
-    const campaignDonations = await this.donationRepo
-      .createQueryBuilder("d")
-      .where("d.status = :status", { status: COMPLETED_STATUS })
-      .andWhere("d.campaign_id IS NOT NULL")
-      .andWhere("d.date >= :start", { start })
-      .andWhere("d.date <= :end", { end })
-      .leftJoinAndSelect("d.donor", "donor")
-      .getMany();
-    let campaignsAmount = 0;
-    let campaignsCount = 0;
-    const campaignsByMonth = new Map<
-      string,
-      { amount: number; count: number }
-    >();
-    for (const d of campaignDonations) {
-      const amt = this.getAmount(d);
-      campaignsAmount += amt;
-      campaignsCount += 1;
-      const ms = this.getMonthStart(this.getCompletionDate(d));
-      const key = ms.toISOString().slice(0, 7);
-      const cur = campaignsByMonth.get(key) ?? { amount: 0, count: 0 };
-      cur.amount += amt;
-      cur.count += 1;
-      campaignsByMonth.set(key, cur);
-    }
+    const totalRow = await this.donorTotalRepo.findOne({ where: { id: 1 } });
+    const totalDonorsCount = Number(totalRow?.total_donors_count ?? 0);
 
     let totalRaised = 0;
     let totalDonationsCount = 0;
@@ -768,23 +548,19 @@ export class DashboardAggregateService {
       csrAmount += Number(r.total_csr_raised ?? 0);
       individualAmount += Number(r.total_individual_raised ?? 0);
       eventsAmount += Number(r.total_events_raised ?? 0);
+      onlineCount += Number(r.total_online_donations_count ?? 0);
+      csrCount += Number(r.total_csr_donations_count ?? 0);
+      individualCount += Number(r.total_individual_donations_count ?? 0);
+      eventsCount += Number(r.total_events_donations_count ?? 0);
     }
-    const allCompleted = await this.donationRepo.find({
-      where: { status: COMPLETED_STATUS },
-      relations: ["donor"],
-    });
-    const inRangeDonations = allCompleted.filter((d) => {
-      const dDate = this.getCompletionDate(d);
-      return dDate >= start && dDate <= end;
-    });
-    for (const d of inRangeDonations) {
-      const channel = this.deriveChannel(d);
-      const donorType = this.deriveDonorType(d);
-      if (channel === "online") onlineCount += 1;
-      if (donorType === "csr") csrCount += 1;
-      if (donorType === "individual") individualCount += 1;
-      if (d.event_id != null) eventsCount += 1;
-    }
+    const campaignsAmount = monthlyRows.reduce(
+      (s, r) => s + Number(r.total_campaigns_raised ?? 0),
+      0,
+    );
+    const campaignsCount = monthlyRows.reduce(
+      (s, r) => s + Number(r.total_campaigns_donations_count ?? 0),
+      0,
+    );
 
     const cards = {
       total_donations_amount: totalRaised,
@@ -809,7 +585,6 @@ export class DashboardAggregateService {
       monthKeys.add(new Date(r.month_start_date).toISOString().slice(0, 7));
     }
     for (const key of donationBoxByMonth.keys()) monthKeys.add(key);
-    for (const key of campaignsByMonth.keys()) monthKeys.add(key);
     const sortedMonths = Array.from(monthKeys).sort();
 
     const raisedPerMonth = sortedMonths.map((key) => {
@@ -818,7 +593,6 @@ export class DashboardAggregateService {
         (r) => new Date(r.month_start_date).toISOString().slice(0, 7) === key,
       );
       const db = donationBoxByMonth.get(key) ?? { amount: 0, count: 0 };
-      const camp = campaignsByMonth.get(key) ?? { amount: 0, count: 0 };
       const online = mr ? Number(mr.total_online_raised ?? 0) : 0;
       const phone = mr ? Number(mr.total_phone_raised ?? 0) : 0;
       const events = mr ? Number(mr.total_event_channel_raised ?? 0) : 0;
@@ -832,7 +606,7 @@ export class DashboardAggregateService {
         events,
         corporate,
         donation_box: db.amount,
-        campaigns: camp.amount,
+        campaigns: mr ? Number(mr.total_campaigns_raised ?? 0) : 0,
         total,
       };
     });
