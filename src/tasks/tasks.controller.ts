@@ -70,6 +70,39 @@ export class TasksController {
     return res.status(HttpStatus.OK).json({ success: true, ...result });
   }
 
+  @Get("list")
+  @RequiredPermissions([
+    "tasking.tasks.list_view",
+    "tasks.list_view",
+    "tasking.tasks.view",
+    "tasks.view",
+    "super_admin",
+  ])
+  async getTaskList(
+    @Query() query: any,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    // Convert query parameters to the same format as POST /tasks/search
+    const payload = {
+      pagination: {
+        page: parseInt(query.page) || 1,
+        pageSize: parseInt(query.pageSize) || 10,
+        sortField: query.sortField || 'created_at',
+        sortOrder: (query.sortOrder || 'DESC').toUpperCase(),
+      },
+      filters: {
+        search: query.search || '',
+        department: query.department || '',
+        status: query.status || '',
+        priority: query.priority || '',
+      },
+      strictDepartment: query.strictDepartment === 'true' || false,
+    };
+    const result = await this.tasksService.findAll(payload, user);
+    return res.status(HttpStatus.OK).json({ success: true, ...result });
+  }
+
   @Get("dashboard/stats")
   @RequiredPermissions([
     "tasking.dashboard.view",
