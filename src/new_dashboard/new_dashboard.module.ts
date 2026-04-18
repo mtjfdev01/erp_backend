@@ -16,6 +16,13 @@ import { SewingMachineReport } from '../program/sewing_machine/reports/entities/
 import { TreePlantationReport } from '../program/tree_plantation/reports/entities/tree-plantation-report.entity';
 import { WaterReport } from '../program/water/reports/entities/water-report.entity';
 import { WheelChairOrCrutchesReport } from '../program/wheel_chair_or_crutches/reports/entities/wheel-chair-or-crutches-report.entity';
+import { StoreDailyReportEntity } from '../store/store_daily_reports/entities/store-daily-report.entity';
+import { ProcurementsDailyReportEntity } from '../procurements/procurements_daily_reports/entities/procurements-daily-report.entity';
+import { AccountsAndFinanceDailyReportEntity } from '../accounts-and-finance/accounts_and_finance_daily_reports/entities/accounts-and-finance-daily-report.entity';
+import { AlHasanainClg } from '../program/al_hasanain_clg/entities/al_hasanain_clg.entity';
+import { AasCollectionCentersReport } from '../program/aas_collection_centers_report/entities/aas_collection_centers_report.entity';
+import { DreamSchoolReport } from '../program/dream_school_reports/entities/dream_school_report.entity';
+import { HealthReport } from '../program/health/entities/health.entity';
 import { PermissionsModule } from 'src/permissions';
 
 @Module({
@@ -34,6 +41,13 @@ import { PermissionsModule } from 'src/permissions';
       TreePlantationReport,
       WaterReport,
       WheelChairOrCrutchesReport,
+      StoreDailyReportEntity,
+      ProcurementsDailyReportEntity,
+      AccountsAndFinanceDailyReportEntity,
+      AlHasanainClg,
+      AasCollectionCentersReport,
+      DreamSchoolReport,
+      HealthReport,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
