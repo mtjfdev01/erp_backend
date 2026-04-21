@@ -10,6 +10,22 @@ import { CreateApplicationReportDto } from "./dto/create-application-report.dto"
 import { UpdateApplicationReportDto } from "./dto/update-application-report.dto";
 import { User } from "../../users/user.entity";
 
+/** Fields clients may echo from GET responses; must not be written on update/create. */
+function omitApplicationReportImmutableFields(
+  app: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    id: _id,
+    created_at: _ca,
+    updated_at: _ua,
+    created_by: _cb,
+    updated_by: _ub,
+    is_archived: _ia,
+    ...mutable
+  } = app;
+  return mutable;
+}
+
 @Injectable()
 export class ApplicationReportsService {
   constructor(
@@ -33,9 +49,12 @@ export class ApplicationReportsService {
       // Create one record for each application
       const createdReports = [];
       for (const app of applications) {
+        const appFields = omitApplicationReportImmutableFields(
+          app as unknown as Record<string, unknown>,
+        );
         const applicationReport = this.applicationReportRepository.create({
           ...reportData,
-          ...app,
+          ...appFields,
           created_by: dbUser,
           updated_by: dbUser,
           is_archived: false,
@@ -246,13 +265,16 @@ export class ApplicationReportsService {
         ) {
           if (i < applications.length) {
             const app = applications[i];
+            const appFields = omitApplicationReportImmutableFields(
+              app as unknown as Record<string, unknown>,
+            );
             if (i < relatedReports.length) {
               // Update existing record
               await this.applicationReportRepository.update(
                 relatedReports[i].id,
                 {
                   ...reportData,
-                  ...app,
+                  ...appFields,
                   updated_by: dbUser,
                 },
               );
@@ -261,7 +283,7 @@ export class ApplicationReportsService {
               const applicationReport = this.applicationReportRepository.create(
                 {
                   ...reportData,
-                  ...app,
+                  ...appFields,
                   created_by: dbUser,
                   updated_by: dbUser,
                   is_archived: false,
@@ -277,6 +299,7 @@ export class ApplicationReportsService {
       }
       return this.findOne(id);
     } catch (error) {
+      console.log(error);
       if (error instanceof NotFoundException) {
         throw error;
       }
