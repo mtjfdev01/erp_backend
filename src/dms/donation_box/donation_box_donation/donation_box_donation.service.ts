@@ -184,20 +184,7 @@ export class DonationBoxDonationService {
         `✅ Collection recorded for donation box ID: ${createDonationBoxDonationDto.donation_box_id}, Amount: ${createDonationBoxDonationDto.collection_amount}`,
       );
 
-      // Dashboard aggregation: only count verified/deposited collections
-      if (
-        savedCollection.status === CollectionStatus.VERIFIED ||
-        savedCollection.status === CollectionStatus.DEPOSITED
-      ) {
-        this.dashboardAggregateService
-          .applyDonationBoxCounted(savedCollection.id)
-          .catch((e) =>
-            console.error(
-              `Dashboard applyDonationBoxCounted failed for ${savedCollection.id}:`,
-              e,
-            ),
-          );
-      }
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Return with relations
       return await this.donationBoxDonationRepository.findOne({
@@ -409,38 +396,7 @@ export class DonationBoxDonationService {
         updateDonationBoxDonationDto,
       );
 
-      // Dashboard aggregation on status transitions (pending/cancelled <-> verified/deposited)
-      if (
-        updateDonationBoxDonationDto.status &&
-        updateDonationBoxDonationDto.status !== collection.status
-      ) {
-        const prev = collection.status;
-        const next = updateDonationBoxDonationDto.status;
-        const prevCounted =
-          prev === CollectionStatus.VERIFIED || prev === CollectionStatus.DEPOSITED;
-        const nextCounted =
-          next === CollectionStatus.VERIFIED || next === CollectionStatus.DEPOSITED;
-
-        if (!prevCounted && nextCounted) {
-          this.dashboardAggregateService
-            .applyDonationBoxCounted(id)
-            .catch((e) =>
-              console.error(
-                `Dashboard applyDonationBoxCounted failed for ${id}:`,
-                e,
-              ),
-            );
-        } else if (prevCounted && !nextCounted) {
-          this.dashboardAggregateService
-            .applyDonationBoxUncounted(id)
-            .catch((e) =>
-              console.error(
-                `Dashboard applyDonationBoxUncounted failed for ${id}:`,
-                e,
-              ),
-            );
-        }
-      }
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Return updated entity with relations
       return await this.donationBoxDonationRepository.findOne({

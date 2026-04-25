@@ -41,6 +41,7 @@ import { City } from "../dms/geographic/cities/entities/city.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import { ProgressTrackersService } from "../progress_tracking/progress_trackers/progress-trackers.service";
+import { ProgressTracker } from "../progress_tracking/progress_trackers/progress_tracker.entity";
 
 @Injectable()
 export class DonationsService {
@@ -68,35 +69,7 @@ export class DonationsService {
     private progressTrackersService: ProgressTrackersService,
   ) {}
 
-  /**
-   * Keep fundraising dashboard aggregates in sync when a donation status changes.
-   * IMPORTANT: Must be idempotent across multiple gateway callbacks/webhooks.
-   *
-   * Rules:
-   * - Only apply "completed" when transitioning into completed.
-   * - Only apply "reversed/refunded" when transitioning out of completed.
-   */
-  private applyDashboardAggregationForStatusTransition(
-    donationId: number,
-    previousStatus: string | null | undefined,
-    nextStatus: string | null | undefined,
-  ) {
-    const prev = (previousStatus || "").toLowerCase();
-    const next = (nextStatus || "").toLowerCase();
-    if (!donationId || prev === next) return;
-
-    // Only count completed donations (gross). Ignore reversals/refunds here.
-    if (next === "completed" && prev !== "completed") {
-      this.dashboardAggregateService
-        .applyDonationCompleted(donationId)
-        .catch((e) =>
-          console.error(
-            `Dashboard applyDonationCompleted failed for ${donationId}:`,
-            e,
-          ),
-        );
-    }
-  }
+  // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
 
   private async persistGatewayInvoiceError(
     donationId: number | undefined | null,
@@ -697,11 +670,7 @@ export class DonationsService {
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
-      this.applyDashboardAggregationForStatusTransition(
-        donationId,
-        previousStatus,
-        donationStatus,
-      );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
     }
 
     return {
@@ -1431,9 +1400,26 @@ export class DonationsService {
       console.log("user email in donation listing", user?.email);
       console.log("multiselectFilters", multiselectFilters);
       const entitySearchFields = ["city"];
+      // Special filters (not donation table columns)
+      const progressTemplateIdRaw = (filters as any)?.progress_workflow_template_id;
+      const progressTemplateId =
+        progressTemplateIdRaw === null || progressTemplateIdRaw === undefined || progressTemplateIdRaw === ""
+          ? null
+          : Number(progressTemplateIdRaw);
+      if ((filters as any)?.progress_workflow_template_id !== undefined) {
+        // prevent applyCommonFilters() from trying to match a non-existent donation column
+        delete (filters as any).progress_workflow_template_id;
+      }
+
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
+        .leftJoinAndMapOne(
+          "donation.progress_tracker",
+          ProgressTracker,
+          "progress_tracker",
+          "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
+        )
         .addSelect("donor.name", "donor_name")
         .addSelect("donor.id", "donor_id");
       if (!restrictedEmails.includes(user?.email)) {
@@ -1445,6 +1431,11 @@ export class DonationsService {
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       // applyHybridFilters(query, hybridFilters, 'donation');
+
+      // 1b) Progress tracking filter: only donations whose tracker uses this template
+      if (progressTemplateId && Number.isFinite(progressTemplateId) && progressTemplateId > 0) {
+        query.andWhere("progress_tracker.template_id = :ptid", { ptid: progressTemplateId });
+      }
 
       // 2) Relation search (const config) using top-level search
       const RELATIONS_SEARCH: RelationsFilterConfig = {
@@ -1525,7 +1516,12 @@ export class DonationsService {
       const sumQuery = this.donationRepository
         .createQueryBuilder("donation")
         .select("SUM(donation.amount)", "totalDonationAmount")
-        .leftJoin("donation.donor", "donor");
+        .leftJoin("donation.donor", "donor")
+        .leftJoin(
+          ProgressTracker,
+          "progress_tracker",
+          "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
+        );
 
       // Apply same filters to keep consistent
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
@@ -1558,6 +1554,11 @@ export class DonationsService {
           "here (multiselectFilters && multiselectFilters.length > 0",
         );
         applyMultiselectFilters(sumQuery, multiselectFilters, "donation");
+      }
+
+      // Apply same progress template filter to sum query
+      if (progressTemplateId && Number.isFinite(progressTemplateId) && progressTemplateId > 0) {
+        sumQuery.andWhere("progress_tracker.template_id = :ptidSum", { ptidSum: progressTemplateId });
       }
       // Apply same geographic filter to sum query
       if (assignedCityNames && assignedCityNames.length > 0) {
@@ -1622,6 +1623,25 @@ export class DonationsService {
       }
       throw new Error(`Failed to retrieve donation: ${error.message}`);
     }
+  }
+
+  async findOneWithProgressTracker(id: number) {
+    const qb = this.donationRepository
+      .createQueryBuilder("donation")
+      .leftJoinAndSelect("donation.donor", "donor")
+      .leftJoinAndMapOne(
+        "donation.progress_tracker",
+        ProgressTracker,
+        "progress_tracker",
+        "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
+      )
+      .where("donation.id = :id", { id });
+
+    const donation = await qb.getOne();
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${id} not found`);
+    }
+    return donation as any;
   }
 
   // Get all in-kind items for a specific donation
@@ -1794,11 +1814,7 @@ export class DonationsService {
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
 
-      this.applyDashboardAggregationForStatusTransition(
-        donationId,
-        donation.status,
-        newStatus,
-      );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       return {
         donation: updatedDonation,
@@ -1950,11 +1966,7 @@ export class DonationsService {
       // Update the donation
       await this.donationRepository.update(parseInt(donationId), updateData);
 
-      this.applyDashboardAggregationForStatusTransition(
-        parseInt(donationId),
-        donation.status,
-        newStatus,
-      );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Get updated donation
       const updatedDonation = await this.donationRepository.findOne({
@@ -2119,11 +2131,7 @@ export class DonationsService {
         message_sent,
         email_sent,
       });
-      this.applyDashboardAggregationForStatusTransition(
-        parseInt(basket_id),
-        donation.status,
-        newStatus,
-      );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
       console.log(
         `Donation ${basket_id} updated successfully with status: ${newStatus}`,
       );
@@ -2260,11 +2268,7 @@ export class DonationsService {
             status: "completed",
             orderId: orderIdForDonation,
           });
-          this.applyDashboardAggregationForStatusTransition(
-            donationId,
-            donation.status,
-            "completed",
-          );
+          // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
           console.log(
             `Stripe webhook: Donation ${donationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
           );
@@ -2291,11 +2295,7 @@ export class DonationsService {
             status: "completed",
             orderId: paymentIntent.id || donation.orderId,
           });
-          this.applyDashboardAggregationForStatusTransition(
-            donationId,
-            donation.status,
-            "completed",
-          );
+          // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
           console.log(
             `Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`,
           );
@@ -2450,11 +2450,7 @@ export class DonationsService {
       });
 
       if (status === "completed") {
-        this.applyDashboardAggregationForStatusTransition(
-          parseInt(invoice_number),
-          donation.status,
-          status,
-        );
+        // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
       }
 
       console.log(

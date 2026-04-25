@@ -43,6 +43,20 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true })
   password: string;
 
+  // Encrypted copy of password for on-demand delivery (Option C).
+  // Stored as AES-256-GCM payload: iv.tag.ciphertext (base64, dot-separated).
+  @Column({ type: "text", nullable: true })
+  password_enc: string;
+
+  @Column({ type: "int", default: 0 })
+  password_enc_version: number;
+
+  @Column({ type: "timestamp", nullable: true })
+  password_last_revealed_at: Date;
+
+  @Column({ type: "int", default: 0 })
+  password_reveal_count: number;
+
   @Column()
   phone: string;
 

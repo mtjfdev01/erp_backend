@@ -1,25 +1,25 @@
 import {
   IsBoolean,
   IsEnum,
-  IsObject,
   IsOptional,
   IsString,
 } from "class-validator";
 import { ProgressStatus } from "../../common/progress-tracking.enum";
 
 export class UpdateTrackerStepStatusDto {
+  @IsOptional()
   @IsEnum(ProgressStatus)
-  status: ProgressStatus;
+  status?: ProgressStatus;
 
   @IsOptional()
   @IsString()
   notes?: string | null;
 
   @IsOptional()
-  @IsObject()
-  metadata?: Record<string, any> | null;
+  @IsBoolean()
+  donor_visible?: boolean;
 
   @IsOptional()
   @IsBoolean()
-  donor_visible?: boolean;
+  donor_notified?: boolean;
 }

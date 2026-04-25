@@ -267,24 +267,28 @@ export class ProgressTrackersService {
     });
     if (!step) throw new NotFoundException("Tracker step not found");
 
-    this.validateTransition(step.status, dto.status);
+    const nextStatus = dto.status ?? step.status;
+    if (dto.status !== undefined && dto.status !== step.status) {
+      this.validateTransition(step.status, dto.status);
+    }
 
     const now = new Date();
     const updateData: any = {
-      status: dto.status,
+      status: nextStatus,
       updated_by: currentUser?.id === -1 ? null : currentUser,
     };
 
     if (dto.notes !== undefined) updateData.notes = dto.notes;
-    if (dto.metadata !== undefined) updateData.metadata = dto.metadata;
     if (dto.donor_visible !== undefined)
       updateData.donor_visible = dto.donor_visible;
+    if (dto.donor_notified !== undefined)
+      updateData.donor_notified = dto.donor_notified;
 
-    if (dto.status === ProgressStatus.IN_PROGRESS && !step.started_at)
+    if (nextStatus === ProgressStatus.IN_PROGRESS && !step.started_at)
       updateData.started_at = now;
-    if (dto.status === ProgressStatus.COMPLETED) updateData.completed_at = now;
-    if (dto.status === ProgressStatus.SKIPPED) updateData.skipped_at = now;
-    if (dto.status === ProgressStatus.CANCELLED) updateData.cancelled_at = now;
+    if (nextStatus === ProgressStatus.COMPLETED) updateData.completed_at = now;
+    if (nextStatus === ProgressStatus.SKIPPED) updateData.skipped_at = now;
+    if (nextStatus === ProgressStatus.CANCELLED) updateData.cancelled_at = now;
 
     await this.trackerStepsRepo.update(stepId, updateData);
 
@@ -306,7 +310,7 @@ export class ProgressTrackersService {
       relations: ["evidence"],
     });
 
-    if (dto.status === ProgressStatus.COMPLETED) {
+    if (nextStatus === ProgressStatus.COMPLETED) {
       try {
         const templateStep = step.template_step_id
           ? await this.templateStepsRepo.findOne({
@@ -329,6 +333,12 @@ export class ProgressTrackersService {
             recipientPhone: donor?.phone || null,
             publicUrl,
           });
+
+          // Later, WhatsApp/email integration can control this more precisely.
+          // For now, consider "notify attempted successfully" as "notified".
+          await this.trackerStepsRepo.update(stepId, {
+            donor_notified: true,
+          } as any);
         }
       } catch (e) {
         // notifications are best-effort; logs handle visibility

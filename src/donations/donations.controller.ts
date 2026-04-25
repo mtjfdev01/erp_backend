@@ -27,6 +27,8 @@ import { RequiredPermissions } from "src/permissions";
 import { PermissionsService } from "src/permissions/permissions.service";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { DonationsReceiptsService } from "./receipts.service";
+import { UserOrDonorJwtGuard } from "src/auth/guards/user-or-donor-jwt.guard";
+import { DonorService } from "src/dms/donor/donor.service";
 
 @Controller("donations")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -35,6 +37,7 @@ export class DonationsController {
     private readonly donationsService: DonationsService,
     private readonly permissionsService: PermissionsService,
     private readonly receiptsService: DonationsReceiptsService,
+    private readonly donorService: DonorService,
   ) {}
 
   /**
@@ -395,6 +398,86 @@ export class DonationsController {
       return res.status(status).json({
         success: false,
         message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  /**
+   * Donor-portal safe donation view.
+   * - Allows either staff jwt cookie OR donor_jwt cookie.
+   * - If donor: must own the donation (donation.donor_id === donor_id) and excludes in_kind donations.
+   */
+  @Get(":id/portal-view")
+  @UseGuards(UserOrDonorJwtGuard)
+  async portalView(@Param("id") id: string, @Req() req: any, @Res() res: Response) {
+    try {
+      const donationId = Number(id);
+      if (!donationId || Number.isNaN(donationId)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "Invalid donation id",
+          data: null,
+        });
+      }
+
+      // Always load with tracker relation (donor portal needs tracking)
+      const donation = await this.donationsService.findOneWithProgressTracker(donationId);
+
+      // Staff flow (existing permission logic)
+      if (req?.user?.id) {
+        await this.checkDonationPermission(req.user.id, donation.donation_source, "view");
+        await this.checkGeographicAccess(req.user.id, donation);
+        return res.status(HttpStatus.OK).json({
+          success: true,
+          message: "Donation retrieved successfully",
+          data: donation,
+        });
+      }
+
+      // Donor flow (strict)
+      if (req?.donor?.donor_id) {
+        const donor = await this.donorService.findOne(Number(req.donor.donor_id));
+        if (!donor) {
+          return res.status(HttpStatus.UNAUTHORIZED).json({
+            success: false,
+            message: "Donor not found",
+            data: null,
+          });
+        }
+
+        if (String(donation.donation_method || "").toLowerCase() === "in_kind") {
+          return res.status(HttpStatus.FORBIDDEN).json({
+            success: false,
+            message: "In-kind donation is not available in donor portal",
+            data: null,
+          });
+        }
+
+        if (Number(donation.donor_id) !== Number(donor.id)) {
+          return res.status(HttpStatus.FORBIDDEN).json({
+            success: false,
+            message: "You do not have access to this donation",
+            data: null,
+          });
+        }
+
+        return res.status(HttpStatus.OK).json({
+          success: true,
+          message: "Donation retrieved successfully",
+          data: donation,
+        });
+      }
+
+      return res.status(HttpStatus.UNAUTHORIZED).json({
+        success: false,
+        message: "Unauthorized",
+        data: null,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Failed to retrieve donation",
         data: null,
       });
     }

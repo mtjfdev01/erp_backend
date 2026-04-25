@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  ForbiddenException,
   HttpStatus,
   Param,
   Patch,
@@ -10,12 +11,18 @@ import {
   Query,
   Res,
   UseGuards,
+  Req,
 } from "@nestjs/common";
-import { Response } from "express";
+import { Response, Request } from "express";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
 import { RequiredPermissions } from "src/permissions";
 import { CurrentUser } from "src/auth/current-user.decorator";
+import { UserOrDonorJwtGuard } from "src/auth/guards/user-or-donor-jwt.guard";
+import { PermissionsService } from "src/permissions/permissions.service";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Donation } from "src/donations/entities/donation.entity";
 
 import { ProgressTrackersService } from "./progress-trackers.service";
 import { CreateTrackerDto } from "./dto/create-tracker.dto";
@@ -24,11 +31,35 @@ import { UpdateTrackerStepStatusDto } from "./dto/update-tracker-step-status.dto
 import { AddEvidenceDto } from "./dto/add-evidence.dto";
 
 @Controller("progress/trackers")
-@UseGuards(JwtGuard, PermissionsGuard)
 export class ProgressTrackersController {
-  constructor(private readonly service: ProgressTrackersService) {}
+  constructor(
+    private readonly service: ProgressTrackersService,
+    private readonly permissionsService: PermissionsService,
+    @InjectRepository(Donation)
+    private readonly donationsRepo: Repository<Donation>,
+  ) {}
+
+  private async assertStaffHasAnyPermission(user: any, perms: string[]) {
+    if (!user?.id) throw new ForbiddenException("Authentication required");
+    if (user.id === -1) return;
+    // Allow role match (legacy behavior in PermissionsGuard)
+    for (const perm of perms) {
+      if (
+        user.role &&
+        String(user.role).toLowerCase() === String(perm).toLowerCase()
+      ) {
+        return;
+      }
+    }
+    for (const perm of perms) {
+      const ok = await this.permissionsService.hasPermission(Number(user.id), perm);
+      if (ok) return;
+    }
+    throw new ForbiddenException("Insufficient permissions");
+  }
 
   @Post()
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.create",
     "super_admin",
@@ -46,6 +77,7 @@ export class ProgressTrackersController {
   }
 
   @Get()
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.view",
     "super_admin",
@@ -73,6 +105,7 @@ export class ProgressTrackersController {
   }
 
   @Get(":id")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.view",
     "super_admin",
@@ -104,6 +137,7 @@ export class ProgressTrackersController {
   }
 
   @Patch(":id")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
@@ -122,6 +156,7 @@ export class ProgressTrackersController {
   }
 
   @Post(":id/token")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
@@ -139,20 +174,66 @@ export class ProgressTrackersController {
   }
 
   @Get(":id/steps")
-  @RequiredPermissions([
-    "fund_raising.donations.view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
-  async listSteps(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.service.listSteps(+id);
-    return res
-      .status(HttpStatus.OK)
-      .json({ success: true, message: "Tracker steps retrieved", data });
+  @UseGuards(UserOrDonorJwtGuard)
+  async listSteps(
+    @Param("id") id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const trackerId = Number(id);
+    const staffUser = (req as any).user;
+    const donorPayload = (req as any).donor;
+
+    if (staffUser?.id) {
+      await this.assertStaffHasAnyPermission(staffUser, [
+        "fund_raising.donations.view",
+        "super_admin",
+        "fund_raising_manager",
+        "fund_raising_user",
+      ]);
+      const data = await this.service.listSteps(trackerId);
+      return res
+        .status(HttpStatus.OK)
+        .json({ success: true, message: "Tracker steps retrieved", data });
+    }
+
+    if (donorPayload?.donor_id) {
+      const tracker = await this.service.getTrackerDetail(trackerId);
+      if ((tracker as any)?.donor_visible === false) {
+        throw new ForbiddenException("Access denied");
+      }
+
+      // Ownership check: tracker must be attached to a donation owned by this donor
+      const donationId = Number((tracker as any)?.donation_id || 0);
+      if (!donationId) throw new ForbiddenException("Access denied");
+
+      const donation = await this.donationsRepo.findOne({
+        where: { id: donationId } as any,
+        select: ["id", "donor_id", "donation_method"] as any,
+      });
+      if (!donation) throw new ForbiddenException("Access denied");
+      if (Number((donation as any).donor_id) !== Number(donorPayload.donor_id)) {
+        throw new ForbiddenException("Access denied");
+      }
+      if (String((donation as any).donation_method || "") === "in_kind") {
+        throw new ForbiddenException("Access denied");
+      }
+
+      const steps = ((tracker as any).steps || []).filter(
+        (s: any) => s?.donor_visible === true && s?.is_archived !== true,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Tracker steps retrieved",
+        data: steps,
+      });
+    }
+
+    throw new ForbiddenException("Authentication required");
   }
 
   @Patch("steps/:stepId")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
@@ -171,6 +252,7 @@ export class ProgressTrackersController {
   }
 
   @Post("steps/:stepId/evidence")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
@@ -189,6 +271,7 @@ export class ProgressTrackersController {
   }
 
   @Patch("evidence/:evidenceId")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
@@ -207,6 +290,7 @@ export class ProgressTrackersController {
   }
 
   @Delete("evidence/:evidenceId")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.update",
     "super_admin",
