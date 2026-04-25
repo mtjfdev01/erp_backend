@@ -2,9 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { CreateHealthDto } from './dto/create-health.dto';
 import { UpdateHealthDto } from './dto/update-health.dto';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { HealthReport } from './entities/health.entity';
 import { User } from '../../users/user.entity';
+import { HEALTH_REPORT_TYPES } from './dto/create-health.dto';
 
 @Injectable()
 export class HealthService {
@@ -150,5 +151,97 @@ export class HealthService {
     const reports = await this.findByDate(date);
     if (!reports || reports.length === 0) throw new NotFoundException(`Health reports with date ${date} not found`);
     await this.healthReportRepository.update({ date: new Date(date) }, { is_archived: true });
+  }
+
+  private applyDateRange(
+    qb: SelectQueryBuilder<HealthReport>,
+    alias: string,
+    from?: string,
+    to?: string,
+  ): void {
+    const col = `${alias}.date`;
+    if (from && to) {
+      qb.andWhere(`${col} BETWEEN :from AND :to`, { from, to });
+    } else if (from) {
+      qb.andWhere(`${col} >= :from`, { from });
+    } else if (to) {
+      qb.andWhere(`${col} <= :to`, { to });
+    }
+  }
+
+  /**
+   * Totals per report `type` (e.g. Medicines, Ambulance) for an optional date range.
+   * Each "total" is the sum of all vulnerability columns for that type.
+   */
+  async getTotalsByType(from?: string, to?: string): Promise<{
+    from?: string;
+    to?: string;
+    types: Array<{
+      type: string;
+      widows: number;
+      divorced: number;
+      disable: number;
+      indegent: number;
+      orphans: number;
+      total: number;
+    }>;
+    grand_total: number;
+  }> {
+    const qb = this.healthReportRepository
+      .createQueryBuilder('h')
+      .select('h.type', 'type')
+      .addSelect('COALESCE(SUM(h.widows), 0)', 'widows')
+      .addSelect('COALESCE(SUM(h.divorced), 0)', 'divorced')
+      .addSelect('COALESCE(SUM(h.disable), 0)', 'disable')
+      .addSelect('COALESCE(SUM(h.indegent), 0)', 'indegent')
+      .addSelect('COALESCE(SUM(h.orphans), 0)', 'orphans')
+      .addSelect(
+        'COALESCE(SUM(h.widows + h.divorced + h.disable + h.indegent + h.orphans), 0)',
+        'total',
+      )
+      .where('h.is_archived = false')
+      .groupBy('h.type');
+
+    this.applyDateRange(qb, 'h', from, to);
+
+    const rows = await qb.getRawMany<{
+      type: string;
+      widows: string;
+      divorced: string;
+      disable: string;
+      indegent: string;
+      orphans: string;
+      total: string;
+    }>();
+
+    const byType = new Map<string, any>();
+    for (const r of rows) {
+      byType.set(r.type, {
+        type: r.type,
+        widows: Number(r.widows ?? 0),
+        divorced: Number(r.divorced ?? 0),
+        disable: Number(r.disable ?? 0),
+        indegent: Number(r.indegent ?? 0),
+        orphans: Number(r.orphans ?? 0),
+        total: Number(r.total ?? 0),
+      });
+    }
+
+    const types = (HEALTH_REPORT_TYPES as readonly string[]).map((t) => {
+      return (
+        byType.get(t) ?? {
+          type: t,
+          widows: 0,
+          divorced: 0,
+          disable: 0,
+          indegent: 0,
+          orphans: 0,
+          total: 0,
+        }
+      );
+    });
+
+    const grand_total = types.reduce((s, t) => s + (Number(t.total) || 0), 0);
+    return { from, to, types, grand_total };
   }
 }
