@@ -53,9 +53,6 @@ export class ProgressTrackerStep extends BaseEntity {
   @Column({ type: "text", nullable: true })
   notes: string;
 
-  @Column({ type: "jsonb", nullable: true })
-  metadata: object;
-
   @Column({ type: "timestamp with time zone", nullable: true })
   started_at: Date;
 
@@ -70,6 +67,9 @@ export class ProgressTrackerStep extends BaseEntity {
 
   @Column({ default: false })
   donor_visible: boolean;
+
+  @Column({ default: false })
+  donor_notified: boolean;
 
   @OneToMany(() => ProgressStepEvidence, (evidence) => evidence.tracker_step)
   evidence: ProgressStepEvidence[];

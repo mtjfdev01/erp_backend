@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { HealthService } from './health.service';
 import { CreateHealthDto } from './dto/create-health.dto';
 import { UpdateHealthDto } from './dto/update-health.dto';
+import { HealthTotalsQueryDto } from './dto/health-totals-query.dto';
 import { JwtGuard } from 'src/auth/jwt.guard';
 import { PermissionsGuard } from 'src/permissions/guards/permissions.guard';
 import { RequiredPermissions } from 'src/permissions/decorators/require-permission.decorator';
@@ -87,6 +88,29 @@ export class HealthController {
         message: error.message,
         data: [],
         pagination: null,
+      });
+    }
+  }
+
+  /**
+   * GET /program/health/reports/type-totals?from=YYYY-MM-DD&to=YYYY-MM-DD
+   * Returns totals grouped by report `type` (Medicines, Ambulance, ...).
+   */
+  @Get('type-totals')
+  @RequiredPermissions(['program.health_reports.list_view', 'super_admin', 'programs_manager', 'read_only_super_admin'])
+  async getTypeTotals(@Query() query: HealthTotalsQueryDto, @Res() res: Response) {
+    try {
+      const data = await this.healthService.getTotalsByType(query.from, query.to);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: 'Health totals by type retrieved successfully',
+        data,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message || 'Failed to fetch health totals by type',
+        data: null,
       });
     }
   }

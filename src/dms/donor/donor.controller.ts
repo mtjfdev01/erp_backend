@@ -22,6 +22,7 @@ import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { PermissionsService } from "../../permissions/permissions.service";
+import { JwtGuard } from "src/auth/jwt.guard";
 
 @Controller("donors")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -425,6 +426,105 @@ export class DonorController {
           .json({ success: false, message: error.message, data: null });
       }
       return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  /**
+   * Admin-only: reveal donor password (decrypt Option C storage).
+   * Keep this strictly restricted and auditable.
+   */
+  @Get(":id/reveal-password")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions(["super_admin", "fund_raising_manager"])
+  async revealPassword(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const donorId = Number(id);
+      if (!donorId || Number.isNaN(donorId)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "Invalid donor id",
+          data: null,
+        });
+      }
+
+      // Ensure requester can view this donor type + geo
+      const donor = await this.donorService.findOne(donorId);
+      if (req?.user?.id) {
+        await this.checkDonorPermission(req.user.id, donor.source, "view");
+        await this.checkGeographicAccess(req.user.id, donor.city);
+      }
+
+      const data = await this.donorService.revealDonorPassword(donorId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Password revealed",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Post(":id/reset-password")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions(["super_admin", "fund_raising_manager"])
+  async resetPassword(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const donorId = Number(id);
+      if (!donorId || Number.isNaN(donorId)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "Invalid donor id",
+          data: null,
+        });
+      }
+
+      const donor = await this.donorService.findOne(donorId);
+      if (req?.user?.id) {
+        await this.checkDonorPermission(req.user.id, donor.source, "update");
+        await this.checkGeographicAccess(req.user.id, donor.city);
+      }
+
+      const data = await this.donorService.resetPasswordAdmin(donorId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Password reset successfully",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
         success: false,
         message: error.message,
         data: null,

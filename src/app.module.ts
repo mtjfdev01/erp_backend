@@ -29,6 +29,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { TasksModule } from './tasks/tasks.module';
 import { ProgressTrackingModule } from './progress_tracking/progress-tracking.module';
 import { NewDashboardModule } from './new_dashboard/new_dashboard.module';
+import { DonorAuthModule } from './donor_auth/donor-auth.module';
+import { DonorPortalModule } from './donor_portal/donor-portal.module';
 
 @Module({
   imports: [
@@ -97,6 +99,8 @@ import { NewDashboardModule } from './new_dashboard/new_dashboard.module';
     TasksModule,
     ProgressTrackingModule,
     NewDashboardModule,
+    DonorAuthModule,
+    DonorPortalModule,
   ],
   controllers: [AppController],
   providers: [AppService],

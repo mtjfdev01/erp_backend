@@ -17,6 +17,11 @@ import { User, Department } from "src/users/user.entity";
 import { UsersService } from "src/users/users.service";
 import { City } from "../geographic/cities/entities/city.entity";
 import { DashboardAggregateService } from "../../dashboard/dashboard-aggregate.service";
+import {
+  decryptDonorPassword,
+  encryptDonorPassword,
+  generateRandomPassword,
+} from "src/utils/crypto/donor-password-vault";
 
 interface PaginationOptions {
   page: number;
@@ -162,16 +167,20 @@ export class DonorService {
           throw new NotFoundException("Assigned to user not found");
         }
       }
-      // Hash the password only if provided
-      let hashedPassword = null;
-      if (createDonorDto.password) {
-        hashedPassword = await bcrypt.hash(createDonorDto.password, 10);
-      }
+      // Password handling (Option C):
+      // - If password provided: store bcrypt hash + encrypted copy.
+      // - If not provided: generate password, store bcrypt hash + encrypted copy (do not return plaintext).
+      const plainPassword =
+        createDonorDto.password || generateRandomPassword();
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+      const enc = encryptDonorPassword(plainPassword);
 
       // Create donor entity
       const donor = this.donorRepository.create({
         ...createDonorDto,
         password: hashedPassword,
+        password_enc: enc.payload,
+        password_enc_version: enc.version,
         assigned_to,
         referred_by,
         created_by: user,
@@ -180,15 +189,11 @@ export class DonorService {
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
 
-      // Dashboard donor count: track donors irrespective of donation status
-      this.dashboardAggregateService
-        .applyDonorSeen(savedDonor.id, savedDonor.created_at || new Date())
-        .catch((e) =>
-          console.error(`Dashboard applyDonorSeen failed for ${savedDonor.id}:`, e),
-        );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Remove password from response
       delete savedDonor.password;
+      delete (savedDonor as any).password_enc;
 
       return savedDonor;
     } catch (error) {
@@ -434,11 +439,13 @@ export class DonorService {
       }
 
       // Create donor entity WITHOUT password
-      // Password will be set when they explicitly register/login
+      // Password will be set when they explicitly register/login (donor portal flow).
       const donor = this.donorRepository.create({
         donor_type: DonorType.INDIVIDUAL,
         email: donor_email,
         password: null, // No password for auto-registered donors
+        password_enc: null,
+        password_enc_version: 0,
         phone: donor_phone,
         name: donor_name || "Anonymous Donor",
         city: city || null,
@@ -452,12 +459,7 @@ export class DonorService {
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
 
-      // Dashboard donor count: track donors irrespective of donation status
-      this.dashboardAggregateService
-        .applyDonorSeen(savedDonor.id, savedDonor.created_at || new Date())
-        .catch((e) =>
-          console.error(`Dashboard applyDonorSeen failed for ${savedDonor.id}:`, e),
-        );
+      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       console.log(
         `✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`,
@@ -523,6 +525,28 @@ export class DonorService {
     delete donor.password;
 
     return donor;
+  }
+
+  async revealDonorPassword(donorId: number): Promise<{ password: string }> {
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+    });
+    if (!donor) throw new NotFoundException("Donor not found");
+    if (!donor.password_enc || !donor.password_enc_version) {
+      throw new NotFoundException("No stored password available for this donor");
+    }
+
+    const password = decryptDonorPassword(
+      donor.password_enc,
+      donor.password_enc_version,
+    );
+
+    await this.donorRepository.update(donorId, {
+      password_last_revealed_at: new Date(),
+      password_reveal_count: (donor.password_reveal_count || 0) + 1,
+    } as any);
+
+    return { password };
   }
 
   /**
@@ -597,6 +621,9 @@ export class DonorService {
 
       // Hash and save new password
       donor.password = await bcrypt.hash(newPassword, 10);
+      const enc = encryptDonorPassword(newPassword);
+      donor.password_enc = enc.payload as any;
+      donor.password_enc_version = enc.version as any;
       await this.donorRepository.save(donor);
 
       return { message: "Password changed successfully" };
@@ -609,6 +636,24 @@ export class DonorService {
       }
       throw new ConflictException("Failed to change password");
     }
+  }
+
+  async resetPasswordAdmin(donorId: number): Promise<{ password: string }> {
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+    });
+    if (!donor) throw new NotFoundException("Donor not found");
+
+    const plainPassword = generateRandomPassword();
+    donor.password = await bcrypt.hash(plainPassword, 10);
+    const enc = encryptDonorPassword(plainPassword);
+    donor.password_enc = enc.payload as any;
+    donor.password_enc_version = enc.version as any;
+    donor.password_last_revealed_at = new Date();
+    donor.password_reveal_count = (donor.password_reveal_count || 0) + 1;
+
+    await this.donorRepository.save(donor);
+    return { password: plainPassword };
   }
 
   /**

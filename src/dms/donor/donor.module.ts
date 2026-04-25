@@ -9,6 +9,8 @@ import { PermissionsModule } from "../../permissions/permissions.module";
 import { User } from "src/users/user.entity";
 import { UsersModule } from "src/users/users.module";
 import { DashboardModule } from "../../dashboard/dashboard.module";
+import { DonorPasswordBackfillService } from "./donor-password-backfill.service";
+import { DonorPasswordBackfillRunner } from "./donor-password-backfill.runner";
 
 @Module({
   imports: [
@@ -22,7 +24,7 @@ import { DashboardModule } from "../../dashboard/dashboard.module";
     DashboardModule,
   ],
   controllers: [DonorController],
-  providers: [DonorService],
+  providers: [DonorService, DonorPasswordBackfillService, DonorPasswordBackfillRunner],
   exports: [DonorService, TypeOrmModule], // Export TypeOrmModule for Donor repository
 })
 export class DonorModule {}
