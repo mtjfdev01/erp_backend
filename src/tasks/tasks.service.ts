@@ -343,9 +343,24 @@ export class TasksService {
         dto.assigned_users,
       );
 
+      // Handle MOV checklist - encode into description if provided
+      let descriptionWithMov = dto.description || '';
+      if (dto.mov_checklist && dto.mov_checklist.length > 0) {
+        const movHeader = "[MOV CHECKLIST]";
+        const movItems = dto.mov_checklist.map(item => item.text);
+        const movContent = movItems.map((item) => `- ${item}`).join("\n");
+        const movBlock = `${movHeader}\n${movContent}`;
+        
+        if (descriptionWithMov && descriptionWithMov.trim()) {
+          descriptionWithMov = `${descriptionWithMov.trim()}\n\n${movBlock}`;
+        } else {
+          descriptionWithMov = movBlock;
+        }
+      }
+
       const task = this.taskRepo.create({
         title: dto.title,
-        description: dto.description,
+        description: descriptionWithMov,
         department: dto.department,
         priority: dto.priority,
         workflow_type: dto.workflow_type || TaskWorkflowType.STANDARD,
@@ -569,6 +584,53 @@ export class TasksService {
           );
         }
       }
+
+      // Handle search filter - extend to include creator name (like User Management)
+      const searchTerm = safeFilters.search;
+      if (searchTerm && searchTerm.trim() !== '') {
+        // Join created_by relation to search in user fields
+        qb.leftJoin("task.created_by", "searchCreatedBy");
+        
+        qb.andWhere(
+          new Brackets((searchQb) => {
+            // Search in task fields
+            searchQb.where("LOWER(task.title) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            // Search in creator name (like User Management search)
+            searchQb.orWhere("LOWER(searchCreatedBy.first_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            searchQb.orWhere("LOWER(searchCreatedBy.last_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            searchQb.orWhere("LOWER(searchCreatedBy.email) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+          })
+        );
+        
+        // Remove search from safeFilters so applyCommonFilters doesn't duplicate it
+        delete safeFilters.search;
+      }
+
+      // Handle user name filter - dedicated filter for searching by creator name (like User Management)
+      const userNameFilter = safeFilters.user_name;
+      if (userNameFilter && userNameFilter.trim() !== '') {
+        // Join created_by relation if not already joined
+        if (!safeFilters.search) {
+          qb.leftJoin("task.created_by", "userNameCreatedBy");
+        }
+        
+        const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
+        const joinAlias = safeFilters.search ? "searchCreatedBy" : "userNameCreatedBy";
+        
+        qb.andWhere(
+          new Brackets((userQb) => {
+            // Search in creator name
+            userQb.where(`LOWER(${joinAlias}.first_name) LIKE :userName`, { userName: userSearchTerm });
+            userQb.orWhere(`LOWER(${joinAlias}.last_name) LIKE :userName`, { userName: userSearchTerm });
+            userQb.orWhere(`LOWER(${joinAlias}.email) LIKE :userName`, { userName: userSearchTerm });
+          })
+        );
+      }
+      
+      // Remove user_name from safeFilters so it's not passed to applyCommonFilters
+      delete safeFilters.user_name;
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
@@ -1053,8 +1115,16 @@ export class TasksService {
         }
       }
 
-      const users = Object.entries(userCountsMap).map(
-        ([id, item]: [string, any]) => ({
+      const users = Object.entries(userCountsMap)
+        .filter(([id, item]: [string, any]) => item.count > 0) // Only include users with tasks
+        .filter(([id, item]: [string, any]) => {
+          // Exclude logged-in user when "Created by Me" filter is active
+          if (query.view_type === "created" && currentUser) {
+            return Number(id) !== Number(currentUser.id);
+          }
+          return true;
+        })
+        .map(([id, item]: [string, any]) => ({
           id: isNaN(Number(id)) ? null : Number(id),
           label: item.label,
           count: item.count,
@@ -1068,8 +1138,7 @@ export class TasksService {
                   ((item.completed_count / item.count) * 100).toFixed(1),
                 )
               : 0,
-        }),
-      );
+        }));
       const projects = Object.entries(projectCountsMap).map(
         ([label, count]) => ({
           label,
