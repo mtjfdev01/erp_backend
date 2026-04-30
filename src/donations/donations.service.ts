@@ -42,6 +42,8 @@ import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import { ProgressTrackersService } from "../progress_tracking/progress_trackers/progress-trackers.service";
 import { ProgressTracker } from "../progress_tracking/progress_trackers/progress_tracker.entity";
+import { ProgressBatchesService } from "../progress_tracking/progress_batches/progress-batches.service";
+import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
 
 @Injectable()
 export class DonationsService {
@@ -67,6 +69,9 @@ export class DonationsService {
     private campaignsService: CampaignsService,
     private dashboardAggregateService: DashboardAggregateService,
     private progressTrackersService: ProgressTrackersService,
+    private progressBatchesService: ProgressBatchesService,
+    @InjectRepository(ProgressWorkflowTemplate)
+    private readonly workflowTemplatesRepo: Repository<ProgressWorkflowTemplate>,
   ) {}
 
   // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
@@ -95,6 +100,8 @@ export class DonationsService {
           donation_id: savedDonation.id,
           donor_visible:
             createDonationDto.progress_tracker_donor_visible ?? true,
+          batch_parts_count:
+            (createDonationDto as any).progress_batch_parts_requested ?? null,
         },
         user,
       );
@@ -104,6 +111,226 @@ export class DonationsService {
         e?.message || e,
       );
     }
+  }
+
+  /**
+   * Derive `progress_workflow_template_id` and (optionally) `progress_batch_parts_requested`
+   * from the incoming `donation_items[]` payload.
+   *
+   * IMPORTANT: current progress-tracking data model creates ONE tracker per donation.
+   * If multiple items are present, we choose ONE "primary" workflow template:
+   * - prefer batchable templates
+   * - if multiple match, prefer the highest `quantity`
+   *
+   * This keeps the external payload unchanged while enabling template selection based
+   * on initiative.
+   */
+  private async deriveProgressTemplateFromDonationItems(params: {
+    donationItems: any[];
+  }): Promise<{
+    templateId: number;
+    batchPartsRequested?: number;
+  } | null> {
+    if (!Array.isArray(params?.donationItems) || params.donationItems.length === 0) {
+      return null;
+    }
+
+    // Extend/override this mapping per project if needed.
+    // We try initiativeTitle/subtitle first (matches your "Cow Share"/"Goat"/"Cow" templates).
+    const initiativeTitleToTemplateCode: Record<string, string> = {
+      "cow share": "cow_share",
+      "cowshare": "cow_share",
+      "full cow": "cow",
+      "cow": "cow",
+      "goat": "goat",
+    };
+
+    // Fallback: if initiativeId ends with "-1" / "-2" / "-3"
+    const initiativeIdSuffixToTemplateCode: Record<string, string> = {
+      "1": "cow_share",
+      "2": "cow",
+      "3": "goat",
+    };
+
+    const normalize = (v: any) => String(v ?? "").trim().toLowerCase();
+
+    const candidates: Array<{
+      template: ProgressWorkflowTemplate;
+      quantity: number;
+    }> = [];
+
+    for (const item of params.donationItems) {
+      const initiativeId = normalize(item?.initiativeId);
+      const initiativeTitle = normalize(item?.initiativeTitle);
+      const initiativeSubtitle = normalize(item?.initiativeSubtitle);
+      const quantityRaw = item?.quantity;
+      const quantity = Number(quantityRaw);
+
+      if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+      const titleKey = initiativeTitle || initiativeSubtitle;
+      const templateCodeFromTitle =
+        titleKey ? initiativeTitleToTemplateCode[titleKey] : undefined;
+
+      const suffixMatch = initiativeId.match(/-(\d+)$/);
+      const templateCodeFromSuffix = suffixMatch
+        ? initiativeIdSuffixToTemplateCode[String(suffixMatch[1])]
+        : undefined;
+
+      const templateCode = templateCodeFromTitle || templateCodeFromSuffix;
+      if (!templateCode) continue;
+
+      const template = await this.workflowTemplatesRepo.findOne({
+        where: { code: templateCode, is_archived: false } as any,
+      });
+      if (!template) continue;
+
+      candidates.push({ template, quantity: Math.floor(quantity) });
+    }
+
+    if (candidates.length === 0) return null;
+
+    const batchableCandidates = candidates.filter((c) => !!c.template.is_batchable);
+    const pool = batchableCandidates.length > 0 ? batchableCandidates : candidates;
+
+    const primary = pool.sort((a, b) => b.quantity - a.quantity)[0];
+    if (!primary?.template?.id) return null;
+
+    return {
+      templateId: primary.template.id,
+      batchPartsRequested: primary.template.is_batchable ? primary.quantity : undefined,
+    };
+  }
+
+  private derivePartsRequestedForBatchableTemplate(params: {
+    partsRequestedRaw?: any;
+    amount?: any;
+    batchPartAmount: number;
+  }): number {
+    const raw = params.partsRequestedRaw;
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+        throw new HttpException(
+          "progress_batch_parts_requested must be a positive integer",
+          400,
+        );
+      }
+      return n;
+    }
+
+    const amount = Number(params.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new HttpException(
+        "Amount is required to derive batch parts for a batchable template",
+        400,
+      );
+    }
+    const partAmount = Number(params.batchPartAmount);
+    if (!Number.isFinite(partAmount) || partAmount <= 0) {
+      throw new HttpException("Invalid batch_part_amount on template", 400);
+    }
+    const parts = amount / partAmount;
+    if (!Number.isFinite(parts) || parts <= 0 || !Number.isInteger(parts)) {
+      throw new HttpException(
+        "Donation amount must be an exact multiple of batch_part_amount, or provide progress_batch_parts_requested",
+        400,
+      );
+    }
+    return parts;
+  }
+
+  private async maybeAllocateDonationIntoBatchesForNewDonation(
+    createDonationDto: CreateDonationDto,
+    savedDonation: { id: number },
+    user: any,
+  ): Promise<void> {
+    const templateId = createDonationDto.progress_workflow_template_id;
+    if (templateId == null || templateId === undefined) return;
+    const tid = Number(templateId);
+    if (!Number.isFinite(tid) || tid <= 0) return;
+
+    const cfg = await this.progressBatchesService.getBatchingConfig(tid);
+    if (!cfg.is_batchable) return;
+
+    const partsRequested = this.derivePartsRequestedForBatchableTemplate({
+      partsRequestedRaw: (createDonationDto as any).progress_batch_parts_requested,
+      amount: createDonationDto.amount,
+      batchPartAmount: Number(cfg.batch_part_amount || 0),
+    });
+
+    await this.progressBatchesService.allocateDonationIntoBatches({
+      template_id: tid,
+      donation_id: savedDonation.id,
+      parts_requested: partsRequested,
+      currentUser: user,
+    });
+  }
+
+  private async processDonationBatchingAfterPaymentSuccess(params: {
+    donationId: number;
+    currentUser?: any;
+    source?: string;
+  }): Promise<{
+    processed: boolean;
+    reason?: string;
+    allocationsCreated?: number;
+  }> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: params.donationId } as any,
+    });
+    if (!donation) throw new NotFoundException("Donation not found");
+
+    if (String(donation.status || "").toLowerCase() !== "completed") {
+      return { processed: false, reason: "Donation not completed" };
+    }
+
+    let tracker: any = null;
+    try {
+      tracker = await this.progressTrackersService.getTrackerByDonationId(
+        donation.id,
+      );
+    } catch (e) {
+      return { processed: false, reason: "No progress tracker for donation" };
+    }
+    const tid = tracker?.template_id != null ? Number(tracker.template_id) : NaN;
+    if (!Number.isFinite(tid) || tid <= 0) {
+      return { processed: false, reason: "Tracker has no template" };
+    }
+
+    const cfg = await this.progressBatchesService.getBatchingConfig(tid);
+    if (!cfg.is_batchable) {
+      return { processed: false, reason: "Template is not batchable" };
+    }
+
+    const alreadyAllocated =
+      await this.progressBatchesService.hasAllocationsForDonation(donation.id);
+    if (alreadyAllocated) {
+      return { processed: false, reason: "Already allocated" };
+    }
+
+    const partsRequested = this.derivePartsRequestedForBatchableTemplate({
+      partsRequestedRaw: tracker?.batch_parts_count ?? null,
+      amount: donation.amount,
+      batchPartAmount: Number(cfg.batch_part_amount || 0),
+    });
+
+    const allocations = await this.progressBatchesService.allocateDonationIntoBatches({
+      template_id: tid,
+      donation_id: donation.id,
+      parts_requested: partsRequested,
+      currentUser: params.currentUser,
+    });
+
+    return { processed: true, allocationsCreated: allocations.length };
+  }
+
+  async processBatchingForDonationManual(donationId: number, user: any) {
+    return this.processDonationBatchingAfterPaymentSuccess({
+      donationId,
+      currentUser: user,
+      source: "manual",
+    });
   }
 
   // /** Reuse same-day pending donation for existing donor (same amount, method, campaign). */
@@ -1001,6 +1228,34 @@ export class DonationsService {
       ];
       console.log("createDonationDto", createDonationDto);
 
+      // If the caller didn't explicitly provide progress-tracking template info,
+      // derive it from the incoming `donation_items[]` payload.
+      if (
+        createDonationDto.project_id === "qurbani-barai-mustehqeen" &&
+        (createDonationDto as any)?.progress_workflow_template_id == null &&
+        Array.isArray((createDonationDto as any)?.donation_items) &&
+        (createDonationDto as any)?.donation_items.length > 0
+      ) {
+        try {
+          const derived = await this.deriveProgressTemplateFromDonationItems({
+            donationItems: (createDonationDto as any).donation_items,
+          });
+          if (derived?.templateId) {
+            (createDonationDto as any).progress_workflow_template_id =
+              derived.templateId;
+            if (derived.batchPartsRequested != null) {
+              (createDonationDto as any).progress_batch_parts_requested =
+                derived.batchPartsRequested;
+            }
+          }
+        } catch (e) {
+          console.error(
+            "Failed to derive progress template from donation_items:",
+            e?.message || e,
+          );
+        }
+      }
+
       let donorId: number | null = createDonationDto.donor_id || null;
       let donor: any;
       let savedDonation: any;
@@ -1153,6 +1408,13 @@ export class DonationsService {
         savedDonation = await this.donationRepository.save(donation);
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
+        );
+
+        // TEST MODE: allow batching allocations on creation even if pending.
+        await this.maybeAllocateDonationIntoBatchesForNewDonation(
+          createDonationDto,
+          savedDonation,
+          user,
         );
 
         await this.maybeCreateProgressTrackerForNewDonation(
@@ -2131,6 +2393,23 @@ export class DonationsService {
         message_sent,
         email_sent,
       });
+
+      let batching: any = null;
+      if (newStatus === "completed") {
+        try {
+          batching = await this.processDonationBatchingAfterPaymentSuccess({
+            donationId: parseInt(basket_id),
+            currentUser: { id: -1 },
+            source: "payfast_ipn",
+          });
+        } catch (e: any) {
+          console.error(
+            `Batching process failed for donation ${basket_id}:`,
+            e?.message || e,
+          );
+          batching = { processed: false, reason: e?.message || "Batching failed" };
+        }
+      }
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
       console.log(
         `Donation ${basket_id} updated successfully with status: ${newStatus}`,
@@ -2143,6 +2422,7 @@ export class DonationsService {
         transaction_id: transaction_id,
         status: newStatus,
         processed: true,
+        batching,
       };
     } catch (error) {
       console.error("=== IPN PROCESSING ERROR ===");

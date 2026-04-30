@@ -90,6 +90,9 @@ export class ProgressTrackersController {
     @Query("search") search?: string,
     @Query("template_id") template_id?: string,
     @Query("donation_id") donation_id?: string,
+    @Query("batch_id") batch_id?: string,
+    @Query("batch_number") batch_number?: string,
+    @Query("batch_status") batch_status?: string,
     @Res() res?: Response,
   ) {
     const data = await this.service.listTrackers({
@@ -98,6 +101,12 @@ export class ProgressTrackersController {
       search,
       template_id: template_id ? parseInt(template_id, 10) : undefined,
       donation_id: donation_id ? parseInt(donation_id, 10) : undefined,
+      batch_id: batch_id ? parseInt(batch_id, 10) : undefined,
+      batch_number: batch_number ? parseInt(batch_number, 10) : undefined,
+      batch_status:
+        batch_status === "open" || batch_status === "closed"
+          ? (batch_status as any)
+          : undefined,
     });
     return res
       .status(HttpStatus.OK)

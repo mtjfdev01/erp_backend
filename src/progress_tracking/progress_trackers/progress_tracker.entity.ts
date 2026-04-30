@@ -40,6 +40,13 @@ export class ProgressTracker extends BaseEntity {
   @Column({ type: "bigint" })
   template_id: number;
 
+  /**
+   * For batchable templates: how many parts/shares this tracker should allocate
+   * for the linked donation (e.g., 2 parts out of 7). Nullable for non-batch use.
+   */
+  @Column({ type: "int", nullable: true })
+  batch_parts_count: number | null;
+
   @Column({
     type: "enum",
     enum: TrackerOverallStatus,

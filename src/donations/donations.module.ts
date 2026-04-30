@@ -23,6 +23,8 @@ import { CampaignsModule } from "../dms/campaigns/campaigns.module";
 import { DashboardModule } from "../dashboard/dashboard.module";
 import { DonationsReceiptsService } from "./receipts.service";
 import { ProgressTrackersModule } from "../progress_tracking/progress_trackers/progress-trackers.module";
+import { ProgressBatchesModule } from "../progress_tracking/progress_batches/progress-batches.module";
+import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
 
 @Module({
   imports: [
@@ -32,6 +34,7 @@ import { ProgressTrackersModule } from "../progress_tracking/progress_trackers/p
       User,
       RecurringDonation,
       City,
+      ProgressWorkflowTemplate,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -44,6 +47,7 @@ import { ProgressTrackersModule } from "../progress_tracking/progress_trackers/p
     CampaignsModule,
     DashboardModule,
     ProgressTrackersModule,
+    ProgressBatchesModule,
   ],
   controllers: [
     DonationsController,

@@ -14,6 +14,9 @@ import { Donation } from "src/donations/entities/donation.entity";
 import { PermissionsModule } from "src/permissions/permissions.module";
 import { JwtModule } from "@nestjs/jwt";
 import { ProgressNotificationsModule } from "../progress_notifications/progress-notifications.module";
+import { ProgressBatchStepEvidence } from "../progress_batches/progress_batch_step_evidence.entity";
+import { ProgressWorkflowBatch } from "../progress_batches/progress_workflow_batch.entity";
+import { DonationBatchAllocation } from "../progress_batches/donation_batch_allocation.entity";
 
 @Module({
   imports: [
@@ -21,6 +24,9 @@ import { ProgressNotificationsModule } from "../progress_notifications/progress-
       ProgressTracker,
       ProgressTrackerStep,
       ProgressStepEvidence,
+      ProgressBatchStepEvidence,
+      ProgressWorkflowBatch,
+      DonationBatchAllocation,
       ProgressWorkflowTemplate,
       ProgressWorkflowTemplateStep,
       Donation,

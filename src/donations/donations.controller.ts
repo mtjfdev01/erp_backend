@@ -230,6 +230,29 @@ export class DonationsController {
     });
   }
 
+  @Post(":id/process-batching")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "fund_raising.donations.update",
+    "super_admin",
+    "fund_raising_manager",
+  ])
+  async processBatching(
+    @Param("id") id: string,
+    @Res() res: Response,
+    @CurrentUser() user: any,
+  ) {
+    const data = await this.donationsService.processBatchingForDonationManual(
+      +id,
+      user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Batching processed",
+      data,
+    });
+  }
+
   @Post("search")
   async findAll(@Body() payload: any, @Res() res: Response, @Req() req: any) {
     try {

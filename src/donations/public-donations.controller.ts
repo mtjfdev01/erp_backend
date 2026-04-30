@@ -49,6 +49,7 @@ export class PublicDonationsController {
         success: true,
         message: "IPN received successfully",
         basket_id: result.basket_id,
+        batching: result.batching || null,
       });
     } catch (error) {
       console.error("IPN processing error:", error.message);
