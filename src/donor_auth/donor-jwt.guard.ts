@@ -20,4 +20,3 @@ export class DonorJwtGuard implements CanActivate {
     return true;
   }
 }
-

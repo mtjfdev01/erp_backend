@@ -16,4 +16,3 @@ export class DashboardDonorTotal {
   })
   total_donors_count: number;
 }
-

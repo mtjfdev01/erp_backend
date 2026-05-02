@@ -1,4 +1,10 @@
-import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional } from "class-validator";
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+} from "class-validator";
 import { ParentEntityType } from "../../common/progress-tracking.enum";
 
 export class CreateTrackerDto {

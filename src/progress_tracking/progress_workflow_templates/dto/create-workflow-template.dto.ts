@@ -1,4 +1,10 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString } from "class-validator";
+import {
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from "class-validator";
 
 export class CreateWorkflowTemplateDto {
   @IsString()

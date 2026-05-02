@@ -88,17 +88,17 @@ export class TasksController {
       pagination: {
         page: parseInt(query.page) || 1,
         pageSize: parseInt(query.pageSize) || 10,
-        sortField: query.sortField || 'created_at',
-        sortOrder: (query.sortOrder || 'DESC').toUpperCase(),
+        sortField: query.sortField || "created_at",
+        sortOrder: (query.sortOrder || "DESC").toUpperCase(),
       },
       filters: {
-        search: query.search || '',
-        department: query.department || '',
-        status: query.status || '',
-        priority: query.priority || '',
-        user_name: query.user_name || '',
+        search: query.search || "",
+        department: query.department || "",
+        status: query.status || "",
+        priority: query.priority || "",
+        user_name: query.user_name || "",
       },
-      strictDepartment: query.strictDepartment === 'true' || false,
+      strictDepartment: query.strictDepartment === "true" || false,
     };
     const result = await this.tasksService.findAll(payload, user);
     return res.status(HttpStatus.OK).json({ success: true, ...result });

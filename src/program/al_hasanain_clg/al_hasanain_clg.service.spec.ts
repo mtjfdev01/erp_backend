@@ -1,7 +1,7 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { AlHasanainClgService } from './al_hasanain_clg.service';
+import { Test, TestingModule } from "@nestjs/testing";
+import { AlHasanainClgService } from "./al_hasanain_clg.service";
 
-describe('AlHasanainClgService', () => {
+describe("AlHasanainClgService", () => {
   let service: AlHasanainClgService;
 
   beforeEach(async () => {
@@ -12,7 +12,7 @@ describe('AlHasanainClgService', () => {
     service = module.get<AlHasanainClgService>(AlHasanainClgService);
   });
 
-  it('should be defined', () => {
+  it("should be defined", () => {
     expect(service).toBeDefined();
   });
 });

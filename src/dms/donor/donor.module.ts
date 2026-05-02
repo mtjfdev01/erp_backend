@@ -24,7 +24,11 @@ import { DonorPasswordBackfillRunner } from "./donor-password-backfill.runner";
     DashboardModule,
   ],
   controllers: [DonorController],
-  providers: [DonorService, DonorPasswordBackfillService, DonorPasswordBackfillRunner],
+  providers: [
+    DonorService,
+    DonorPasswordBackfillService,
+    DonorPasswordBackfillRunner,
+  ],
   exports: [DonorService, TypeOrmModule], // Export TypeOrmModule for Donor repository
 })
 export class DonorModule {}

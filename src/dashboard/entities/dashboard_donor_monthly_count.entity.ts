@@ -17,4 +17,3 @@ export class DashboardDonorMonthlyCount {
   })
   donors_count: number;
 }
-

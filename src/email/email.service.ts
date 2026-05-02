@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { Resend } from "resend";
 import { ConfigService } from "@nestjs/config";
+import { generateTaskOverdueTemplate } from "./taskOverdueEmailTemplate";
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -1312,28 +1313,35 @@ export class EmailService implements OnModuleInit {
     task: any,
     master?: any,
   ): Promise<boolean> {
-
     try {
-      const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
-      const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
 
       if (!this.resend) {
-        this.logger.error('Resend is not configured - cannot send email');
+        this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
 
-      let recurrenceInfo = '';
-      if (master && master.task_type === 'recurring') {
+      let recurrenceInfo = "";
+      if (master && master.task_type === "recurring") {
         const rule = master.recurrence_rule;
         const endType = master.recurrence_end_type;
-        const endDate = master.recurrence_end_date ? new Date(master.recurrence_end_date).toLocaleDateString() : '';
+        const endDate = master.recurrence_end_date
+          ? new Date(master.recurrence_end_date).toLocaleDateString()
+          : "";
         const endOccurrences = master.recurrence_end_occurrences;
         const currentOccurrence = master.recurrence_created_count;
 
-        let endMsg = '';
-        if (endType === 'on_date') {
+        let endMsg = "";
+        if (endType === "on_date") {
           endMsg = `until ${endDate}`;
-        } else if (endType === 'after_occurrences') {
+        } else if (endType === "after_occurrences") {
           endMsg = `for ${endOccurrences} total occurrences (This is #${currentOccurrence})`;
         } else {
           endMsg = `indefinitely`;
@@ -1350,18 +1358,25 @@ export class EmailService implements OnModuleInit {
           <p>Hi ${user.first_name || user.email},</p>
           <p>You have been assigned a new task: <strong>${task.title}</strong></p>
           <p><strong>Priority:</strong> ${task.priority}</p>
-          <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : 'N/A'}</p>
+          <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : "N/A"}</p>
           ${recurrenceInfo}
           <p>Please log in to the ERP to view more details.</p>
         `,
       });
-      return result.error === null;
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Task assignment email sent successfully to ${user.email} (id: ${result.data?.id})`,
+        );
+      } else if (result.error) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
+      return success;
     } catch (e: any) {
       this.logger.error(`Failed to send task assignment email: ${e.message}`);
       return false;
     }
-
-    return true;
   }
 
   async sendTaskOverdueNotification(
@@ -1369,7 +1384,6 @@ export class EmailService implements OnModuleInit {
     task: any,
     escalationLevel: number,
   ): Promise<boolean> {
-
     try {
       const fromEmail = this.configService.get<string>(
         "RESEND_FROM_EMAIL",
@@ -1391,70 +1405,21 @@ export class EmailService implements OnModuleInit {
         from: `${senderName} <${fromEmail}>`,
         to: [toEmail],
         subject,
-        html: this.generateTaskOverdueTemplate(task, escalationLevel),
+        html: generateTaskOverdueTemplate(task, escalationLevel),
       });
 
-      const messageId = result.data?.id || "unknown";
-      this.logger.log(
-        `Sent task overdue notification via Resend to ${toEmail} (id: ${messageId})`,
-      );
-      return true;
+      const success = !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Sent task overdue notification via Resend to ${toEmail} (id: ${result.data?.id})`,
+        );
+      } else if (result.error) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
+      return success;
     } catch (error: any) {
       this.logger.error(`Task overdue email send failed: ${error?.message}`);
       return false;
     }
-
-    return true;
-  }
-
-  private generateTaskOverdueTemplate(
-    task: any,
-    escalationLevel: number,
-  ): string {
-
-    const assignees =
-      (Array.isArray(task.assigned_users_meta) &&
-        task.assigned_users_meta
-          .map((m: any) => (m && m.user_id != null ? String(m.user_id) : null))
-          .filter((v: string | null) => v !== null)
-          .join(", ")) ||
-      (Array.isArray(task.assigned_user_ids) &&
-        task.assigned_user_ids.map((id) => String(id)).join(", ")) ||
-      "Unassigned";
-
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background-color: #d9534f; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; background-color: #f9f9f9; }
-          .details { background-color: white; padding: 15px; border-radius: 5px; border-left: 5px solid #d9534f; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Task Overdue Alert</h1>
-          </div>
-          <div class="content">
-            <p><strong>Escalation Level: ${escalationLevel}</strong></p>
-            <p>The following task is overdue and requires immediate attention:</p>
-            <div class="details">
-              <p><strong>Title:</strong> ${task.title}</p>
-              <p><strong>Due Date:</strong> ${task.due_date}</p>
-              <p><strong>Priority:</strong> ${task.priority}</p>
-              <p><strong>Assigned To:</strong> ${assignees}</p>
-            </div>
-            <p>Please take necessary actions.</p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-
-    return "";
   }
 }

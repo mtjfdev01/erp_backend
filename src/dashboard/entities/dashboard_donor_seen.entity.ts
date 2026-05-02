@@ -10,4 +10,3 @@ export class DashboardDonorSeen {
   @PrimaryColumn({ type: "bigint" })
   donor_id: number;
 }
-

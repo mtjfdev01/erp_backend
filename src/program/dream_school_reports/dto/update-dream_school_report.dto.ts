@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Type } from "class-transformer";
 import {
   ArrayMinSize,
   IsArray,
@@ -8,7 +8,7 @@ import {
   IsString,
   Min,
   ValidateNested,
-} from 'class-validator';
+} from "class-validator";
 
 export class UpdateDreamSchoolReportLineDto {
   @IsInt()
@@ -23,8 +23,8 @@ export class UpdateDreamSchoolReportLineDto {
   remarks?: string;
 
   @IsString()
-  @IsIn(['good', 'poor', 'excellent', 'medium'])
-  teacher_performance: 'good' | 'poor' | 'excellent' | 'medium';
+  @IsIn(["good", "poor", "excellent", "medium"])
+  teacher_performance: "good" | "poor" | "excellent" | "medium";
 }
 
 export class UpdateDreamSchoolReportDto {

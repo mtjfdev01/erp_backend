@@ -64,6 +64,39 @@ export class TasksService {
     private readonly permissionsService: PermissionsService,
   ) {}
 
+  private async sendAssignmentEmailsToAssignees(
+    task: Task,
+    master?: Task,
+  ): Promise<void> {
+    try {
+      if (
+        !Array.isArray(task.assigned_user_ids) ||
+        task.assigned_user_ids.length === 0
+      ) {
+        return;
+      }
+
+      for (const userId of task.assigned_user_ids) {
+        try {
+          const user = await this.userRepo.findOne({
+            where: { id: userId },
+          });
+          if (user && user.email) {
+            await this.emailService.sendTaskAssignmentEmail(user, task, master);
+          }
+        } catch (emailErr: any) {
+          this.logger.warn(
+            `Failed to send assignment email to user ${userId}: ${emailErr?.message}`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Error in sendAssignmentEmailsToAssignees: ${err?.message}`,
+      );
+    }
+  }
+
   private userDisplayName(u?: User | null): string | null {
     if (!u) return null;
     const full = `${u.first_name || ""} ${u.last_name || ""}`.trim() || null;
@@ -344,13 +377,13 @@ export class TasksService {
       );
 
       // Handle MOV checklist - encode into description if provided
-      let descriptionWithMov = dto.description || '';
+      let descriptionWithMov = dto.description || "";
       if (dto.mov_checklist && dto.mov_checklist.length > 0) {
         const movHeader = "[MOV CHECKLIST]";
-        const movItems = dto.mov_checklist.map(item => item.text);
+        const movItems = dto.mov_checklist.map((item) => item.text);
         const movContent = movItems.map((item) => `- ${item}`).join("\n");
         const movBlock = `${movHeader}\n${movContent}`;
-        
+
         if (descriptionWithMov && descriptionWithMov.trim()) {
           descriptionWithMov = `${descriptionWithMov.trim()}\n\n${movBlock}`;
         } else {
@@ -404,6 +437,8 @@ export class TasksService {
       await this.logActivity(saved, currentUser, "created", {
         title: saved.title,
       });
+
+      await this.sendAssignmentEmailsToAssignees(saved);
 
       return saved;
     } catch (e) {
@@ -587,48 +622,70 @@ export class TasksService {
 
       // Handle search filter - extend to include creator name (like User Management)
       const searchTerm = safeFilters.search;
-      if (searchTerm && searchTerm.trim() !== '') {
+      if (searchTerm && searchTerm.trim() !== "") {
         // Join created_by relation to search in user fields
         qb.leftJoin("task.created_by", "searchCreatedBy");
-        
+
         qb.andWhere(
           new Brackets((searchQb) => {
             // Search in task fields
-            searchQb.where("LOWER(task.title) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
-            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
-            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
+            searchQb.where("LOWER(task.title) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
             // Search in creator name (like User Management search)
-            searchQb.orWhere("LOWER(searchCreatedBy.first_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
-            searchQb.orWhere("LOWER(searchCreatedBy.last_name) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
-            searchQb.orWhere("LOWER(searchCreatedBy.email) LIKE :searchTerm", { searchTerm: `%${searchTerm.toLowerCase()}%` });
-          })
+            searchQb.orWhere(
+              "LOWER(searchCreatedBy.first_name) LIKE :searchTerm",
+              { searchTerm: `%${searchTerm.toLowerCase()}%` },
+            );
+            searchQb.orWhere(
+              "LOWER(searchCreatedBy.last_name) LIKE :searchTerm",
+              { searchTerm: `%${searchTerm.toLowerCase()}%` },
+            );
+            searchQb.orWhere("LOWER(searchCreatedBy.email) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+          }),
         );
-        
+
         // Remove search from safeFilters so applyCommonFilters doesn't duplicate it
         delete safeFilters.search;
       }
 
       // Handle user name filter - dedicated filter for searching by creator name (like User Management)
       const userNameFilter = safeFilters.user_name;
-      if (userNameFilter && userNameFilter.trim() !== '') {
+      if (userNameFilter && userNameFilter.trim() !== "") {
         // Join created_by relation if not already joined
         if (!safeFilters.search) {
           qb.leftJoin("task.created_by", "userNameCreatedBy");
         }
-        
+
         const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
-        const joinAlias = safeFilters.search ? "searchCreatedBy" : "userNameCreatedBy";
-        
+        const joinAlias = safeFilters.search
+          ? "searchCreatedBy"
+          : "userNameCreatedBy";
+
         qb.andWhere(
           new Brackets((userQb) => {
             // Search in creator name
-            userQb.where(`LOWER(${joinAlias}.first_name) LIKE :userName`, { userName: userSearchTerm });
-            userQb.orWhere(`LOWER(${joinAlias}.last_name) LIKE :userName`, { userName: userSearchTerm });
-            userQb.orWhere(`LOWER(${joinAlias}.email) LIKE :userName`, { userName: userSearchTerm });
-          })
+            userQb.where(`LOWER(${joinAlias}.first_name) LIKE :userName`, {
+              userName: userSearchTerm,
+            });
+            userQb.orWhere(`LOWER(${joinAlias}.last_name) LIKE :userName`, {
+              userName: userSearchTerm,
+            });
+            userQb.orWhere(`LOWER(${joinAlias}.email) LIKE :userName`, {
+              userName: userSearchTerm,
+            });
+          }),
         );
       }
-      
+
       // Remove user_name from safeFilters so it's not passed to applyCommonFilters
       delete safeFilters.user_name;
 
@@ -946,7 +1003,10 @@ export class TasksService {
           role: string;
         }
       > = {};
-      const projectCountsMap: Record<string, { count: number; statuses: Record<string, number>; tasks: any[] }> = {};
+      const projectCountsMap: Record<
+        string,
+        { count: number; statuses: Record<string, number>; tasks: any[] }
+      > = {};
       let totalDays = 0;
       let completedCount = 0;
 
@@ -1064,21 +1124,21 @@ export class TasksService {
               };
             }
             userCountsMap[userId].count++;
-            
+
             // Track status breakdown
-            const status = t.status || 'open';
-            userCountsMap[userId].statuses[status] = 
+            const status = t.status || "open";
+            userCountsMap[userId].statuses[status] =
               (userCountsMap[userId].statuses[status] || 0) + 1;
-            
+
             // Store task details for tooltip
             const projectName = t.project_name || null;
             userCountsMap[userId].tasks.push({
               title: t.title,
               status: t.status,
               project: projectName,
-              department: t.department
+              department: t.department,
             });
-            
+
             if (t.status === TaskStatus.IN_PROGRESS) {
               userCountsMap[userId].in_progress_count++;
             }
@@ -1108,21 +1168,21 @@ export class TasksService {
             };
           }
           userCountsMap[label].count++;
-          
+
           // Track status breakdown
-          const status = t.status || 'open';
-          userCountsMap[label].statuses[status] = 
+          const status = t.status || "open";
+          userCountsMap[label].statuses[status] =
             (userCountsMap[label].statuses[status] || 0) + 1;
-          
+
           // Store task details for tooltip
           const projectName = t.project_name || null;
           userCountsMap[label].tasks.push({
             title: t.title,
             status: t.status,
             project: projectName,
-            department: t.department
+            department: t.department,
           });
-          
+
           if (t.status === TaskStatus.IN_PROGRESS) {
             userCountsMap[label].in_progress_count++;
           }
@@ -1143,27 +1203,29 @@ export class TasksService {
           projectCountsMap[projectKey] = {
             count: 0,
             statuses: {},
-            tasks: []
+            tasks: [],
           };
         }
         projectCountsMap[projectKey].count++;
-        
+
         // Track status breakdown
-        const status = t.status || 'open';
-        projectCountsMap[projectKey].statuses[status] = 
+        const status = t.status || "open";
+        projectCountsMap[projectKey].statuses[status] =
           (projectCountsMap[projectKey].statuses[status] || 0) + 1;
-        
+
         // Store task details for tooltip
-        const assignees = t.assigned_user_ids 
-          ? t.assigned_user_ids.map(id => userNamesMap.get(Number(id))?.name).filter(Boolean)
+        const assignees = t.assigned_user_ids
+          ? t.assigned_user_ids
+              .map((id) => userNamesMap.get(Number(id))?.name)
+              .filter(Boolean)
           : [];
-        
+
         projectCountsMap[projectKey].tasks.push({
           title: t.title,
           department: t.department,
           status: t.status,
           assignees: assignees,
-          assignee_names: assignees.join(', ') || 'Unassigned'
+          assignee_names: assignees.join(", ") || "Unassigned",
         });
 
         if (t.start_date && t.completed_date) {
@@ -1209,7 +1271,7 @@ export class TasksService {
           label,
           count: data.count,
           statuses: data.statuses,
-          tasks: data.tasks.slice(0, 100) // Limit to 100 tasks for performance
+          tasks: data.tasks.slice(0, 100), // Limit to 100 tasks for performance
         }),
       );
       const avgCompletionDays =
@@ -1706,6 +1768,9 @@ export class TasksService {
       await this.logActivity(saved, currentUser, "assigned", {
         assigned_user_ids: saved.assigned_user_ids,
       });
+
+      await this.sendAssignmentEmailsToAssignees(saved);
+
       return saved;
     } catch (e) {
       throw e;
@@ -1811,6 +1876,8 @@ export class TasksService {
       const details = [...fromItems, ...toItems];
 
       await this.logActivity(saved, currentUser, "reassigned", details);
+
+      await this.sendAssignmentEmailsToAssignees(saved);
 
       if (
         Array.isArray(saved.assigned_user_ids) &&

@@ -33,10 +33,7 @@ export class RationReportsService {
   ) {}
 
   private sumLifeTimeGranular(o: Record<string, unknown>): number {
-    return LIFE_TIME_GRANULAR_KEYS.reduce(
-      (s, k) => s + Number(o[k] ?? 0),
-      0,
-    );
+    return LIFE_TIME_GRANULAR_KEYS.reduce((s, k) => s + Number(o[k] ?? 0), 0);
   }
 
   private mapVulnerabilityBlock(
@@ -45,13 +42,9 @@ export class RationReportsService {
   ) {
     return {
       Widows: Number(report[`${prefix}_widows` as keyof RationReport] ?? 0),
-      Divorced: Number(
-        report[`${prefix}_divorced` as keyof RationReport] ?? 0,
-      ),
+      Divorced: Number(report[`${prefix}_divorced` as keyof RationReport] ?? 0),
       Disable: Number(report[`${prefix}_disable` as keyof RationReport] ?? 0),
-      Indegent: Number(
-        report[`${prefix}_indegent` as keyof RationReport] ?? 0,
-      ),
+      Indegent: Number(report[`${prefix}_indegent` as keyof RationReport] ?? 0),
       Orphan: Number(report[`${prefix}_orphan` as keyof RationReport] ?? 0),
     };
   }
@@ -88,10 +81,7 @@ export class RationReportsService {
       const rationReport = this.rationReportRepository.create({
         ...createRationReportDto,
         ...Object.fromEntries(
-          LIFE_TIME_GRANULAR_KEYS.map((k) => [
-            k,
-            Number(mergedLt[k] ?? 0),
-          ]),
+          LIFE_TIME_GRANULAR_KEYS.map((k) => [k, Number(mergedLt[k] ?? 0)]),
         ),
         life_time: lifeTimeTotal,
         created_by: dbUser,

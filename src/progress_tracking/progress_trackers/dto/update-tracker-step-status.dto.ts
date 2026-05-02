@@ -1,9 +1,4 @@
-import {
-  IsBoolean,
-  IsEnum,
-  IsOptional,
-  IsString,
-} from "class-validator";
+import { IsBoolean, IsEnum, IsOptional, IsString } from "class-validator";
 import { ProgressStatus } from "../../common/progress-tracking.enum";
 
 export class UpdateTrackerStepStatusDto {

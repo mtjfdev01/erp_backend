@@ -52,7 +52,10 @@ export class ProgressTrackersController {
       }
     }
     for (const perm of perms) {
-      const ok = await this.permissionsService.hasPermission(Number(user.id), perm);
+      const ok = await this.permissionsService.hasPermission(
+        Number(user.id),
+        perm,
+      );
       if (ok) return;
     }
     throw new ForbiddenException("Insufficient permissions");
@@ -221,7 +224,9 @@ export class ProgressTrackersController {
         select: ["id", "donor_id", "donation_method"] as any,
       });
       if (!donation) throw new ForbiddenException("Access denied");
-      if (Number((donation as any).donor_id) !== Number(donorPayload.donor_id)) {
+      if (
+        Number((donation as any).donor_id) !== Number(donorPayload.donor_id)
+      ) {
         throw new ForbiddenException("Access denied");
       }
       if (String((donation as any).donation_method || "") === "in_kind") {

@@ -1,11 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { CreateHealthDto } from './dto/create-health.dto';
-import { UpdateHealthDto } from './dto/update-health.dto';
-import { Repository, SelectQueryBuilder } from 'typeorm';
-import { HealthReport } from './entities/health.entity';
-import { User } from '../../users/user.entity';
-import { HEALTH_REPORT_TYPES } from './dto/create-health.dto';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { CreateHealthDto } from "./dto/create-health.dto";
+import { UpdateHealthDto } from "./dto/update-health.dto";
+import { Repository, SelectQueryBuilder } from "typeorm";
+import { HealthReport } from "./entities/health.entity";
+import { User } from "../../users/user.entity";
+import { HEALTH_REPORT_TYPES } from "./dto/create-health.dto";
 
 @Injectable()
 export class HealthService {
@@ -18,7 +22,9 @@ export class HealthService {
 
   async create(createDto: CreateHealthDto, user: User) {
     try {
-      const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
+      const dbUser = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
       const report = this.healthReportRepository.create({
         date: new Date(createDto.date),
         type: createDto.type,
@@ -55,26 +61,30 @@ export class HealthService {
   async findAll(
     page: number = 1,
     pageSize: number = 10,
-    sortField: string = 'date',
-    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    sortField: string = "date",
+    sortOrder: "ASC" | "DESC" = "DESC",
   ): Promise<{ data: any[]; pagination: any }> {
     try {
       const skip = (page - 1) * pageSize;
 
       const queryBuilder = this.healthReportRepository
-        .createQueryBuilder('report')
+        .createQueryBuilder("report")
         .where({ is_archived: false })
         .orderBy(`report.${sortField}`, sortOrder)
         .skip(skip)
         .take(pageSize);
 
       const reports = await queryBuilder.getMany();
-      const total = await this.healthReportRepository.count({ where: { is_archived: false } });
+      const total = await this.healthReportRepository.count({
+        where: { is_archived: false },
+      });
       const totalPages = Math.ceil(total / pageSize);
 
       const groupedReports = reports.reduce((acc, report) => {
         const dateKey =
-          report.date instanceof Date ? report.date.toISOString().split('T')[0] : new Date(report.date).toISOString().split('T')[0];
+          report.date instanceof Date
+            ? report.date.toISOString().split("T")[0]
+            : new Date(report.date).toISOString().split("T")[0];
 
         if (!acc[dateKey]) {
           acc[dateKey] = {
@@ -109,26 +119,34 @@ export class HealthService {
         },
       };
     } catch (error) {
-      throw new BadRequestException('Failed to fetch health reports: ' + error.message);
+      throw new BadRequestException(
+        "Failed to fetch health reports: " + error.message,
+      );
     }
   }
 
   async findOne(id: number): Promise<HealthReport> {
-    const report = await this.healthReportRepository.findOne({ where: { id, is_archived: false } });
-    if (!report) throw new NotFoundException(`Health report with ID ${id} not found`);
+    const report = await this.healthReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report)
+      throw new NotFoundException(`Health report with ID ${id} not found`);
     return report;
   }
 
   async findByDate(date: string): Promise<HealthReport[]> {
     return await this.healthReportRepository.find({
       where: { date: new Date(date), is_archived: false },
-      order: { id: 'ASC' },
+      order: { id: "ASC" },
     });
   }
 
   async update(id: number, updateDto: UpdateHealthDto): Promise<HealthReport> {
-    const report = await this.healthReportRepository.findOne({ where: { id, is_archived: false } });
-    if (!report) throw new NotFoundException(`Health report with ID ${id} not found`);
+    const report = await this.healthReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report)
+      throw new NotFoundException(`Health report with ID ${id} not found`);
 
     if (updateDto.date) report.date = new Date(updateDto.date);
     if (updateDto.type) report.type = updateDto.type;
@@ -142,15 +160,22 @@ export class HealthService {
   }
 
   async remove(id: number): Promise<void> {
-    const report = await this.healthReportRepository.findOne({ where: { id, is_archived: false } });
-    if (!report) throw new NotFoundException(`Health report with ID ${id} not found`);
+    const report = await this.healthReportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!report)
+      throw new NotFoundException(`Health report with ID ${id} not found`);
     await this.healthReportRepository.update(id, { is_archived: true });
   }
 
   async removeByDate(date: string): Promise<void> {
     const reports = await this.findByDate(date);
-    if (!reports || reports.length === 0) throw new NotFoundException(`Health reports with date ${date} not found`);
-    await this.healthReportRepository.update({ date: new Date(date) }, { is_archived: true });
+    if (!reports || reports.length === 0)
+      throw new NotFoundException(`Health reports with date ${date} not found`);
+    await this.healthReportRepository.update(
+      { date: new Date(date) },
+      { is_archived: true },
+    );
   }
 
   private applyDateRange(
@@ -173,7 +198,10 @@ export class HealthService {
    * Totals per report `type` (e.g. Medicines, Ambulance) for an optional date range.
    * Each "total" is the sum of all vulnerability columns for that type.
    */
-  async getTotalsByType(from?: string, to?: string): Promise<{
+  async getTotalsByType(
+    from?: string,
+    to?: string,
+  ): Promise<{
     from?: string;
     to?: string;
     types: Array<{
@@ -188,21 +216,21 @@ export class HealthService {
     grand_total: number;
   }> {
     const qb = this.healthReportRepository
-      .createQueryBuilder('h')
-      .select('h.type', 'type')
-      .addSelect('COALESCE(SUM(h.widows), 0)', 'widows')
-      .addSelect('COALESCE(SUM(h.divorced), 0)', 'divorced')
-      .addSelect('COALESCE(SUM(h.disable), 0)', 'disable')
-      .addSelect('COALESCE(SUM(h.indegent), 0)', 'indegent')
-      .addSelect('COALESCE(SUM(h.orphans), 0)', 'orphans')
+      .createQueryBuilder("h")
+      .select("h.type", "type")
+      .addSelect("COALESCE(SUM(h.widows), 0)", "widows")
+      .addSelect("COALESCE(SUM(h.divorced), 0)", "divorced")
+      .addSelect("COALESCE(SUM(h.disable), 0)", "disable")
+      .addSelect("COALESCE(SUM(h.indegent), 0)", "indegent")
+      .addSelect("COALESCE(SUM(h.orphans), 0)", "orphans")
       .addSelect(
-        'COALESCE(SUM(h.widows + h.divorced + h.disable + h.indegent + h.orphans), 0)',
-        'total',
+        "COALESCE(SUM(h.widows + h.divorced + h.disable + h.indegent + h.orphans), 0)",
+        "total",
       )
-      .where('h.is_archived = false')
-      .groupBy('h.type');
+      .where("h.is_archived = false")
+      .groupBy("h.type");
 
-    this.applyDateRange(qb, 'h', from, to);
+    this.applyDateRange(qb, "h", from, to);
 
     const rows = await qb.getRawMany<{
       type: string;

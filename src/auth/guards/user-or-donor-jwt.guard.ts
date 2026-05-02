@@ -54,4 +54,3 @@ export class UserOrDonorJwtGuard implements CanActivate {
     throw new UnauthorizedException("No token provided");
   }
 }
-

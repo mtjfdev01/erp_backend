@@ -1,11 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
-import { DreamSchoolReport } from './entities/dream_school_report.entity';
-import { DreamSchool } from '../dream_schools/entities/dream_school.entity';
-import { CreateDreamSchoolReportDto } from './dto/create-dream_school_report.dto';
-import { UpdateDreamSchoolReportDto } from './dto/update-dream_school_report.dto';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { In, Repository } from "typeorm";
+import { randomUUID } from "crypto";
+import { DreamSchoolReport } from "./entities/dream_school_report.entity";
+import { DreamSchool } from "../dream_schools/entities/dream_school.entity";
+import { CreateDreamSchoolReportDto } from "./dto/create-dream_school_report.dto";
+import { UpdateDreamSchoolReportDto } from "./dto/update-dream_school_report.dto";
 
 @Injectable()
 export class DreamSchoolReportsService {
@@ -44,7 +48,9 @@ export class DreamSchoolReportsService {
   }
 
   private async ensureSchool(id: number): Promise<DreamSchool> {
-    const school = await this.dreamSchoolRepository.findOne({ where: { id, is_archived: false } });
+    const school = await this.dreamSchoolRepository.findOne({
+      where: { id, is_archived: false },
+    });
     if (!school) throw new BadRequestException(`Dream school ${id} not found`);
     return school;
   }
@@ -69,8 +75,8 @@ export class DreamSchoolReportsService {
     }
     const withRelations = await this.reportRepository.find({
       where: { id: In(saved.map((s) => s.id)) },
-      relations: ['dreamSchool'],
-      order: { id: 'ASC' },
+      relations: ["dreamSchool"],
+      order: { id: "ASC" },
     });
     return this.groupToResponse(withRelations);
   }
@@ -78,26 +84,26 @@ export class DreamSchoolReportsService {
   async findAll(
     page: number = 1,
     pageSize: number = 10,
-    sortField: string = 'created_at',
-    sortOrder: 'ASC' | 'DESC' = 'DESC',
+    sortField: string = "created_at",
+    sortOrder: "ASC" | "DESC" = "DESC",
   ) {
     const skip = (page - 1) * pageSize;
 
     const batchRows = await this.reportRepository
-      .createQueryBuilder('r')
-      .select('r.batch_id', 'batch_id')
-      .addSelect('MAX(r.created_at)', 'mx')
-      .where('r.is_archived = false')
-      .groupBy('r.batch_id')
-      .orderBy('mx', sortOrder === 'ASC' ? 'ASC' : 'DESC')
+      .createQueryBuilder("r")
+      .select("r.batch_id", "batch_id")
+      .addSelect("MAX(r.created_at)", "mx")
+      .where("r.is_archived = false")
+      .groupBy("r.batch_id")
+      .orderBy("mx", sortOrder === "ASC" ? "ASC" : "DESC")
       .offset(skip)
       .limit(pageSize)
       .getRawMany<{ batch_id: string }>();
 
     const countRow = await this.reportRepository
-      .createQueryBuilder('r')
-      .select('COUNT(DISTINCT r.batch_id)', 'cnt')
-      .where('r.is_archived = false')
+      .createQueryBuilder("r")
+      .select("COUNT(DISTINCT r.batch_id)", "cnt")
+      .where("r.is_archived = false")
       .getRawOne<{ cnt: string }>();
 
     const total = Number(countRow?.cnt ?? 0);
@@ -114,8 +120,8 @@ export class DreamSchoolReportsService {
 
     const rows = await this.reportRepository.find({
       where: { batch_id: In(batchIds), is_archived: false },
-      relations: ['dreamSchool'],
-      order: { id: 'ASC' },
+      relations: ["dreamSchool"],
+      order: { id: "ASC" },
     });
 
     const byBatch = new Map<string, DreamSchoolReport[]>();
@@ -124,7 +130,9 @@ export class DreamSchoolReportsService {
       byBatch.get(r.batch_id)!.push(r);
     }
 
-    const data = batchIds.map((bid) => this.groupToResponse(byBatch.get(bid) || []));
+    const data = batchIds.map((bid) =>
+      this.groupToResponse(byBatch.get(bid) || []),
+    );
 
     return {
       success: true,
@@ -136,32 +144,39 @@ export class DreamSchoolReportsService {
   async findOne(id: number) {
     const row = await this.reportRepository.findOne({
       where: { id, is_archived: false },
-      relations: ['dreamSchool'],
+      relations: ["dreamSchool"],
     });
-    if (!row) throw new NotFoundException(`Dream school report ${id} not found`);
+    if (!row)
+      throw new NotFoundException(`Dream school report ${id} not found`);
 
     const related = await this.reportRepository.find({
       where: { batch_id: row.batch_id, is_archived: false },
-      relations: ['dreamSchool'],
-      order: { id: 'ASC' },
+      relations: ["dreamSchool"],
+      order: { id: "ASC" },
     });
     return this.groupToResponse(related);
   }
 
   async update(id: number, dto: UpdateDreamSchoolReportDto, user: any) {
-    const first = await this.reportRepository.findOne({ where: { id, is_archived: false } });
-    if (!first) throw new NotFoundException(`Dream school report ${id} not found`);
+    const first = await this.reportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!first)
+      throw new NotFoundException(`Dream school report ${id} not found`);
 
     const related = await this.reportRepository.find({
       where: { batch_id: first.batch_id, is_archived: false },
-      order: { id: 'ASC' },
+      order: { id: "ASC" },
     });
 
     const reportMonth = dto.report_month ?? first.report_month;
 
     if (dto.report_month != null) {
       for (const r of related) {
-        await this.reportRepository.update(r.id, { report_month: dto.report_month, updated_by: user });
+        await this.reportRepository.update(r.id, {
+          report_month: dto.report_month,
+          updated_by: user,
+        });
       }
     }
 
@@ -195,7 +210,10 @@ export class DreamSchoolReportsService {
             );
           }
         } else {
-          await this.reportRepository.update(related[i].id, { is_archived: true, updated_by: user });
+          await this.reportRepository.update(related[i].id, {
+            is_archived: true,
+            updated_by: user,
+          });
         }
       }
     }
@@ -204,14 +222,17 @@ export class DreamSchoolReportsService {
   }
 
   async remove(id: number) {
-    const row = await this.reportRepository.findOne({ where: { id, is_archived: false } });
-    if (!row) throw new NotFoundException(`Dream school report ${id} not found`);
+    const row = await this.reportRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!row)
+      throw new NotFoundException(`Dream school report ${id} not found`);
     await this.reportRepository
       .createQueryBuilder()
       .update(DreamSchoolReport)
       .set({ is_archived: true })
-      .where('batch_id = :batchId', { batchId: row.batch_id })
-      .andWhere('is_archived = false')
+      .where("batch_id = :batchId", { batchId: row.batch_id })
+      .andWhere("is_archived = false")
       .execute();
   }
 }

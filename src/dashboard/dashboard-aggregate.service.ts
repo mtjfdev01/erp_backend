@@ -3,7 +3,10 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, Between } from "typeorm";
 import { Donation } from "../donations/entities/donation.entity";
 import { Donor } from "../dms/donor/entities/donor.entity";
-import { DonationBox, BoxStatus } from "../dms/donation_box/entities/donation-box.entity";
+import {
+  DonationBox,
+  BoxStatus,
+} from "../dms/donation_box/entities/donation-box.entity";
 import { DonationBoxDonation } from "../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity";
 import { Event } from "../dms/events/entities/event.entity";
 import { Campaign } from "../dms/campaigns/entities/campaign.entity";
@@ -124,12 +127,17 @@ export class DashboardAggregateService {
       start.setUTCHours(0, 0, 0, 0);
       end.setUTCHours(0, 0, 0, 0);
     } else if (query.start_date || query.end_date) {
-      start = query.start_date ? new Date(query.start_date) : new Date("1970-01-01");
+      start = query.start_date
+        ? new Date(query.start_date)
+        : new Date("1970-01-01");
       end = query.end_date ? new Date(query.end_date) : new Date();
       start.setUTCHours(0, 0, 0, 0);
       end.setUTCHours(23, 59, 59, 999);
     } else {
-      const r = this.getFundraisingDateRange({ year: query.year, months: query.months });
+      const r = this.getFundraisingDateRange({
+        year: query.year,
+        months: query.months,
+      });
       start = r.start;
       end = r.end;
     }
@@ -137,10 +145,7 @@ export class DashboardAggregateService {
     // 1) donations: completed + not archived, filter by donation.date
     const donationsAgg = await this.donationRepo
       .createQueryBuilder("d")
-      .select(
-        "COALESCE(SUM(d.amount), 0)",
-        "amount_sum",
-      )
+      .select("COALESCE(SUM(d.amount), 0)", "amount_sum")
       .addSelect("COALESCE(COUNT(d.id), 0)", "count")
       .where("d.is_archived = false")
       .andWhere("LOWER(d.status) = :status", { status: COMPLETED_STATUS })
@@ -154,10 +159,7 @@ export class DashboardAggregateService {
     const monthRows = await this.donationRepo
       .createQueryBuilder("d")
       .select("DATE_TRUNC('month', d.date)", "month_start")
-      .addSelect(
-        "COALESCE(SUM(d.amount), 0)",
-        "month_total",
-      )
+      .addSelect("COALESCE(SUM(d.amount), 0)", "month_total")
       .where("d.is_archived = false")
       .andWhere("LOWER(d.status) = :status", { status: COMPLETED_STATUS })
       .andWhere("d.date BETWEEN :start AND :end", { start, end })
@@ -227,10 +229,14 @@ export class DashboardAggregateService {
     const cards = {
       total_donations_amount: totalDonationsAmount,
       total_donations_count: totalDonationsCount,
-      individual_donors_count: Number(donorCounts?.individual_donors_count ?? 0),
+      individual_donors_count: Number(
+        donorCounts?.individual_donors_count ?? 0,
+      ),
       corporate_donors_count: Number(donorCounts?.corporate_donors_count ?? 0),
       recurring_donors_count: Number(donorCounts?.recurring_donors_count ?? 0),
-      multi_time_donors_count: Number(donorCounts?.multi_time_donors_count ?? 0),
+      multi_time_donors_count: Number(
+        donorCounts?.multi_time_donors_count ?? 0,
+      ),
       active_donation_boxes_count: Number(activeDonationBoxesCount ?? 0),
       donation_box_donations_amount: donationBoxDonationsAmount,
       events_count: Number(eventsCount ?? 0),

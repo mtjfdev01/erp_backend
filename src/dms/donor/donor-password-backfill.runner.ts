@@ -23,4 +23,3 @@ export class DonorPasswordBackfillRunner implements OnModuleInit {
     }, 5000);
   }
 }
-

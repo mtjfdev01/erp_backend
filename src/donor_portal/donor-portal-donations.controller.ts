@@ -49,7 +49,10 @@ export class DonorPortalDonationsController {
     @Res() res: Response,
   ) {
     const donor = (req as any).donor;
-    const data = await this.service.getTrackingForDonation(donor.id, Number(id));
+    const data = await this.service.getTrackingForDonation(
+      donor.id,
+      Number(id),
+    );
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Donation tracking retrieved",
@@ -57,4 +60,3 @@ export class DonorPortalDonationsController {
     });
   }
 }
-
