@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsNumber, IsOptional } from "class-validator";
+import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional } from "class-validator";
 import { ParentEntityType } from "../../common/progress-tracking.enum";
 
 export class CreateTrackerDto {
@@ -20,4 +20,9 @@ export class CreateTrackerDto {
   @IsOptional()
   @IsBoolean()
   donor_visible?: boolean;
+
+  /** For batchable templates: number of parts/shares this tracker should allocate. */
+  @IsOptional()
+  @IsInt()
+  batch_parts_count?: number | null;
 }

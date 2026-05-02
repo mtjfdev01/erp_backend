@@ -174,4 +174,13 @@ export class CreateDonationDto {
   @IsOptional()
   @IsBoolean()
   progress_tracker_donor_visible?: boolean;
+
+  /**
+   * When the selected progress workflow template is batchable, this indicates
+   * how many parts/shares this donation should reserve (e.g., 2 out of 7).
+   * If omitted, the backend will attempt to derive it from amount / batch_part_amount.
+   */
+  @IsOptional()
+  @IsInt()
+  progress_batch_parts_requested?: number;
 }
