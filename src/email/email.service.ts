@@ -1312,7 +1312,7 @@ export class EmailService implements OnModuleInit {
     task: any,
     master?: any,
   ): Promise<boolean> {
-    /*
+
     try {
       const fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL', 'info@mtjfoundation.com');
       const senderName = this.configService.get<string>('SENDER_NAME', 'MTJ Foundation');
@@ -1360,7 +1360,7 @@ export class EmailService implements OnModuleInit {
       this.logger.error(`Failed to send task assignment email: ${e.message}`);
       return false;
     }
-    */
+
     return true;
   }
 
@@ -1369,7 +1369,7 @@ export class EmailService implements OnModuleInit {
     task: any,
     escalationLevel: number,
   ): Promise<boolean> {
-    /*
+
     try {
       const fromEmail = this.configService.get<string>(
         "RESEND_FROM_EMAIL",
@@ -1403,7 +1403,7 @@ export class EmailService implements OnModuleInit {
       this.logger.error(`Task overdue email send failed: ${error?.message}`);
       return false;
     }
-    */
+
     return true;
   }
 
@@ -1411,7 +1411,7 @@ export class EmailService implements OnModuleInit {
     task: any,
     escalationLevel: number,
   ): string {
-    /*
+
     const assignees =
       (Array.isArray(task.assigned_users_meta) &&
         task.assigned_users_meta
@@ -1454,7 +1454,7 @@ export class EmailService implements OnModuleInit {
       </body>
       </html>
     `;
-    */
+
     return "";
   }
 }
