@@ -433,7 +433,11 @@ export class DonationsController {
    */
   @Get(":id/portal-view")
   @UseGuards(UserOrDonorJwtGuard)
-  async portalView(@Param("id") id: string, @Req() req: any, @Res() res: Response) {
+  async portalView(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
       const donationId = Number(id);
       if (!donationId || Number.isNaN(donationId)) {
@@ -445,11 +449,16 @@ export class DonationsController {
       }
 
       // Always load with tracker relation (donor portal needs tracking)
-      const donation = await this.donationsService.findOneWithProgressTracker(donationId);
+      const donation =
+        await this.donationsService.findOneWithProgressTracker(donationId);
 
       // Staff flow (existing permission logic)
       if (req?.user?.id) {
-        await this.checkDonationPermission(req.user.id, donation.donation_source, "view");
+        await this.checkDonationPermission(
+          req.user.id,
+          donation.donation_source,
+          "view",
+        );
         await this.checkGeographicAccess(req.user.id, donation);
         return res.status(HttpStatus.OK).json({
           success: true,
@@ -460,7 +469,9 @@ export class DonationsController {
 
       // Donor flow (strict)
       if (req?.donor?.donor_id) {
-        const donor = await this.donorService.findOne(Number(req.donor.donor_id));
+        const donor = await this.donorService.findOne(
+          Number(req.donor.donor_id),
+        );
         if (!donor) {
           return res.status(HttpStatus.UNAUTHORIZED).json({
             success: false,
@@ -469,7 +480,9 @@ export class DonationsController {
           });
         }
 
-        if (String(donation.donation_method || "").toLowerCase() === "in_kind") {
+        if (
+          String(donation.donation_method || "").toLowerCase() === "in_kind"
+        ) {
           return res.status(HttpStatus.FORBIDDEN).json({
             success: false,
             message: "In-kind donation is not available in donor portal",

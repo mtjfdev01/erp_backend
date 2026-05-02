@@ -1,4 +1,11 @@
-import { Entity, Column, Index, ManyToOne, OneToMany, JoinColumn } from "typeorm";
+import {
+  Entity,
+  Column,
+  Index,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+} from "typeorm";
 import { BaseEntity } from "../../utils/base_utils/entities/baseEntity";
 import { ProgressWorkflowTemplateStep } from "./progress_workflow_template_step.entity";
 import { ProgressTracker } from "../progress_trackers/progress_tracker.entity";

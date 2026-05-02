@@ -26,7 +26,10 @@ export class DonorPortalDonationsService {
         "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
       )
       .addSelect("progress_tracker.id", "progress_tracker_id")
-      .addSelect("progress_tracker.public_tracking_token", "progress_tracker_token")
+      .addSelect(
+        "progress_tracker.public_tracking_token",
+        "progress_tracker_token",
+      )
       .where("donation.donor_id = :donorId", { donorId })
       .andWhere("COALESCE(donation.donation_method,'') != 'in_kind'")
       .orderBy("donation.created_at", "DESC");
@@ -54,7 +57,10 @@ export class DonorPortalDonationsService {
         "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
       )
       .addSelect("progress_tracker.id", "progress_tracker_id")
-      .addSelect("progress_tracker.public_tracking_token", "progress_tracker_token")
+      .addSelect(
+        "progress_tracker.public_tracking_token",
+        "progress_tracker_token",
+      )
       .where("donation.id = :id", { id: donationId })
       .andWhere("donation.donor_id = :donorId", { donorId })
       .andWhere("COALESCE(donation.donation_method,'') != 'in_kind'");
@@ -104,4 +110,3 @@ export class DonorPortalDonationsService {
     };
   }
 }
-

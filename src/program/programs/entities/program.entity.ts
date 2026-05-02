@@ -17,6 +17,6 @@ export class ProgramEntity extends BaseEntity {
   status: string;
 
   /** When false, program is excluded from application reports UI and Program Overview (Applications). */
-  @Column({ type: 'boolean', name: 'applicationable', default: true })
+  @Column({ type: "boolean", name: "applicationable", default: true })
   applicationable: boolean;
 }

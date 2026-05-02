@@ -11,17 +11,13 @@ import { DashboardAggregateService } from "./dashboard-aggregate.service";
 import { ConditionalJwtGuard } from "../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../permissions";
-import {
-  DashboardFundraisingOverviewQueryDto,
-} from "./dto/dashboard-query.dto";
+import { DashboardFundraisingOverviewQueryDto } from "./dto/dashboard-query.dto";
 
 @Controller("dashboard")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 @RequiredPermissions(["dms.dashboard.view", "super_admin"])
 export class DashboardController {
-  constructor(
-    private readonly aggregateService: DashboardAggregateService,
-  ) {}
+  constructor(private readonly aggregateService: DashboardAggregateService) {}
 
   /**
    * GET /dashboard/fundraising-overview?months=12 | ?year=2024

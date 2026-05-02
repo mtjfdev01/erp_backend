@@ -28,9 +28,7 @@ import { DashboardController } from "./dashboard.controller";
     PermissionsModule,
   ],
   controllers: [DashboardController],
-  providers: [
-    DashboardAggregateService,
-  ],
+  providers: [DashboardAggregateService],
   exports: [DashboardAggregateService],
 })
 export class DashboardModule {}

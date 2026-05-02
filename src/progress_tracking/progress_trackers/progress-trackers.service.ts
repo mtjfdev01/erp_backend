@@ -100,7 +100,9 @@ export class ProgressTrackersService {
     }
   }
 
-  private async resolveTemplateStepsWithParentFallback(templateId: number): Promise<{
+  private async resolveTemplateStepsWithParentFallback(
+    templateId: number,
+  ): Promise<{
     steps: ProgressWorkflowTemplateStep[];
     source_template_id: number;
   }> {
@@ -231,7 +233,8 @@ export class ProgressTrackersService {
         "batch.id = alloc.batch_id AND batch.is_archived = false",
       );
 
-      if (options?.batch_id) qb.andWhere("batch.id = :bid", { bid: options.batch_id });
+      if (options?.batch_id)
+        qb.andWhere("batch.id = :bid", { bid: options.batch_id });
       if (options?.batch_number)
         qb.andWhere("batch.batch_number = :bn", { bn: options.batch_number });
       if (options?.batch_status === "open")
@@ -357,7 +360,9 @@ export class ProgressTrackersService {
     return steps;
   }
 
-  private async attachBatchEvidenceIfApplicable(tracker: ProgressTracker): Promise<void> {
+  private async attachBatchEvidenceIfApplicable(
+    tracker: ProgressTracker,
+  ): Promise<void> {
     if (!tracker?.template_id || !tracker?.donation_id) return;
     await this.attachBatchEvidenceToSteps({
       donationId: tracker.donation_id,
@@ -371,8 +376,10 @@ export class ProgressTrackersService {
     templateId: number | null;
     steps: Array<any>;
   }): Promise<void> {
-    const donationId = params.donationId != null ? Number(params.donationId) : NaN;
-    const templateId = params.templateId != null ? Number(params.templateId) : NaN;
+    const donationId =
+      params.donationId != null ? Number(params.donationId) : NaN;
+    const templateId =
+      params.templateId != null ? Number(params.templateId) : NaN;
     if (!Number.isFinite(donationId) || donationId <= 0) return;
     if (!Number.isFinite(templateId) || templateId <= 0) return;
 
@@ -387,12 +394,16 @@ export class ProgressTrackersService {
       select: ["batch_id"] as any,
     });
     const batchIds = Array.from(
-      new Set((allocs || []).map((a: any) => Number(a.batch_id)).filter((x) => Number.isFinite(x))),
+      new Set(
+        (allocs || [])
+          .map((a: any) => Number(a.batch_id))
+          .filter((x) => Number.isFinite(x)),
+      ),
     );
     if (!batchIds.length) return;
 
     const batches = await this.workflowBatchesRepo.find({
-      where: batchIds.map((id) => ({ id, is_archived: false } as any)) as any,
+      where: batchIds.map((id) => ({ id, is_archived: false }) as any) as any,
       select: ["id", "batch_number"] as any,
     });
     const batchNumberById = new Map<number, number>();
@@ -401,7 +412,11 @@ export class ProgressTrackersService {
     });
 
     const stepKeys = Array.from(
-      new Set((params.steps || []).map((s) => String(s.step_key || "")).filter(Boolean)),
+      new Set(
+        (params.steps || [])
+          .map((s) => String(s.step_key || ""))
+          .filter(Boolean),
+      ),
     );
     if (!stepKeys.length) return;
 
@@ -540,7 +555,9 @@ export class ProgressTrackersService {
 
           // Recompute overall_status for all affected trackers (including the original).
           const trackers = await this.trackersRepo.find({
-            where: trackerIds.map((id) => ({ id, is_archived: false } as any)) as any,
+            where: trackerIds.map(
+              (id) => ({ id, is_archived: false }) as any,
+            ) as any,
             relations: ["steps"] as any,
           });
           for (const tr of trackers || []) {
@@ -636,7 +653,11 @@ export class ProgressTrackersService {
         select: ["batch_id"] as any,
       });
       const batchIds = Array.from(
-        new Set((allocs || []).map((a: any) => Number(a.batch_id)).filter((x) => Number.isFinite(x))),
+        new Set(
+          (allocs || [])
+            .map((a: any) => Number(a.batch_id))
+            .filter((x) => Number.isFinite(x)),
+        ),
       );
       if (!batchIds.length) {
         // Fall back to tracker-scoped evidence if not yet allocated.

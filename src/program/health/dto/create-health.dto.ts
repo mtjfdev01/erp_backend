@@ -1,11 +1,18 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from "class-validator";
 
 export const HEALTH_REPORT_TYPES = [
-  'In-house',
-  'Referred',
-  'Surgeries Supported',
-  'Ambulance',
-  'Medicines',
+  "In-house",
+  "Referred",
+  "Surgeries Supported",
+  "Ambulance",
+  "Medicines",
 ] as const;
 
 export class CreateHealthDto {

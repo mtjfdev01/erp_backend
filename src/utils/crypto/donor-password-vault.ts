@@ -17,9 +17,7 @@ function getKeyV1(): Buffer {
     } catch {}
   }
   if (!key) {
-    throw new Error(
-      "DONOR_PASSWORD_ENC_KEY must be 32 bytes (base64 or hex)",
-    );
+    throw new Error("DONOR_PASSWORD_ENC_KEY must be 32 bytes (base64 or hex)");
   }
   return key;
 }
@@ -66,4 +64,3 @@ export function decryptDonorPassword(payload: string, version: number): string {
   const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
   return pt.toString("utf8");
 }
-

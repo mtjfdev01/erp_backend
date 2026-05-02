@@ -131,7 +131,10 @@ export class DonationsService {
     templateId: number;
     batchPartsRequested?: number;
   } | null> {
-    if (!Array.isArray(params?.donationItems) || params.donationItems.length === 0) {
+    if (
+      !Array.isArray(params?.donationItems) ||
+      params.donationItems.length === 0
+    ) {
       return null;
     }
 
@@ -139,10 +142,10 @@ export class DonationsService {
     // We try initiativeTitle/subtitle first (matches your "Cow Share"/"Goat"/"Cow" templates).
     const initiativeTitleToTemplateCode: Record<string, string> = {
       "cow share": "cow_share",
-      "cowshare": "cow_share",
+      cowshare: "cow_share",
       "full cow": "cow",
-      "cow": "cow",
-      "goat": "goat",
+      cow: "cow",
+      goat: "goat",
     };
 
     // Fallback: if initiativeId ends with "-1" / "-2" / "-3"
@@ -152,7 +155,10 @@ export class DonationsService {
       "3": "goat",
     };
 
-    const normalize = (v: any) => String(v ?? "").trim().toLowerCase();
+    const normalize = (v: any) =>
+      String(v ?? "")
+        .trim()
+        .toLowerCase();
 
     const candidates: Array<{
       template: ProgressWorkflowTemplate;
@@ -169,8 +175,9 @@ export class DonationsService {
       if (!Number.isFinite(quantity) || quantity <= 0) continue;
 
       const titleKey = initiativeTitle || initiativeSubtitle;
-      const templateCodeFromTitle =
-        titleKey ? initiativeTitleToTemplateCode[titleKey] : undefined;
+      const templateCodeFromTitle = titleKey
+        ? initiativeTitleToTemplateCode[titleKey]
+        : undefined;
 
       const suffixMatch = initiativeId.match(/-(\d+)$/);
       const templateCodeFromSuffix = suffixMatch
@@ -190,15 +197,20 @@ export class DonationsService {
 
     if (candidates.length === 0) return null;
 
-    const batchableCandidates = candidates.filter((c) => !!c.template.is_batchable);
-    const pool = batchableCandidates.length > 0 ? batchableCandidates : candidates;
+    const batchableCandidates = candidates.filter(
+      (c) => !!c.template.is_batchable,
+    );
+    const pool =
+      batchableCandidates.length > 0 ? batchableCandidates : candidates;
 
     const primary = pool.sort((a, b) => b.quantity - a.quantity)[0];
     if (!primary?.template?.id) return null;
 
     return {
       templateId: primary.template.id,
-      batchPartsRequested: primary.template.is_batchable ? primary.quantity : undefined,
+      batchPartsRequested: primary.template.is_batchable
+        ? primary.quantity
+        : undefined,
     };
   }
 
@@ -254,7 +266,8 @@ export class DonationsService {
     if (!cfg.is_batchable) return;
 
     const partsRequested = this.derivePartsRequestedForBatchableTemplate({
-      partsRequestedRaw: (createDonationDto as any).progress_batch_parts_requested,
+      partsRequestedRaw: (createDonationDto as any)
+        .progress_batch_parts_requested,
       amount: createDonationDto.amount,
       batchPartAmount: Number(cfg.batch_part_amount || 0),
     });
@@ -293,7 +306,8 @@ export class DonationsService {
     } catch (e) {
       return { processed: false, reason: "No progress tracker for donation" };
     }
-    const tid = tracker?.template_id != null ? Number(tracker.template_id) : NaN;
+    const tid =
+      tracker?.template_id != null ? Number(tracker.template_id) : NaN;
     if (!Number.isFinite(tid) || tid <= 0) {
       return { processed: false, reason: "Tracker has no template" };
     }
@@ -315,12 +329,13 @@ export class DonationsService {
       batchPartAmount: Number(cfg.batch_part_amount || 0),
     });
 
-    const allocations = await this.progressBatchesService.allocateDonationIntoBatches({
-      template_id: tid,
-      donation_id: donation.id,
-      parts_requested: partsRequested,
-      currentUser: params.currentUser,
-    });
+    const allocations =
+      await this.progressBatchesService.allocateDonationIntoBatches({
+        template_id: tid,
+        donation_id: donation.id,
+        parts_requested: partsRequested,
+        currentUser: params.currentUser,
+      });
 
     return { processed: true, allocationsCreated: allocations.length };
   }
@@ -1663,9 +1678,12 @@ export class DonationsService {
       console.log("multiselectFilters", multiselectFilters);
       const entitySearchFields = ["city"];
       // Special filters (not donation table columns)
-      const progressTemplateIdRaw = (filters as any)?.progress_workflow_template_id;
+      const progressTemplateIdRaw = (filters as any)
+        ?.progress_workflow_template_id;
       const progressTemplateId =
-        progressTemplateIdRaw === null || progressTemplateIdRaw === undefined || progressTemplateIdRaw === ""
+        progressTemplateIdRaw === null ||
+        progressTemplateIdRaw === undefined ||
+        progressTemplateIdRaw === ""
           ? null
           : Number(progressTemplateIdRaw);
       if ((filters as any)?.progress_workflow_template_id !== undefined) {
@@ -1695,8 +1713,14 @@ export class DonationsService {
       // applyHybridFilters(query, hybridFilters, 'donation');
 
       // 1b) Progress tracking filter: only donations whose tracker uses this template
-      if (progressTemplateId && Number.isFinite(progressTemplateId) && progressTemplateId > 0) {
-        query.andWhere("progress_tracker.template_id = :ptid", { ptid: progressTemplateId });
+      if (
+        progressTemplateId &&
+        Number.isFinite(progressTemplateId) &&
+        progressTemplateId > 0
+      ) {
+        query.andWhere("progress_tracker.template_id = :ptid", {
+          ptid: progressTemplateId,
+        });
       }
 
       // 2) Relation search (const config) using top-level search
@@ -1819,8 +1843,14 @@ export class DonationsService {
       }
 
       // Apply same progress template filter to sum query
-      if (progressTemplateId && Number.isFinite(progressTemplateId) && progressTemplateId > 0) {
-        sumQuery.andWhere("progress_tracker.template_id = :ptidSum", { ptidSum: progressTemplateId });
+      if (
+        progressTemplateId &&
+        Number.isFinite(progressTemplateId) &&
+        progressTemplateId > 0
+      ) {
+        sumQuery.andWhere("progress_tracker.template_id = :ptidSum", {
+          ptidSum: progressTemplateId,
+        });
       }
       // Apply same geographic filter to sum query
       if (assignedCityNames && assignedCityNames.length > 0) {
@@ -2413,7 +2443,10 @@ export class DonationsService {
             `Batching process failed for donation ${basket_id}:`,
             e?.message || e,
           );
-          batching = { processed: false, reason: e?.message || "Batching failed" };
+          batching = {
+            processed: false,
+            reason: e?.message || "Batching failed",
+          };
         }
       }
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
@@ -2924,7 +2957,7 @@ export class DonationsService {
   //       case 'custom':
   //         // Determine grouping based on range length
   //         const daysDiff = Math.ceil((dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-          
+
   //         if (daysDiff <= 31) {
   //           // Group by day - date column is already DATE type
   //           timeSeriesData = await createBaseQuery()
@@ -2962,13 +2995,13 @@ export class DonationsService {
   //     // Map data to labels
   //     const mapDataToLabels = (dataKey: string, defaultValue: number = 0): number[] => {
   //       const dataMap = new Map<string, number>();
-        
+
   //       timeSeriesData.forEach(item => {
   //         const period = item.period?.toString() || '';
   //         // Handle null values - convert to 0 if null/undefined
   //         const rawValue = item[dataKey];
   //         const value = rawValue === null || rawValue === undefined ? 0 : Number(rawValue || 0);
-          
+
   //         // Handle different period formats based on duration type
   //         if (dateRange.durationType === 'year') {
   //           // Period is already month abbreviation (e.g., 'Sep', 'Oct')
@@ -3011,10 +3044,10 @@ export class DonationsService {
   //                 const keyDate = new Date(key);
   //                 if (!isNaN(keyDate.getTime())) {
   //                   // Match based on date format
-  //                   const labelDate = label.includes('/') 
+  //                   const labelDate = label.includes('/')
   //                     ? this.parseLabelDate(label, dateRange.startDate)
   //                     : null;
-                    
+
   //                   if (labelDate && keyDate.toDateString() === labelDate.toDateString()) {
   //                     return value;
   //                   }

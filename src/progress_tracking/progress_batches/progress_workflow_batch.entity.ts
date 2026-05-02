@@ -32,4 +32,3 @@ export class ProgressWorkflowBatch extends BaseEntity {
   @Column({ default: false })
   is_closed: boolean;
 }
-

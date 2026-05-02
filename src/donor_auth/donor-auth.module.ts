@@ -17,4 +17,3 @@ import { DonorAuthService } from "./donor-auth.service";
   exports: [DonorAuthService],
 })
 export class DonorAuthModule {}
-

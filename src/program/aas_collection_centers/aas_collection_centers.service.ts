@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAasCollectionCenterDto } from './dto/create-aas_collection_center.dto';
-import { UpdateAasCollectionCenterDto } from './dto/update-aas_collection_center.dto';
+import { Injectable } from "@nestjs/common";
+import { CreateAasCollectionCenterDto } from "./dto/create-aas_collection_center.dto";
+import { UpdateAasCollectionCenterDto } from "./dto/update-aas_collection_center.dto";
 
 @Injectable()
 export class AasCollectionCentersService {
   create(createAasCollectionCenterDto: CreateAasCollectionCenterDto) {
-    return 'This action adds a new aasCollectionCenter';
+    return "This action adds a new aasCollectionCenter";
   }
 
   findAll() {
@@ -16,7 +16,10 @@ export class AasCollectionCentersService {
     return `This action returns a #${id} aasCollectionCenter`;
   }
 
-  update(id: number, updateAasCollectionCenterDto: UpdateAasCollectionCenterDto) {
+  update(
+    id: number,
+    updateAasCollectionCenterDto: UpdateAasCollectionCenterDto,
+  ) {
     return `This action updates a #${id} aasCollectionCenter`;
   }
 

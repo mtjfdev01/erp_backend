@@ -30,9 +30,13 @@ export class DonorPasswordBackfillService {
     if (this.ran) return;
     this.ran = true;
 
-    const enabled = String(process.env.DONOR_PASSWORD_BACKFILL_ONCE || "").toLowerCase() === "true";
+    const enabled =
+      String(process.env.DONOR_PASSWORD_BACKFILL_ONCE || "").toLowerCase() ===
+      "true";
     if (!enabled) {
-      this.logger.log("Backfill skipped (DONOR_PASSWORD_BACKFILL_ONCE not enabled)");
+      this.logger.log(
+        "Backfill skipped (DONOR_PASSWORD_BACKFILL_ONCE not enabled)",
+      );
       return;
     }
 
@@ -79,7 +83,9 @@ export class DonorPasswordBackfillService {
         updated += 1;
       }
 
-      this.logger.log(`Backfill progress: updated=${updated}, scanned=${scanned}`);
+      this.logger.log(
+        `Backfill progress: updated=${updated}, scanned=${scanned}`,
+      );
     }
 
     this.logger.warn(`Donor password backfill complete. updated=${updated}`);
@@ -88,4 +94,3 @@ export class DonorPasswordBackfillService {
     );
   }
 }
-

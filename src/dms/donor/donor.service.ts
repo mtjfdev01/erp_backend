@@ -170,8 +170,7 @@ export class DonorService {
       // Password handling (Option C):
       // - If password provided: store bcrypt hash + encrypted copy.
       // - If not provided: generate password, store bcrypt hash + encrypted copy (do not return plaintext).
-      const plainPassword =
-        createDonorDto.password || generateRandomPassword();
+      const plainPassword = createDonorDto.password || generateRandomPassword();
       const hashedPassword = await bcrypt.hash(plainPassword, 10);
       const enc = encryptDonorPassword(plainPassword);
 
@@ -533,7 +532,9 @@ export class DonorService {
     });
     if (!donor) throw new NotFoundException("Donor not found");
     if (!donor.password_enc || !donor.password_enc_version) {
-      throw new NotFoundException("No stored password available for this donor");
+      throw new NotFoundException(
+        "No stored password available for this donor",
+      );
     }
 
     const password = decryptDonorPassword(

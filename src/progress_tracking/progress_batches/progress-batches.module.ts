@@ -30,4 +30,3 @@ import { PermissionsModule } from "src/permissions/permissions.module";
   exports: [ProgressBatchesService],
 })
 export class ProgressBatchesModule {}
-

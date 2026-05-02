@@ -99,15 +99,23 @@ export class ProgressBatchesService {
     }
 
     if (params.status === "open") {
-      qb.andWhere("tr.id IS NOT NULL")
-        .andWhere("tr.overall_status NOT IN (:...closed)", {
-          closed: [TrackerOverallStatus.COMPLETED, TrackerOverallStatus.CANCELLED],
-        });
+      qb.andWhere("tr.id IS NOT NULL").andWhere(
+        "tr.overall_status NOT IN (:...closed)",
+        {
+          closed: [
+            TrackerOverallStatus.COMPLETED,
+            TrackerOverallStatus.CANCELLED,
+          ],
+        },
+      );
     } else if (params.status === "closed") {
       qb.andWhere("tr.id IS NOT NULL").andWhere(
         "tr.overall_status IN (:...closed)",
         {
-          closed: [TrackerOverallStatus.COMPLETED, TrackerOverallStatus.CANCELLED],
+          closed: [
+            TrackerOverallStatus.COMPLETED,
+            TrackerOverallStatus.CANCELLED,
+          ],
         },
       );
     }
@@ -150,7 +158,9 @@ export class ProgressBatchesService {
 
     const partsRequested = Number(params.parts_requested || 0);
     if (!Number.isFinite(partsRequested) || partsRequested <= 0) {
-      throw new BadRequestException("parts_requested must be a positive integer");
+      throw new BadRequestException(
+        "parts_requested must be a positive integer",
+      );
     }
 
     const qr = this.dataSource.createQueryRunner();
@@ -189,8 +199,10 @@ export class ProgressBatchesService {
             batch_part_amount: partAmount,
             allocated_parts: 0,
             is_closed: false,
-            created_by: params.currentUser?.id === -1 ? null : params.currentUser,
-            updated_by: params.currentUser?.id === -1 ? null : params.currentUser,
+            created_by:
+              params.currentUser?.id === -1 ? null : params.currentUser,
+            updated_by:
+              params.currentUser?.id === -1 ? null : params.currentUser,
           } as any);
           const saved = await batchRepo.save(createdBatch as any);
           const savedBatch = Array.isArray(saved) ? saved[0] : saved;
@@ -203,12 +215,18 @@ export class ProgressBatchesService {
             .getOneOrFail();
         }
 
-        const available = Math.max(0, Number(batch.batch_parts) - Number(batch.allocated_parts));
+        const available = Math.max(
+          0,
+          Number(batch.batch_parts) - Number(batch.allocated_parts),
+        );
         if (available <= 0) {
-          await qr.manager.getRepository(ProgressWorkflowBatch).update(batch.id, {
-            is_closed: true,
-            updated_by: params.currentUser?.id === -1 ? null : params.currentUser,
-          } as any);
+          await qr.manager
+            .getRepository(ProgressWorkflowBatch)
+            .update(batch.id, {
+              is_closed: true,
+              updated_by:
+                params.currentUser?.id === -1 ? null : params.currentUser,
+            } as any);
           continue;
         }
 
@@ -224,7 +242,9 @@ export class ProgressBatchesService {
           updated_by: params.currentUser?.id === -1 ? null : params.currentUser,
         } as any);
 
-        const allocationRepo = qr.manager.getRepository(DonationBatchAllocation);
+        const allocationRepo = qr.manager.getRepository(
+          DonationBatchAllocation,
+        );
         const createdAllocation = allocationRepo.create({
           donation_id: params.donation_id,
           template_id: template.id,
@@ -238,7 +258,9 @@ export class ProgressBatchesService {
           created_by: params.currentUser?.id === -1 ? null : params.currentUser,
           updated_by: params.currentUser?.id === -1 ? null : params.currentUser,
         } as any);
-        const allocationSaved = await allocationRepo.save(createdAllocation as any);
+        const allocationSaved = await allocationRepo.save(
+          createdAllocation as any,
+        );
         const allocation = Array.isArray(allocationSaved)
           ? allocationSaved[0]
           : allocationSaved;
@@ -257,4 +279,3 @@ export class ProgressBatchesService {
     }
   }
 }
-

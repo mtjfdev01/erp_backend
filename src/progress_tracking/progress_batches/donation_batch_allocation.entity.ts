@@ -48,4 +48,3 @@ export class DonationBatchAllocation extends BaseEntity {
   @Column({ type: "bigint" })
   total_amount: number;
 }
-

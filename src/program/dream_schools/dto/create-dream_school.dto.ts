@@ -1,4 +1,4 @@
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from "class-validator";
 
 export class CreateDreamSchoolDto {
   /** Ignored if sent; server generates `MTJF-EDU/DS-YY-NN`. */

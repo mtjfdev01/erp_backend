@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, Max, Min } from 'class-validator';
+import { IsInt, IsNumber, Max, Min } from "class-validator";
 
 export class CreateAlHasanainClgDto {
   @IsInt()
