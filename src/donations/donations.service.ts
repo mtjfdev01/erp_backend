@@ -1976,6 +1976,7 @@ export class DonationsService {
       "bank",
       "transaction_id",
       "ref",
+      "on_behalf_names",
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -1996,11 +1997,16 @@ export class DonationsService {
       }
       if (
         key === "campaign_id" ||
-        key === "sub_program_id" ||
-        key === "event_id"
+          key === "sub_program_id" ||
+          key === "event_id"
       ) {
         const n = Number(d[key]);
         if (!Number.isNaN(n)) patch[key] = n;
+        continue;
+      }
+      if (key === "on_behalf_names") {
+        const v = d[key];
+        patch[key] = v === "" || v === null ? null : String(v);
         continue;
       }
       patch[key] = d[key];

@@ -101,4 +101,8 @@ export class Donation extends BaseEntity {
 
   @Column({ type: "int", nullable: true, default: null })
   noted_by: number;
+
+  /** Optional: names for Qurbani / on-behalf dedications (free text). */
+  @Column({ type: "text", nullable: true, default: null })
+  on_behalf_names: string | null;
 }

@@ -84,4 +84,8 @@ export class UpdateDonationDto {
   @IsOptional()
   @IsString()
   ref?: string;
+
+  @IsOptional()
+  @IsString()
+  on_behalf_names?: string | null;
 }
