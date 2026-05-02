@@ -938,13 +938,15 @@ export class TasksService {
         {
           label: string;
           count: number;
+          statuses: Record<string, number>;
+          tasks: any[];
           in_progress_count: number;
           completed_count: number;
           overdue_count: number;
           role: string;
         }
       > = {};
-      const projectCountsMap: Record<string, number> = {};
+      const projectCountsMap: Record<string, { count: number; statuses: Record<string, number>; tasks: any[] }> = {};
       let totalDays = 0;
       let completedCount = 0;
 
@@ -1017,6 +1019,8 @@ export class TasksService {
           label: name,
           role: u.role,
           count: 0,
+          statuses: {},
+          tasks: [],
           in_progress_count: 0,
           completed_count: 0,
           overdue_count: 0,
@@ -1052,12 +1056,29 @@ export class TasksService {
                 label: userMeta.name,
                 role: userMeta.role,
                 count: 0,
+                statuses: {},
+                tasks: [],
                 in_progress_count: 0,
                 completed_count: 0,
                 overdue_count: 0,
               };
             }
             userCountsMap[userId].count++;
+            
+            // Track status breakdown
+            const status = t.status || 'open';
+            userCountsMap[userId].statuses[status] = 
+              (userCountsMap[userId].statuses[status] || 0) + 1;
+            
+            // Store task details for tooltip
+            const projectName = t.project_name || null;
+            userCountsMap[userId].tasks.push({
+              title: t.title,
+              status: t.status,
+              project: projectName,
+              department: t.department
+            });
+            
             if (t.status === TaskStatus.IN_PROGRESS) {
               userCountsMap[userId].in_progress_count++;
             }
@@ -1078,6 +1099,8 @@ export class TasksService {
             userCountsMap[label] = {
               label: "Unassigned",
               count: 0,
+              statuses: {},
+              tasks: [],
               in_progress_count: 0,
               completed_count: 0,
               overdue_count: 0,
@@ -1085,6 +1108,21 @@ export class TasksService {
             };
           }
           userCountsMap[label].count++;
+          
+          // Track status breakdown
+          const status = t.status || 'open';
+          userCountsMap[label].statuses[status] = 
+            (userCountsMap[label].statuses[status] || 0) + 1;
+          
+          // Store task details for tooltip
+          const projectName = t.project_name || null;
+          userCountsMap[label].tasks.push({
+            title: t.title,
+            status: t.status,
+            project: projectName,
+            department: t.department
+          });
+          
           if (t.status === TaskStatus.IN_PROGRESS) {
             userCountsMap[label].in_progress_count++;
           }
@@ -1101,7 +1139,32 @@ export class TasksService {
         }
 
         const projectKey = t.project_name || "No Project";
-        projectCountsMap[projectKey] = (projectCountsMap[projectKey] || 0) + 1;
+        if (!projectCountsMap[projectKey]) {
+          projectCountsMap[projectKey] = {
+            count: 0,
+            statuses: {},
+            tasks: []
+          };
+        }
+        projectCountsMap[projectKey].count++;
+        
+        // Track status breakdown
+        const status = t.status || 'open';
+        projectCountsMap[projectKey].statuses[status] = 
+          (projectCountsMap[projectKey].statuses[status] || 0) + 1;
+        
+        // Store task details for tooltip
+        const assignees = t.assigned_user_ids 
+          ? t.assigned_user_ids.map(id => userNamesMap.get(Number(id))?.name).filter(Boolean)
+          : [];
+        
+        projectCountsMap[projectKey].tasks.push({
+          title: t.title,
+          department: t.department,
+          status: t.status,
+          assignees: assignees,
+          assignee_names: assignees.join(', ') || 'Unassigned'
+        });
 
         if (t.start_date && t.completed_date) {
           const start = new Date(t.start_date);
@@ -1128,6 +1191,8 @@ export class TasksService {
           id: isNaN(Number(id)) ? null : Number(id),
           label: item.label,
           count: item.count,
+          statuses: item.statuses,
+          tasks: item.tasks.slice(0, 100), // Limit to 100 tasks for performance
           in_progress_count: item.in_progress_count,
           completed_count: item.completed_count,
           overdue_count: item.overdue_count,
@@ -1140,9 +1205,11 @@ export class TasksService {
               : 0,
         }));
       const projects = Object.entries(projectCountsMap).map(
-        ([label, count]) => ({
+        ([label, data]) => ({
           label,
-          count,
+          count: data.count,
+          statuses: data.statuses,
+          tasks: data.tasks.slice(0, 100) // Limit to 100 tasks for performance
         }),
       );
       const avgCompletionDays =
