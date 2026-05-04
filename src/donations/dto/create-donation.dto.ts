@@ -20,6 +20,15 @@ export class CreateDonationDto {
   @IsString()
   project_name?: string;
 
+  /**
+   * Qurbani (`project_id` = qurbani-barai-mustehqeen): optional workflow template code
+   * when `donation_items` is not sent (e.g. single-line checkout). Must match
+   * `progress_workflow_templates.code` (e.g. `cow_share`, `cow`, `goat`).
+   */
+  @IsOptional()
+  @IsString()
+  template_code?: string;
+
   @IsOptional()
   @IsNumber()
   amount?: number;

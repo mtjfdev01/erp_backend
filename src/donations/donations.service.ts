@@ -214,6 +214,74 @@ export class DonationsService {
     };
   }
 
+  /**
+   * Qurbani-only: set `progress_workflow_template_id` (and batch parts when applicable)
+   * from `donation_items[]` or from `template_code` when items are omitted.
+   */
+  private async applyQurbaniProgressTemplateFromPayload(
+    createDonationDto: CreateDonationDto,
+  ): Promise<void> {
+    if (createDonationDto.project_id !== "qurbani-barai-mustehqeen") return;
+    if (createDonationDto.progress_workflow_template_id != null) return;
+
+    const donationItems = (createDonationDto as any).donation_items;
+    if (Array.isArray(donationItems) && donationItems.length > 0) {
+      try {
+        const derived = await this.deriveProgressTemplateFromDonationItems({
+          donationItems,
+        });
+        if (derived?.templateId) {
+          createDonationDto.progress_workflow_template_id = derived.templateId;
+          if (derived.batchPartsRequested != null) {
+            createDonationDto.progress_batch_parts_requested =
+              derived.batchPartsRequested;
+          }
+        }
+      } catch (e: any) {
+        console.error(
+          "Failed to derive progress template from donation_items:",
+          e?.message || e,
+        );
+      }
+      return;
+    }
+
+    const raw = String(createDonationDto.template_code ?? "").trim();
+    if (!raw) return;
+
+    try {
+      let template = await this.workflowTemplatesRepo.findOne({
+        where: { code: raw, is_archived: false } as any,
+      });
+      if (!template) {
+        const normalized = raw.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+        template = await this.workflowTemplatesRepo.findOne({
+          where: { code: normalized, is_archived: false } as any,
+        });
+      }
+      if (!template?.id) return;
+
+      createDonationDto.progress_workflow_template_id = template.id;
+
+      if (template.is_batchable) {
+        const cfg = await this.progressBatchesService.getBatchingConfig(
+          template.id,
+        );
+        const parts = this.derivePartsRequestedForBatchableTemplate({
+          partsRequestedRaw: createDonationDto.progress_batch_parts_requested,
+          amount: createDonationDto.amount,
+          batchPartAmount: Number(cfg.batch_part_amount || 0),
+        });
+        createDonationDto.progress_batch_parts_requested = parts;
+      }
+    } catch (e: any) {
+      console.error(
+        "Failed to resolve progress template from template_code:",
+        e?.message || e,
+      );
+    }
+  }
+
   private derivePartsRequestedForBatchableTemplate(params: {
     partsRequestedRaw?: any;
     amount?: any;
@@ -1243,33 +1311,7 @@ export class DonationsService {
       ];
       console.log("createDonationDto", createDonationDto);
 
-      // If the caller didn't explicitly provide progress-tracking template info,
-      // derive it from the incoming `donation_items[]` payload.
-      if (
-        createDonationDto.project_id === "qurbani-barai-mustehqeen" &&
-        (createDonationDto as any)?.progress_workflow_template_id == null &&
-        Array.isArray((createDonationDto as any)?.donation_items) &&
-        (createDonationDto as any)?.donation_items.length > 0
-      ) {
-        try {
-          const derived = await this.deriveProgressTemplateFromDonationItems({
-            donationItems: (createDonationDto as any).donation_items,
-          });
-          if (derived?.templateId) {
-            (createDonationDto as any).progress_workflow_template_id =
-              derived.templateId;
-            if (derived.batchPartsRequested != null) {
-              (createDonationDto as any).progress_batch_parts_requested =
-                derived.batchPartsRequested;
-            }
-          }
-        } catch (e) {
-          console.error(
-            "Failed to derive progress template from donation_items:",
-            e?.message || e,
-          );
-        }
-      }
+      await this.applyQurbaniProgressTemplateFromPayload(createDonationDto);
 
       let donorId: number | null = createDonationDto.donor_id || null;
       let donor: any;
