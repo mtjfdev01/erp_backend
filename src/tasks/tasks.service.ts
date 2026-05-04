@@ -620,12 +620,9 @@ export class TasksService {
         }
       }
 
-      // Handle search filter - extend to include creator name (like User Management)
+      // Handle search filter - extend to include assigned user names
       const searchTerm = safeFilters.search;
       if (searchTerm && searchTerm.trim() !== "") {
-        // Join created_by relation to search in user fields
-        qb.leftJoin("task.created_by", "searchCreatedBy");
-
         qb.andWhere(
           new Brackets((searchQb) => {
             // Search in task fields
@@ -638,18 +635,11 @@ export class TasksService {
             searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
-            // Search in creator name (like User Management search)
+            // Search in assigned user names from assigned_users_meta
             searchQb.orWhere(
-              "LOWER(searchCreatedBy.first_name) LIKE :searchTerm",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
               { searchTerm: `%${searchTerm.toLowerCase()}%` },
             );
-            searchQb.orWhere(
-              "LOWER(searchCreatedBy.last_name) LIKE :searchTerm",
-              { searchTerm: `%${searchTerm.toLowerCase()}%` },
-            );
-            searchQb.orWhere("LOWER(searchCreatedBy.email) LIKE :searchTerm", {
-              searchTerm: `%${searchTerm.toLowerCase()}%`,
-            });
           }),
         );
 
@@ -657,32 +647,14 @@ export class TasksService {
         delete safeFilters.search;
       }
 
-      // Handle user name filter - dedicated filter for searching by creator name (like User Management)
+      // Handle user name filter - dedicated filter for searching by assigned user name
       const userNameFilter = safeFilters.user_name;
       if (userNameFilter && userNameFilter.trim() !== "") {
-        // Join created_by relation if not already joined
-        if (!safeFilters.search) {
-          qb.leftJoin("task.created_by", "userNameCreatedBy");
-        }
-
         const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
-        const joinAlias = safeFilters.search
-          ? "searchCreatedBy"
-          : "userNameCreatedBy";
 
         qb.andWhere(
-          new Brackets((userQb) => {
-            // Search in creator name
-            userQb.where(`LOWER(${joinAlias}.first_name) LIKE :userName`, {
-              userName: userSearchTerm,
-            });
-            userQb.orWhere(`LOWER(${joinAlias}.last_name) LIKE :userName`, {
-              userName: userSearchTerm,
-            });
-            userQb.orWhere(`LOWER(${joinAlias}.email) LIKE :userName`, {
-              userName: userSearchTerm,
-            });
-          }),
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
+          { userName: userSearchTerm },
         );
       }
 
