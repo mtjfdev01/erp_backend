@@ -2202,8 +2202,8 @@ export class DonationsService {
       }
       if (
         key === "campaign_id" ||
-          key === "sub_program_id" ||
-          key === "event_id"
+        key === "sub_program_id" ||
+        key === "event_id"
       ) {
         const n = Number(d[key]);
         if (!Number.isNaN(n)) patch[key] = n;
