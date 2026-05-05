@@ -13,6 +13,7 @@ import { ProgressNotificationLog } from "./progress_notifications/progress_notif
 import { ProgressWorkflowTemplatesModule } from "./progress_workflow_templates/progress-workflow-templates.module";
 import { ProgressTrackersModule } from "./progress_trackers/progress-trackers.module";
 import { ProgressNotificationsModule } from "./progress_notifications/progress-notifications.module";
+import { ProgressReportsModule } from "./progress_reports/progress-reports.module";
 
 @Module({
   imports: [
@@ -32,11 +33,13 @@ import { ProgressNotificationsModule } from "./progress_notifications/progress-n
     ProgressWorkflowTemplatesModule,
     ProgressTrackersModule,
     ProgressNotificationsModule,
+    ProgressReportsModule,
   ],
   exports: [
     ProgressWorkflowTemplatesModule,
     ProgressTrackersModule,
     ProgressNotificationsModule,
+    ProgressReportsModule,
   ],
 })
 export class ProgressTrackingModule {}

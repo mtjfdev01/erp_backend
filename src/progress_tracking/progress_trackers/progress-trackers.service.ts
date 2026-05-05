@@ -738,52 +738,55 @@ export class ProgressTrackersService {
 
     await this.trackerStepsRepo.update(stepId, updateData);
 
-    // BATCHING: If the template is batchable and this tracker is part of a batch,
-    // propagate the same step_key status update to all trackers in the same batch(es).
+    // BATCHING: If the template is batchable and this step is batch-scoped,
+    // propagate the same step_key status update to ALL donations occupying the same batch.
     try {
       const templateId = (step as any)?.tracker?.template_id;
       const donationId = (step as any)?.tracker?.donation_id;
       const stepKey = String((step as any)?.step_key || "");
       if (templateId && donationId && stepKey && dto.status !== undefined) {
-        const trackerIds = await this.resolveBatchTrackerIdsForDonation({
-          donationId: Number(donationId),
-          templateId: Number(templateId),
-        });
-        if (trackerIds.length) {
-          const stepBatchId = (step as any)?.batch_id;
-          const qb = this.trackerStepsRepo
+        const stepBatchId = (step as any)?.batch_id;
+        if (
+          stepBatchId != null &&
+          String(stepBatchId).trim() !== "" &&
+          Number.isFinite(Number(stepBatchId))
+        ) {
+          // Update batch-scoped steps across all trackers sharing the same batch_id.
+          await this.trackerStepsRepo
             .createQueryBuilder()
             .update()
             .set(updateData)
             .where("is_archived = false")
-            .andWhere("tracker_id IN (:...ids)", { ids: trackerIds })
+            .andWhere("batch_id = :bid", { bid: Number(stepBatchId) })
             .andWhere("step_key = :stepKey", { stepKey })
-            .andWhere("status = :fromStatus", { fromStatus: step.status });
-          if (
-            stepBatchId != null &&
-            String(stepBatchId).trim() !== "" &&
-            Number.isFinite(Number(stepBatchId))
-          ) {
-            qb.andWhere("batch_id = :bid", { bid: Number(stepBatchId) });
-          } else {
-            qb.andWhere("batch_id IS NULL");
-          }
-          await qb.execute();
+            .andWhere("status = :fromStatus", { fromStatus: step.status })
+            .execute();
 
-          // Recompute overall_status for all affected trackers (including the original).
-          const trackers = await this.trackersRepo.find({
-            where: trackerIds.map(
-              (id) => ({ id, is_archived: false }) as any,
-            ) as any,
-            relations: ["steps"] as any,
-          });
-          for (const tr of trackers || []) {
-            const overall = this.deriveOverallStatus(
-              ((tr as any).steps || []).filter((s: any) => !s.is_archived),
-            );
-            await this.trackersRepo.update((tr as any).id, {
-              overall_status: overall,
-            } as any);
+          // Recompute overall status for affected trackers (best-effort).
+          const trackerRows = await this.trackerStepsRepo
+            .createQueryBuilder("s")
+            .select("DISTINCT s.tracker_id", "tracker_id")
+            .where("s.is_archived = false")
+            .andWhere("s.batch_id = :bid", { bid: Number(stepBatchId) })
+            .getRawMany<{ tracker_id: string }>();
+          const trackerIds = (trackerRows || [])
+            .map((r) => Number(r.tracker_id))
+            .filter((x) => Number.isFinite(x) && x > 0);
+          if (trackerIds.length) {
+            const trackers = await this.trackersRepo.find({
+              where: trackerIds.map(
+                (id) => ({ id, is_archived: false }) as any,
+              ) as any,
+              relations: ["steps"] as any,
+            });
+            for (const tr of trackers || []) {
+              const overall = this.deriveOverallStatus(
+                ((tr as any).steps || []).filter((s: any) => !s.is_archived),
+              );
+              await this.trackersRepo.update((tr as any).id, {
+                overall_status: overall,
+              } as any);
+            }
           }
         }
       }
@@ -887,13 +890,16 @@ export class ProgressTrackersService {
         Number.isFinite(Number(stepBatchId)) &&
         batchIds.includes(Number(stepBatchId))
       ) {
-        const evidence = this.evidenceRepo.create({
-          tracker_step_id: stepId,
+        // Batch-scoped step: evidence must be shared across ALL donations occupying this batch.
+        const ev = this.batchEvidenceRepo.create({
+          batch_id: Number(stepBatchId),
+          step_key: (step as any).step_key,
           ...dto,
           created_by: currentUser?.id === -1 ? null : currentUser,
           updated_by: currentUser?.id === -1 ? null : currentUser,
         } as any);
-        return this.evidenceRepo.save(evidence);
+        const saved = await this.batchEvidenceRepo.save(ev as any);
+        return { created: 1, scope: "batch" } as any;
       }
 
       if (!batchIds.length) {
