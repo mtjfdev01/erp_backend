@@ -45,6 +45,20 @@ export class ProgressBatchesService {
     return count > 0;
   }
 
+  async hasAllocationsForDonationTemplate(
+    donationId: number,
+    templateId: number,
+  ): Promise<boolean> {
+    const count = await this.allocationsRepo.count({
+      where: {
+        donation_id: donationId,
+        template_id: templateId,
+        is_archived: false,
+      } as any,
+    });
+    return count > 0;
+  }
+
   async listBatchOptions(params: {
     status: "open" | "closed" | "all";
     search?: string;
