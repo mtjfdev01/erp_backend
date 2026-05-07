@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { DeepPartial, Repository } from "typeorm";
+import { DeepPartial, IsNull, Not, Repository } from "typeorm";
 import * as crypto from "crypto";
 import { ProgressTracker } from "./progress_tracker.entity";
 import { ProgressTrackerStep } from "./progress_tracker_step.entity";
@@ -143,10 +143,16 @@ export class ProgressTrackersService {
     const donationId = dto.donation_id ?? null;
     if (donationId) {
       const existing = await this.trackersRepo.findOne({
-        where: { donation_id: donationId, is_archived: false },
+        where: {
+          donation_id: donationId,
+          template_id: dto.template_id,
+          is_archived: false,
+        } as any,
       });
       if (existing)
-        throw new ConflictException("Tracker already exists for this donation");
+        throw new ConflictException(
+          "Tracker already exists for this donation and workflow template",
+        );
     }
 
     const trackerEntity = this.trackersRepo.create({
@@ -173,6 +179,7 @@ export class ProgressTrackersService {
     const stepRows: DeepPartial<ProgressTrackerStep>[] = templateSteps.map(
       (ts) => ({
         tracker_id: tracker.id,
+        batch_id: null,
         template_step_id: ts.id,
         step_key: ts.step_key,
         title: ts.title,
@@ -188,6 +195,111 @@ export class ProgressTrackersService {
     );
 
     return this.getTrackerDetail(tracker.id);
+  }
+
+  /**
+   * For batchable templates: after `donation_batch_allocations` rows exist, materialize
+   * one full set of tracker steps per physical batch, then archive template-wide
+   * (`batch_id` null) placeholder steps for that tracker.
+   */
+  async syncBatchScopedStepsForDonationTemplate(
+    donationId: number,
+    templateId: number,
+    currentUser?: any,
+  ): Promise<void> {
+    const tid = Number(templateId);
+    const did = Number(donationId);
+    if (!Number.isFinite(tid) || tid <= 0 || !Number.isFinite(did) || did <= 0)
+      return;
+
+    const template = await this.templatesRepo.findOne({
+      where: { id: tid, is_archived: false } as any,
+      select: ["id", "is_batchable"] as any,
+    });
+    if (!template || !(template as any).is_batchable) return;
+
+    const tracker = await this.trackersRepo.findOne({
+      where: {
+        donation_id: did,
+        template_id: tid,
+        is_archived: false,
+      } as any,
+    });
+    if (!tracker) return;
+
+    const allocs = await this.allocationsRepo.find({
+      where: {
+        donation_id: did,
+        template_id: tid,
+        is_archived: false,
+      } as any,
+      select: ["batch_id"] as any,
+    });
+    const batchIds = Array.from(
+      new Set(
+        (allocs || [])
+          .map((a: any) => Number(a.batch_id))
+          .filter((x) => Number.isFinite(x) && x > 0),
+      ),
+    );
+    if (!batchIds.length) return;
+
+    const { steps: templateSteps } =
+      await this.resolveTemplateStepsWithParentFallback(tid);
+
+    const auditUser =
+      currentUser?.id === -1 ? null : currentUser ?? null;
+
+    for (const batchId of batchIds) {
+      const existing = await this.trackerStepsRepo.count({
+        where: {
+          tracker_id: tracker.id,
+          batch_id: batchId,
+          is_archived: false,
+        } as any,
+      });
+      if (existing >= templateSteps.length) continue;
+      if (existing > 0) continue;
+
+      const stepRows: DeepPartial<ProgressTrackerStep>[] = templateSteps.map(
+        (ts) => ({
+          tracker_id: tracker.id,
+          batch_id: batchId,
+          template_step_id: ts.id,
+          step_key: ts.step_key,
+          title: ts.title,
+          step_order: ts.step_order,
+          status: ProgressStatus.PENDING,
+          donor_visible: true,
+          created_by: auditUser,
+          updated_by: auditUser,
+        }),
+      );
+      await this.trackerStepsRepo.save(
+        stepRows.map((row) => this.trackerStepsRepo.create(row)),
+      );
+    }
+
+    const perBatchCount = await this.trackerStepsRepo.count({
+      where: {
+        tracker_id: tracker.id,
+        batch_id: Not(IsNull()),
+        is_archived: false,
+      } as any,
+    });
+    if (perBatchCount > 0) {
+      await this.trackerStepsRepo.update(
+        {
+          tracker_id: tracker.id,
+          batch_id: IsNull(),
+          is_archived: false,
+        } as any,
+        {
+          is_archived: true,
+          updated_by: auditUser,
+        } as any,
+      );
+    }
   }
 
   async listTrackers(options?: {
@@ -218,7 +330,8 @@ export class ProgressTrackersService {
             "batch.id = alloc2.batch_id AND batch.is_archived = false",
           )
           .where("alloc2.is_archived = false")
-          .andWhere("alloc2.donation_id = t.donation_id");
+          .andWhere("alloc2.donation_id = t.donation_id")
+          .andWhere("alloc2.template_id = t.template_id");
       }, "batch_number")
       .where("t.is_archived = false");
 
@@ -226,7 +339,7 @@ export class ProgressTrackersService {
       qb.leftJoin(
         "donation_batch_allocations",
         "alloc",
-        "alloc.donation_id = t.donation_id AND alloc.is_archived = false",
+        "alloc.donation_id = t.donation_id AND alloc.is_archived = false AND alloc.template_id = t.template_id",
       ).leftJoin(
         "progress_workflow_batches",
         "batch",
@@ -275,6 +388,52 @@ export class ProgressTrackersService {
       batch_number:
         raw?.[idx]?.batch_number != null ? Number(raw[idx].batch_number) : null,
     }));
+
+    for (const row of data as any[]) {
+      row.allocation_batches = [];
+      const did = row.donation_id != null ? Number(row.donation_id) : NaN;
+      const tid = row.template_id != null ? Number(row.template_id) : NaN;
+      if (!Number.isFinite(did) || did <= 0 || !Number.isFinite(tid) || tid <= 0)
+        continue;
+
+      const rawBatches = await this.allocationsRepo
+        .createQueryBuilder("a")
+        .innerJoin(
+          ProgressWorkflowBatch,
+          "b",
+          "b.id = a.batch_id AND b.is_archived = false",
+        )
+        .where("a.is_archived = false")
+        .andWhere("a.donation_id = :did", { did })
+        .andWhere("a.template_id = :tid", { tid })
+        .select("a.batch_id", "batch_id")
+        .addSelect("b.batch_number", "batch_number")
+        .addSelect("a.parts_count", "parts_count")
+        .orderBy("b.batch_number", "ASC")
+        .getRawMany();
+
+      const seen = new Set<number>();
+      for (const r of rawBatches || []) {
+        const raw = r as Record<string, unknown>;
+        const bid = Number(
+          raw.batch_id ?? raw.a_batch_id ?? raw.donation_batch_allocations_batch_id,
+        );
+        const bnum = Number(
+          raw.batch_number ?? raw.b_batch_number ?? raw.progress_workflow_batches_batch_number,
+        );
+        const parts = Number(
+          raw.parts_count ?? raw.a_parts_count ?? raw.donation_batch_allocations_parts_count,
+        );
+        if (!Number.isFinite(bid) || bid <= 0 || seen.has(bid)) continue;
+        seen.add(bid);
+        (row.allocation_batches as any[]).push({
+          batch_id: bid,
+          batch_number: Number.isFinite(bnum) && bnum > 0 ? bnum : bid,
+          parts_count: Number.isFinite(parts) && parts > 0 ? parts : 0,
+        });
+      }
+    }
+
     const totalPages = Math.ceil(total / pageSize);
     return {
       data,
@@ -292,7 +451,7 @@ export class ProgressTrackersService {
   async getTrackerDetail(trackerId: number) {
     const tracker = await this.trackersRepo.findOne({
       where: { id: trackerId, is_archived: false },
-      relations: ["template", "steps", "steps.evidence"],
+      relations: ["template", "steps", "steps.evidence", "steps.batch"],
     });
     if (!tracker) throw new NotFoundException("Tracker not found");
     tracker.steps = (tracker.steps || [])
@@ -302,9 +461,30 @@ export class ProgressTrackersService {
     return tracker;
   }
 
+  async findTrackersByDonationId(donationId: number): Promise<
+    Array<{
+      id: number;
+      template_id: number;
+      batch_parts_count: number | null;
+    }>
+  > {
+    const rows = await this.trackersRepo.find({
+      where: { donation_id: donationId, is_archived: false },
+      order: { id: "ASC" },
+      select: ["id", "template_id", "batch_parts_count"] as any,
+    });
+    return (rows || []).map((r: any) => ({
+      id: Number(r.id),
+      template_id: Number(r.template_id),
+      batch_parts_count:
+        r.batch_parts_count != null ? Number(r.batch_parts_count) : null,
+    }));
+  }
+
   async getTrackerByDonationId(donationId: number) {
     const tracker = await this.trackersRepo.findOne({
       where: { donation_id: donationId, is_archived: false },
+      order: { id: "ASC" },
     });
     if (!tracker) throw new NotFoundException("Tracker not found for donation");
     return this.getTrackerDetail(tracker.id);
@@ -342,7 +522,7 @@ export class ProgressTrackersService {
   async listSteps(trackerId: number) {
     const steps = await this.trackerStepsRepo.find({
       where: { tracker_id: trackerId, is_archived: false },
-      relations: ["evidence"],
+      relations: ["evidence", "batch"],
       order: { step_order: "ASC" },
     });
     // Attach shared batch evidence (if any) by resolving tracker.
@@ -390,7 +570,11 @@ export class ProgressTrackersService {
     if (!template || !(template as any).is_batchable) return;
 
     const allocs = await this.allocationsRepo.find({
-      where: { donation_id: donationId, is_archived: false } as any,
+      where: {
+        donation_id: donationId,
+        template_id: templateId,
+        is_archived: false,
+      } as any,
       select: ["batch_id"] as any,
     });
     const batchIds = Array.from(
@@ -441,12 +625,26 @@ export class ProgressTrackersService {
         batch_id: (ev as any).batch_id,
         batch_number: bn,
       };
-      byStepKey.set(key, [...(byStepKey.get(key) || []), wrapped]);
+      const mapKey = `${key}::${Number((ev as any).batch_id)}`;
+      byStepKey.set(mapKey, [...(byStepKey.get(mapKey) || []), wrapped]);
     }
 
     for (const s of params.steps || []) {
       const key = String(s.step_key || "");
-      const shared = byStepKey.get(key) || [];
+      if (!key) continue;
+      const bid =
+        (s as any).batch_id != null &&
+        Number.isFinite(Number((s as any).batch_id))
+          ? Number((s as any).batch_id)
+          : null;
+      let shared: any[] = [];
+      if (bid != null) {
+        shared = byStepKey.get(`${key}::${bid}`) || [];
+      } else {
+        for (const [mk, arr] of byStepKey) {
+          if (mk.startsWith(`${key}::`)) shared.push(...(arr || []));
+        }
+      }
       if (!shared.length) continue;
       const own = Array.isArray(s.evidence) ? s.evidence : [];
       s.evidence = [...shared, ...own];
@@ -464,7 +662,11 @@ export class ProgressTrackersService {
     if (!template || !(template as any).is_batchable) return [];
 
     const allocs = await this.allocationsRepo.find({
-      where: { donation_id: params.donationId, is_archived: false } as any,
+      where: {
+        donation_id: params.donationId,
+        template_id: params.templateId,
+        is_archived: false,
+      } as any,
       select: ["batch_id"] as any,
     });
     const batchIds = Array.from(
@@ -481,10 +683,16 @@ export class ProgressTrackersService {
       .innerJoin(
         "donation_batch_allocations",
         "a",
-        "a.donation_id = t.donation_id AND a.is_archived = false",
+        "a.donation_id = t.donation_id AND a.is_archived = false AND a.template_id = :templateId AND a.batch_id IN (:...batchIds)",
+        { templateId: params.templateId, batchIds },
       )
       .where("t.is_archived = false")
-      .andWhere("a.batch_id IN (:...batchIds)", { batchIds })
+      .andWhere("t.template_id = :templateId2", {
+        templateId2: params.templateId,
+      })
+      .andWhere("t.donation_id = :donationId", {
+        donationId: params.donationId,
+      })
       .select(["t.id AS id"])
       .distinct(true)
       .getRawMany<{ id: string }>();
@@ -530,43 +738,55 @@ export class ProgressTrackersService {
 
     await this.trackerStepsRepo.update(stepId, updateData);
 
-    // BATCHING: If the template is batchable and this tracker is part of a batch,
-    // propagate the same step_key status update to all trackers in the same batch(es).
+    // BATCHING: If the template is batchable and this step is batch-scoped,
+    // propagate the same step_key status update to ALL donations occupying the same batch.
     try {
       const templateId = (step as any)?.tracker?.template_id;
       const donationId = (step as any)?.tracker?.donation_id;
       const stepKey = String((step as any)?.step_key || "");
       if (templateId && donationId && stepKey && dto.status !== undefined) {
-        const trackerIds = await this.resolveBatchTrackerIdsForDonation({
-          donationId: Number(donationId),
-          templateId: Number(templateId),
-        });
-        if (trackerIds.length) {
-          // Update only steps still in the same "from" status to avoid breaking transitions for out-of-sync trackers.
+        const stepBatchId = (step as any)?.batch_id;
+        if (
+          stepBatchId != null &&
+          String(stepBatchId).trim() !== "" &&
+          Number.isFinite(Number(stepBatchId))
+        ) {
+          // Update batch-scoped steps across all trackers sharing the same batch_id.
           await this.trackerStepsRepo
             .createQueryBuilder()
             .update()
             .set(updateData)
             .where("is_archived = false")
-            .andWhere("tracker_id IN (:...ids)", { ids: trackerIds })
+            .andWhere("batch_id = :bid", { bid: Number(stepBatchId) })
             .andWhere("step_key = :stepKey", { stepKey })
             .andWhere("status = :fromStatus", { fromStatus: step.status })
             .execute();
 
-          // Recompute overall_status for all affected trackers (including the original).
-          const trackers = await this.trackersRepo.find({
-            where: trackerIds.map(
-              (id) => ({ id, is_archived: false }) as any,
-            ) as any,
-            relations: ["steps"] as any,
-          });
-          for (const tr of trackers || []) {
-            const overall = this.deriveOverallStatus(
-              ((tr as any).steps || []).filter((s: any) => !s.is_archived),
-            );
-            await this.trackersRepo.update((tr as any).id, {
-              overall_status: overall,
-            } as any);
+          // Recompute overall status for affected trackers (best-effort).
+          const trackerRows = await this.trackerStepsRepo
+            .createQueryBuilder("s")
+            .select("DISTINCT s.tracker_id", "tracker_id")
+            .where("s.is_archived = false")
+            .andWhere("s.batch_id = :bid", { bid: Number(stepBatchId) })
+            .getRawMany<{ tracker_id: string }>();
+          const trackerIds = (trackerRows || [])
+            .map((r) => Number(r.tracker_id))
+            .filter((x) => Number.isFinite(x) && x > 0);
+          if (trackerIds.length) {
+            const trackers = await this.trackersRepo.find({
+              where: trackerIds.map(
+                (id) => ({ id, is_archived: false }) as any,
+              ) as any,
+              relations: ["steps"] as any,
+            });
+            for (const tr of trackers || []) {
+              const overall = this.deriveOverallStatus(
+                ((tr as any).steps || []).filter((s: any) => !s.is_archived),
+              );
+              await this.trackersRepo.update((tr as any).id, {
+                overall_status: overall,
+              } as any);
+            }
           }
         }
       }
@@ -649,18 +869,40 @@ export class ProgressTrackersService {
 
     if (template && (template as any).is_batchable && donationId) {
       const allocs = await this.allocationsRepo.find({
-        where: { donation_id: Number(donationId), is_archived: false } as any,
+        where: {
+          donation_id: Number(donationId),
+          template_id: Number(templateId),
+          is_archived: false,
+        } as any,
         select: ["batch_id"] as any,
       });
       const batchIds = Array.from(
         new Set(
           (allocs || [])
             .map((a: any) => Number(a.batch_id))
-            .filter((x) => Number.isFinite(x)),
+            .filter((x) => Number.isFinite(x) && x > 0),
         ),
       );
+
+      const stepBatchId = (step as any).batch_id;
+      if (
+        stepBatchId != null &&
+        Number.isFinite(Number(stepBatchId)) &&
+        batchIds.includes(Number(stepBatchId))
+      ) {
+        // Batch-scoped step: evidence must be shared across ALL donations occupying this batch.
+        const ev = this.batchEvidenceRepo.create({
+          batch_id: Number(stepBatchId),
+          step_key: (step as any).step_key,
+          ...dto,
+          created_by: currentUser?.id === -1 ? null : currentUser,
+          updated_by: currentUser?.id === -1 ? null : currentUser,
+        } as any);
+        const saved = await this.batchEvidenceRepo.save(ev as any);
+        return { created: 1, scope: "batch" } as any;
+      }
+
       if (!batchIds.length) {
-        // Fall back to tracker-scoped evidence if not yet allocated.
         const evidence = this.evidenceRepo.create({
           tracker_step_id: stepId,
           ...dto,

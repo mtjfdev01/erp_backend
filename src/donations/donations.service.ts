@@ -89,6 +89,49 @@ export class DonationsService {
     savedDonation: { id: number },
     user: any,
   ): Promise<void> {
+    if (createDonationDto.project_id === "qurbani-barai-mustehqeen") {
+      const donationItems = (createDonationDto as any).donation_items;
+      if (Array.isArray(donationItems) && donationItems.length > 0) {
+        let groups: Array<{
+          templateId: number;
+          batchParts: number;
+          isBatchable: boolean;
+        }> = [];
+        try {
+          groups = await this.deriveProgressTemplateGroupsFromDonationItems({
+            donationItems,
+          });
+          let createdAny = false;
+          for (const g of groups) {
+            try {
+              await this.progressTrackersService.createTrackerFromTemplate(
+                {
+                  template_id: g.templateId,
+                  donation_id: savedDonation.id,
+                  donor_visible:
+                    createDonationDto.progress_tracker_donor_visible ?? true,
+                  batch_parts_count: g.isBatchable ? g.batchParts : null,
+                },
+                user,
+              );
+              createdAny = true;
+            } catch (e: any) {
+              console.error(
+                `Failed to create Qurbani progress tracker for donation ${savedDonation.id} (template ${g.templateId}):`,
+                e?.message || e,
+              );
+            }
+          }
+          if (createdAny) return;
+        } catch (e: any) {
+          console.error(
+            `Failed to derive Qurbani progress trackers from donation_items:`,
+            e?.message || e,
+          );
+        }
+      }
+    }
+
     const templateId = createDonationDto.progress_workflow_template_id;
     if (templateId == null || templateId === undefined) return;
     const tid = Number(templateId);
@@ -114,32 +157,26 @@ export class DonationsService {
   }
 
   /**
-   * Derive `progress_workflow_template_id` and (optionally) `progress_batch_parts_requested`
-   * from the incoming `donation_items[]` payload.
-   *
-   * IMPORTANT: current progress-tracking data model creates ONE tracker per donation.
-   * If multiple items are present, we choose ONE "primary" workflow template:
-   * - prefer batchable templates
-   * - if multiple match, prefer the highest `quantity`
-   *
-   * This keeps the external payload unchanged while enabling template selection based
-   * on initiative.
+   * Resolve workflow templates from `donation_items[]` for Qurbani: one row per
+   * distinct template, merging quantities when the same template appears on multiple lines.
+   * Prefer explicit `templateCode` / `template_code` on each item when present.
    */
-  private async deriveProgressTemplateFromDonationItems(params: {
+  private async deriveProgressTemplateGroupsFromDonationItems(params: {
     donationItems: any[];
-  }): Promise<{
-    templateId: number;
-    batchPartsRequested?: number;
-  } | null> {
+  }): Promise<
+    Array<{
+      templateId: number;
+      batchParts: number;
+      isBatchable: boolean;
+    }>
+  > {
     if (
       !Array.isArray(params?.donationItems) ||
       params.donationItems.length === 0
     ) {
-      return null;
+      return [];
     }
 
-    // Extend/override this mapping per project if needed.
-    // We try initiativeTitle/subtitle first (matches your "Cow Share"/"Goat"/"Cow" templates).
     const initiativeTitleToTemplateCode: Record<string, string> = {
       "cow share": "cow_share",
       cowshare: "cow_share",
@@ -148,7 +185,6 @@ export class DonationsService {
       goat: "goat",
     };
 
-    // Fallback: if initiativeId ends with "-1" / "-2" / "-3"
     const initiativeIdSuffixToTemplateCode: Record<string, string> = {
       "1": "cow_share",
       "2": "cow",
@@ -160,10 +196,16 @@ export class DonationsService {
         .trim()
         .toLowerCase();
 
-    const candidates: Array<{
-      template: ProgressWorkflowTemplate;
-      quantity: number;
-    }> = [];
+    const normalizeCode = (v: any) => {
+      const s = String(v ?? "").trim();
+      if (!s) return "";
+      return s.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+    };
+
+    const byTemplateId = new Map<
+      number,
+      { template: ProgressWorkflowTemplate; quantity: number }
+    >();
 
     for (const item of params.donationItems) {
       const initiativeId = normalize(item?.initiativeId);
@@ -174,49 +216,63 @@ export class DonationsService {
 
       if (!Number.isFinite(quantity) || quantity <= 0) continue;
 
-      const titleKey = initiativeTitle || initiativeSubtitle;
-      const templateCodeFromTitle = titleKey
-        ? initiativeTitleToTemplateCode[titleKey]
-        : undefined;
+      let templateCode = normalizeCode(item?.templateCode);
+      if (!templateCode) templateCode = normalizeCode(item?.template_code);
 
-      const suffixMatch = initiativeId.match(/-(\d+)$/);
-      const templateCodeFromSuffix = suffixMatch
-        ? initiativeIdSuffixToTemplateCode[String(suffixMatch[1])]
-        : undefined;
+      if (!templateCode) {
+        const titleKey = initiativeTitle || initiativeSubtitle;
+        const templateCodeFromTitle = titleKey
+          ? initiativeTitleToTemplateCode[titleKey]
+          : undefined;
 
-      const templateCode = templateCodeFromTitle || templateCodeFromSuffix;
+        const suffixMatch = initiativeId.match(/-(\d+)$/);
+        const templateCodeFromSuffix = suffixMatch
+          ? initiativeIdSuffixToTemplateCode[String(suffixMatch[1])]
+          : undefined;
+
+        templateCode = templateCodeFromTitle || templateCodeFromSuffix || "";
+      }
+
       if (!templateCode) continue;
 
-      const template = await this.workflowTemplatesRepo.findOne({
+      let template = await this.workflowTemplatesRepo.findOne({
         where: { code: templateCode, is_archived: false } as any,
       });
-      if (!template) continue;
+      if (!template) {
+        template = await this.workflowTemplatesRepo.findOne({
+          where: {
+            code: templateCode.replace(/-/g, "_"),
+            is_archived: false,
+          } as any,
+        });
+      }
+      if (!template?.id) continue;
 
-      candidates.push({ template, quantity: Math.floor(quantity) });
+      const addQty = Math.floor(quantity);
+      const prev = byTemplateId.get(template.id);
+      if (prev) {
+        prev.quantity += addQty;
+      } else {
+        byTemplateId.set(template.id, {
+          template,
+          quantity: addQty,
+        });
+      }
     }
 
-    if (candidates.length === 0) return null;
-
-    const batchableCandidates = candidates.filter(
-      (c) => !!c.template.is_batchable,
-    );
-    const pool =
-      batchableCandidates.length > 0 ? batchableCandidates : candidates;
-
-    const primary = pool.sort((a, b) => b.quantity - a.quantity)[0];
-    if (!primary?.template?.id) return null;
-
-    return {
-      templateId: primary.template.id,
-      batchPartsRequested: primary.template.is_batchable
-        ? primary.quantity
-        : undefined,
-    };
+    return Array.from(byTemplateId.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => ({
+        templateId: v.template.id,
+        batchParts: v.quantity,
+        isBatchable: Boolean((v.template as any).is_batchable),
+      }));
   }
 
   /**
    * Qurbani-only: set `progress_workflow_template_id` (and batch parts when applicable)
-   * from `donation_items[]` or from `template_code` when items are omitted.
+   * from `template_code` when `donation_items` is omitted. When `donation_items` is present,
+   * trackers are created per line / per template in `maybeCreateProgressTrackerForNewDonation`.
    */
   private async applyQurbaniProgressTemplateFromPayload(
     createDonationDto: CreateDonationDto,
@@ -226,23 +282,6 @@ export class DonationsService {
 
     const donationItems = (createDonationDto as any).donation_items;
     if (Array.isArray(donationItems) && donationItems.length > 0) {
-      try {
-        const derived = await this.deriveProgressTemplateFromDonationItems({
-          donationItems,
-        });
-        if (derived?.templateId) {
-          createDonationDto.progress_workflow_template_id = derived.templateId;
-          if (derived.batchPartsRequested != null) {
-            createDonationDto.progress_batch_parts_requested =
-              derived.batchPartsRequested;
-          }
-        }
-      } catch (e: any) {
-        console.error(
-          "Failed to derive progress template from donation_items:",
-          e?.message || e,
-        );
-      }
       return;
     }
 
@@ -299,6 +338,12 @@ export class DonationsService {
       return n;
     }
 
+    if (params.amount === undefined || params.amount === null) {
+      throw new HttpException(
+        "Explicit batch parts count is required when amount is not available for this allocation",
+        400,
+      );
+    }
     const amount = Number(params.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new HttpException(
@@ -325,27 +370,86 @@ export class DonationsService {
     savedDonation: { id: number },
     user: any,
   ): Promise<void> {
-    const templateId = createDonationDto.progress_workflow_template_id;
-    if (templateId == null || templateId === undefined) return;
-    const tid = Number(templateId);
-    if (!Number.isFinite(tid) || tid <= 0) return;
+    try {
+      const trackers =
+        await this.progressTrackersService.findTrackersByDonationId(
+          savedDonation.id,
+        );
 
-    const cfg = await this.progressBatchesService.getBatchingConfig(tid);
-    if (!cfg.is_batchable) return;
+      if (trackers.length > 0) {
+        const multi = trackers.length > 1;
+        for (const tr of trackers) {
+          const tid = Number(tr.template_id);
+          if (!Number.isFinite(tid) || tid <= 0) continue;
+          const cfg = await this.progressBatchesService.getBatchingConfig(tid);
+          if (!cfg.is_batchable) continue;
+          const already =
+            await this.progressBatchesService.hasAllocationsForDonationTemplate(
+              savedDonation.id,
+              tid,
+            );
+          if (already) continue;
+          let partsRequested: number;
+          try {
+            partsRequested = this.derivePartsRequestedForBatchableTemplate({
+              partsRequestedRaw: tr.batch_parts_count,
+              amount: multi ? undefined : createDonationDto.amount,
+              batchPartAmount: Number(cfg.batch_part_amount || 0),
+            });
+          } catch (e: any) {
+            console.error(
+              `TEST batch allocate skipped for donation ${savedDonation.id} template ${tid}:`,
+              e?.message || e,
+            );
+            continue;
+          }
+          await this.progressBatchesService.allocateDonationIntoBatches({
+            template_id: tid,
+            donation_id: savedDonation.id,
+            parts_requested: partsRequested,
+            currentUser: user,
+          });
+          await this.progressTrackersService.syncBatchScopedStepsForDonationTemplate(
+            savedDonation.id,
+            tid,
+            user,
+          );
+        }
+        return;
+      }
 
-    const partsRequested = this.derivePartsRequestedForBatchableTemplate({
-      partsRequestedRaw: (createDonationDto as any)
-        .progress_batch_parts_requested,
-      amount: createDonationDto.amount,
-      batchPartAmount: Number(cfg.batch_part_amount || 0),
-    });
+      const templateId = createDonationDto.progress_workflow_template_id;
+      if (templateId == null || templateId === undefined) return;
+      const tid = Number(templateId);
+      if (!Number.isFinite(tid) || tid <= 0) return;
 
-    await this.progressBatchesService.allocateDonationIntoBatches({
-      template_id: tid,
-      donation_id: savedDonation.id,
-      parts_requested: partsRequested,
-      currentUser: user,
-    });
+      const cfg = await this.progressBatchesService.getBatchingConfig(tid);
+      if (!cfg.is_batchable) return;
+
+      const partsRequested = this.derivePartsRequestedForBatchableTemplate({
+        partsRequestedRaw: (createDonationDto as any)
+          .progress_batch_parts_requested,
+        amount: createDonationDto.amount,
+        batchPartAmount: Number(cfg.batch_part_amount || 0),
+      });
+
+      await this.progressBatchesService.allocateDonationIntoBatches({
+        template_id: tid,
+        donation_id: savedDonation.id,
+        parts_requested: partsRequested,
+        currentUser: user,
+      });
+      await this.progressTrackersService.syncBatchScopedStepsForDonationTemplate(
+        savedDonation.id,
+        tid,
+        user,
+      );
+    } catch (e: any) {
+      console.error(
+        `maybeAllocateDonationIntoBatchesForNewDonation failed for donation ${savedDonation.id}:`,
+        e?.message || e,
+      );
+    }
   }
 
   private async processDonationBatchingAfterPaymentSuccess(params: {
@@ -366,46 +470,75 @@ export class DonationsService {
       return { processed: false, reason: "Donation not completed" };
     }
 
-    let tracker: any = null;
-    try {
-      tracker = await this.progressTrackersService.getTrackerByDonationId(
-        donation.id,
-      );
-    } catch (e) {
+    const trackers =
+      await this.progressTrackersService.findTrackersByDonationId(donation.id);
+    if (trackers.length === 0) {
       return { processed: false, reason: "No progress tracker for donation" };
     }
-    const tid =
-      tracker?.template_id != null ? Number(tracker.template_id) : NaN;
-    if (!Number.isFinite(tid) || tid <= 0) {
-      return { processed: false, reason: "Tracker has no template" };
+
+    const multi = trackers.length > 1;
+    let allocationsCreated = 0;
+
+    for (const tracker of trackers) {
+      const tid =
+        tracker?.template_id != null ? Number(tracker.template_id) : NaN;
+      if (!Number.isFinite(tid) || tid <= 0) continue;
+
+      let cfg: { is_batchable: boolean; batch_parts: number | null; batch_part_amount: number | null };
+      try {
+        cfg = await this.progressBatchesService.getBatchingConfig(tid);
+      } catch {
+        continue;
+      }
+      if (!cfg.is_batchable) continue;
+
+      const alreadyForTemplate =
+        await this.progressBatchesService.hasAllocationsForDonationTemplate(
+          donation.id,
+          tid,
+        );
+      if (alreadyForTemplate) continue;
+
+      let partsRequested: number;
+      try {
+        partsRequested = this.derivePartsRequestedForBatchableTemplate({
+          partsRequestedRaw: tracker?.batch_parts_count ?? null,
+          amount: multi ? undefined : donation.amount,
+          batchPartAmount: Number(cfg.batch_part_amount || 0),
+        });
+      } catch (e: any) {
+        console.error(
+          `Payment batch allocate skipped for donation ${donation.id} template ${tid}:`,
+          e?.message || e,
+        );
+        continue;
+      }
+
+      const allocations =
+        await this.progressBatchesService.allocateDonationIntoBatches({
+          template_id: tid,
+          donation_id: donation.id,
+          parts_requested: partsRequested,
+          currentUser: params.currentUser,
+        });
+      allocationsCreated += allocations.length;
+      await this.progressTrackersService.syncBatchScopedStepsForDonationTemplate(
+        donation.id,
+        tid,
+        params.currentUser,
+      );
     }
 
-    const cfg = await this.progressBatchesService.getBatchingConfig(tid);
-    if (!cfg.is_batchable) {
-      return { processed: false, reason: "Template is not batchable" };
+    if (allocationsCreated === 0) {
+      return {
+        processed: false,
+        reason: multi
+          ? "No new batch allocations for any tracker"
+          : "No batch allocation created",
+      };
     }
 
-    const alreadyAllocated =
-      await this.progressBatchesService.hasAllocationsForDonation(donation.id);
-    if (alreadyAllocated) {
-      return { processed: false, reason: "Already allocated" };
-    }
-
-    const partsRequested = this.derivePartsRequestedForBatchableTemplate({
-      partsRequestedRaw: tracker?.batch_parts_count ?? null,
-      amount: donation.amount,
-      batchPartAmount: Number(cfg.batch_part_amount || 0),
-    });
-
-    const allocations =
-      await this.progressBatchesService.allocateDonationIntoBatches({
-        template_id: tid,
-        donation_id: donation.id,
-        parts_requested: partsRequested,
-        currentUser: params.currentUser,
-      });
-
-    return { processed: true, allocationsCreated: allocations.length };
+    return { processed: true, allocationsCreated };
   }
 
   async processBatchingForDonationManual(donationId: number, user: any) {
@@ -1467,14 +1600,14 @@ export class DonationsService {
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
 
-        // TEST MODE: allow batching allocations on creation even if pending.
-        await this.maybeAllocateDonationIntoBatchesForNewDonation(
+        await this.maybeCreateProgressTrackerForNewDonation(
           createDonationDto,
           savedDonation,
           user,
         );
 
-        await this.maybeCreateProgressTrackerForNewDonation(
+        // TEST MODE: allow batching allocations on creation even if pending.
+        await this.maybeAllocateDonationIntoBatchesForNewDonation(
           createDonationDto,
           savedDonation,
           user,
