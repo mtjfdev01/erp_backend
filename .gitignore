@@ -3,6 +3,7 @@
 /node_modules
 /build
 src/app.module.ts
+erp_backend\src\seeders\seeders.module.ts
 
 
 # Logs

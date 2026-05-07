@@ -21,12 +21,12 @@ import { Route } from "../dms/geographic/routes/entities/route.entity";
       isGlobal: true, // Makes ConfigService available globally
     }),
     TypeOrmModule.forRoot({
-      type: "postgres",
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT),
-      username: process.env.DB_USERNAME,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
+      // type: "postgres",
+      // host: process.env.DB_HOST,
+      // port: parseInt(process.env.DB_PORT),
+      // username: process.env.DB_USERNAME,
+      // password: process.env.DB_PASSWORD,
+      // database: process.env.DB_NAME,
       // Explicitly register ONLY the entities needed for seeding
       // This avoids cascading entity metadata issues
       entities: [

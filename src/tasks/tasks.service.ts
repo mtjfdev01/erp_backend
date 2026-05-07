@@ -740,7 +740,16 @@ export class TasksService {
   async getDashboardStats(filters: any, currentUser?: User) {
     try {
       const qb = this.taskRepo.createQueryBuilder("task");
-      await this.applyRoleFilters(qb, currentUser);
+      
+      // For dashboard stats, show all tasks to Super Admin/Admin
+      const isSuperAdminOrAdmin = 
+        currentUser && 
+        (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
+      
+      // Only apply role filters if user is not admin/super admin
+      if (!isSuperAdminOrAdmin) {
+        await this.applyRoleFilters(qb, currentUser);
+      }
 
       if (filters.start_date) {
         qb.andWhere("task.created_at >= :start_date", {
@@ -816,24 +825,68 @@ export class TasksService {
         .groupBy("task.priority")
         .getRawMany();
 
-      const departmentBreakdown = await qb
-        .clone()
-        .select("task.department", "department")
-        .addSelect("COUNT(task.id)", "count")
-        .groupBy("task.department")
-        .getRawMany();
+      // Get all tasks first to process assignee departments
+      const allTasks = await qb.clone().getMany();
+      
+      // Aggregate department breakdown by assignees
+      const deptCountMap: Record<string, number> = {};
+      const deptStatusMap: Record<string, Record<string, { count: number; tasks: any[] }>> = {};
+      
+      // Initialize department maps
+      Object.values(Department).forEach((dept) => {
+        deptCountMap[dept] = 0;
+        deptStatusMap[dept] = {};
+      });
+      
+      // Process each task
+      for (const task of allTasks) {
+        const taskAssigneeDepartments = new Set<string>();
+        
+        // Get unique departments from assigned_users_meta
+        if (Array.isArray(task.assigned_users_meta) && task.assigned_users_meta.length > 0) {
+          task.assigned_users_meta.forEach((meta) => {
+            if (meta.department) {
+              taskAssigneeDepartments.add(meta.department.toLowerCase());
+            }
+          });
+        }
+        
+        // If no assignees, use task.department as fallback
+        if (taskAssigneeDepartments.size === 0 && task.department) {
+          taskAssigneeDepartments.add(task.department.toLowerCase());
+        }
+        
+        // Count task for each relevant department
+        taskAssigneeDepartments.forEach((dept) => {
+          // Increment count
+          deptCountMap[dept] = (deptCountMap[dept] || 0) + 1;
+          
+          // Update status breakdown
+          const status = task.status || "open";
+          if (!deptStatusMap[dept][status]) {
+            deptStatusMap[dept][status] = { count: 0, tasks: [] };
+          }
+          deptStatusMap[dept][status].count++;
+          deptStatusMap[dept][status].tasks.push({
+            id: task.id,
+            title: task.title,
+          });
+        });
+      }
 
-      const departmentStatusBreakdown = await qb
-        .clone()
-        .select("task.department", "department")
-        .addSelect("task.status", "status")
-        .addSelect(
-          "json_agg(json_build_object('id', task.id, 'title', task.title))",
-          "tasks",
-        )
-        .groupBy("task.department")
-        .addGroupBy("task.status")
-        .getRawMany();
+      // Build department breakdown, only including departments with tasks
+      const departmentBreakdown = Object.values(Department)
+        .map((dept) => ({
+          department: dept,
+          count: deptCountMap[dept] || 0,
+        }))
+        .filter((item) => item.count > 0);
+
+      // Build department_status_breakdown including ALL departments from enum
+      const departmentStatusBreakdown: Record<string, any> = {};
+      Object.values(Department).forEach((dept) => {
+        departmentStatusBreakdown[dept] = deptStatusMap[dept] || {};
+      });
 
       const overdueTasks = await qb
         .clone()
@@ -872,23 +925,13 @@ export class TasksService {
           (acc, item) => ({ ...acc, [item.priority]: +item.count }),
           {},
         ),
+        // departmentBreakdown is already { dept: count } object from our map, so convert array to object
         department_breakdown: departmentBreakdown.reduce(
           (acc, item) => ({ ...acc, [item.department]: +item.count }),
           {},
         ),
-        department_status_breakdown: departmentStatusBreakdown.reduce(
-          (acc, item) => {
-            if (!acc[item.department]) {
-              acc[item.department] = {};
-            }
-            acc[item.department][item.status] = {
-              count: item.tasks.length,
-              tasks: item.tasks,
-            };
-            return acc;
-          },
-          {},
-        ),
+        // departmentStatusBreakdown is already an object, no need to reduce!
+        department_status_breakdown: departmentStatusBreakdown,
         overdue_tasks: overdueTasks,
         completion_rate: parseFloat(completionRate as string),
       };
@@ -904,7 +947,14 @@ export class TasksService {
           ? "task.completed_date"
           : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
-      await this.applyRoleFilters(qb, currentUser);
+      
+      const isSuperAdminOrAdmin = 
+        currentUser && 
+        (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
+      
+      if (!isSuperAdminOrAdmin) {
+        await this.applyRoleFilters(qb, currentUser);
+      }
 
       if (query.start_date) {
         qb.andWhere(`${dateField} >= :start_date`, {
@@ -966,6 +1016,7 @@ export class TasksService {
         string,
         {
           label: string;
+          name: string; // Added name property
           count: number;
           statuses: Record<string, number>;
           tasks: any[];
@@ -982,8 +1033,7 @@ export class TasksService {
       let totalDays = 0;
       let completedCount = 0;
 
-      // Pre-fetch user names to avoid multiple queries or complex joins if preferred,
-      // but let's just collect all unique user IDs first.
+      // Collect all user IDs from tasks
       const allUserIds = new Set<number>();
       for (const t of tasks) {
         if (Array.isArray(t.assigned_user_ids)) {
@@ -991,43 +1041,31 @@ export class TasksService {
         }
       }
 
+      // Fetch users with role-based filtering
       const usersListQuery = this.userRepo
         .createQueryBuilder("user")
         .where("(user.isActive = true OR user.isActive IS NULL)");
 
       if (query.department) {
         const lowerDept = String(query.department).toLowerCase();
-        usersListQuery.andWhere(
-          new Brackets((bqb) => {
-            bqb.where("user.department = :dept", { dept: lowerDept });
-            if (allUserIds.size > 0) {
-              bqb.orWhere("user.id IN (:...ids)", {
-                ids: Array.from(allUserIds),
-              });
-            }
-          }),
-        );
-      } else if (allUserIds.size > 0) {
-        usersListQuery.andWhere("user.id IN (:...ids)", {
-          ids: Array.from(allUserIds),
-        });
-      } else if (
-        currentUser &&
-        currentUser.role !== UserRole.SUPER_ADMIN &&
-        currentUser.role !== UserRole.ADMIN
-      ) {
-        if (currentUser.department) {
-          usersListQuery.andWhere(
-            "LOWER(user.department::text) = LOWER(:dept)",
-            { dept: currentUser.department },
-          );
-        } else {
-          usersListQuery.andWhere("user.id = :id", { id: currentUser.id });
+        usersListQuery.andWhere("user.department = :dept", { dept: lowerDept });
+      } else if (currentUser && !isSuperAdminOrAdmin) {
+        // If not super admin/admin, restrict to users in the same role scope
+        const reportScope = await this.getTaskScope(currentUser);
+        if (reportScope === "department" && currentUser.department) {
+          usersListQuery.andWhere("user.department = :dept", { 
+            dept: currentUser.department.toLowerCase() 
+          });
+        } else if (reportScope === "self") {
+          // Only include the current user
+          usersListQuery.andWhere("user.id = :userId", { userId: currentUser.id });
         }
+        // For team/org scope, we'll let it include more users but still apply task-level filtering
       }
 
       const usersList = await usersListQuery.getMany();
 
+      // Build user names map
       const userNamesMap = new Map<
         number,
         { name: string; role: string; id: number }
@@ -1040,7 +1078,7 @@ export class TasksService {
         userNamesMap.set(Number(u.id), { name, role: u.role, id: u.id });
       });
 
-      // Initialize userCountsMap with all fetched users to show 0-task users as well
+      // Initialize userCountsMap only with users in usersList
       usersList.forEach((u) => {
         const userId = Number(u.id);
         const name =
@@ -1049,6 +1087,7 @@ export class TasksService {
           `User #${u.id}`;
         userCountsMap[userId] = {
           label: name,
+          name: name, // Explicit name field
           role: u.role,
           count: 0,
           statuses: {},
@@ -1079,50 +1118,37 @@ export class TasksService {
         ) {
           for (const uid of t.assigned_user_ids) {
             const userId = Number(uid);
-            if (!userCountsMap[userId]) {
-              const userMeta = userNamesMap.get(userId) || {
-                name: `User #${userId}`,
-                role: "Staff",
-              };
-              userCountsMap[userId] = {
-                label: userMeta.name,
-                role: userMeta.role,
-                count: 0,
-                statuses: {},
-                tasks: [],
-                in_progress_count: 0,
-                completed_count: 0,
-                overdue_count: 0,
-              };
-            }
-            userCountsMap[userId].count++;
+            // Only include users that are in our filtered usersList
+            if (userCountsMap[userId]) {
+              userCountsMap[userId].count++;
 
-            // Track status breakdown
-            const status = t.status || "open";
-            userCountsMap[userId].statuses[status] =
-              (userCountsMap[userId].statuses[status] || 0) + 1;
+              // Track status breakdown
+              const status = t.status || "open";
+              userCountsMap[userId].statuses[status] =
+                (userCountsMap[userId].statuses[status] || 0) + 1;
 
-            // Store task details for tooltip
-            const projectName = t.project_name || null;
-            userCountsMap[userId].tasks.push({
-              title: t.title,
-              status: t.status,
-              project: projectName,
-              department: t.department,
-            });
+              // Store task details for tooltip
+              const projectName = t.project_name || null;
+              userCountsMap[userId].tasks.push({
+                title: t.title,
+                status: t.status,
+                project: projectName,
+                department: t.department,
+              });
 
-            if (t.status === TaskStatus.IN_PROGRESS) {
-              userCountsMap[userId].in_progress_count++;
-            }
-            if (
-              t.status === TaskStatus.CLOSED ||
-              t.status === TaskStatus.COMPLETED ||
-              t.status === TaskStatus.APPROVED
-            ) {
-              userCountsMap[userId].completed_count++;
-            }
-            if (isOverdue) {
-              userCountsMap[userId].overdue_count++;
+              if (t.status === TaskStatus.IN_PROGRESS) {
+                userCountsMap[userId].in_progress_count++;
+              }
+              if (
+                t.status === TaskStatus.CLOSED ||
+                t.status === TaskStatus.COMPLETED ||
+                t.status === TaskStatus.APPROVED
+              ) {
+                userCountsMap[userId].completed_count++;
+              }
+              if (isOverdue) {
+                userCountsMap[userId].overdue_count++;
+              }
             }
           }
         } else {
@@ -1130,6 +1156,7 @@ export class TasksService {
           if (!userCountsMap[label]) {
             userCountsMap[label] = {
               label: "Unassigned",
+              name: "Unassigned",
               count: 0,
               statuses: {},
               tasks: [],
@@ -1224,6 +1251,7 @@ export class TasksService {
         .map(([id, item]: [string, any]) => ({
           id: isNaN(Number(id)) ? null : Number(id),
           label: item.label,
+          name: item.label, // Add name field as well for compatibility
           count: item.count,
           statuses: item.statuses,
           tasks: item.tasks.slice(0, 100), // Limit to 100 tasks for performance
