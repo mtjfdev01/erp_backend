@@ -89,7 +89,7 @@ export class DonationsService {
     savedDonation: { id: number },
     user: any,
   ): Promise<void> {
-    if (createDonationDto.project_id === "qurbani-barai-mustehqeen") {
+    if (createDonationDto.project_id === "qurbani-baraye-mustehqeen") {
       const donationItems = (createDonationDto as any).donation_items;
       if (Array.isArray(donationItems) && donationItems.length > 0) {
         let groups: Array<{
