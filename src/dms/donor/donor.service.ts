@@ -35,6 +35,8 @@ interface PaginationOptions {
   is_active?: boolean;
   start_date?: string;
   end_date?: string;
+  /** Narrow list to website (online) vs non-website (offline) donors */
+  source?: "online" | "offline";
 }
 
 @Injectable()
@@ -225,6 +227,7 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
+        source,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -277,6 +280,17 @@ export class DonorService {
           queryBuilder.andWhere("donor.source = 'website'");
         }
         // If both true, no source filter needed
+      }
+
+      // Optional list filter: narrow by online (website) vs offline (non-website) donors
+      if (source === "online") {
+        queryBuilder.andWhere("donor.source = :websiteSource", {
+          websiteSource: "website",
+        });
+      } else if (source === "offline") {
+        queryBuilder.andWhere("COALESCE(donor.source, '') != :websiteSource", {
+          websiteSource: "website",
+        });
       }
 
       // Geographic filter — restrict donors to user's assigned city names

@@ -62,6 +62,12 @@ export class DonorController {
     );
     if (hasFundRaisingManager) return;
 
+    const hasUnifiedDonors = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.donors.${action}`,
+    );
+    if (hasUnifiedDonors) return;
+
     const submodule = this.isOnlineDonor(donorSource)
       ? "online_donors"
       : "offline_donors";
@@ -98,6 +104,12 @@ export class DonorController {
       "fund_raising_manager",
     );
     if (hasFundRaisingManager) return { online: true, offline: true };
+
+    const hasUnifiedDonors = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.donors.${action}`,
+    );
+    if (hasUnifiedDonors) return { online: true, offline: true };
 
     const hasOnline = await this.permissionsService.hasPermission(
       userId,
@@ -184,6 +196,7 @@ export class DonorController {
     @Query("start_date") start_date?: string,
     @Query("end_date") end_date?: string,
     @Query("multi_time_donors") multi_time_donor?: string,
+    @Query("source") source?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -202,6 +215,29 @@ export class DonorController {
             pagination: null,
           });
         }
+      }
+
+      const donorSourceFilter = source?.toLowerCase().trim();
+      const requestedSource =
+        donorSourceFilter === "online" || donorSourceFilter === "offline"
+          ? donorSourceFilter
+          : undefined;
+
+      if (requestedSource === "online" && !sourceAccess.online) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: "Insufficient permissions to filter online donors",
+          data: [],
+          pagination: null,
+        });
+      }
+      if (requestedSource === "offline" && !sourceAccess.offline) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: "Insufficient permissions to filter offline donors",
+          data: [],
+          pagination: null,
+        });
       }
 
       // Resolve user's geographic assignments to city name strings
@@ -231,6 +267,7 @@ export class DonorController {
           multi_time_donor: multi_time_donor
             ? multi_time_donor === "true"
             : undefined,
+          source: requestedSource,
         },
         assignedCityNames,
         sourceAccess,
