@@ -172,6 +172,9 @@ export class Task {
   @Column({ type: "int", default: 0 })
   progress: number;
 
+  @Column({ type: "boolean", default: false })
+  overdue_email_sent: boolean;
+
   @Column({ type: "text", nullable: true })
   last_progress_notes: string;
 
