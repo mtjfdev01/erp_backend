@@ -541,7 +541,7 @@ export class TasksService {
         payload?.pageSize ||
         10
       );
-      const sortField = payload?.sortField || "created_at";
+      const sortField = payload?.sortField || "updated_at";
       const sortOrder = payload?.sortOrder || "DESC";
 
       const qb = this.taskRepo.createQueryBuilder("task");
@@ -572,6 +572,7 @@ export class TasksService {
         delete safeFilters.view_type;
       }
 
+      const strictDepartment = safeFilters.strictDepartment;
       delete safeFilters.strictDepartment;
 
       const startDate = safeFilters.start_date;
@@ -683,25 +684,33 @@ export class TasksService {
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
-        // This checks if any of the assigned users belong to the filtered department.
         qb.andWhere(
-          new Brackets((dqb) => {
-            dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
-              deptMeta: JSON.stringify([{ department: lowerDept }]),
-            });
-
-            // Optionally, if there are no assigned users, you might still want to see tasks
-            // that are explicitly labeled with that department (the current behavior).
-            // But according to the user request, they want it based on the assignee's department.
-            // To be safe and comprehensive, we can keep the direct department check as well
-            // OR remove it if they ONLY want assignee-based filtering.
-            // The request says: "It should filter tasks based on the assignee’s department,
-            // but it is currently filtering by the task creator’s department."
-            // Note: task.department is usually set at creation time.
-
-            dqb.orWhere("task.department = :department", {
-              department: lowerDept,
-            });
+          new Brackets((deptQb) => {
+            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
+            if (currentUser) {
+              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
+                userId: currentUser.id,
+              });
+              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
+                userId: currentUser.id,
+              });
+              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
+              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
+            }
+            
+            // Then apply the department filter
+            if (strictDepartment === true || strictDepartment === "true") {
+              deptQb.orWhere("task.department = :filterDept", {
+                filterDept: lowerDept,
+              });
+            } else {
+              deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
+                deptMeta: JSON.stringify([{ department: lowerDept }]),
+              });
+              deptQb.orWhere("task.department = :department", {
+                department: lowerDept,
+              });
+            }
           }),
         );
       }
@@ -713,8 +722,9 @@ export class TasksService {
         "department",
         "due_date",
         "created_at",
+        "updated_at",
       ];
-      const sortName = validSort.includes(sortField) ? sortField : "created_at";
+      const sortName = validSort.includes(sortField) ? sortField : "updated_at";
       qb.orderBy(`task.${sortName}`, sortOrder as "ASC" | "DESC");
 
       const skip = (page - 1) * pageSize;
