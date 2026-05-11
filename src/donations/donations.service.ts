@@ -2096,19 +2096,18 @@ export class DonationsService {
     const qb = this.donationRepository
       .createQueryBuilder("donation")
       .leftJoinAndSelect("donation.donor", "donor")
-      .leftJoinAndMapOne(
-        "donation.progress_tracker",
-        ProgressTracker,
-        "progress_tracker",
-        "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
-      )
       .where("donation.id = :id", { id });
 
     const donation = await qb.getOne();
     if (!donation) {
       throw new NotFoundException(`Donation with ID ${id} not found`);
     }
-    return donation as any;
+
+    const trackers =
+      await this.progressTrackersService.getAllTrackersByDonationId(id);
+    const d = donation as any;
+    d.progress_trackers = trackers;
+    return d;
   }
 
   // Get all in-kind items for a specific donation

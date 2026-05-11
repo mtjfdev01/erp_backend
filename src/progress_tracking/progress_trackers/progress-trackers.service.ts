@@ -481,13 +481,30 @@ export class ProgressTrackersService {
     }));
   }
 
-  async getTrackerByDonationId(donationId: number) {
-    const tracker = await this.trackersRepo.findOne({
+  /**
+   * All active trackers for a donation (one per workflow template is typical).
+   * Each entry is the same shape as getTrackerDetail (steps, template, batch evidence, etc.).
+   */
+  async getAllTrackersByDonationId(donationId: number): Promise<ProgressTracker[]> {
+    const rows = await this.trackersRepo.find({
       where: { donation_id: donationId, is_archived: false },
       order: { id: "ASC" },
+      select: ["id"] as any,
     });
-    if (!tracker) throw new NotFoundException("Tracker not found for donation");
-    return this.getTrackerDetail(tracker.id);
+    const out: ProgressTracker[] = [];
+    for (const r of rows || []) {
+      const tid = Number((r as any)?.id);
+      if (!Number.isFinite(tid) || tid <= 0) continue;
+      out.push(await this.getTrackerDetail(tid));
+    }
+    return out;
+  }
+
+  /** @deprecated Prefer getAllTrackersByDonationId — kept for callers that expect a single tracker. */
+  async getTrackerByDonationId(donationId: number) {
+    const all = await this.getAllTrackersByDonationId(donationId);
+    if (!all.length) throw new NotFoundException("Tracker not found for donation");
+    return all[0];
   }
 
   async updateTracker(
