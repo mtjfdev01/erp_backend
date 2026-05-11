@@ -116,22 +116,9 @@ export class ProgressTrackersController {
       .json({ success: true, message: "Trackers retrieved", ...data });
   }
 
-  @Get(":id")
-  @UseGuards(JwtGuard, PermissionsGuard)
-  @RequiredPermissions([
-    "fund_raising.donations.view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
-  async detail(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.service.getTrackerDetail(+id);
-    return res
-      .status(HttpStatus.OK)
-      .json({ success: true, message: "Tracker retrieved", data });
-  }
-
+  /** Must be registered before @Get(":id") so "by-donation" is not captured as an id. */
   @Get("by-donation/:donationId")
+  @UseGuards(JwtGuard, PermissionsGuard)
   @RequiredPermissions([
     "fund_raising.donations.view",
     "super_admin",
@@ -142,7 +129,26 @@ export class ProgressTrackersController {
     @Param("donationId") donationId: string,
     @Res() res: Response,
   ) {
-    const data = await this.service.getTrackerByDonationId(+donationId);
+    const trackers = await this.service.getAllTrackersByDonationId(+donationId);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: trackers.length
+        ? "Trackers retrieved"
+        : "No trackers for this donation",
+      data: { trackers },
+    });
+  }
+
+  @Get(":id")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "fund_raising.donations.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async detail(@Param("id") id: string, @Res() res: Response) {
+    const data = await this.service.getTrackerDetail(+id);
     return res
       .status(HttpStatus.OK)
       .json({ success: true, message: "Tracker retrieved", data });
