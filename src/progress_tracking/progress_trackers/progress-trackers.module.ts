@@ -17,6 +17,7 @@ import { ProgressNotificationsModule } from "../progress_notifications/progress-
 import { ProgressBatchStepEvidence } from "../progress_batches/progress_batch_step_evidence.entity";
 import { ProgressWorkflowBatch } from "../progress_batches/progress_workflow_batch.entity";
 import { DonationBatchAllocation } from "../progress_batches/donation_batch_allocation.entity";
+import { ProgressBatchesModule } from "../progress_batches/progress-batches.module";
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { DonationBatchAllocation } from "../progress_batches/donation_batch_allo
     }),
     PermissionsModule,
     ProgressNotificationsModule,
+    ProgressBatchesModule,
   ],
   controllers: [ProgressTrackersController, ProgressPublicController],
   providers: [ProgressTrackersService],

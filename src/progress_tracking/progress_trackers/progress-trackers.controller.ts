@@ -29,6 +29,7 @@ import { CreateTrackerDto } from "./dto/create-tracker.dto";
 import { UpdateTrackerDto } from "./dto/update-tracker.dto";
 import { UpdateTrackerStepStatusDto } from "./dto/update-tracker-step-status.dto";
 import { AddEvidenceDto } from "./dto/add-evidence.dto";
+import { AllocateTrackerPartsDto } from "./dto/allocate-tracker-parts.dto";
 
 @Controller("progress/trackers")
 export class ProgressTrackersController {
@@ -189,6 +190,29 @@ export class ProgressTrackersController {
     return res
       .status(HttpStatus.OK)
       .json({ success: true, message: "Token generated", data });
+  }
+
+  @Post(":id/allocate-parts")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "fund_raising.donations.update",
+    "super_admin",
+    "fund_raising_manager",
+  ])
+  async allocateParts(
+    @Param("id") id: string,
+    @Body() dto: AllocateTrackerPartsDto,
+    @Res() res: Response,
+    @CurrentUser() user: any,
+  ) {
+    const data = await this.service.allocateMoreParts(
+      Number(id),
+      Number(dto?.parts_requested || 0),
+      user,
+    );
+    return res
+      .status(HttpStatus.OK)
+      .json({ success: true, message: "Parts allocated", data });
   }
 
   @Get(":id/steps")

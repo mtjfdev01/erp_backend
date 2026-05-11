@@ -19,7 +19,7 @@ type DonorPortalTrackerPayload = {
     notes: string | null;
     completed_at: Date | null;
     batch_id: number | null;
-    batch: { id: number; batch_number: number } | null;
+    batch: { id: number; batch_number: number; tag_number: string | null } | null;
     evidence: any[];
   }>;
 };
@@ -100,6 +100,11 @@ export class DonorPortalDonationsService {
             ? {
                 id: s.batch.id,
                 batch_number: s.batch.batch_number,
+                tag_number:
+                  s.batch.tag_number != null &&
+                  String(s.batch.tag_number).trim() !== ""
+                    ? String(s.batch.tag_number).trim()
+                    : null,
               }
             : null,
           evidence: (s.evidence || []).filter(
