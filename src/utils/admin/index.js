@@ -9,5 +9,6 @@ export const departments = [
   "marketing",
   "audio_video",
   "fund_raising",
-  "meal"
+  "meal",
+  "health"
 ];

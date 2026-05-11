@@ -1548,6 +1548,13 @@ export class TasksService {
         }
       }
 
+      const oldDueDate = task.due_date ? new Date(task.due_date).getTime() : null;
+      const newDueDate = dto.due_date ? new Date(dto.due_date).getTime() : oldDueDate;
+
+      if (newDueDate !== oldDueDate) {
+        task.overdue_email_sent = false;
+      }
+
       const oldProgress = task.progress;
       Object.assign(task, {
         title: dto.title ?? task.title,
@@ -2382,6 +2389,7 @@ export class TasksService {
         .createQueryBuilder("task")
         .where("task.due_date IS NOT NULL")
         .andWhere("task.due_date < CURRENT_DATE")
+        .andWhere("task.overdue_email_sent = :sent", { sent: false })
         .andWhere(`task.status NOT IN (:...statuses)`, {
           statuses: [
             TaskStatus.COMPLETED,
@@ -2394,14 +2402,19 @@ export class TasksService {
         const escalationLevel = 1;
         const adminEmail =
           process.env.NOTIFICATION_EMAIL || "dev@mtjfoundation.org";
-        await this.emailService.sendTaskOverdueNotification(
+        const success = await this.emailService.sendTaskOverdueNotification(
           adminEmail,
           t,
           escalationLevel,
         );
-        await this.logActivity(t, null as any, "overdue_escalated", {
-          escalation_level: escalationLevel,
-        });
+        if (success) {
+          t.overdue_email_sent = true;
+          await this.taskRepo.save(t);
+          await this.logActivity(t, null as any, "overdue_escalated", {
+            escalation_level: escalationLevel,
+            notes: "Initial overdue notification sent. Duplicate daily emails suppressed.",
+          });
+        }
       }
       return tasks.length;
     } catch (e) {
