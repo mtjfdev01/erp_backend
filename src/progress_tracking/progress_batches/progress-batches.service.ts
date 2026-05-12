@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { DataSource, Repository } from "typeorm";
+import { DataSource, Not, Repository } from "typeorm";
 import { ProgressWorkflowTemplate } from "../progress_workflow_templates/progress_workflow_template.entity";
 import { ProgressWorkflowBatch } from "./progress_workflow_batch.entity";
 import { DonationBatchAllocation } from "./donation_batch_allocation.entity";
@@ -72,6 +72,8 @@ export class ProgressBatchesService {
       is_closed: boolean;
       allocated_parts: number;
       batch_parts: number;
+      tag_number: string | null;
+      tag_name: string | null;
     }>
   > {
     const take = Math.min(Number(params.limit || 200) || 200, 500);
@@ -97,6 +99,8 @@ export class ProgressBatchesService {
         "b.is_closed AS is_closed",
         "b.allocated_parts AS allocated_parts",
         "b.batch_parts AS batch_parts",
+        "b.tag_number AS tag_number",
+        "b.tag_name AS tag_name",
       ])
       .where("b.is_archived = false");
 
@@ -107,7 +111,10 @@ export class ProgressBatchesService {
         if (Number.isFinite(n)) {
           qb.andWhere("b.batch_number = :bn", { bn: n });
         } else {
-          qb.andWhere("CAST(b.batch_number AS text) ILIKE :q", { q: `%${q}%` });
+          qb.andWhere(
+            "(CAST(b.batch_number AS text) ILIKE :q OR COALESCE(b.tag_number,'') ILIKE :q OR COALESCE(b.tag_name,'') ILIKE :q)",
+            { q: `%${q}%` },
+          );
         }
       }
     }
@@ -144,7 +151,97 @@ export class ProgressBatchesService {
       is_closed: Boolean(r.is_closed),
       allocated_parts: Number(r.allocated_parts),
       batch_parts: Number(r.batch_parts),
+      tag_number:
+        r.tag_number != null && String(r.tag_number).trim() !== ""
+          ? String(r.tag_number).trim()
+          : null,
+      tag_name:
+        r.tag_name != null && String(r.tag_name).trim() !== ""
+          ? String(r.tag_name).trim()
+          : null,
     }));
+  }
+
+  private normalizeNullableString(v: unknown): string | null {
+    if (v == null) return null;
+    const s = String(v).trim();
+    return s === "" ? null : s;
+  }
+
+  async updateWorkflowBatch(
+    batchId: number,
+    dto: { tag_number?: string | null; tag_name?: string | null },
+    currentUser?: any,
+  ): Promise<ProgressWorkflowBatch> {
+    const id = Number(batchId);
+    if (!Number.isFinite(id) || id <= 0) {
+      throw new BadRequestException("Invalid batch id");
+    }
+
+    if (dto.tag_number === undefined && dto.tag_name === undefined) {
+      throw new BadRequestException(
+        "Provide at least one of tag_number or tag_name",
+      );
+    }
+
+    const batch = await this.batchesRepo.findOne({
+      where: { id, is_archived: false } as any,
+    });
+    if (!batch) throw new NotFoundException("Batch not found");
+
+    const tagNumber =
+      dto.tag_number !== undefined
+        ? this.normalizeNullableString(dto.tag_number)
+        : undefined;
+    const tagName =
+      dto.tag_name !== undefined
+        ? this.normalizeNullableString(dto.tag_name)
+        : undefined;
+
+    if (tagNumber !== undefined && tagNumber != null) {
+      const dup = await this.batchesRepo.findOne({
+        where: {
+          template_id: batch.template_id,
+          tag_number: tagNumber,
+          id: Not(id),
+          is_archived: false,
+        } as any,
+      });
+      if (dup) {
+        throw new ConflictException(
+          "Another batch in this template already uses this tag_number",
+        );
+      }
+    }
+
+    if (tagName !== undefined && tagName != null) {
+      const dupName = await this.batchesRepo.findOne({
+        where: {
+          template_id: batch.template_id,
+          tag_name: tagName,
+          id: Not(id),
+          is_archived: false,
+        } as any,
+      });
+      if (dupName) {
+        throw new ConflictException(
+          "Another batch in this template already uses this tag_name",
+        );
+      }
+    }
+
+    const patch: Record<string, unknown> = {
+      updated_by: currentUser?.id === -1 ? null : currentUser,
+    };
+    if (tagNumber !== undefined) patch.tag_number = tagNumber;
+    if (tagName !== undefined) patch.tag_name = tagName;
+
+    await this.batchesRepo.update(id, patch as any);
+    const updated = await this.batchesRepo.findOne({
+      where: { id, is_archived: false } as any,
+    });
+    if (!updated) throw new NotFoundException("Batch not found");
+    return updated;
   }
 
   async allocateDonationIntoBatches(params: {

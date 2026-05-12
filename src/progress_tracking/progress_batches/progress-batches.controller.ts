@@ -1,7 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   HttpStatus,
+  Param,
+  Patch,
   Query,
   Res,
   UseGuards,
@@ -10,7 +13,9 @@ import { Response } from "express";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
 import { RequiredPermissions } from "src/permissions";
+import { CurrentUser } from "src/auth/current-user.decorator";
 import { ProgressBatchesService } from "./progress-batches.service";
+import { UpdateWorkflowBatchDto } from "./dto/update-workflow-batch.dto";
 
 @Controller("progress/batches")
 @UseGuards(JwtGuard, PermissionsGuard)
@@ -45,6 +50,26 @@ export class ProgressBatchesController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Batches retrieved",
+      data,
+    });
+  }
+
+  @Patch(":id")
+  @RequiredPermissions([
+    "fund_raising.donations.update",
+    "super_admin",
+    "fund_raising_manager",
+  ])
+  async updateBatch(
+    @Param("id") id: string,
+    @Body() dto: UpdateWorkflowBatchDto,
+    @Res() res: Response,
+    @CurrentUser() user: any,
+  ) {
+    const data = await this.service.updateWorkflowBatch(Number(id), dto, user);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Batch updated",
       data,
     });
   }
