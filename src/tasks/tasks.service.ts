@@ -1672,9 +1672,13 @@ export class TasksService {
     const isAssignee = allAssignedIds.includes(currentUserId);
     const isCreator = task.created_by_id === currentUserId;
     const isReporter = task.reported_by_id === currentUserId;
+    const approvers = Array.isArray(task.approval_required_user_ids)
+      ? task.approval_required_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
+      : [];
+    const isConfiguredApprover = approvers.includes(currentUserId);
 
     if (!perms.canUpdate) {
-      if (!perms.canView || (!isAssignee && !isCreator && !isReporter)) {
+      if (!perms.canView || (!isAssignee && !isCreator && !isReporter && !isConfiguredApprover)) {
         throw new ForbiddenException(
           "Insufficient permissions to change task status",
         );
@@ -1693,7 +1697,7 @@ export class TasksService {
         nextStatus,
       )
     ) {
-      if (!perms.canApprove && !isAdminRole && !isCreator && !isReporter) {
+      if (!perms.canApprove && !isAdminRole && !isCreator && !isReporter && !isConfiguredApprover) {
         throw new ForbiddenException(
           "Only approvers, admins, creators, or assigners can update this status",
         );
@@ -1705,7 +1709,8 @@ export class TasksService {
       !isAdminRole &&
       !perms.canApprove &&
       !isCreator &&
-      !isReporter
+      !isReporter &&
+      !isConfiguredApprover
     ) {
       throw new ForbiddenException("Only authorized staff can close tasks");
     }

@@ -218,15 +218,13 @@ export class TasksController {
 
   @Post(":id/approve")
   @RequiredPermissions([
-    "tasking.tasks.approve",
-    "tasks.approve",
-    "tasking.tasks.update",
-    "tasks.update",
     UserRole.SUPER_ADMIN,
     UserRole.ADMIN,
     UserRole.DEPT_HEAD,
     UserRole.MANAGER,
     UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
   ])
   async approve(
     @Param("id") id: string,
@@ -275,11 +273,13 @@ export class TasksController {
 
   @Post(":id/status-transition")
   @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
     "tasking.tasks.view",
     "tasks.view",
-    "tasking.tasks.update",
-    "tasks.update",
-    "super_admin",
   ])
   async statusTransition(
     @Param("id") id: string,
