@@ -26,6 +26,7 @@ import { Donation } from "../../donations/entities/donation.entity";
 import { ProgressBatchStepEvidence } from "../progress_batches/progress_batch_step_evidence.entity";
 import { ProgressWorkflowBatch } from "../progress_batches/progress_workflow_batch.entity";
 import { DonationBatchAllocation } from "../progress_batches/donation_batch_allocation.entity";
+import { ProgressBatchesService } from "../progress_batches/progress-batches.service";
 
 @Injectable()
 export class ProgressTrackersService {
@@ -49,6 +50,7 @@ export class ProgressTrackersService {
     private readonly workflowBatchesRepo: Repository<ProgressWorkflowBatch>,
     @InjectRepository(DonationBatchAllocation)
     private readonly allocationsRepo: Repository<DonationBatchAllocation>,
+    private readonly progressBatchesService: ProgressBatchesService,
   ) {}
 
   private deriveOverallStatus(
@@ -520,6 +522,72 @@ export class ProgressTrackersService {
       ...dto,
       updated_by: currentUser?.id === -1 ? null : currentUser,
     } as any);
+    return this.getTrackerDetail(trackerId);
+  }
+
+  /**
+   * Add extra parts/shares for an existing donation tracker (batchable templates only).
+   * This is additive and does not change existing create-tracker behavior.
+   */
+  async allocateMoreParts(
+    trackerId: number,
+    partsRequested: number,
+    currentUser?: any,
+  ) {
+    const tr = await this.trackersRepo.findOne({
+      where: { id: trackerId, is_archived: false } as any,
+      relations: ["template"] as any,
+    });
+    if (!tr) throw new NotFoundException("Tracker not found");
+    const donationId =
+      (tr as any).donation_id != null ? Number((tr as any).donation_id) : NaN;
+    if (!Number.isFinite(donationId) || donationId <= 0) {
+      throw new BadRequestException(
+        "This tracker is not linked to a donation",
+      );
+    }
+
+    const templateId =
+      (tr as any).template_id != null ? Number((tr as any).template_id) : NaN;
+    if (!Number.isFinite(templateId) || templateId <= 0) {
+      throw new BadRequestException("Invalid tracker template_id");
+    }
+
+    const template = (tr as any).template;
+    if (!template || (template as any).is_batchable !== true) {
+      throw new BadRequestException("Workflow template is not batchable");
+    }
+
+    const n = Number(partsRequested || 0);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new BadRequestException(
+        "parts_requested must be a positive integer",
+      );
+    }
+
+    await this.progressBatchesService.allocateDonationIntoBatches({
+      template_id: templateId,
+      donation_id: donationId,
+      parts_requested: n,
+      currentUser,
+    });
+
+    const prev =
+      (tr as any).batch_parts_count != null
+        ? Number((tr as any).batch_parts_count)
+        : 0;
+    const next = (Number.isFinite(prev) && prev > 0 ? prev : 0) + n;
+    await this.trackersRepo.update(trackerId, {
+      batch_parts_count: next,
+      updated_by: currentUser?.id === -1 ? null : currentUser,
+    } as any);
+
+    await this.syncBatchScopedStepsForDonationTemplate(
+      donationId,
+      templateId,
+      currentUser,
+    );
+
     return this.getTrackerDetail(trackerId);
   }
 

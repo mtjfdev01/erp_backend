@@ -31,4 +31,12 @@ export class ProgressWorkflowBatch extends BaseEntity {
   /** When true, no more parts can be allocated */
   @Column({ default: false })
   is_closed: boolean;
+
+  /** Physical / reference tag id (shared by all donations on this batch) */
+  @Column({ type: "varchar", length: 120, nullable: true })
+  tag_number: string | null;
+
+  /** Optional display / descriptive name for the batch tag */
+  @Column({ type: "varchar", length: 255, nullable: true })
+  tag_name: string | null;
 }
