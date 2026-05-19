@@ -1,0 +1,50 @@
+Bank Alfalah APG — ddr_server integration (mirrors PayFast pattern)
+====================================================================
+
+SETUP
+-----
+1. Set ALFALAH_ENV=sandbox | production
+   - always required: APG_MERCHANT_ID, APG_STORE_ID, APG_MERCHANT_HASH, USERNAME, PASSWORD
+   - sandbox only optional: APG_KEY1, APG_KEY2 (derived if omitted)
+   - production: APG_KEY1 and APG_KEY2 required (16 chars each)
+2. APG_BASE_URL auto-defaults from ALFALAH_ENV if omitted.
+2. Set API_PUBLIC_BASE_URL to your public API host (HTTPS in production).
+3. In APG merchant portal: Return URL = {API}/donations/public/alfalah/return
+   Listener URL = {API}/donations/public/alfalah/listener (whitelist with bank).
+4. Run migration: src/database/migrations/CreateAlfalahPaymentSessions1760000000023.ts
+
+CREATE DONATION (same as PayFast — POST /donations)
+---------------------------------------------------
+donation_method: "alfalah"
+alfalah_transaction_type: "1" | "2" | "3"   (wallet | account | card)
+alfalah_account_number: required for types 1 and 2 (wallet/account number)
+donor_phone, donor_email: required (APG sends OTP/OTAC to these)
+
+Response (wallet/account):
+{
+  "requiresOtp": true,
+  "isOtp": true,           // true = 8-digit SMS OTP (wallet)
+  "otpLength": 8,          // false = 4+4 SMS+email OTAC (account)
+  "processOtpUrl": "/donations/public/alfalah/process-otp",
+  "donationId": 123,
+  "transactionReference": "123"
+}
+
+Response (card):
+{ "alfalahFlow": "card", "cardStep": 1, "formAction": "...", "formFields": { ... } }
+→ Auto-submit HTML form to formAction with formFields.
+
+SUBMIT OTP (after donor receives code from Bank Alfalah)
+--------------------------------------------------------
+POST /donations/public/alfalah/process-otp
+Body (wallet):  { "donationId": 123, "smsOtp": "12345678" }
+Body (account): { "donationId": 123, "smsOtac": "abcd", "emailOtac": "wxyz" }
+
+On success: donation status = completed (also verified via APG IPN OrderStatus).
+
+OTHER PUBLIC ROUTES
+-------------------
+POST /donations/public/alfalah/listener?url=<APG IPN GET URL>
+GET  /donations/public/alfalah/return   (browser redirect → frontend thank-you)
+GET  /donations/public/alfalah/status  (handshake health check)
+GET  /donations/:id/provider-status    (polls APG when donation_method is alfalah)
