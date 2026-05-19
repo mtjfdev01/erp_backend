@@ -61,9 +61,19 @@ export class CreateDonationDto {
   @IsOptional()
   @IsEnum(DonationMethod, {
     message:
-      "donation_method must be one of: meezan, blinq, payfast, stripe, stripe_embed",
+      "donation_method must be one of: meezan, blinq, payfast, alfalah, stripe, stripe_embed",
   })
   donation_method?: DonationMethod;
+
+  /** Bank Alfalah APG: 1 = Alfa Wallet, 2 = Alfalah account, 3 = card (redirect). */
+  @IsOptional()
+  @IsString()
+  alfalah_transaction_type?: string;
+
+  /** Wallet number or Alfalah account number for APG DoTran. */
+  @IsOptional()
+  @IsString()
+  alfalah_account_number?: string;
 
   @IsOptional()
   @IsString()

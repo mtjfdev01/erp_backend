@@ -17,6 +17,9 @@ export class Donation extends BaseEntity {
   campaign_id: number | null;
 
   @Column({ type: "bigint", nullable: true, default: null })
+  appeal_id: number | null;
+
+  @Column({ type: "bigint", nullable: true, default: null })
   sub_program_id: number | null;
 
   @Column({ type: "bigint", nullable: true, default: null })

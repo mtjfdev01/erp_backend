@@ -12,6 +12,7 @@ import {
 import { Request, Response } from "express";
 import { DonationsService } from "./donations.service";
 import { DonorService } from "src/dms/donor/donor.service";
+import { ProcessAlfalahOtpDto } from "./dto/process-alfalah-otp.dto";
 
 @Controller("donations/public")
 export class PublicDonationsController {
@@ -35,6 +36,116 @@ export class PublicDonationsController {
         status: "error",
         message: "Donations API error",
         error: error.message,
+      });
+    }
+  }
+
+  // Bank Alfalah APG — submit OTP after DoTran (wallet 8-digit / account 4+4 OTAC)
+  @Post("alfalah/process-otp")
+  async processAlfalahOtp(
+    @Body() dto: ProcessAlfalahOtpDto,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.donationsService.processAlfalahOtp(dto);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "OTP processed",
+        data: result,
+      });
+    } catch (error) {
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  // APG IPN listener — POST with ?url=... (GET that URL for order status)
+  @Post("alfalah/listener")
+  async handleAlfalahListener(@Query() query: any, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.handleAlfalahListener(query);
+      return res.status(HttpStatus.OK).json(result);
+    } catch (error) {
+      console.error("Alfalah listener error:", error.message);
+      return res.status(HttpStatus.OK).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Browser return from APG (card handshake or payment result) — redirects to frontend
+  @Get("alfalah/return")
+  async handleAlfalahReturn(@Query() query: any, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.handleAlfalahReturn(query);
+      const frontendBase =
+        process.env.BASE_Frontend_URL?.replace(/\/thanks\/?$/, "") ||
+        "https://donation.mtjfoundation.org";
+
+      if (result.type === "card_sso_form") {
+        const fieldsJson = encodeURIComponent(
+          JSON.stringify({
+            action: result.formAction,
+            fields: result.formFields,
+          }),
+        );
+        return res.redirect(
+          302,
+          `${frontendBase}/donate/alfalah-card?donationId=${result.donationId}&form=${fieldsJson}`,
+        );
+      }
+
+      const status = result.status || "pending";
+      let path = "/pending";
+      let statusParam = "pending";
+      if (status === "completed") {
+        path = "/thank-you";
+        statusParam = "success";
+      } else if (status === "failed") {
+        path = "/payment-failed";
+        statusParam = "failed";
+      }
+      return res.redirect(
+        302,
+        `${frontendBase}${path}?donationId=${result.donationId}&status=${statusParam}`,
+      );
+    } catch (error) {
+      console.error("Alfalah return error:", error.message);
+      const frontendBase =
+        process.env.BASE_Frontend_URL?.replace(/\/thanks\/?$/, "") ||
+        "https://donation.mtjfoundation.org";
+      return res.redirect(
+        302,
+        `${frontendBase}/pending?status=pending`,
+      );
+    }
+  }
+
+  @Get("alfalah/status")
+  async getAlfalahStatus(@Res() res: Response) {
+    try {
+      const result = await this.donationsService.getAlfalahHandshakeHealth();
+      return res.status(
+        result.success ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE,
+      ).json({
+        success: result.success,
+        status: result.success ? "active" : "unavailable",
+        message: result.message,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        success: false,
+        status: "unavailable",
+        message: error.message,
+        timestamp: new Date().toISOString(),
       });
     }
   }

@@ -1,4 +1,4 @@
-import { HttpException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, Injectable, NotFoundException } from "@nestjs/common";
 import { CreateDonationDto } from "./dto/create-donation.dto";
 import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
@@ -13,6 +13,9 @@ import { User, Department, UserRole } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
 import { PayfastService } from "./payfast.service";
 import { StripeService } from "./stripe.service";
+import { AlfalahService } from "./alfalah/alfalah.service";
+import { AlfalahPaymentSession } from "./alfalah/entities/alfalah-payment-session.entity";
+import { ProcessAlfalahOtpDto } from "./dto/process-alfalah-otp.dto";
 import { DonorService } from "../dms/donor/donor.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
@@ -57,6 +60,9 @@ export class DonationsService {
     private emailService: EmailService,
     private payfastService: PayfastService,
     private stripeService: StripeService,
+    private alfalahService: AlfalahService,
+    @InjectRepository(AlfalahPaymentSession)
+    private alfalahSessionRepository: Repository<AlfalahPaymentSession>,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonation)
@@ -1064,6 +1070,22 @@ export class DonationsService {
               "Blinq status is updated via callback. Showing current DB status.",
           },
         };
+      } else if (method === "alfalah") {
+        const orderRef = String(donation.id);
+        const ipn = await this.alfalahService.getOrderStatus(orderRef);
+        providerStatus = String(ipn?.TransactionStatus ?? "");
+        donationStatus = this.alfalahService.isPaidStatus(providerStatus)
+          ? "completed"
+          : this.alfalahService.isSuccessResponseCode(ipn?.ResponseCode)
+            ? "pending"
+            : "failed";
+        details = {
+          responseCode: ipn?.ResponseCode,
+          description: ipn?.Description,
+          transactionId: ipn?.TransactionId,
+          transactionStatus: ipn?.TransactionStatus,
+          transactionAmount: ipn?.TransactionAmount,
+        };
       } else {
         // Manual methods (cash, bank_transfer, cheque, in_kind, etc.)
         return {
@@ -1439,6 +1461,7 @@ export class DonationsService {
         "meezan",
         "blinq",
         "payfast",
+        "alfalah",
         "stripe",
         "stripe_embed",
       ];
@@ -1461,22 +1484,20 @@ export class DonationsService {
           //  return with error that donation amount is less than 50
           throw new HttpException("Donation amount is less than 50 PKR", 400);
         }
-        if (
-          (createDonationDto.donor_email && createDonationDto.donor_phone) ||
-          donorId
+        if (donorId) {
+          // Explicit donor_id (e.g. staff add): use as-is only — no website registration,
+          // no multi_time_donor updates, no auto-register. Donation uses dto.donor_id.
+        } else if (
+          createDonationDto.donor_email &&
+          createDonationDto.donor_phone
         ) {
           console.log(
             `🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`,
           );
 
-          // Check if donor already exists with this email AND phone
-          if (createDonationDto.donor_email && createDonationDto.donor_phone) {
-            donor = await this.donorService.findByEmail(
-              createDonationDto.donor_email,
-            );
-          } else if (donorId) {
-            donor = await this.donorService.findOne(donorId);
-          }
+          donor = await this.donorService.findByEmail(
+            createDonationDto.donor_email,
+          );
 
           if (donor) {
             const alreadyMultiTimeDonor = donor?.multi_time_donor || false;
@@ -1613,16 +1634,71 @@ export class DonationsService {
           user,
         );
         // }
+      } else {
+        // Website payment retry: reuse existing donation row (e.g. pending Payfast) — do not create a duplicate.
+        const prevRaw = createDonationDto.previous_donation_id;
+        const prevId =
+          typeof prevRaw === "string"
+            ? parseInt(String(prevRaw).trim(), 10)
+            : Number(prevRaw);
+        if (!Number.isFinite(prevId) || prevId <= 0) {
+          throw new BadRequestException("Invalid previous_donation_id");
+        }
 
-        if (createDonationDto?.previous_donation_id) {
+        savedDonation = await this.donationRepository.findOne({
+          where: { id: prevId },
+          relations: ["donor"],
+        });
+        if (!savedDonation) {
+          throw new NotFoundException("Previous donation not found");
+        }
+        donor = (savedDonation as any).donor ?? null;
+        donorId = (savedDonation as any).donor_id ?? null;
+
+        const updatePatch: Record<string, unknown> = {};
+        if (
+          createDonationDto.amount != null &&
+          Number.isFinite(Number(createDonationDto.amount))
+        ) {
+          updatePatch.amount = Number(createDonationDto.amount);
+        }
+        if (createDonationDto.currency != null && createDonationDto.currency !== "") {
+          updatePatch.currency = createDonationDto.currency;
+        }
+        if (createDonationDto.donation_method != null) {
+          updatePatch.donation_method = createDonationDto.donation_method;
+        }
+        if (createDonationDto.donation_type != null && createDonationDto.donation_type !== "") {
+          updatePatch.donation_type = createDonationDto.donation_type;
+        }
+        if (createDonationDto.project_id != null && createDonationDto.project_id !== "") {
+          updatePatch.project_id = createDonationDto.project_id;
+        }
+        if (createDonationDto.project_name != null && createDonationDto.project_name !== "") {
+          updatePatch.project_name = createDonationDto.project_name;
+        }
+        if (createDonationDto.on_behalf_names !== undefined) {
+          updatePatch.on_behalf_names = createDonationDto.on_behalf_names;
+        }
+        if (createDonationDto.donation_source != null && createDonationDto.donation_source !== "") {
+          updatePatch.donation_source = createDonationDto.donation_source;
+        }
+        if (createDonationDto.status != null && createDonationDto.status !== "") {
+          updatePatch.status = createDonationDto.status;
+        }
+
+        if (Object.keys(updatePatch).length > 0) {
+          updatePatch.updated_by = user?.id == -1 ? null : user?.id;
+          await this.donationRepository.update(prevId, updatePatch as any);
           savedDonation = await this.donationRepository.findOne({
-            where: { id: parseInt(createDonationDto.previous_donation_id) },
+            where: { id: prevId },
             relations: ["donor"],
           });
-
           if (!savedDonation) {
-            throw new HttpException("Previous donation not found", 404);
+            throw new NotFoundException("Previous donation not found after update");
           }
+          donor = (savedDonation as any).donor ?? donor;
+          donorId = (savedDonation as any).donor_id ?? donorId;
         }
       }
       //  await this.emailService.sendDonationFailureNotification(savedDonation);
@@ -1641,7 +1717,11 @@ export class DonationsService {
           }
         }
 
-        if (validUserIds.length > 0) {
+        if (
+          validUserIds.length > 0 &&
+          savedDonation &&
+          !createDonationDto?.previous_donation_id
+        ) {
           await this.notificationsService.create(
             {
               title: "New Donation Received",
@@ -1713,6 +1793,23 @@ export class DonationsService {
             BASKET_ID: savedDonation.id.toString(),
             TXNAMT: savedDonation.amount.toString(),
           };
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (
+        createDonationDto.donation_method &&
+        createDonationDto.donation_method === "alfalah"
+      ) {
+        try {
+          return await this.startAlfalahPayment(
+            savedDonation,
+            createDonationDto,
+            donor,
+          );
         } catch (e) {
           await this.persistGatewayInvoiceError(
             savedDonation.id,
@@ -3010,6 +3107,457 @@ export class DonationsService {
       console.error("Blinq hash verification error:", error.message);
       return false;
     }
+  }
+
+  // ─── Bank Alfalah APG (wallet / account + card redirect) ───────────────────
+
+  private normalizeAlfalahMobile(phone: string | undefined): string {
+    if (!phone) return "";
+    let p = String(phone).replace(/\D/g, "");
+    if (p.startsWith("92") && p.length >= 12) {
+      p = "0" + p.slice(2);
+    }
+    if (!p.startsWith("0") && p.length === 10) {
+      p = "0" + p;
+    }
+    return p;
+  }
+
+  private async startAlfalahPayment(
+    savedDonation: Donation,
+    createDonationDto: CreateDonationDto,
+    donor: any,
+  ) {
+    const txType = String(
+      createDonationDto.alfalah_transaction_type || "1",
+    ) as "1" | "2" | "3";
+    const orderRef = String(savedDonation.id);
+    const email =
+      donor?.email ||
+      createDonationDto.donor_email ||
+      "donor@mtjfoundation.org";
+    const mobile = this.normalizeAlfalahMobile(
+      donor?.phone || createDonationDto.donor_phone,
+    );
+
+    if (txType === "3") {
+      const cardForm = this.alfalahService.buildCardHandshakeForm(orderRef);
+      await this.donationRepository.update(savedDonation.id, {
+        orderId: orderRef,
+      });
+      return {
+        donationId: savedDonation.id,
+        transactionReference: orderRef,
+        alfalahFlow: "card",
+        cardStep: 1,
+        formAction: cardForm.action,
+        formFields: cardForm.fields,
+        message:
+          "Submit the form to Bank Alfalah secure checkout to pay by card.",
+      };
+    }
+
+    const accountNumber = createDonationDto.alfalah_account_number?.trim();
+    if (!accountNumber) {
+      throw new BadRequestException(
+        "alfalah_account_number is required for Alfa Wallet or Alfalah account payments",
+      );
+    }
+    if (!mobile) {
+      throw new BadRequestException(
+        "donor_phone is required for Bank Alfalah payments (OTP is sent to this number)",
+      );
+    }
+
+    const handshake = await this.alfalahService.initiateHandshake(orderRef);
+    if (!handshake.success || !handshake.authToken) {
+      throw new HttpException(
+        handshake.errorMessage || "Bank Alfalah handshake failed",
+        400,
+      );
+    }
+
+    const doTran = await this.alfalahService.initiateTransaction({
+      authToken: handshake.authToken,
+      transactionTypeId: txType,
+      transactionReference: orderRef,
+      amount: Number(savedDonation.amount),
+      accountNumber,
+      email,
+      mobile,
+    });
+
+    if (!doTran.success || !doTran.authToken || !doTran.hashKey) {
+      throw new HttpException(
+        doTran.errorMessage || "Bank Alfalah could not initiate transaction",
+        400,
+      );
+    }
+
+    await this.alfalahSessionRepository.delete({ donation_id: savedDonation.id });
+    await this.alfalahSessionRepository.save({
+      donation_id: savedDonation.id,
+      transaction_type_id: txType,
+      auth_token: doTran.authToken,
+      hash_key: doTran.hashKey,
+      is_otp: doTran.isOtp !== false,
+      transaction_reference: orderRef,
+    });
+
+    await this.donationRepository.update(savedDonation.id, {
+      orderId: orderRef,
+      status: "pending",
+    });
+
+    await this.notifyDonorAlfalahOtpSent({
+      donation: savedDonation,
+      donor,
+      email,
+      mobile,
+      isWalletOtp: doTran.isOtp !== false,
+    });
+
+    return {
+      donationId: savedDonation.id,
+      transactionReference: orderRef,
+      alfalahFlow: "api",
+      requiresOtp: true,
+      isOtp: doTran.isOtp !== false,
+      otpHint: doTran.isOtp !== false
+        ? "Enter the 8-digit OTP sent by Bank Alfalah to your Alfa Wallet mobile number."
+        : "Enter the 4-character SMS and email codes sent by Bank Alfalah for your Alfalah account.",
+      otpLength: doTran.isOtp !== false ? 8 : 4,
+      processOtpUrl: "/donations/public/alfalah/process-otp",
+    };
+  }
+
+  private async notifyDonorAlfalahOtpSent(params: {
+    donation: Donation;
+    donor: any;
+    email: string;
+    mobile: string;
+    isWalletOtp: boolean;
+  }) {
+    const donorName =
+      params.donor?.name || params.donation?.donor?.name || "Donor";
+    const amount = params.donation.amount;
+    const otpMessage = params.isWalletOtp
+      ? `Bank Alfalah has sent an 8-digit OTP to your mobile number ending ${params.mobile.slice(-4)}. Enter it on the donation page to complete your payment of PKR ${amount}.`
+      : `Bank Alfalah has sent a 4-character code to your mobile and email for your Alfalah account. Enter both codes on the donation page to complete your payment of PKR ${amount}.`;
+
+    try {
+      if (params.email) {
+        await this.emailService.sendDynamicEmail({
+          to: params.email,
+          subject: "Complete your MTJ Foundation donation – OTP from Bank Alfalah",
+          body: `<p>Dear {{name}},</p><p>{{message}}</p><p>Thank you for supporting MTJ Foundation.</p>`,
+          data: { name: donorName, message: otpMessage },
+        });
+      }
+    } catch (e: any) {
+      console.error("Alfalah OTP email failed:", e?.message || e);
+    }
+
+    // OTP is delivered by Bank Alfalah to mobile/email; we only mirror instructions via email.
+  }
+
+  async processAlfalahOtp(dto: ProcessAlfalahOtpDto) {
+    const donation = await this.donationRepository.findOne({
+      where: { id: dto.donationId },
+      relations: ["donor"],
+    });
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${dto.donationId} not found`);
+    }
+    if (donation.status === "completed") {
+      return {
+        donationId: donation.id,
+        status: "completed",
+        message: "Donation is already completed",
+        processed: true,
+      };
+    }
+
+    const session = await this.alfalahSessionRepository.findOne({
+      where: { donation_id: dto.donationId },
+    });
+    if (!session?.auth_token || !session?.hash_key) {
+      throw new BadRequestException(
+        "No active Bank Alfalah session. Create the donation again with donation_method alfalah.",
+      );
+    }
+
+    const orderRef = session.transaction_reference || String(donation.id);
+    const isOtp = session.is_otp;
+
+    if (isOtp) {
+      if (!dto.smsOtp || dto.smsOtp.length !== 8) {
+        throw new BadRequestException("smsOtp (8 digits) is required for Alfa Wallet");
+      }
+    } else {
+      if (!dto.smsOtac || !dto.emailOtac) {
+        throw new BadRequestException(
+          "smsOtac and emailOtac (4 characters each) are required for Alfalah account payments",
+        );
+      }
+    }
+
+    const proResult = await this.alfalahService.processTransaction({
+      authToken: session.auth_token,
+      hashKey: session.hash_key,
+      transactionTypeId: session.transaction_type_id as "1" | "2",
+      transactionReference: orderRef,
+      isOtp,
+      smsOtp: dto.smsOtp,
+      smsOtac: dto.smsOtac,
+      emailOtac: dto.emailOtac,
+    });
+
+    const responseCode = proResult?.response_code ?? proResult?.ResponseCode;
+    const txStatus =
+      proResult?.transaction_status ?? proResult?.TransactionStatus;
+    const paid =
+      this.alfalahService.isSuccessResponseCode(responseCode) &&
+      String(txStatus || "").toUpperCase() === "PAID";
+
+    if (!paid) {
+      const err =
+        proResult?.ErrorMessage ||
+        proResult?.description ||
+        proResult?.Description ||
+        "Bank Alfalah payment failed";
+      await this.donationRepository.update(donation.id, {
+        status: "failed",
+        err_msg: String(err),
+      });
+      throw new HttpException(String(err), 400);
+    }
+
+    const sync = await this.syncAlfalahDonationFromIpn(orderRef, {
+      uniqueTranId: proResult?.unique_tran_id,
+      source: "alfalah_protran",
+    });
+
+    await this.alfalahSessionRepository.delete({ donation_id: donation.id });
+
+    return {
+      donationId: donation.id,
+      status: sync.status,
+      transactionReference: orderRef,
+      uniqueTranId: proResult?.unique_tran_id,
+      processed: true,
+      batching: sync.batching,
+    };
+  }
+
+  async handleAlfalahListener(query: { url?: string }) {
+    const statusUrl = query?.url;
+    if (!statusUrl) {
+      throw new BadRequestException("Missing url query parameter from APG listener");
+    }
+    const { data } = await axios.get(statusUrl, { timeout: 60000 });
+    const orderRef =
+      data?.TransactionReferenceNumber ||
+      this.extractAlfalahOrderIdFromIpnUrl(statusUrl);
+    if (!orderRef) {
+      throw new BadRequestException("Could not determine order id from APG IPN");
+    }
+    const sync = await this.syncAlfalahDonationFromIpn(String(orderRef), {
+      source: "alfalah_listener",
+      ipnPayload: data,
+    });
+    return {
+      success: true,
+      orderId: orderRef,
+      status: sync.status,
+      batching: sync.batching,
+    };
+  }
+
+  async handleAlfalahReturn(query: Record<string, string>) {
+    const orderRef =
+      query.O ||
+      query.o ||
+      query.donationId ||
+      this.parseAlfalahOrderFromReturnPath(query);
+    const authToken = query.auth_token || query.AuthToken;
+
+    if (authToken && orderRef) {
+      const donation = await this.donationRepository.findOne({
+        where: { id: Number(orderRef) },
+      });
+      if (donation) {
+        const sso = this.alfalahService.buildCardSsoForm({
+          authToken,
+          transactionReference: String(orderRef),
+          amount: Number(donation.amount),
+        });
+        return {
+          type: "card_sso_form" as const,
+          donationId: Number(orderRef),
+          formAction: sso.action,
+          formFields: sso.fields,
+        };
+      }
+    }
+
+    if (orderRef) {
+      const sync = await this.syncAlfalahDonationFromIpn(String(orderRef), {
+        source: "alfalah_return",
+      });
+      return {
+        type: "status" as const,
+        donationId: Number(orderRef),
+        status: sync.status,
+        batching: sync.batching,
+      };
+    }
+
+    throw new BadRequestException("Could not parse Bank Alfalah return parameters");
+  }
+
+  private parseAlfalahOrderFromReturnPath(query: Record<string, string>): string | null {
+    for (const key of Object.keys(query)) {
+      if (key.toUpperCase() === "O" && query[key]) {
+        return query[key];
+      }
+    }
+    const raw = query.TS || query.RC || "";
+    if (typeof raw === "string" && raw.includes("O=")) {
+      const m = raw.match(/O=([^/&]+)/i);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  private extractAlfalahOrderIdFromIpnUrl(url: string): string | null {
+    try {
+      const parts = url.split("/").filter(Boolean);
+      return parts[parts.length - 1] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async syncAlfalahDonationFromIpn(
+    orderRef: string,
+    opts?: {
+      uniqueTranId?: string;
+      source?: string;
+      ipnPayload?: Record<string, any>;
+    },
+  ): Promise<{ status: string; batching?: any }> {
+    const donationId = parseInt(orderRef, 10);
+    if (!Number.isFinite(donationId) || donationId <= 0) {
+      throw new BadRequestException("Invalid Alfalah order reference");
+    }
+
+    const donation = await this.donationRepository
+      .createQueryBuilder("donation")
+      .leftJoinAndSelect("donation.donor", "donor")
+      .where("donation.id = :id", { id: donationId })
+      .getOne();
+
+    if (!donation) {
+      throw new NotFoundException(`Donation ${donationId} not found`);
+    }
+
+    if (donation.status === "completed") {
+      return { status: "completed" };
+    }
+
+    let ipn = opts?.ipnPayload;
+    if (!ipn) {
+      ipn = await this.alfalahService.getOrderStatus(orderRef);
+    }
+
+    const paid = this.alfalahService.isPaidStatus(ipn?.TransactionStatus);
+    const newStatus = paid
+      ? "completed"
+      : this.alfalahService.isSuccessResponseCode(ipn?.ResponseCode)
+        ? "pending"
+        : "failed";
+
+    const transactionId =
+      opts?.uniqueTranId ||
+      ipn?.TransactionId ||
+      ipn?.transaction_id ||
+      donation.orderId;
+
+    let message_sent = donation.message_sent;
+    let email_sent = donation.email_sent;
+    const send_message =
+      donation.message_sent === false && donation.amount >= 5000;
+    const send_email =
+      donation.email_sent === false && donation.amount >= 5000;
+
+    if (newStatus === "completed" && donation.donor) {
+      if (send_message) {
+        message_sent = true;
+        await this.whatsAppService.sendPaymentConfirmation({
+          phoneNumber: donation.donor.phone,
+          userName: donation.donor.name,
+          amount: donation.amount,
+        });
+      }
+      if (send_email) {
+        email_sent = true;
+        await this.emailService.sendDonationSuccessEmail(
+          donation,
+          donation.donor,
+          donation.donor.email,
+        );
+      }
+    } else if (newStatus === "failed" && donation.donor && send_message) {
+      message_sent = true;
+      await this.whatsAppService.sendAbandonMessage({
+        phoneNumber: donation.donor.phone,
+        userName: donation.donor.name,
+        amount: donation.amount,
+        donationId: orderRef,
+      });
+      if (send_email) {
+        email_sent = true;
+        await this.emailService.sendDonationFailureEmail(donation);
+      }
+    }
+
+    await this.donationRepository.update(donationId, {
+      status: newStatus,
+      orderId: String(transactionId || orderRef),
+      err_msg: paid
+        ? ipn?.Description || null
+        : ipn?.Description || ipn?.description || "Payment not completed",
+      message_sent,
+      email_sent,
+      ...(newStatus === "completed" ? { paid_amount: donation.amount } : {}),
+    });
+
+    let batching: any = null;
+    if (newStatus === "completed") {
+      try {
+        batching = await this.processDonationBatchingAfterPaymentSuccess({
+          donationId,
+          currentUser: { id: -1 },
+          source: opts?.source || "alfalah_ipn",
+        });
+      } catch (e: any) {
+        batching = { processed: false, reason: e?.message };
+      }
+    }
+
+    return { status: newStatus, batching };
+  }
+
+  async getAlfalahHandshakeHealth(): Promise<{ success: boolean; message: string }> {
+    const testRef = `TEST-${Date.now()}`;
+    const result = await this.alfalahService.initiateHandshake(testRef);
+    return {
+      success: result.success,
+      message: result.success
+        ? "Bank Alfalah APG handshake OK"
+        : result.errorMessage || "Handshake failed",
+    };
   }
 
   async getDonationListForDropdown(options?: {

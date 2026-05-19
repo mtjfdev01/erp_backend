@@ -31,6 +31,7 @@ import { ProgressTrackingModule } from "./progress_tracking/progress-tracking.mo
 import { NewDashboardModule } from "./new_dashboard/new_dashboard.module";
 import { DonorAuthModule } from "./donor_auth/donor-auth.module";
 import { DonorPortalModule } from "./donor_portal/donor-portal.module";
+import { DataImportModule } from "./data_import/data-import.module";
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { DonorPortalModule } from "./donor_portal/donor-portal.module";
     NewDashboardModule,
     DonorAuthModule,
     DonorPortalModule,
+    DataImportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

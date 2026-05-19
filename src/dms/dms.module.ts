@@ -16,6 +16,11 @@ import { SurveysModule } from "./surveys/surveys.module";
 import { EventsModule } from "./events/events.module";
 import { CampaignsModule } from "./campaigns/campaigns.module";
 import { EmailTemplateModule } from "./email_template/email_template.module";
+import { CrowdFundingModule } from './crowd_funding/crowd_funding.module';
+import { AppealsModule } from './appeals/appeals.module';
+import { AppealsBenificiariesModule } from './appeals_benificiaries/appeals_benificiaries.module';
+import { AppealUpdatesModule } from './appeal_updates/appeal_updates.module';
+import { AppealMediaModule } from './appeal_media/appeal_media.module';
 
 @Module({
   controllers: [DmsController],
@@ -39,6 +44,11 @@ import { EmailTemplateModule } from "./email_template/email_template.module";
     EventsModule,
     CampaignsModule,
     EmailTemplateModule,
+    CrowdFundingModule,
+    AppealsModule,
+    AppealsBenificiariesModule,
+    AppealUpdatesModule,
+    AppealMediaModule,
   ],
 })
 export class DmsModule {}

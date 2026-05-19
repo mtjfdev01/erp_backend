@@ -206,6 +206,61 @@ export class DonorService {
   }
 
   /**
+   * CSV / data-import row — same persistence rules as register(), no HTTP DTO validation.
+   */
+  async importDonorRow(
+    row: Record<string, any>,
+    user: any,
+  ): Promise<Donor> {
+    const createDonorDto = {
+      donor_type: row.donor_type,
+      email: String(row.email || "")
+        .trim()
+        .toLowerCase(),
+      phone: String(row.phone || "").trim(),
+      password: row.password,
+      source: row.source,
+      address: row.address,
+      city: row.city,
+      country: row.country,
+      postal_code: row.postal_code,
+      notes: row.notes,
+      name: row.name,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      cnic: row.cnic,
+      company_name: row.company_name,
+      company_registration: row.company_registration,
+      contact_person: row.contact_person,
+      designation: row.designation,
+      company_address: row.company_address,
+      company_phone: row.company_phone,
+      company_email: row.company_email,
+      assigned_to_user_id: row.assigned_to_user_id,
+      referrer_user_id: row.referrer_user_id,
+    } as CreateDonorDto;
+
+    const saved = await this.register(createDonorDto, user);
+
+    const patch: Partial<Donor> = {};
+    if (row.is_active !== undefined) patch.is_active = row.is_active;
+    if (row.notification_subscription !== undefined) {
+      patch.notification_subscription = row.notification_subscription;
+    }
+    if (row.recurring !== undefined) patch.recurring = row.recurring;
+    if (row.multi_time_donor !== undefined) {
+      patch.multi_time_donor = row.multi_time_donor;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await this.donorRepository.update(saved.id, patch);
+      Object.assign(saved, patch);
+    }
+
+    return saved;
+  }
+
+  /**
    * Find all donors with pagination and filtering
    */
   async findAll(

@@ -15,6 +15,8 @@ import { PermissionsModule } from "src/permissions/permissions.module";
 import { EmailModule } from "../email/email.module";
 import { PayfastService } from "./payfast.service";
 import { StripeService } from "./stripe.service";
+import { AlfalahService } from "./alfalah/alfalah.service";
+import { AlfalahPaymentSession } from "./alfalah/entities/alfalah-payment-session.entity";
 import { DonorModule } from "../dms/donor/donor.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
@@ -35,6 +37,7 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
       RecurringDonation,
       City,
       ProgressWorkflowTemplate,
+      AlfalahPaymentSession,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -61,6 +64,7 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
     DonationsReceiptsService,
     PayfastService,
     StripeService,
+    AlfalahService,
     WhatsAppService,
   ],
   exports: [DonationsService],
