@@ -11,9 +11,19 @@ import {
   Req,
   HttpStatus,
   Res,
+  UploadedFile,
+  UploadedFiles,
+  UseInterceptors,
+  BadRequestException,
 } from "@nestjs/common";
+import { FileInterceptor, FilesInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { Response } from "express";
 import { AppealsService } from "./appeals.service";
+import {
+  AppealImagePurpose,
+  S3StorageService,
+} from "../../utils/storage/s3-storage.service";
 import { CreateAppealDto } from "./dto/create-appeal.dto";
 import { UpdateAppealDto } from "./dto/update-appeal.dto";
 import { AppealFiltersDto } from "./dto/appeal-filters.dto";
@@ -22,9 +32,102 @@ import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions";
 
+const APPEAL_IMAGE_PURPOSES = new Set<AppealImagePurpose>([
+  "cover",
+  "organizer",
+  "beneficiary",
+  "gallery",
+]);
+
+const imageUploadOptions = {
+  storage: memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+};
+
 @Controller("appeals")
 export class AppealsController {
-  constructor(private readonly appealsService: AppealsService) {}
+  constructor(
+    private readonly appealsService: AppealsService,
+    private readonly s3Storage: S3StorageService,
+  ) {}
+
+  /** Upload a single image to S3; returns public URL for appeal form fields. */
+  @Post("upload/image")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "dms.appeals.create",
+    "dms.appeals.update",
+    "fund_raising.appeals.create",
+    "fund_raising.appeals.update",
+    "super_admin",
+  ])
+  @UseInterceptors(FileInterceptor("file", imageUploadOptions))
+  async uploadImage(
+    @UploadedFile() file: Express.Multer.File,
+    @Query("purpose") purpose: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const p = (purpose || "gallery").toLowerCase() as AppealImagePurpose;
+      if (!APPEAL_IMAGE_PURPOSES.has(p)) {
+        throw new BadRequestException(
+          "purpose must be cover, organizer, beneficiary, or gallery",
+        );
+      }
+      const result = await this.s3Storage.uploadAppealImage(file, p);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Image uploaded successfully",
+        data: result,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  /** Upload multiple gallery images (max 10). */
+  @Post("upload/images")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "dms.appeals.create",
+    "dms.appeals.update",
+    "fund_raising.appeals.create",
+    "fund_raising.appeals.update",
+    "super_admin",
+  ])
+  @UseInterceptors(FilesInterceptor("files", 10, imageUploadOptions))
+  async uploadImages(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Res() res: Response,
+  ) {
+    try {
+      if (!files?.length) {
+        throw new BadRequestException("No files uploaded");
+      }
+      const uploads = await Promise.all(
+        files.map((f) => this.s3Storage.uploadAppealImage(f, "gallery")),
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Images uploaded successfully",
+        data: uploads,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
 
   @Post()
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)

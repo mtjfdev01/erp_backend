@@ -9,6 +9,11 @@ SETUP
    - production: APG_KEY1 and APG_KEY2 required (16 chars each)
 2. APG_BASE_URL auto-defaults from ALFALAH_ENV if omitted.
 2. Set API_PUBLIC_BASE_URL to your public API host (HTTPS in production).
+   Optional APG_HS_RETURN_URL — card step-1 return base (must match portal whitelist).
+   Server appends ?donationId={id}. Examples:
+     https://www.mtjfoundation.org/donate/alfalah-card  (preferred)
+     https://www.mtjfoundation.org/thanks  (frontend redirects AuthToken → alfalah-card)
+   BASE_Frontend_URL=https://www.mtjfoundation.org
 3. In APG merchant portal: Return URL = {API}/donations/public/alfalah/return
    Listener URL = {API}/donations/public/alfalah/listener (whitelist with bank).
 4. Run migration: src/database/migrations/CreateAlfalahPaymentSessions1760000000023.ts
@@ -31,8 +36,12 @@ Response (wallet/account):
 }
 
 Response (card):
-{ "alfalahFlow": "card", "cardStep": 1, "formAction": "...", "formFields": { ... } }
-→ Auto-submit HTML form to formAction with formFields.
+Preferred: cardStep 2 + SSO form (server REST handshake with channel 1001).
+Fallback: cardStep 1 + POST to HS/HS/HS (if REST handshake fails — same as before).
+
+Fallback (raw AuthToken on frontend):
+GET /donations/public/alfalah/card-sso?donationId=&authToken=
+→ { formAction, formFields } for frontend /donate/alfalah-card redirect.
 
 SUBMIT OTP (after donor receives code from Bank Alfalah)
 --------------------------------------------------------

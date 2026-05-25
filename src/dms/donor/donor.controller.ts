@@ -328,6 +328,42 @@ export class DonorController {
     }
   }
 
+  @Get(":id/audit-history")
+  async getAuditHistory(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const existing = await this.donorService.findOne(+id);
+      const user = req?.user ?? null;
+      if (user?.id) {
+        await this.checkDonorPermission(user.id, existing.source, "view");
+        await this.checkGeographicAccess(user.id, existing.city);
+      }
+      const history = await this.donorService.getDonorAuditHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donor audit history retrieved successfully",
+        data: history,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(":id")
   async findOne(
     @Param("id") id: string,
@@ -377,7 +413,7 @@ export class DonorController {
         await this.checkDonorPermission(user.id, existing.source, "update");
         await this.checkGeographicAccess(user.id, existing.city);
       }
-      const result = await this.donorService.update(+id, updateDonorDto);
+      const result = await this.donorService.update(+id, updateDonorDto, user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Donor updated successfully",

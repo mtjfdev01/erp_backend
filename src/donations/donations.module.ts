@@ -27,9 +27,11 @@ import { DonationsReceiptsService } from "./receipts.service";
 import { ProgressTrackersModule } from "../progress_tracking/progress_trackers/progress-trackers.module";
 import { ProgressBatchesModule } from "../progress_tracking/progress_batches/progress-batches.module";
 import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
+import { DonationAuditModule } from "./audit/donation-audit.module";
 
 @Module({
   imports: [
+    DonationAuditModule,
     TypeOrmModule.forFeature([
       Donation,
       DonationInKind,

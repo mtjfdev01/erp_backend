@@ -12,6 +12,8 @@ import { CreateAppealDto } from "./dto/create-appeal.dto";
 import { UpdateAppealDto } from "./dto/update-appeal.dto";
 import { AppealFiltersDto } from "./dto/appeal-filters.dto";
 import { AppealsBenificiariesService } from "../appeals_benificiaries/appeals_benificiaries.service";
+import { AppealMediaService } from "../appeal_media/appeal_media.service";
+import { AppealMediaType } from "../appeal_media/entities/appeal_media.entity";
 
 export type AppealWithStats = Appeal & {
   raised_amount: number;
@@ -28,6 +30,7 @@ export class AppealsService {
     @InjectRepository(Donation)
     private readonly donationRepo: Repository<Donation>,
     private readonly beneficiariesService: AppealsBenificiariesService,
+    private readonly appealMediaService: AppealMediaService,
   ) {}
 
   private generateSlug(title: string): string {
@@ -167,7 +170,21 @@ export class AppealsService {
       created_by: createdBy != null ? ({ id: createdBy } as any) : undefined,
     });
 
-    return this.appealRepo.save(appeal);
+    const saved = await this.appealRepo.save(appeal);
+
+    const galleryUrls = (dto.gallery_image_urls || []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0,
+    );
+    for (let i = 0; i < galleryUrls.length; i++) {
+      await this.appealMediaService.create({
+        appeal_id: saved.id,
+        url: galleryUrls[i].trim(),
+        media_type: AppealMediaType.GALLERY,
+        sort_order: i,
+      });
+    }
+
+    return saved;
   }
 
   async findAll(filters?: AppealFiltersDto): Promise<AppealWithStats[]> {

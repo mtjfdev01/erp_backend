@@ -11,6 +11,7 @@ import { AppealMedia } from "../appeal_media/entities/appeal_media.entity";
 import { Donation } from "../../donations/entities/donation.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { AppealsBenificiariesModule } from "../appeals_benificiaries/appeals_benificiaries.module";
+import { AppealMediaModule } from "../appeal_media/appeal_media.module";
 import { User } from "../../users/user.entity";
 
 @Module({
@@ -29,6 +30,7 @@ import { User } from "../../users/user.entity";
     }),
     PermissionsModule,
     AppealsBenificiariesModule,
+    AppealMediaModule,
   ],
   controllers: [AppealsController, PublicAppealsController],
   providers: [AppealsService],

@@ -11,7 +11,10 @@ export interface AlfalahCredentials {
   key2: string;
   apiChannelId: string;
   cardChannelId: string;
+  /** Final return after card payment (API → frontend redirect). */
   returnUrl: string;
+  /** Card handshake HS_ReturnURL — must match APG portal whitelist (often same as returnUrl). */
+  hsReturnUrl: string;
   defaultCountry: string;
 }
 
@@ -117,6 +120,11 @@ export function resolveAlfalahCredentials(): AlfalahCredentials & {
     process.env.APG_RETURN_URL ||
     `${apiBase.replace(/\/$/, "")}/donations/public/alfalah/return`;
 
+  const hsReturnUrl =
+    process.env.APG_HS_RETURN_URL ||
+    process.env.APG_CARD_HS_RETURN_URL ||
+    returnUrl;
+
   return {
     env,
     baseUrl,
@@ -130,6 +138,7 @@ export function resolveAlfalahCredentials(): AlfalahCredentials & {
     apiChannelId: process.env.APG_CHANNEL_ID || "1002",
     cardChannelId: process.env.APG_CARD_CHANNEL_ID || "1001",
     returnUrl,
+    hsReturnUrl,
     defaultCountry: process.env.APG_DEFAULT_COUNTRY || "164",
   };
 }

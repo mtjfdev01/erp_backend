@@ -32,12 +32,14 @@ import { NewDashboardModule } from "./new_dashboard/new_dashboard.module";
 import { DonorAuthModule } from "./donor_auth/donor-auth.module";
 import { DonorPortalModule } from "./donor_portal/donor-portal.module";
 import { DataImportModule } from "./data_import/data-import.module";
+import { S3StorageModule } from "./utils/storage/s3-storage.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // Makes ConfigService available globally
     }),
+    S3StorageModule,
     TypeOrmModule.forRoot({
       type: "postgres",
       // host: process.env.DB_HOST,

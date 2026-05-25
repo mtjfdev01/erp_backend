@@ -145,4 +145,10 @@ export class CreateAppealDto {
   @ValidateNested()
   @Type(() => CreateAppealsBenificiaryDto)
   beneficiary?: CreateAppealsBenificiaryDto;
+
+  /** Gallery image URLs (from S3 upload) saved as appeal_media rows. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  gallery_image_urls?: string[];
 }

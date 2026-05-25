@@ -128,6 +128,35 @@ export class PublicDonationsController {
     }
   }
 
+  /** Card step 2 — build SSO form from handshake AuthToken (frontend fallback). */
+  @Get("alfalah/card-sso")
+  async getAlfalahCardSso(
+    @Query("donationId") donationId: string,
+    @Query("authToken") authToken: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const id = Number(donationId);
+      if (!Number.isFinite(id) || id <= 0) {
+        throw new Error("Invalid donationId");
+      }
+      const result = await this.donationsService.buildAlfalahCardSsoFormForDonation(
+        id,
+        authToken,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get("alfalah/status")
   async getAlfalahStatus(@Res() res: Response) {
     try {

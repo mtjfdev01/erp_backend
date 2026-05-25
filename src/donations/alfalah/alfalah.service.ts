@@ -40,19 +40,24 @@ export class AlfalahService {
     return data;
   }
 
-  /** Step 1 — Initiate Handshake (wallet / account REST flow). */
-  async initiateHandshake(transactionReference: string): Promise<{
+  /** Step 1 — Initiate Handshake (REST). Wallet/account: API channel; card: page-redirection channel. */
+  async initiateHandshake(
+    transactionReference: string,
+    options?: { channelId?: string; returnUrl?: string },
+  ): Promise<{
     success: boolean;
     authToken?: string;
     returnUrl?: string;
     errorMessage?: string;
   }> {
     const c = this.creds();
+    const channelId = options?.channelId ?? c.apiChannelId;
+    const returnUrl = options?.returnUrl ?? c.returnUrl;
     const fields: Array<[string, string]> = [
-      ["HS_ChannelId", c.apiChannelId],
+      ["HS_ChannelId", channelId],
       ["HS_MerchantId", c.merchantId],
       ["HS_StoreId", c.storeId],
-      ["HS_ReturnURL", c.returnUrl],
+      ["HS_ReturnURL", returnUrl],
       ["HS_MerchantHash", c.merchantHash],
       ["HS_MerchantUsername", c.merchantUsername],
       ["HS_MerchantPassword", c.merchantPassword],
@@ -168,16 +173,20 @@ export class AlfalahService {
     return data;
   }
 
-  /** Card flow step 1 — form fields for POST to HS/HS/HS. */
-  buildCardHandshakeForm(transactionReference: string): {
+  /** Card flow step 1 — form fields for POST to HS/HS/HS (page redirection channel 1001). */
+  buildCardHandshakeForm(
+    transactionReference: string,
+    hsReturnUrl?: string,
+  ): {
     action: string;
     fields: Record<string, string>;
   } {
     const c = this.creds();
     const fields: Array<[string, string]> = [
+      // 0 = redirect to HS_ReturnURL with auth_token (APG guide — card step 1)
       ["HS_IsRedirectionRequest", "0"],
       ["HS_ChannelId", c.cardChannelId],
-      ["HS_ReturnURL", c.returnUrl],
+      ["HS_ReturnURL", hsReturnUrl || c.hsReturnUrl],
       ["HS_MerchantId", c.merchantId],
       ["HS_StoreId", c.storeId],
       ["HS_MerchantHash", c.merchantHash],

@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   HttpStatus,
+  Logger,
   Res,
   UseGuards,
   Query,
@@ -33,6 +34,8 @@ import { DonorService } from "src/dms/donor/donor.service";
 @Controller("donations")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
 export class DonationsController {
+  private readonly logger = new Logger(DonationsController.name);
+
   constructor(
     private readonly donationsService: DonationsService,
     private readonly permissionsService: PermissionsService,
@@ -190,15 +193,26 @@ export class DonationsController {
       }
 
       console.log("donation api called________________________");
-      const result = await this.donationsService.create(
-        createDonationDto,
-        user,
-      );
-      return res.status(HttpStatus.CREATED).json({
+      const { data, donationId, deferPostCreate } =
+        await this.donationsService.create(createDonationDto, user);
+
+      res.status(HttpStatus.CREATED).json({
         success: true,
         message: "Donation created successfully",
-        data: result,
+        data,
       });
+
+      if (deferPostCreate) {
+        void this.donationsService
+          .finalizeDonationPostCreate(donationId, createDonationDto, user)
+          .catch((err) =>
+            this.logger.error(
+              `finalizeDonationPostCreate failed for donation ${donationId}: ${err?.message || err}`,
+            ),
+          );
+      }
+
+      return;
     } catch (error) {
       if (error instanceof ForbiddenException) {
         return res.status(HttpStatus.FORBIDDEN).json({
@@ -368,6 +382,47 @@ export class DonationsController {
         success: true,
         message: "Provider status retrieved successfully",
         data: result,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Get(":id/audit-history")
+  async getAuditHistory(
+    @Param("id") id: string,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const user = req?.user ?? null;
+      const existing = await this.donationsService.findOne(+id);
+      if (user?.id) {
+        await this.checkDonationPermission(
+          user.id,
+          existing.donation_source,
+          "view",
+        );
+        await this.checkGeographicAccess(user.id, existing);
+      }
+
+      const history = await this.donationsService.getDonationAuditHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation audit history retrieved successfully",
+        data: history,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
@@ -593,7 +648,11 @@ export class DonationsController {
         await this.checkGeographicAccess(user.id, existing);
       }
 
-      const result = await this.donationsService.update(+id, updateDonationDto);
+      const result = await this.donationsService.update(
+        +id,
+        updateDonationDto,
+        user,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Donation updated successfully",
@@ -676,7 +735,7 @@ export class DonationsController {
         await this.checkGeographicAccess(user.id, existing);
       }
 
-      const result = await this.donationsService.remove(+id);
+      const result = await this.donationsService.remove(+id, user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Donation deleted successfully",
@@ -751,6 +810,7 @@ export class DonationsController {
       const result = await this.donationsService.updateStatusAction(
         updateStatusDto.donation_id,
         updateStatusDto.status,
+        user,
       );
 
       return res.status(HttpStatus.OK).json({
