@@ -42,15 +42,10 @@ import { S3StorageModule } from "./utils/storage/s3-storage.module";
     S3StorageModule,
     TypeOrmModule.forRoot({
       type: "postgres",
-      // host: process.env.DB_HOST,
-      // port: parseInt(process.env.DB_PORT),
-      // username: process.env.DB_USERNAME,
-      // password: process.env.DB_PASSWORD,
-      // database: process.env.DB_NAME,
-
-      url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/ddr_db',
-      ssl: process.env.SSL === 'production',
-      autoLoadEntities: true,
+      url: process.env.DATABASE_URL,
+      ssl: process.env.SSL === "true"
+      ? { rejectUnauthorized: false }
+      : false,      autoLoadEntities: true,
       synchronize: true,
       extra: {
         max: 5,
@@ -59,23 +54,6 @@ import { S3StorageModule } from "./utils/storage/s3-storage.module";
         statement_timeout: 60000,
       },
     }),
-
-    // ✅ VECTOR / AI DB (new pgvector service)
-    // TypeOrmModule.forRoot({
-    //   name: 'vector',
-    //   type: 'postgres',
-    //   url: process.env.VECTOR_DATABASE_URL,
-    //   // keep this isolated to only AI entities (don’t use autoLoadEntities here)
-    //   autoLoadEntities: false,
-    //   synchronize: true, // OK for start; later move to migrations
-    //   ssl: process.env.VECTOR_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    //   extra: {
-    //     max: 5,
-    //     connectionTimeoutMillis: 15000,
-    //     query_timeout: 60000,
-    //     statement_timeout: 60000,
-    //   },
-    // }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,
     ProcurementsModule,
