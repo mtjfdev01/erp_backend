@@ -16,6 +16,7 @@ import { DonationsModule } from "./donations/donations.module";
 import { DmsModule } from "./dms/dms.module";
 import { DmsCronsModule } from "./crons/dms_crons/dms-crons.module";
 import { DonationsReportModule } from "./crons/donations_report/donations-report.module";
+import { SocialPostsBufferCronModule } from "./crons/social_posts_buffer/social-posts-buffer-cron.module";
 import { GeographicModule } from "./dms/geographic/geographic.module";
 import { MessagesModule } from "./website/messages/messages.module";
 import { NewsletterModule } from "./website/newsletter/newsletter.module";
@@ -68,6 +69,7 @@ import { S3StorageModule } from "./utils/storage/s3-storage.module";
     DmsModule,
     DmsCronsModule,
     DonationsReportModule,
+    SocialPostsBufferCronModule,
     GeographicModule,
     MessagesModule,
     NewsletterModule,

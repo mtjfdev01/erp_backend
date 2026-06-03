@@ -8,8 +8,11 @@ import {
   IsEnum,
   IsBoolean,
   IsInt,
+  ValidateNested,
 } from "class-validator";
+import { Type } from "class-transformer";
 import { DonationMethod } from "src/utils/enums";
+import { DonationRecurringDto } from "./donation-recurring.dto";
 
 export class CreateDonationDto {
   @IsOptional()
@@ -64,16 +67,6 @@ export class CreateDonationDto {
       "donation_method must be one of: meezan, blinq, payfast, alfalah, stripe, stripe_embed",
   })
   donation_method?: DonationMethod;
-
-  /** Bank Alfalah APG: 1 = Alfa Wallet, 2 = Alfalah account, 3 = card (redirect). */
-  @IsOptional()
-  @IsString()
-  alfalah_transaction_type?: string;
-
-  /** Wallet number or Alfalah account number for APG DoTran. */
-  @IsOptional()
-  @IsString()
-  alfalah_account_number?: string;
 
   @IsOptional()
   @IsString()
@@ -184,6 +177,16 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   donation_frequency?: string;
+
+  /**
+   * Stripe recurring billing (subscription). Used when donation_method is stripe or stripe_embed.
+   * Example: { "interval": "month", "interval_count": 1 }
+   * Legacy: donation_frequency "monthly" maps to month / 1 when recurring is omitted.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DonationRecurringDto)
+  recurring?: DonationRecurringDto;
 
   /** When set, creates a progress tracker from this workflow template for the new donation. */
   @IsOptional()

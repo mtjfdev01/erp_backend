@@ -9,13 +9,12 @@ export interface AlfalahCredentials {
   merchantPassword: string;
   key1: string;
   key2: string;
-  apiChannelId: string;
+  /** Page redirection channel for card (APG guide: 1001). */
   cardChannelId: string;
-  /** Final return after card payment (API → frontend redirect). */
+  /** ReturnURL on SSO + post-payment redirect (public API). */
   returnUrl: string;
-  /** Card handshake HS_ReturnURL — must match APG portal whitelist (often same as returnUrl). */
+  /** HS_ReturnURL for step-1 auth_token (public API). */
   hsReturnUrl: string;
-  defaultCountry: string;
 }
 
 export function getAlfalahEnvMode(): AlfalahEnvMode {
@@ -135,10 +134,8 @@ export function resolveAlfalahCredentials(): AlfalahCredentials & {
     merchantPassword,
     key1: padApgKey16(key1, merchantId),
     key2: padApgKey16(key2, storeId),
-    apiChannelId: process.env.APG_CHANNEL_ID || "1002",
     cardChannelId: process.env.APG_CARD_CHANNEL_ID || "1001",
     returnUrl,
     hsReturnUrl,
-    defaultCountry: process.env.APG_DEFAULT_COUNTRY || "164",
   };
 }

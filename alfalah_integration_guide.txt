@@ -1,59 +1,47 @@
-Bank Alfalah APG — ddr_server integration (mirrors PayFast pattern)
-====================================================================
+Bank Alfalah APG — credit/debit card only (ddr_server)
+======================================================
 
 SETUP
 -----
-1. Set ALFALAH_ENV=sandbox | production
-   - always required: APG_MERCHANT_ID, APG_STORE_ID, APG_MERCHANT_HASH, USERNAME, PASSWORD
-   - sandbox only optional: APG_KEY1, APG_KEY2 (derived if omitted)
-   - production: APG_KEY1 and APG_KEY2 required (16 chars each)
-2. APG_BASE_URL auto-defaults from ALFALAH_ENV if omitted.
-2. Set API_PUBLIC_BASE_URL to your public API host (HTTPS in production).
-   Optional APG_HS_RETURN_URL — card step-1 return base (must match portal whitelist).
-   Server appends ?donationId={id}. Examples:
-     https://www.mtjfoundation.org/donate/alfalah-card  (preferred)
-     https://www.mtjfoundation.org/thanks  (frontend redirects AuthToken → alfalah-card)
+1. ALFALAH_ENV=sandbox | production
+   Required: APG_MERCHANT_ID, APG_STORE_ID, APG_MERCHANT_HASH, USERNAME, PASSWORD
+   Production: APG_KEY1, APG_KEY2 (16 chars each)
+2. API_PUBLIC_BASE_URL=https://your-api.example.com
+   APG_HS_RETURN_URL=https://your-api.example.com/donations/public/alfalah/return
+   APG_RETURN_URL=https://your-api.example.com/donations/public/alfalah/return
+   (base URLs only — server appends ?donationId={id} per payment)
    BASE_Frontend_URL=https://www.mtjfoundation.org
-3. In APG merchant portal: Return URL = {API}/donations/public/alfalah/return
-   Listener URL = {API}/donations/public/alfalah/listener (whitelist with bank).
-4. Run migration: src/database/migrations/CreateAlfalahPaymentSessions1760000000023.ts
+3. APG merchant portal (whitelist with bank):
+   Return URL = APG_RETURN_URL base above
+   Listener URL = {API}/donations/public/alfalah/listener
+   Card channel = 1001 (page redirection)
 
-CREATE DONATION (same as PayFast — POST /donations)
----------------------------------------------------
-donation_method: "alfalah"
-alfalah_transaction_type: "1" | "2" | "3"   (wallet | account | card)
-alfalah_account_number: required for types 1 and 2 (wallet/account number)
-donor_phone, donor_email: required (APG sends OTP/OTAC to these)
+FLOW (APG guide)
+----------------
+Step 1 — Donor browser POST form to {APG}/HS/HS/HS (from create donation API response).
+Step 2 — APG redirects to HS_ReturnURL with auth_token; API auto-POSTs SSO to {APG}/SSO/SSO/SSO.
+Step 3 — Donor pays on APG secure card page.
+Step 4 — APG redirects to ReturnURL with O=order id; API calls IPN OrderStatus and redirects frontend.
 
-Response (wallet/account):
+CREATE DONATION
+---------------
+POST /donations (or public create route)
+  donation_method: "alfalah"
+
+Response:
 {
-  "requiresOtp": true,
-  "isOtp": true,           // true = 8-digit SMS OTP (wallet)
-  "otpLength": 8,          // false = 4+4 SMS+email OTAC (account)
-  "processOtpUrl": "/donations/public/alfalah/process-otp",
   "donationId": 123,
-  "transactionReference": "123"
+  "transactionReference": "123",
+  "cardStep": 1,
+  "formAction": "https://payments.bankalfalah.com/HS/HS/HS",
+  "formFields": { "HS_ChannelId": "1001", ... }
 }
 
-Response (card):
-Preferred: cardStep 2 + SSO form (server REST handshake with channel 1001).
-Fallback: cardStep 1 + POST to HS/HS/HS (if REST handshake fails — same as before).
+Frontend: postGatewayForm(formAction, formFields) once.
 
-Fallback (raw AuthToken on frontend):
-GET /donations/public/alfalah/card-sso?donationId=&authToken=
-→ { formAction, formFields } for frontend /donate/alfalah-card redirect.
-
-SUBMIT OTP (after donor receives code from Bank Alfalah)
---------------------------------------------------------
-POST /donations/public/alfalah/process-otp
-Body (wallet):  { "donationId": 123, "smsOtp": "12345678" }
-Body (account): { "donationId": 123, "smsOtac": "abcd", "emailOtac": "wxyz" }
-
-On success: donation status = completed (also verified via APG IPN OrderStatus).
-
-OTHER PUBLIC ROUTES
--------------------
-POST /donations/public/alfalah/listener?url=<APG IPN GET URL>
-GET  /donations/public/alfalah/return   (browser redirect → frontend thank-you)
-GET  /donations/public/alfalah/status  (handshake health check)
-GET  /donations/:id/provider-status    (polls APG when donation_method is alfalah)
+PUBLIC ROUTES
+-------------
+GET  /donations/public/alfalah/return   — Step 2 SSO HTML + post-payment IPN sync
+POST /donations/public/alfalah/listener — IPN webhook (?url=... then GET that URL)
+GET  /donations/public/alfalah/status   — credentials configured check
+GET  /donations/:id/provider-status     — polls IPN when donation_method is alfalah

@@ -18,10 +18,11 @@ import {
 import { User, Department, UserRole } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
 import { PayfastService } from "./payfast.service";
-import { StripeService } from "./stripe.service";
+import {
+  StripeRecurringParams,
+  StripeService,
+} from "./stripe.service";
 import { AlfalahService } from "./alfalah/alfalah.service";
-import { AlfalahPaymentSession } from "./alfalah/entities/alfalah-payment-session.entity";
-import { ProcessAlfalahOtpDto } from "./dto/process-alfalah-otp.dto";
 import { DonorService } from "../dms/donor/donor.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
@@ -45,7 +46,7 @@ import {
 import axios from "axios";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
 import { Donor } from "src/dms/donor/entities/donor.entity";
-import { RecurringDonation } from "src/dms/recurring_donations/entities/recurring_donation.entity";
+import { RecurringDonationPlan } from "src/dms/recurring_donations/entities/recurring_donation.entity";
 import { City } from "../dms/geographic/cities/entities/city.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
@@ -54,6 +55,7 @@ import { ProgressTracker } from "../progress_tracking/progress_trackers/progress
 import { ProgressBatchesService } from "../progress_tracking/progress_batches/progress-batches.service";
 import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
 import { DonationAuditService } from "./audit/donation-audit.service";
+import { RecurringDonationsStripeService } from "./recurring_donations/recurring-donations-stripe.service";
 import { DonationAuditAction } from "./audit/donation-audit-action.enum";
 import { DonationAuditSource } from "./audit/donation-audit-source.enum";
 import {
@@ -94,12 +96,10 @@ export class DonationsService {
     private payfastService: PayfastService,
     private stripeService: StripeService,
     private alfalahService: AlfalahService,
-    @InjectRepository(AlfalahPaymentSession)
-    private alfalahSessionRepository: Repository<AlfalahPaymentSession>,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
-    @InjectRepository(RecurringDonation)
-    private recurringDonationRepository: Repository<RecurringDonation>,
+    @InjectRepository(RecurringDonationPlan)
+    private recurringDonationPlanRepository: Repository<RecurringDonationPlan>,
     @InjectRepository(City)
     private cityRepository: Repository<City>,
     private donorService: DonorService,
@@ -112,6 +112,7 @@ export class DonationsService {
     @InjectRepository(ProgressWorkflowTemplate)
     private readonly workflowTemplatesRepo: Repository<ProgressWorkflowTemplate>,
     private readonly donationAuditService: DonationAuditService,
+    private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
   ) {}
 
   // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
@@ -147,6 +148,28 @@ export class DonationsService {
     donationId: number,
   ): T & { donationId: number } {
     return { ...payload, donationId };
+  }
+
+  /** Stripe subscription + internal recurring row when payload has recurring or legacy monthly. */
+  private isDonationRecurring(createDonationDto: CreateDonationDto): boolean {
+    if (createDonationDto.recurring?.interval) return true;
+    return createDonationDto.donation_frequency === "monthly";
+  }
+
+  /** Maps API `recurring` (or legacy monthly) to Stripe billing params. */
+  private resolveStripeRecurring(
+    createDonationDto: CreateDonationDto,
+  ): StripeRecurringParams | undefined {
+    if (createDonationDto.recurring?.interval) {
+      return {
+        interval: createDonationDto.recurring.interval as StripeRecurringParams["interval"],
+        interval_count: createDonationDto.recurring.interval_count ?? 1,
+      };
+    }
+    if (createDonationDto.donation_frequency === "monthly") {
+      return { interval: "month", interval_count: 1 };
+    }
+    return undefined;
   }
 
   private async assertDonorNotArchivedByEmail(email: string): Promise<void> {
@@ -214,17 +237,17 @@ export class DonationsService {
 
     await this.donationRepository.update(donationId, { donor_id: donor.id });
 
-    if (createDonationDto.donation_frequency === "monthly") {
+    if (this.isDonationRecurring(createDonationDto)) {
       const donation = await this.donationRepository.findOne({
         where: { id: donationId },
       });
       if (donation && !donation.recurrence_id) {
-        const recurringDonation = this.recurringDonationRepository.create({
+        const recurringDonation = this.recurringDonationPlanRepository.create({
           ...createDonationDto,
           donor_id: donor.id,
         });
         const savedRecurring =
-          await this.recurringDonationRepository.save(recurringDonation);
+          await this.recurringDonationPlanRepository.save(recurringDonation);
         await this.donationRepository.update(donationId, {
           recurrence_id: savedRecurring.id,
         });
@@ -1829,16 +1852,13 @@ export class DonationsService {
           }
         }
 
-        if (
-          !deferPostCreate &&
-          createDonationDto?.donation_frequency === "monthly"
-        ) {
-          const recurringDonation = this.recurringDonationRepository.create({
+        if (!deferPostCreate && this.isDonationRecurring(createDonationDto)) {
+          const recurringDonation = this.recurringDonationPlanRepository.create({
             ...createDonationDto,
             donor_id: donorId,
           });
           const savedRecurring =
-            await this.recurringDonationRepository.save(recurringDonation);
+            await this.recurringDonationPlanRepository.save(recurringDonation);
           recurringRowId = savedRecurring.id;
           if (donor) {
             donor.recurring = true;
@@ -2005,11 +2025,7 @@ export class DonationsService {
         }
       } else if (createDonationDto.donation_method === "alfalah") {
         try {
-          data = await this.startAlfalahPayment(
-            savedDonation,
-            createDonationDto,
-            donor,
-          );
+          data = await this.startAlfalahPayment(savedDonation);
         } catch (e) {
           await this.persistGatewayInvoiceError(
             savedDonation.id,
@@ -2020,6 +2036,7 @@ export class DonationsService {
       } else if (createDonationDto.donation_method === "stripe") {
         try {
           const baseFrontendUrl = process.env.BASE_Frontend_URL || "";
+          const stripeRecurring = this.resolveStripeRecurring(createDonationDto);
           const stripeResult = await this.stripeService.createCheckoutSession({
             donationId: savedDonation.id,
             amount: savedDonation.amount,
@@ -2028,7 +2045,7 @@ export class DonationsService {
             cancelUrl: `${baseFrontendUrl}/donate?cancelled=1`,
             donorEmail: donor?.email || createDonationDto.donor_email,
             donorName: this.donorDisplayName(donor, createDonationDto),
-            isMonthly: createDonationDto.donation_frequency === "monthly",
+            recurring: stripeRecurring,
           });
           savedDonation.orderId = stripeResult.sessionId;
           await this.donationRepository.save(savedDonation);
@@ -2045,6 +2062,7 @@ export class DonationsService {
         }
       } else if (createDonationDto.donation_method === "stripe_embed") {
         try {
+          const stripeRecurring = this.resolveStripeRecurring(createDonationDto);
           const embedResult =
             await this.stripeService.createPaymentIntentForEmbed({
               donationId: savedDonation.id,
@@ -2052,7 +2070,7 @@ export class DonationsService {
               currency: savedDonation.currency || "pkr",
               donorEmail: donor?.email || createDonationDto.donor_email,
               donorName: this.donorDisplayName(donor, createDonationDto),
-              isMonthly: createDonationDto.donation_frequency === "monthly",
+              recurring: stripeRecurring,
             });
           savedDonation.orderId =
             embedResult.subscriptionId ?? embedResult.paymentIntentId;
@@ -3132,8 +3150,14 @@ export class DonationsService {
   async handleStripeWebhook(
     rawBody: Buffer | string,
     signature: string,
-  ): Promise<{ received: boolean; donationId?: number }> {
+  ): Promise<{
+    received: boolean;
+    donationId?: number;
+    recurringDonation?: { handled: boolean; action?: string };
+  }> {
     const event = this.stripeService.constructWebhookEvent(rawBody, signature);
+    let resolvedDonationId: number | undefined;
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as {
         id?: string;
@@ -3142,30 +3166,28 @@ export class DonationsService {
         mode?: string;
         subscription?: string;
       };
-      const donationId = session.client_reference_id
+      const parsedDonationId = session.client_reference_id
         ? parseInt(session.client_reference_id, 10)
         : null;
-      if (donationId && !isNaN(donationId)) {
+      if (parsedDonationId && !isNaN(parsedDonationId)) {
         const donation = await this.donationRepository.findOne({
-          where: { id: donationId },
+          where: { id: parsedDonationId },
         });
         if (donation) {
-          if (donation.status === "completed") {
-            return { received: true, donationId };
+          resolvedDonationId = parsedDonationId;
+          if (donation.status !== "completed") {
+            const orderIdForDonation =
+              session.mode === "subscription" && session.subscription
+                ? session.subscription
+                : session.id || donation.orderId;
+            await this.donationRepository.update(parsedDonationId, {
+              status: "completed",
+              orderId: orderIdForDonation,
+            });
+            console.log(
+              `Stripe webhook: Donation ${parsedDonationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
+            );
           }
-          const orderIdForDonation =
-            session.mode === "subscription" && session.subscription
-              ? session.subscription
-              : session.id || donation.orderId;
-          await this.donationRepository.update(donationId, {
-            status: "completed",
-            orderId: orderIdForDonation,
-          });
-          // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
-          console.log(
-            `Stripe webhook: Donation ${donationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
-          );
-          return { received: true, donationId };
         }
       }
     }
@@ -3175,28 +3197,54 @@ export class DonationsService {
         metadata?: { donation_id?: string };
       };
       const donationIdStr = paymentIntent.metadata?.donation_id;
-      const donationId = donationIdStr ? parseInt(donationIdStr, 10) : null;
-      if (donationId && !isNaN(donationId)) {
+      const parsedDonationId = donationIdStr
+        ? parseInt(donationIdStr, 10)
+        : null;
+      if (parsedDonationId && !isNaN(parsedDonationId)) {
         const donation = await this.donationRepository.findOne({
-          where: { id: donationId },
+          where: { id: parsedDonationId },
         });
         if (donation) {
-          if (donation.status === "completed") {
-            return { received: true, donationId };
+          resolvedDonationId = parsedDonationId;
+          if (donation.status !== "completed") {
+            await this.donationRepository.update(parsedDonationId, {
+              status: "completed",
+              orderId: paymentIntent.id || donation.orderId,
+            });
+            console.log(
+              `Stripe webhook (embed): Donation ${parsedDonationId} marked completed (payment_intent: ${paymentIntent.id})`,
+            );
           }
-          await this.donationRepository.update(donationId, {
-            status: "completed",
-            orderId: paymentIntent.id || donation.orderId,
-          });
-          // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
-          console.log(
-            `Stripe webhook (embed): Donation ${donationId} marked completed (payment_intent: ${paymentIntent.id})`,
-          );
-          return { received: true, donationId };
         }
       }
     }
-    return { received: true };
+
+    let recurringDonation: { handled: boolean; action?: string } | undefined;
+    try {
+      const recurringResult =
+        await this.recurringDonationsStripeService.handleStripeEvent(event);
+      if (recurringResult.handled) {
+        recurringDonation = {
+          handled: true,
+          action: recurringResult.action,
+        };
+        if (recurringResult.initialDonationId) {
+          resolvedDonationId =
+            resolvedDonationId ?? recurringResult.initialDonationId;
+        }
+      }
+    } catch (recurringErr: any) {
+      console.error(
+        "Recurring donations Stripe handler error:",
+        recurringErr?.message || recurringErr,
+      );
+    }
+
+    return {
+      received: true,
+      donationId: resolvedDonationId,
+      recurringDonation,
+    };
   }
 
   // Blinq IPN Handler - Public endpoint logic
@@ -3412,257 +3460,24 @@ export class DonationsService {
     }
   }
 
-  // ─── Bank Alfalah APG (wallet / account + card redirect) ───────────────────
+  // ─── Bank Alfalah APG — credit/debit card only (page redirection) ───────────
 
-  private normalizeAlfalahMobile(phone: string | undefined): string {
-    if (!phone) return "";
-    let p = String(phone).replace(/\D/g, "");
-    if (p.startsWith("92") && p.length >= 12) {
-      p = "0" + p.slice(2);
-    }
-    if (!p.startsWith("0") && p.length === 10) {
-      p = "0" + p;
-    }
-    return p;
-  }
-
-  private async startAlfalahPayment(
-    savedDonation: Donation,
-    createDonationDto: CreateDonationDto,
-    donor: any,
-  ) {
-    const txType = String(
-      createDonationDto.alfalah_transaction_type || "1",
-    ) as "1" | "2" | "3";
+  /** APG step 1: return form POST to HS/HS/HS; step 2 on /alfalah/return. */
+  private async startAlfalahPayment(savedDonation: Donation) {
     const orderRef = String(savedDonation.id);
-    const email =
-      donor?.email ||
-      createDonationDto.donor_email ||
-      "donor@mtjfoundation.org";
-    const mobile = this.normalizeAlfalahMobile(
-      donor?.phone || createDonationDto.donor_phone,
-    );
-
-    if (txType === "3") {
-      await this.donationRepository.update(savedDonation.id, {
-        orderId: orderRef,
-      });
-      const frontendBase = (
-        process.env.BASE_Frontend_URL || "https://www.mtjfoundation.org"
-      ).replace(/\/thanks\/?$/, "");
-      const hsReturnBase =
-        process.env.APG_HS_RETURN_URL ||
-        `${frontendBase}/donate/alfalah-card`;
-      const hsReturnUrl = hsReturnBase.includes("?")
-        ? `${hsReturnBase}&donationId=${orderRef}`
-        : `${hsReturnBase}?donationId=${orderRef}`;
-
-      const cardForm = this.alfalahService.buildCardHandshakeForm(
-        orderRef,
-        hsReturnUrl,
-      );
-      return {
-        donationId: savedDonation.id,
-        transactionReference: orderRef,
-        alfalahFlow: "card",
-        cardStep: 1,
-        formAction: cardForm.action,
-        formFields: cardForm.fields,
-        message:
-          "Submit the form to Bank Alfalah secure checkout to pay by card.",
-      };
-    }
-
-    const accountNumber = createDonationDto.alfalah_account_number?.trim();
-    if (!accountNumber) {
-      throw new BadRequestException(
-        "alfalah_account_number is required for Alfa Wallet or Alfalah account payments",
-      );
-    }
-    if (!mobile) {
-      throw new BadRequestException(
-        "donor_phone is required for Bank Alfalah payments (OTP is sent to this number)",
-      );
-    }
-
-    const handshake = await this.alfalahService.initiateHandshake(orderRef);
-    if (!handshake.success || !handshake.authToken) {
-      throw new HttpException(
-        handshake.errorMessage || "Bank Alfalah handshake failed",
-        400,
-      );
-    }
-
-    const doTran = await this.alfalahService.initiateTransaction({
-      authToken: handshake.authToken,
-      transactionTypeId: txType,
-      transactionReference: orderRef,
-      amount: Number(savedDonation.amount),
-      accountNumber,
-      email,
-      mobile,
-    });
-
-    if (!doTran.success || !doTran.authToken || !doTran.hashKey) {
-      throw new HttpException(
-        doTran.errorMessage || "Bank Alfalah could not initiate transaction",
-        400,
-      );
-    }
-
-    await this.alfalahSessionRepository.delete({ donation_id: savedDonation.id });
-    await this.alfalahSessionRepository.save({
-      donation_id: savedDonation.id,
-      transaction_type_id: txType,
-      auth_token: doTran.authToken,
-      hash_key: doTran.hashKey,
-      is_otp: doTran.isOtp !== false,
-      transaction_reference: orderRef,
-    });
-
     await this.donationRepository.update(savedDonation.id, {
       orderId: orderRef,
       status: "pending",
     });
 
-    await this.notifyDonorAlfalahOtpSent({
-      donation: savedDonation,
-      donor,
-      email,
-      mobile,
-      isWalletOtp: doTran.isOtp !== false,
-    });
-
+    const step1 = this.alfalahService.buildCardHandshakeForm(orderRef);
     return {
       donationId: savedDonation.id,
       transactionReference: orderRef,
-      alfalahFlow: "api",
-      requiresOtp: true,
-      isOtp: doTran.isOtp !== false,
-      otpHint: doTran.isOtp !== false
-        ? "Enter the 8-digit OTP sent by Bank Alfalah to your Alfa Wallet mobile number."
-        : "Enter the 4-character SMS and email codes sent by Bank Alfalah for your Alfalah account.",
-      otpLength: doTran.isOtp !== false ? 8 : 4,
-      processOtpUrl: "/donations/public/alfalah/process-otp",
-    };
-  }
-
-  private async notifyDonorAlfalahOtpSent(params: {
-    donation: Donation;
-    donor: any;
-    email: string;
-    mobile: string;
-    isWalletOtp: boolean;
-  }) {
-    const donorName =
-      params.donor?.name || params.donation?.donor?.name || "Donor";
-    const amount = params.donation.amount;
-    const otpMessage = params.isWalletOtp
-      ? `Bank Alfalah has sent an 8-digit OTP to your mobile number ending ${params.mobile.slice(-4)}. Enter it on the donation page to complete your payment of PKR ${amount}.`
-      : `Bank Alfalah has sent a 4-character code to your mobile and email for your Alfalah account. Enter both codes on the donation page to complete your payment of PKR ${amount}.`;
-
-    try {
-      if (params.email) {
-        await this.emailService.sendDynamicEmail({
-          to: params.email,
-          subject: "Complete your MTJ Foundation donation – OTP from Bank Alfalah",
-          body: `<p>Dear {{name}},</p><p>{{message}}</p><p>Thank you for supporting MTJ Foundation.</p>`,
-          data: { name: donorName, message: otpMessage },
-        });
-      }
-    } catch (e: any) {
-      console.error("Alfalah OTP email failed:", e?.message || e);
-    }
-
-    // OTP is delivered by Bank Alfalah to mobile/email; we only mirror instructions via email.
-  }
-
-  async processAlfalahOtp(dto: ProcessAlfalahOtpDto) {
-    const donation = await this.donationRepository.findOne({
-      where: { id: dto.donationId },
-      relations: ["donor"],
-    });
-    if (!donation) {
-      throw new NotFoundException(`Donation with ID ${dto.donationId} not found`);
-    }
-    if (donation.status === "completed") {
-      return {
-        donationId: donation.id,
-        status: "completed",
-        message: "Donation is already completed",
-        processed: true,
-      };
-    }
-
-    const session = await this.alfalahSessionRepository.findOne({
-      where: { donation_id: dto.donationId },
-    });
-    if (!session?.auth_token || !session?.hash_key) {
-      throw new BadRequestException(
-        "No active Bank Alfalah session. Create the donation again with donation_method alfalah.",
-      );
-    }
-
-    const orderRef = session.transaction_reference || String(donation.id);
-    const isOtp = session.is_otp;
-
-    if (isOtp) {
-      if (!dto.smsOtp || dto.smsOtp.length !== 8) {
-        throw new BadRequestException("smsOtp (8 digits) is required for Alfa Wallet");
-      }
-    } else {
-      if (!dto.smsOtac || !dto.emailOtac) {
-        throw new BadRequestException(
-          "smsOtac and emailOtac (4 characters each) are required for Alfalah account payments",
-        );
-      }
-    }
-
-    const proResult = await this.alfalahService.processTransaction({
-      authToken: session.auth_token,
-      hashKey: session.hash_key,
-      transactionTypeId: session.transaction_type_id as "1" | "2",
-      transactionReference: orderRef,
-      isOtp,
-      smsOtp: dto.smsOtp,
-      smsOtac: dto.smsOtac,
-      emailOtac: dto.emailOtac,
-    });
-
-    const responseCode = proResult?.response_code ?? proResult?.ResponseCode;
-    const txStatus =
-      proResult?.transaction_status ?? proResult?.TransactionStatus;
-    const paid =
-      this.alfalahService.isSuccessResponseCode(responseCode) &&
-      String(txStatus || "").toUpperCase() === "PAID";
-
-    if (!paid) {
-      const err =
-        proResult?.ErrorMessage ||
-        proResult?.description ||
-        proResult?.Description ||
-        "Bank Alfalah payment failed";
-      await this.donationRepository.update(donation.id, {
-        status: "failed",
-        err_msg: String(err),
-      });
-      throw new HttpException(String(err), 400);
-    }
-
-    const sync = await this.syncAlfalahDonationFromIpn(orderRef, {
-      uniqueTranId: proResult?.unique_tran_id,
-      source: "alfalah_protran",
-    });
-
-    await this.alfalahSessionRepository.delete({ donation_id: donation.id });
-
-    return {
-      donationId: donation.id,
-      status: sync.status,
-      transactionReference: orderRef,
-      uniqueTranId: proResult?.unique_tran_id,
-      processed: true,
-      batching: sync.batching,
+      cardStep: 1,
+      formAction: step1.action,
+      formFields: step1.fields,
+      message: "Redirecting to Bank Alfalah secure checkout to pay by card.",
     };
   }
 
@@ -3690,56 +3505,36 @@ export class DonationsService {
     };
   }
 
-  async buildAlfalahCardSsoFormForDonation(
-    donationId: number,
-    authToken: string,
-  ): Promise<{ formAction: string; formFields: Record<string, string> }> {
-    const donation = await this.donationRepository.findOne({
-      where: { id: donationId },
-    });
-    if (!donation) {
-      throw new BadRequestException("Donation not found");
-    }
-    const token = authToken?.trim();
-    if (!token) {
-      throw new BadRequestException("Missing Bank Alfalah auth token");
-    }
-    const sso = this.alfalahService.buildCardSsoForm({
-      authToken: token,
-      transactionReference: String(donation.id),
-      amount: Number(donation.amount),
-    });
-    return {
-      formAction: sso.action,
-      formFields: sso.fields,
-    };
-  }
-
   async handleAlfalahReturn(query: Record<string, string>) {
-    const orderRef =
-      query.O ||
-      query.o ||
-      query.donationId ||
-      this.parseAlfalahOrderFromReturnPath(query);
-    const authToken = query.auth_token || query.AuthToken;
+    const authToken = (query.auth_token || query.AuthToken || "").trim();
+    const orderRef = this.resolveAlfalahOrderRef(query);
 
     if (authToken && orderRef) {
-      const donation = await this.donationRepository.findOne({
-        where: { id: Number(orderRef) },
-      });
-      if (donation) {
-        const sso = this.alfalahService.buildCardSsoForm({
-          authToken,
-          transactionReference: String(orderRef),
-          amount: Number(donation.amount),
-        });
-        return {
-          type: "card_sso_form" as const,
-          donationId: Number(orderRef),
-          formAction: sso.action,
-          formFields: sso.fields,
-        };
+      const donationId = Number(orderRef);
+      if (!Number.isFinite(donationId) || donationId <= 0) {
+        throw new BadRequestException(
+          `Invalid donation id in Alfalah return: ${orderRef}`,
+        );
       }
+
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId },
+      });
+      if (!donation) {
+        throw new NotFoundException(`Donation ${donationId} not found`);
+      }
+
+      const sso = this.alfalahService.buildCardSsoForm({
+        authToken,
+        transactionReference: String(orderRef),
+        amount: Number(donation.amount),
+      });
+      return {
+        type: "card_sso_form" as const,
+        donationId,
+        formAction: sso.action,
+        formFields: sso.fields,
+      };
     }
 
     if (orderRef) {
@@ -3754,7 +3549,36 @@ export class DonationsService {
       };
     }
 
-    throw new BadRequestException("Could not parse Bank Alfalah return parameters");
+    throw new BadRequestException(
+      "Could not parse Bank Alfalah return parameters (need AuthToken + donationId, or APG order id O)",
+    );
+  }
+
+  /** Order id from APG (O) or merchant query (donationId / TransactionReferenceNumber). */
+  private resolveAlfalahOrderRef(query: Record<string, string>): string | null {
+    const candidates = [
+      query.O,
+      query.o,
+      query.donationId,
+      query.donation_id,
+      query.TransactionReferenceNumber,
+      query.transactionReferenceNumber,
+      query.transaction_reference_number,
+      query.order_id,
+      query.orderId,
+      this.parseAlfalahOrderFromReturnPath(query),
+    ];
+
+    for (const raw of candidates) {
+      const ref = String(raw || "").trim();
+      if (!ref) continue;
+      const lower = ref.toLowerCase();
+      if (lower === "true" || lower === "false" || lower === "success") {
+        continue;
+      }
+      return ref;
+    }
+    return null;
   }
 
   private parseAlfalahOrderFromReturnPath(query: Record<string, string>): string | null {
@@ -3891,14 +3715,19 @@ export class DonationsService {
   }
 
   async getAlfalahHandshakeHealth(): Promise<{ success: boolean; message: string }> {
-    const testRef = `TEST-${Date.now()}`;
-    const result = await this.alfalahService.initiateHandshake(testRef);
-    return {
-      success: result.success,
-      message: result.success
-        ? "Bank Alfalah APG handshake OK"
-        : result.errorMessage || "Handshake failed",
-    };
+    try {
+      const c = this.alfalahService.getCredentials();
+      this.alfalahService.buildCardHandshakeForm("0");
+      return {
+        success: true,
+        message: `Bank Alfalah APG card configured (merchant ${c.merchantId}, channel ${c.cardChannelId})`,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: e?.message || "APG credentials not configured",
+      };
+    }
   }
 
   async getDonationListForDropdown(options?: {

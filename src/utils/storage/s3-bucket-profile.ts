@@ -14,6 +14,7 @@
 export const S3_BUCKET_PROFILE = {
   DEFAULT: "default",
   APPEALS: "appeals",
+  SOCIAL_MEDIA: "social_media",
 } as const;
 
 export type S3BucketProfileId =

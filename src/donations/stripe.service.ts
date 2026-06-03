@@ -1,6 +1,13 @@
 import { Injectable, HttpException } from "@nestjs/common";
 import Stripe from "stripe";
 
+export type StripeRecurringInterval = "day" | "week" | "month" | "year";
+
+export interface StripeRecurringParams {
+  interval: StripeRecurringInterval;
+  interval_count?: number;
+}
+
 export interface CreateStripeCheckoutParams {
   donationId: number;
   amount: number;
@@ -9,8 +16,8 @@ export interface CreateStripeCheckoutParams {
   cancelUrl: string;
   donorEmail?: string;
   donorName?: string;
-  /** When true, creates a monthly subscription instead of one-time payment */
-  isMonthly?: boolean;
+  /** When set, creates a subscription with this billing interval. */
+  recurring?: StripeRecurringParams;
 }
 
 export interface StripeCheckoutResult {
@@ -24,14 +31,14 @@ export interface CreateStripeEmbedParams {
   currency?: string;
   donorEmail?: string;
   donorName?: string;
-  /** When true, creates a monthly subscription; returns clientSecret for first invoice PaymentIntent */
-  isMonthly?: boolean;
+  /** When set, creates a subscription with this billing interval. */
+  recurring?: StripeRecurringParams;
 }
 
 export interface StripeEmbedResult {
   clientSecret: string;
   paymentIntentId: string;
-  /** Set when isMonthly: true (Stripe subscription id for recurring charges) */
+  /** Set for recurring: Stripe subscription id */
   subscriptionId?: string;
 }
 
@@ -56,6 +63,46 @@ export class StripeService {
     return this.stripe;
   }
 
+  /** For internal services (e.g. named recurring webhook handler). */
+  getStripeClient(): Stripe | null {
+    return this.stripe;
+  }
+
+  private normalizeRecurring(
+    recurring?: StripeRecurringParams,
+  ): { interval: StripeRecurringInterval; interval_count: number } | null {
+    if (!recurring?.interval) return null;
+    const interval = String(recurring.interval).toLowerCase() as StripeRecurringInterval;
+    const allowed: StripeRecurringInterval[] = ["day", "week", "month", "year"];
+    if (!allowed.includes(interval)) {
+      throw new HttpException(
+        "recurring.interval must be one of: day, week, month, year",
+        400,
+      );
+    }
+    const interval_count = Math.max(1, Math.floor(Number(recurring.interval_count ?? 1)));
+    if (!Number.isFinite(interval_count)) {
+      throw new HttpException("recurring.interval_count must be a positive integer", 400);
+    }
+    return { interval, interval_count };
+  }
+
+  private recurringProductLabel(
+    interval: StripeRecurringInterval,
+    interval_count: number,
+  ): string {
+    if (interval_count === 1) {
+      const labels: Record<StripeRecurringInterval, string> = {
+        day: "Daily donation",
+        week: "Weekly donation",
+        month: "Monthly donation",
+        year: "Yearly donation",
+      };
+      return labels[interval];
+    }
+    return `Recurring donation (every ${interval_count} ${interval}s)`;
+  }
+
   /**
    * Create a Stripe Checkout Session for a donation.
    * Amount is in major currency units (e.g. PKR or USD); converted to smallest unit for Stripe.
@@ -67,7 +114,6 @@ export class StripeService {
     const currency = (params.currency || "pkr")
       .toLowerCase()
       .replace(/\s/g, "");
-    // Stripe expects amount in smallest currency unit (cents for USD, paisas for PKR)
     const isZeroDecimal = ["jpy", "krw", "vnd", "clp"].indexOf(currency) !== -1;
     const unitAmount = isZeroDecimal
       ? Math.round(Number(params.amount))
@@ -80,25 +126,33 @@ export class StripeService {
       );
     }
 
-    const isMonthly = params.isMonthly === true;
+    const billing = this.normalizeRecurring(params.recurring);
+    const isSubscription = billing !== null;
+    const stripeCurrency = currency === "pkr" ? "pkr" : currency || "usd";
+
     const session = await stripe.checkout.sessions.create({
-      mode: isMonthly ? "subscription" : "payment",
+      mode: isSubscription ? "subscription" : "payment",
       payment_method_types: ["card"],
       line_items: [
         {
           quantity: 1,
           price_data: {
-            currency: currency === "pkr" ? "pkr" : currency || "usd",
+            currency: stripeCurrency,
             unit_amount: unitAmount,
-            ...(isMonthly && {
-              recurring: { interval: "month" as const },
+            ...(billing && {
+              recurring: {
+                interval: billing.interval,
+                interval_count: billing.interval_count,
+              },
             }),
             product_data: {
-              name: isMonthly ? "Monthly Donation" : "Donation",
+              name: isSubscription
+                ? this.recurringProductLabel(billing.interval, billing.interval_count)
+                : "Donation",
               description: params.donorName
                 ? `Donation from ${params.donorName}`
-                : isMonthly
-                  ? "Recurring monthly donation"
+                : isSubscription
+                  ? "Recurring donation"
                   : "Donation",
               metadata: {
                 donation_id: String(params.donationId),
@@ -114,8 +168,10 @@ export class StripeService {
         donation_id: String(params.donationId),
       },
       customer_email: params.donorEmail || undefined,
-      subscription_data: isMonthly
-        ? { metadata: { donation_id: String(params.donationId) } }
+      subscription_data: isSubscription
+        ? {
+            metadata: { donation_id: String(params.donationId) },
+          }
         : undefined,
     });
 
@@ -152,19 +208,20 @@ export class StripeService {
       );
     }
 
-    const isMonthly = params.isMonthly === true;
+    const billing = this.normalizeRecurring(params.recurring);
+    const stripeCurrency = currency === "pkr" ? "pkr" : currency || "usd";
 
-    if (isMonthly) {
+    if (billing) {
       const customer = await stripe.customers.create({
         email: params.donorEmail || undefined,
         name: params.donorName || undefined,
         metadata: { donation_id: String(params.donationId) },
       });
       const product = await stripe.products.create({
-        name: "Monthly Donation",
+        name: this.recurringProductLabel(billing.interval, billing.interval_count),
         description: params.donorName
-          ? `Monthly donation from ${params.donorName}`
-          : "Recurring monthly donation",
+          ? `Recurring donation from ${params.donorName}`
+          : "Recurring donation",
         metadata: { donation_id: String(params.donationId) },
       });
       const subscription = await stripe.subscriptions.create({
@@ -173,9 +230,12 @@ export class StripeService {
           {
             price_data: {
               product: product.id,
-              currency: currency === "pkr" ? "pkr" : currency || "usd",
+              currency: stripeCurrency,
               unit_amount: amountInSmallestUnit,
-              recurring: { interval: "month" },
+              recurring: {
+                interval: billing.interval,
+                interval_count: billing.interval_count,
+              },
             },
           },
         ],
@@ -206,7 +266,7 @@ export class StripeService {
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInSmallestUnit,
-      currency: currency === "pkr" ? "pkr" : currency || "usd",
+      currency: stripeCurrency,
       automatic_payment_methods: { enabled: true },
       metadata: {
         donation_id: String(params.donationId),

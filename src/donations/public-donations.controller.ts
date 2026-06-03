@@ -12,7 +12,7 @@ import {
 import { Request, Response } from "express";
 import { DonationsService } from "./donations.service";
 import { DonorService } from "src/dms/donor/donor.service";
-import { ProcessAlfalahOtpDto } from "./dto/process-alfalah-otp.dto";
+import { renderApgAutoPostHtml } from "./alfalah/apg-gateway-html.util";
 
 @Controller("donations/public")
 export class PublicDonationsController {
@@ -36,31 +36,6 @@ export class PublicDonationsController {
         status: "error",
         message: "Donations API error",
         error: error.message,
-      });
-    }
-  }
-
-  // Bank Alfalah APG — submit OTP after DoTran (wallet 8-digit / account 4+4 OTAC)
-  @Post("alfalah/process-otp")
-  async processAlfalahOtp(
-    @Body() dto: ProcessAlfalahOtpDto,
-    @Res() res: Response,
-  ) {
-    try {
-      const result = await this.donationsService.processAlfalahOtp(dto);
-      return res.status(HttpStatus.OK).json({
-        success: true,
-        message: "OTP processed",
-        data: result,
-      });
-    } catch (error) {
-      const status = error.message?.includes("not found")
-        ? HttpStatus.NOT_FOUND
-        : HttpStatus.BAD_REQUEST;
-      return res.status(status).json({
-        success: false,
-        message: error.message,
-        data: null,
       });
     }
   }
@@ -90,15 +65,14 @@ export class PublicDonationsController {
         "https://donation.mtjfoundation.org";
 
       if (result.type === "card_sso_form") {
-        const fieldsJson = encodeURIComponent(
-          JSON.stringify({
-            action: result.formAction,
-            fields: result.formFields,
-          }),
-        );
-        return res.redirect(
-          302,
-          `${frontendBase}/donate/alfalah-card?donationId=${result.donationId}&form=${fieldsJson}`,
+        // Auto-POST SSO from API (avoids huge ?form= URLs and missing /donate/alfalah-card handler)
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(HttpStatus.OK).send(
+          renderApgAutoPostHtml(
+            result.formAction,
+            result.formFields,
+            "Redirecting to Bank Alfalah",
+          ),
         );
       }
 
@@ -117,43 +91,18 @@ export class PublicDonationsController {
         `${frontendBase}${path}?donationId=${result.donationId}&status=${statusParam}`,
       );
     } catch (error) {
-      console.error("Alfalah return error:", error.message);
+      console.error("Alfalah return error:", error.message, error?.stack);
       const frontendBase =
         process.env.BASE_Frontend_URL?.replace(/\/thanks\/?$/, "") ||
         "https://donation.mtjfoundation.org";
-      return res.redirect(
-        302,
-        `${frontendBase}/pending?status=pending`,
+      const donationId = query?.donationId || query?.O || query?.o || "";
+      const reason = encodeURIComponent(
+        String(error?.message || "alfalah_return_failed").slice(0, 200),
       );
-    }
-  }
-
-  /** Card step 2 — build SSO form from handshake AuthToken (frontend fallback). */
-  @Get("alfalah/card-sso")
-  async getAlfalahCardSso(
-    @Query("donationId") donationId: string,
-    @Query("authToken") authToken: string,
-    @Res() res: Response,
-  ) {
-    try {
-      const id = Number(donationId);
-      if (!Number.isFinite(id) || id <= 0) {
-        throw new Error("Invalid donationId");
-      }
-      const result = await this.donationsService.buildAlfalahCardSsoFormForDonation(
-        id,
-        authToken,
-      );
-      return res.status(HttpStatus.OK).json({
-        success: true,
-        data: result,
-      });
-    } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
-        success: false,
-        message: error.message,
-        data: null,
-      });
+      const q = donationId
+        ? `donationId=${encodeURIComponent(donationId)}&status=pending&alfalahError=${reason}`
+        : `status=pending&alfalahError=${reason}`;
+      return res.redirect(302, `${frontendBase}/pending?${q}`);
     }
   }
 
