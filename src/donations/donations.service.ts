@@ -3463,8 +3463,8 @@ export class DonationsService {
   // ─── Bank Alfalah APG — credit/debit card only (page redirection) ───────────
 
   /**
-   * Card payment: server runs APG step 1 (HS/HS/HS), then returns step 2 SSO form
-   * for the browser. Browser only POSTs to SSO/SSO/SSO — not HS/HS/HS.
+   * APG card Step 1 only — browser POST HS/HS/HS (HS_IsRedirectionRequest=0).
+   * Step 2 SSO runs on GET /alfalah/return when APG sends auth_token.
    */
   private async startAlfalahPayment(savedDonation: Donation) {
     const orderRef = String(savedDonation.id);
@@ -3473,28 +3473,6 @@ export class DonationsService {
       status: "pending",
     });
 
-    const handshake =
-      await this.alfalahService.initiateCardHandshakeServer(orderRef);
-
-    if (handshake.success && handshake.authToken) {
-      const sso = this.alfalahService.buildCardSsoForm({
-        authToken: handshake.authToken,
-        transactionReference: orderRef,
-        amount: Number(savedDonation.amount),
-      });
-      return {
-        donationId: savedDonation.id,
-        transactionReference: orderRef,
-        cardStep: 2,
-        formAction: sso.action,
-        formFields: sso.fields,
-        message: "Redirecting to Bank Alfalah secure checkout to pay by card.",
-      };
-    }
-
-    this.logger.warn(
-      `APG server handshake failed for ${orderRef}: ${handshake.errorMessage || "no AuthToken"} — browser HS/HS/HS fallback`,
-    );
     const step1 = this.alfalahService.buildCardHandshakeForm(orderRef);
     return {
       donationId: savedDonation.id,
@@ -3502,9 +3480,8 @@ export class DonationsService {
       cardStep: 1,
       formAction: step1.action,
       formFields: step1.fields,
-      handshakeError: handshake.errorMessage,
       message:
-        "Redirecting to Bank Alfalah. Complete the confirmation step if prompted.",
+        "Redirecting to Bank Alfalah. After confirmation you will continue to secure card checkout.",
     };
   }
 

@@ -12,7 +12,8 @@ export type { AlfalahCredentials } from "./alfalah.credentials";
 
 /**
  * Bank Alfalah APG — credit/debit card only (page redirection channel 1001).
- * @see APG Merchant Integration Guide — Credit/Debit Card Payment Method
+ * Step 1: browser POST HS/HS/HS (HS_IsRedirectionRequest=0).
+ * Step 2: POST SSO/SSO/SSO after auth_token on HS_ReturnURL (see handleAlfalahReturn).
  */
 @Injectable()
 export class AlfalahService {
@@ -38,12 +39,11 @@ export class AlfalahService {
 
   private buildCardHandshakeFieldList(
     transactionReference: string,
-    isRedirectionRequest: "0" | "1",
   ): Array<[string, string]> {
     const c = this.creds();
     const hsReturnUrl = this.buildCardHsReturnUrl(transactionReference);
     return [
-      ["HS_IsRedirectionRequest", isRedirectionRequest],
+      ["HS_IsRedirectionRequest", "0"],
       ["HS_ChannelId", c.cardChannelId],
       ["HS_ReturnURL", hsReturnUrl],
       ["HS_MerchantId", c.merchantId],
@@ -55,75 +55,16 @@ export class AlfalahService {
     ];
   }
 
-  private parseApgJsonBody(data: unknown): Record<string, any> {
-    if (data && typeof data === "object") {
-      return data as Record<string, any>;
-    }
-    if (typeof data === "string") {
-      const trimmed = data.trim();
-      if (trimmed.startsWith("{")) {
-        try {
-          return JSON.parse(trimmed);
-        } catch {
-          return {};
-        }
-      }
-    }
-    return {};
-  }
-
   /**
-   * Step 1 on server — POST HS/HS/HS with HS_IsRedirectionRequest=1.
-   * APG returns AuthToken in body (no donor browser round-trip for handshake).
+   * Step 1 — donor browser POST to {baseUrl}/HS/HS/HS.
+   * HS_IsRedirectionRequest=0 → APG redirects to HS_ReturnURL with auth_token (GET).
    */
-  async initiateCardHandshakeServer(
-    transactionReference: string,
-  ): Promise<{
-    success: boolean;
-    authToken?: string;
-    errorMessage?: string;
-  }> {
-    const c = this.creds();
-    const fields = this.buildCardHandshakeFieldList(transactionReference, "1");
-    const body: Record<string, string> = Object.fromEntries(fields);
-    body.HS_RequestHash = buildApgRequestHash(fields, c.key1, c.key2);
-
-    const url = `${c.baseUrl}/HS/HS/HS`;
-    this.logger.log(
-      `APG card server handshake for order ${transactionReference}`,
-    );
-
-    try {
-      const { data: raw } = await axios.post(url, new URLSearchParams(body).toString(), {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        timeout: 60000,
-        validateStatus: () => true,
-      });
-      const data = this.parseApgJsonBody(raw);
-      const success = String(data?.success).toLowerCase() === "true";
-      return {
-        success,
-        authToken: data?.AuthToken,
-        errorMessage: data?.ErrorMessage,
-      };
-    } catch (err: any) {
-      this.logger.warn(
-        `APG card server handshake failed for ${transactionReference}: ${err?.message}`,
-      );
-      return {
-        success: false,
-        errorMessage: err?.message || "Handshake request failed",
-      };
-    }
-  }
-
-  /** Step 1 — browser fallback POST to HS/HS/HS (HS_IsRedirectionRequest=0). */
   buildCardHandshakeForm(transactionReference: string): {
     action: string;
     fields: Record<string, string>;
   } {
     const c = this.creds();
-    const fields = this.buildCardHandshakeFieldList(transactionReference, "0");
+    const fields = this.buildCardHandshakeFieldList(transactionReference);
     const formFields: Record<string, string> = Object.fromEntries(fields);
     formFields.HS_RequestHash = buildApgRequestHash(fields, c.key1, c.key2);
     return {
@@ -132,7 +73,7 @@ export class AlfalahService {
     };
   }
 
-  /** HS_ReturnURL — public API; ?donationId= helps match AuthToken to order (merchant convention). */
+  /** HS_ReturnURL — public API; ?donationId= matches auth_token to order (merchant convention). */
   buildCardHsReturnUrl(transactionReference: string): string {
     const c = this.creds();
     const base =
@@ -148,7 +89,10 @@ export class AlfalahService {
     return appendDonationIdToReturnUrl(c.returnUrl, transactionReference);
   }
 
-  /** Step 2 — POST form to SSO/SSO/SSO after AuthToken on /alfalah/return. */
+  /**
+   * Step 2 — POST {baseUrl}/SSO/SSO/SSO (ChannelId 1001, TransactionTypeId 3).
+   * Called from handleAlfalahReturn when auth_token is on HS_ReturnURL.
+   */
   buildCardSsoForm(params: {
     authToken: string;
     transactionReference: string;
@@ -158,6 +102,7 @@ export class AlfalahService {
     const paymentReturnUrl = this.buildCardPaymentReturnUrl(
       params.transactionReference,
     );
+    const amount = Number(params.amount);
     const fields: Array<[string, string]> = [
       ["AuthToken", params.authToken],
       ["ChannelId", c.cardChannelId],
@@ -170,7 +115,7 @@ export class AlfalahService {
       ["MerchantPassword", c.merchantPassword],
       ["TransactionTypeId", "3"],
       ["TransactionReferenceNumber", params.transactionReference],
-      ["TransactionAmount", String(params.amount)],
+      ["TransactionAmount", Number.isFinite(amount) ? amount.toFixed(2) : "0.00"],
     ];
     const formFields: Record<string, string> = Object.fromEntries(fields);
     formFields.RequestHash = buildApgRequestHash(fields, c.key1, c.key2);
@@ -196,3 +141,4 @@ export class AlfalahService {
     return String(code || "") === "00";
   }
 }
+

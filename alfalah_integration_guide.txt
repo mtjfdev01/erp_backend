@@ -1,49 +1,24 @@
-Bank Alfalah APG — credit/debit card only (ddr_server)
-======================================================
+Bank Alfalah APG — Credit/Debit Card (page redirection channel 1001)
+=====================================================================
 
-SETUP
------
-1. ALFALAH_ENV=sandbox | production
-   Required: APG_MERCHANT_ID, APG_STORE_ID, APG_MERCHANT_HASH, USERNAME, PASSWORD
-   Production: APG_KEY1, APG_KEY2 (16 chars each)
-2. API_PUBLIC_BASE_URL=https://your-api.example.com
-   APG_HS_RETURN_URL=https://your-api.example.com/donations/public/alfalah/return
-   APG_RETURN_URL=https://your-api.example.com/donations/public/alfalah/return
-   (base URLs only — server appends ?donationId={id} per payment)
-   BASE_Frontend_URL=https://www.mtjfoundation.org
-3. APG merchant portal (whitelist with bank):
-   Return URL = APG_RETURN_URL base above
-   Listener URL = {API}/donations/public/alfalah/listener
-   Card channel = 1001 (page redirection)
+STEP 1 — Browser POST to {APG}/HS/HS/HS (HS_IsRedirectionRequest=0, ChannelId=1001)
+  Create-donation returns formAction + formFields; frontend postGatewayForm once.
+  Donor completes APG handshake; APG redirects to HS_ReturnURL with auth_token (GET).
 
-FLOW (APG guide)
-----------------
-Step 1 — Server POST to {APG}/HS/HS/HS (HS_IsRedirectionRequest=1) → AuthToken.
-Step 2 — API returns SSO form; donor browser POSTs to {APG}/SSO/SSO/SSO.
-Fallback — If server handshake fails, API returns HS/HS/HS form (cardStep 1) for browser.
-Step 2b — If browser used step 1, APG redirects to HS_ReturnURL; API auto-POSTs SSO HTML.
-Step 3 — Donor pays on APG secure card page.
-Step 4 — APG redirects to ReturnURL with O=order id; API calls IPN OrderStatus and redirects frontend.
+STEP 2 — POST to {APG}/SSO/SSO/SSO (TransactionTypeId=3)
+  NOT from checkout. API GET /donations/public/alfalah/return?donationId=&auth_token=
+  auto-posts SSO HTML → APG secure card page.
 
-CREATE DONATION
----------------
-POST /donations (or public create route)
-  donation_method: "alfalah"
+STEP 3 — Payment on APG; redirect to ReturnURL with O=order id; API syncs IPN.
 
-Response:
-{
-  "donationId": 123,
-  "transactionReference": "123",
-  "cardStep": 1,
-  "formAction": "https://payments.bankalfalah.com/HS/HS/HS",
-  "formFields": { "HS_ChannelId": "1001", ... }
-}
+ENV
+---
+ALFALAH_ENV=sandbox | production  (do not rely on implicit production in dev)
+APG_MERCHANT_ID, APG_STORE_ID, APG_MERCHANT_HASH, USERNAME, PASSWORD
+Production: APG_KEY1, APG_KEY2 (16 chars)
+APG_CARD_CHANNEL_ID=1001
+API_PUBLIC_BASE_URL, APG_HS_RETURN_URL and APG_RETURN_URL → {API}/donations/public/alfalah/return
+BASE_Frontend_URL → thank-you / pending only
 
-Frontend: postGatewayForm(formAction, formFields) once.
-
-PUBLIC ROUTES
--------------
-GET  /donations/public/alfalah/return   — Step 2 SSO HTML + post-payment IPN sync
-POST /donations/public/alfalah/listener — IPN webhook (?url=... then GET that URL)
-GET  /donations/public/alfalah/status   — credentials configured check
-GET  /donations/:id/provider-status     — polls IPN when donation_method is alfalah
+Frontend: donation_method=alfalah, donation_frequency=once only.
+Misconfigured HS_ReturnURL on www site: /thanks forwards auth_token to API return.
