@@ -36,16 +36,14 @@ export class AlfalahService {
     return process.env.ALFALAH_CURRENCY || "PKR";
   }
 
-  /** Step 1 — POST form to HS/HS/HS (APG card handshake). */
-  buildCardHandshakeForm(transactionReference: string): {
-    action: string;
-    fields: Record<string, string>;
-  } {
+  private buildCardHandshakeFieldList(
+    transactionReference: string,
+    isRedirectionRequest: "0" | "1",
+  ): Array<[string, string]> {
     const c = this.creds();
     const hsReturnUrl = this.buildCardHsReturnUrl(transactionReference);
-    const fields: Array<[string, string]> = [
-      // 0 = APG redirects donor to HS_ReturnURL with auth_token (APG guide step 2)
-      ["HS_IsRedirectionRequest", "0"],
+    return [
+      ["HS_IsRedirectionRequest", isRedirectionRequest],
       ["HS_ChannelId", c.cardChannelId],
       ["HS_ReturnURL", hsReturnUrl],
       ["HS_MerchantId", c.merchantId],
@@ -55,6 +53,77 @@ export class AlfalahService {
       ["HS_MerchantPassword", c.merchantPassword],
       ["HS_TransactionReferenceNumber", transactionReference],
     ];
+  }
+
+  private parseApgJsonBody(data: unknown): Record<string, any> {
+    if (data && typeof data === "object") {
+      return data as Record<string, any>;
+    }
+    if (typeof data === "string") {
+      const trimmed = data.trim();
+      if (trimmed.startsWith("{")) {
+        try {
+          return JSON.parse(trimmed);
+        } catch {
+          return {};
+        }
+      }
+    }
+    return {};
+  }
+
+  /**
+   * Step 1 on server — POST HS/HS/HS with HS_IsRedirectionRequest=1.
+   * APG returns AuthToken in body (no donor browser round-trip for handshake).
+   */
+  async initiateCardHandshakeServer(
+    transactionReference: string,
+  ): Promise<{
+    success: boolean;
+    authToken?: string;
+    errorMessage?: string;
+  }> {
+    const c = this.creds();
+    const fields = this.buildCardHandshakeFieldList(transactionReference, "1");
+    const body: Record<string, string> = Object.fromEntries(fields);
+    body.HS_RequestHash = buildApgRequestHash(fields, c.key1, c.key2);
+
+    const url = `${c.baseUrl}/HS/HS/HS`;
+    this.logger.log(
+      `APG card server handshake for order ${transactionReference}`,
+    );
+
+    try {
+      const { data: raw } = await axios.post(url, new URLSearchParams(body).toString(), {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        timeout: 60000,
+        validateStatus: () => true,
+      });
+      const data = this.parseApgJsonBody(raw);
+      const success = String(data?.success).toLowerCase() === "true";
+      return {
+        success,
+        authToken: data?.AuthToken,
+        errorMessage: data?.ErrorMessage,
+      };
+    } catch (err: any) {
+      this.logger.warn(
+        `APG card server handshake failed for ${transactionReference}: ${err?.message}`,
+      );
+      return {
+        success: false,
+        errorMessage: err?.message || "Handshake request failed",
+      };
+    }
+  }
+
+  /** Step 1 — browser fallback POST to HS/HS/HS (HS_IsRedirectionRequest=0). */
+  buildCardHandshakeForm(transactionReference: string): {
+    action: string;
+    fields: Record<string, string>;
+  } {
+    const c = this.creds();
+    const fields = this.buildCardHandshakeFieldList(transactionReference, "0");
     const formFields: Record<string, string> = Object.fromEntries(fields);
     formFields.HS_RequestHash = buildApgRequestHash(fields, c.key1, c.key2);
     return {

@@ -18,8 +18,10 @@ SETUP
 
 FLOW (APG guide)
 ----------------
-Step 1 — Donor browser POST form to {APG}/HS/HS/HS (from create donation API response).
-Step 2 — APG redirects to HS_ReturnURL with auth_token; API auto-POSTs SSO to {APG}/SSO/SSO/SSO.
+Step 1 — Server POST to {APG}/HS/HS/HS (HS_IsRedirectionRequest=1) → AuthToken.
+Step 2 — API returns SSO form; donor browser POSTs to {APG}/SSO/SSO/SSO.
+Fallback — If server handshake fails, API returns HS/HS/HS form (cardStep 1) for browser.
+Step 2b — If browser used step 1, APG redirects to HS_ReturnURL; API auto-POSTs SSO HTML.
 Step 3 — Donor pays on APG secure card page.
 Step 4 — APG redirects to ReturnURL with O=order id; API calls IPN OrderStatus and redirects frontend.
 
