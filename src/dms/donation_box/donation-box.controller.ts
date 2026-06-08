@@ -209,6 +209,49 @@ export class DonationBoxController {
     }
   }
 
+  @Get(":id/audit-history")
+  @RequiredPermissions([
+    "fund_raising.donation_box.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async getAuditHistory(
+    @Param("id") id: string,
+    @Res() res: Response,
+    @CurrentUser() currentUser?: any,
+  ) {
+    try {
+      const existing = await this.donationBoxService.findOne(+id);
+      if (existing.city_id) {
+        await this.checkGeographicAccess(currentUser.id, existing.city_id);
+      }
+      const history =
+        await this.donationBoxService.getDonationBoxAuditHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation box audit history retrieved successfully",
+        data: history,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(":id")
   @RequiredPermissions([
     "fund_raising.donation_box.view",
@@ -275,6 +318,7 @@ export class DonationBoxController {
       const result = await this.donationBoxService.update(
         +id,
         updateDonationBoxDto,
+        currentUser,
       );
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -318,7 +362,7 @@ export class DonationBoxController {
         await this.checkGeographicAccess(currentUser.id, existingBox.city_id);
       }
 
-      const result = await this.donationBoxService.remove(+id);
+      const result = await this.donationBoxService.remove(+id, currentUser);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

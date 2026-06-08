@@ -11,11 +11,16 @@ import { BlinqModule } from "./payment_gateways/blinq/blinq.module";
 import { PayfastModule } from "./payment_gateways/payfast/payfast.module";
 import { MeezanModule } from "./payment_gateways/meezan/meezan.module";
 import { GeographicModule } from "./geographic/geographic.module";
-import { RecurringDonationsModule } from "./recurring_donations/recurring_donations.module";
 import { SurveysModule } from "./surveys/surveys.module";
 import { EventsModule } from "./events/events.module";
 import { CampaignsModule } from "./campaigns/campaigns.module";
 import { EmailTemplateModule } from "./email_template/email_template.module";
+import { CrowdFundingModule } from './crowd_funding/crowd_funding.module';
+import { AppealsModule } from './appeals/appeals.module';
+import { AppealsBenificiariesModule } from './appeals_benificiaries/appeals_benificiaries.module';
+import { AppealUpdatesModule } from './appeal_updates/appeal_updates.module';
+import { AppealMediaModule } from './appeal_media/appeal_media.module';
+import { SocialMediaModule } from './social_media/social_media.module';
 
 @Module({
   controllers: [DmsController],
@@ -34,11 +39,16 @@ import { EmailTemplateModule } from "./email_template/email_template.module";
     PayfastModule,
     MeezanModule,
     GeographicModule,
-    RecurringDonationsModule,
     SurveysModule,
     EventsModule,
     CampaignsModule,
     EmailTemplateModule,
+    CrowdFundingModule,
+    AppealsModule,
+    AppealsBenificiariesModule,
+    AppealUpdatesModule,
+    AppealMediaModule,
+    SocialMediaModule,
   ],
 })
 export class DmsModule {}

@@ -20,6 +20,12 @@ import {
 import { User, Department } from "../../../users/user.entity";
 import { DashboardAggregateService } from "../../../dashboard/dashboard-aggregate.service";
 import { CollectionStatus } from "./entities/donation_box_donation.entity";
+import { DonationBoxDonationAuditService } from "./audit/donation-box-donation-audit.service";
+import { DonationBoxDonationAuditAction } from "./audit/donation-box-donation-audit-action.enum";
+import { DonationBoxDonationAuditSource } from "./audit/donation-box-donation-audit-source.enum";
+import {
+  buildDonationBoxDonationFieldChanges,
+} from "./audit/donation-box-donation-audit.util";
 
 interface PaginationOptions {
   page: number;
@@ -46,7 +52,49 @@ export class DonationBoxDonationService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dashboardAggregateService: DashboardAggregateService,
+    private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
   ) {}
+
+  /** Staff user id for created_by / updated_by. */
+  private donationBoxDonationAuditUserId(
+    userId: number | null | undefined,
+  ): number | null {
+    if (userId == null || Number(userId) === -1) return null;
+    return Number(userId);
+  }
+
+  private buildDonationBoxDonationPatch(
+    dto: UpdateDonationBoxDonationDto,
+  ): Record<string, unknown> {
+    const d = dto as Record<string, unknown>;
+    const allowed = [
+      "donation_box_id",
+      "collection_amount",
+      "collection_date",
+      "collected_by_id",
+      "collector_name",
+      "status",
+      "verified_by_id",
+      "verified_at",
+      "deposit_date",
+      "bank_deposit_slip_no",
+      "payment_method",
+      "cheque_number",
+      "bank_name",
+      "bank_account_no",
+      "notes",
+      "discrepancy_notes",
+      "photo_urls",
+      "receipt_number",
+      "is_archived",
+    ] as const;
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (d[key] === undefined) continue;
+      patch[key] = d[key];
+    }
+    return patch;
+  }
 
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city IDs.
@@ -124,15 +172,10 @@ export class DonationBoxDonationService {
     }
   }
 
-  /**
-   * Get current user from request context
-   * This should be implemented based on your authentication system
-   */
-  private getCurrentUserId(): number | null {
-    // TODO: Implement based on your authentication system
-    // This could be from JWT token, session, or request context
-    // For now, returning null - you'll need to implement this
-    return null;
+  async getDonationBoxDonationAuditHistory(donationBoxDonationId: number) {
+    return this.donationBoxDonationAuditService.findByDonationBoxDonationId(
+      donationBoxDonationId,
+    );
   }
 
   /**
@@ -159,16 +202,17 @@ export class DonationBoxDonationService {
         throw new BadRequestException("Collection amount cannot be negative");
       }
 
-      // Auto-populate collected_by_id if not provided
-      const userId = currentUserId || this.getCurrentUserId();
-      if (!createDonationBoxDonationDto.collected_by_id && userId) {
-        createDonationBoxDonationDto.collected_by_id = userId;
+      const auditUserId = this.donationBoxDonationAuditUserId(currentUserId);
+      if (!createDonationBoxDonationDto.collected_by_id && auditUserId) {
+        createDonationBoxDonationDto.collected_by_id = auditUserId;
       }
 
-      // Create the collection record
-      const collection = this.donationBoxDonationRepository.create(
-        createDonationBoxDonationDto,
-      );
+      const collection = this.donationBoxDonationRepository.create({
+        ...createDonationBoxDonationDto,
+        ...(auditUserId != null
+          ? { created_by: { id: auditUserId } as any }
+          : {}),
+      });
 
       const savedCollection =
         await this.donationBoxDonationRepository.save(collection);
@@ -189,7 +233,13 @@ export class DonationBoxDonationService {
       // Return with relations
       return await this.donationBoxDonationRepository.findOne({
         where: { id: savedCollection.id },
-        relations: ["donation_box", "collected_by", "verified_by"],
+        relations: [
+          "donation_box",
+          "collected_by",
+          "verified_by",
+          "created_by",
+          "updated_by",
+        ],
       });
     } catch (error) {
       console.log("error", error);
@@ -309,7 +359,13 @@ export class DonationBoxDonationService {
     try {
       const collection = await this.donationBoxDonationRepository.findOne({
         where: { id },
-        relations: ["donation_box", "collected_by", "verified_by"],
+        relations: [
+          "donation_box",
+          "collected_by",
+          "verified_by",
+          "created_by",
+          "updated_by",
+        ],
       });
 
       if (!collection) {
@@ -367,10 +423,12 @@ export class DonationBoxDonationService {
         );
       }
 
-      // Auto-populate collected_by_id if not provided and current user is available
-      const userId = currentUserId || this.getCurrentUserId();
-      if (!updateDonationBoxDonationDto.collected_by_id && userId) {
-        updateDonationBoxDonationDto.collected_by_id = userId;
+      const auditUserId = this.donationBoxDonationAuditUserId(currentUserId);
+      if (
+        updateDonationBoxDonationDto.collected_by_id === undefined &&
+        auditUserId
+      ) {
+        updateDonationBoxDonationDto.collected_by_id = auditUserId;
       }
 
       // If donation_box_id is being changed, validate the new box exists
@@ -390,18 +448,44 @@ export class DonationBoxDonationService {
         }
       }
 
-      // Update the entity
-      await this.donationBoxDonationRepository.update(
-        id,
+      const patch = this.buildDonationBoxDonationPatch(
         updateDonationBoxDonationDto,
       );
+      if (auditUserId != null) {
+        patch.updated_by = auditUserId;
+      }
 
-      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
+      const auditChanges = buildDonationBoxDonationFieldChanges(
+        collection as unknown as Record<string, unknown>,
+        patch,
+      );
 
-      // Return updated entity with relations
+      if (Object.keys(patch).length > 0) {
+        await this.donationBoxDonationRepository.update(id, patch as any);
+      }
+
+      if (auditChanges.length > 0) {
+        const action = auditChanges.some((c) => c.field === "status")
+          ? DonationBoxDonationAuditAction.STATUS_CHANGED
+          : DonationBoxDonationAuditAction.UPDATED;
+        await this.donationBoxDonationAuditService.log({
+          donationBoxDonationId: id,
+          action,
+          source: DonationBoxDonationAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+        });
+      }
+
       return await this.donationBoxDonationRepository.findOne({
         where: { id },
-        relations: ["donation_box", "collected_by", "verified_by"],
+        relations: [
+          "donation_box",
+          "collected_by",
+          "verified_by",
+          "created_by",
+          "updated_by",
+        ],
       });
     } catch (error) {
       console.log("error", error);
@@ -415,7 +499,7 @@ export class DonationBoxDonationService {
   /**
    * Soft delete a collection record (archive)
    */
-  async remove(id: number) {
+  async remove(id: number, currentUserId?: number) {
     try {
       const collection = await this.donationBoxDonationRepository.findOne({
         where: { id },
@@ -427,10 +511,32 @@ export class DonationBoxDonationService {
         );
       }
 
-      // Soft delete by setting is_archived to true
-      await this.donationBoxDonationRepository.update(id, {
-        is_archived: true,
-      });
+      const auditUserId = this.donationBoxDonationAuditUserId(currentUserId);
+      const archivePatch: Record<string, unknown> = { is_archived: true };
+      if (auditUserId != null) {
+        archivePatch.updated_by = auditUserId;
+      }
+
+      const auditChanges = buildDonationBoxDonationFieldChanges(
+        collection as unknown as Record<string, unknown>,
+        archivePatch,
+      );
+
+      if (auditChanges.length > 0) {
+        await this.donationBoxDonationAuditService.log({
+          donationBoxDonationId: id,
+          action: DonationBoxDonationAuditAction.ARCHIVED,
+          source: DonationBoxDonationAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+          metadata: {
+            collection_amount: collection.collection_amount,
+            donation_box_id: collection.donation_box_id,
+          },
+        });
+      }
+
+      await this.donationBoxDonationRepository.update(id, archivePatch as any);
 
       return { message: "Collection record archived successfully" };
     } catch (error) {

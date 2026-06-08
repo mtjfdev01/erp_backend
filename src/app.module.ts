@@ -16,6 +16,7 @@ import { DonationsModule } from "./donations/donations.module";
 import { DmsModule } from "./dms/dms.module";
 import { DmsCronsModule } from "./crons/dms_crons/dms-crons.module";
 import { DonationsReportModule } from "./crons/donations_report/donations-report.module";
+import { SocialPostsBufferCronModule } from "./crons/social_posts_buffer/social-posts-buffer-cron.module";
 import { GeographicModule } from "./dms/geographic/geographic.module";
 import { MessagesModule } from "./website/messages/messages.module";
 import { NewsletterModule } from "./website/newsletter/newsletter.module";
@@ -31,23 +32,21 @@ import { ProgressTrackingModule } from "./progress_tracking/progress-tracking.mo
 import { NewDashboardModule } from "./new_dashboard/new_dashboard.module";
 import { DonorAuthModule } from "./donor_auth/donor-auth.module";
 import { DonorPortalModule } from "./donor_portal/donor-portal.module";
+import { DataImportModule } from "./data_import/data-import.module";
+import { S3StorageModule } from "./utils/storage/s3-storage.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // Makes ConfigService available globally
     }),
+    S3StorageModule,
     TypeOrmModule.forRoot({
       type: "postgres",
-      // host: process.env.DB_HOST,
-      // port: parseInt(process.env.DB_PORT),
-      // username: process.env.DB_USERNAME,
-      // password: process.env.DB_PASSWORD,
-      // database: process.env.DB_NAME,
-
-      url: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/ddr_db',
-      ssl: process.env.SSL === 'production',
-      autoLoadEntities: true,
+      url: process.env.DATABASE_URL,
+      ssl: process.env.SSL === "true"
+      ? { rejectUnauthorized: false }
+      : false,      autoLoadEntities: true,
       synchronize: true,
       extra: {
         max: 5,
@@ -56,23 +55,6 @@ import { DonorPortalModule } from "./donor_portal/donor-portal.module";
         statement_timeout: 60000,
       },
     }),
-
-    // ✅ VECTOR / AI DB (new pgvector service)
-    // TypeOrmModule.forRoot({
-    //   name: 'vector',
-    //   type: 'postgres',
-    //   url: process.env.VECTOR_DATABASE_URL,
-    //   // keep this isolated to only AI entities (don’t use autoLoadEntities here)
-    //   autoLoadEntities: false,
-    //   synchronize: true, // OK for start; later move to migrations
-    //   ssl: process.env.VECTOR_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    //   extra: {
-    //     max: 5,
-    //     connectionTimeoutMillis: 15000,
-    //     query_timeout: 60000,
-    //     statement_timeout: 60000,
-    //   },
-    // }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
     StoreModule,
     ProcurementsModule,
@@ -87,6 +69,7 @@ import { DonorPortalModule } from "./donor_portal/donor-portal.module";
     DmsModule,
     DmsCronsModule,
     DonationsReportModule,
+    SocialPostsBufferCronModule,
     GeographicModule,
     MessagesModule,
     NewsletterModule,
@@ -101,6 +84,7 @@ import { DonorPortalModule } from "./donor_portal/donor-portal.module";
     NewDashboardModule,
     DonorAuthModule,
     DonorPortalModule,
+    DataImportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

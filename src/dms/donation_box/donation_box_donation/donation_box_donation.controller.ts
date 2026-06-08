@@ -257,6 +257,55 @@ export class DonationBoxDonationController {
     }
   }
 
+  @Get(":id/audit-history")
+  @RequiredPermissions([
+    "fund_raising.donation_box_donations.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async getAuditHistory(
+    @Param("id") id: string,
+    @Res() res: Response,
+    @CurrentUser() currentUser?: any,
+  ) {
+    try {
+      const existing = await this.donationBoxDonationService.findOne(+id);
+      if (existing.donation_box_id) {
+        await this.checkGeographicAccessByBoxId(
+          currentUser?.id,
+          existing.donation_box_id,
+        );
+      }
+
+      const history =
+        await this.donationBoxDonationService.getDonationBoxDonationAuditHistory(
+          +id,
+        );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Collection audit history retrieved successfully",
+        data: history,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(":id")
   @RequiredPermissions([
     "fund_raising.donation_box_donations.view",
@@ -378,7 +427,10 @@ export class DonationBoxDonationController {
         );
       }
 
-      const result = await this.donationBoxDonationService.remove(+id);
+      const result = await this.donationBoxDonationService.remove(
+        +id,
+        currentUser?.id,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

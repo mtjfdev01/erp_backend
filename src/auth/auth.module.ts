@@ -16,6 +16,6 @@ import { ConditionalJwtGuard } from "./guards/conditional-jwt.guard";
   ],
   providers: [AuthService, JwtGuard, ConditionalJwtGuard],
   controllers: [AuthController],
-  exports: [AuthService, JwtGuard, ConditionalJwtGuard],
+  exports: [AuthService, JwtGuard, ConditionalJwtGuard, JwtModule],
 })
 export class AuthModule {}

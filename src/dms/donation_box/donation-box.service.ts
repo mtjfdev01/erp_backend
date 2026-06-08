@@ -15,6 +15,10 @@ import {
 import { Route } from "../geographic/routes/entities/route.entity";
 import { City } from "../geographic/cities/entities/city.entity";
 import { User, Department } from "../../users/user.entity";
+import { DonationBoxAuditService } from "./audit/donation-box-audit.service";
+import { DonationBoxAuditAction } from "./audit/donation-box-audit-action.enum";
+import { DonationBoxAuditSource } from "./audit/donation-box-audit-source.enum";
+import { buildDonationBoxFieldChanges } from "./audit/donation-box-audit.util";
 
 interface PaginationOptions {
   page: number;
@@ -43,7 +47,69 @@ export class DonationBoxService {
     private readonly cityRepository: Repository<City>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly donationBoxAuditService: DonationBoxAuditService,
   ) {}
+
+  private donationBoxAuditUserId(
+    userId: number | null | undefined,
+  ): number | null {
+    if (userId == null || Number(userId) === -1) return null;
+    return Number(userId);
+  }
+
+  private donationBoxAuditSnapshot(box: DonationBox): Record<string, unknown> {
+    return {
+      key_no: box.key_no,
+      route_id: box.route_id,
+      city_id: box.city_id,
+      shop_name: box.shop_name,
+      shopkeeper: box.shopkeeper,
+      cell_no: box.cell_no,
+      landmark_marketplace: box.landmark_marketplace,
+      box_type: box.box_type,
+      status: box.status,
+      frequency: box.frequency,
+      active_since: box.active_since,
+      last_collection_date: box.last_collection_date,
+      total_collected: box.total_collected,
+      collection_count: box.collection_count,
+      notes: box.notes,
+      is_active: box.is_active,
+      is_archived: box.is_archived,
+      assigned_user_ids: (box.assignedUsers || [])
+        .map((u) => u.id)
+        .sort((a, b) => a - b),
+    };
+  }
+
+  private buildDonationBoxPatch(dto: Record<string, unknown>): Record<string, unknown> {
+    const allowed = [
+      "key_no",
+      "route_id",
+      "city_id",
+      "shop_name",
+      "shopkeeper",
+      "cell_no",
+      "landmark_marketplace",
+      "box_type",
+      "status",
+      "frequency",
+      "active_since",
+      "last_collection_date",
+      "notes",
+      "is_active",
+      "is_archived",
+    ] as const;
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (dto[key] !== undefined) patch[key] = dto[key];
+    }
+    return patch;
+  }
+
+  async getDonationBoxAuditHistory(donationBoxId: number) {
+    return this.donationBoxAuditService.findByDonationBoxId(donationBoxId);
+  }
 
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city IDs.
@@ -173,9 +239,12 @@ export class DonationBoxService {
 
       // Create donation box entity
       const { assigned_user_ids, ...boxData } = createDonationBoxDto;
+      const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
       const donationBox = this.donationBoxRepository.create({
         ...boxData,
-        created_by: currentUser?.id == -1 ? null : currentUser?.id,
+        ...(auditUserId != null
+          ? { created_by: { id: auditUserId } as any }
+          : {}),
         assignedUsers: assignedUsers,
       });
 
@@ -296,6 +365,8 @@ export class DonationBoxService {
           "route.region",
           "route.country",
           "assignedUsers",
+          "created_by",
+          "updated_by",
         ],
       });
 
@@ -318,22 +389,32 @@ export class DonationBoxService {
   /**
    * Update a donation box
    */
-  async update(id: number, updateDonationBoxDto: any): Promise<DonationBox> {
+  async update(
+    id: number,
+    updateDonationBoxDto: any,
+    currentUser?: any,
+  ): Promise<DonationBox> {
     try {
       const donationBox = await this.donationBoxRepository.findOne({
         where: { id },
+        relations: ["assignedUsers"],
       });
 
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
 
-      // Validate route if it's being updated
+      const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
+      const before = this.donationBoxAuditSnapshot(donationBox);
+      const dto = { ...updateDonationBoxDto } as Record<string, unknown>;
+      const auditPatch: Record<string, unknown> = {
+        ...this.buildDonationBoxPatch(dto),
+      };
+
       if (updateDonationBoxDto.route_id) {
         const route = await this.routeRepository.findOne({
           where: { id: updateDonationBoxDto.route_id },
         });
-
         if (!route) {
           throw new NotFoundException(
             `Route with ID ${updateDonationBoxDto.route_id} not found`,
@@ -341,7 +422,6 @@ export class DonationBoxService {
         }
       }
 
-      // Handle user assignments if provided
       if (updateDonationBoxDto.assigned_user_ids !== undefined) {
         let assignedUsers: User[] = [];
         if (
@@ -351,37 +431,54 @@ export class DonationBoxService {
           assignedUsers = await this.userRepository.findBy({
             id: In(updateDonationBoxDto.assigned_user_ids),
           });
-
           if (
             assignedUsers.length !==
             updateDonationBoxDto.assigned_user_ids.length
           ) {
             const foundIds = assignedUsers.map((user) => user.id);
             const missingIds = updateDonationBoxDto.assigned_user_ids.filter(
-              (id) => !foundIds.includes(id),
+              (uid: number) => !foundIds.includes(uid),
             );
             throw new NotFoundException(
               `Users with IDs ${missingIds.join(", ")} not found`,
             );
           }
         }
-
-        // Update user assignments
-        const donationBox = await this.donationBoxRepository.findOne({
-          where: { id },
-          relations: ["assignedUsers"],
-        });
         donationBox.assignedUsers = assignedUsers;
+        auditPatch.assigned_user_ids = (assignedUsers || [])
+          .map((u) => u.id)
+          .sort((a, b) => a - b);
         await this.donationBoxRepository.save(donationBox);
       }
 
-      // Update other entity properties
-      const { assigned_user_ids, ...updateData } = updateDonationBoxDto;
-      if (Object.keys(updateData).length > 0) {
-        await this.donationBoxRepository.update(id, updateData);
+      const { assigned_user_ids: _au, ...updateData } = updateDonationBoxDto;
+      const scalarPatch = this.buildDonationBoxPatch(
+        updateData as Record<string, unknown>,
+      );
+      Object.assign(auditPatch, scalarPatch);
+
+      if (auditUserId != null) {
+        scalarPatch.updated_by = auditUserId;
       }
 
-      // Return updated entity with relations
+      const auditChanges = buildDonationBoxFieldChanges(before, auditPatch);
+      if (Object.keys(scalarPatch).length > 0) {
+        await this.donationBoxRepository.update(id, scalarPatch as any);
+      }
+
+      if (auditChanges.length > 0) {
+        const action = auditChanges.some((c) => c.field === "status")
+          ? DonationBoxAuditAction.STATUS_CHANGED
+          : DonationBoxAuditAction.UPDATED;
+        await this.donationBoxAuditService.log({
+          donationBoxId: id,
+          action,
+          source: DonationBoxAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+        });
+      }
+
       return await this.donationBoxRepository.findOne({
         where: { id },
         relations: [
@@ -390,6 +487,8 @@ export class DonationBoxService {
           "route.region",
           "route.country",
           "assignedUsers",
+          "created_by",
+          "updated_by",
         ],
       });
     } catch (error) {
@@ -404,18 +503,36 @@ export class DonationBoxService {
   /**
    * Soft delete a donation box (archive)
    */
-  async remove(id: number) {
+  async remove(id: number, currentUser?: any) {
     try {
       const donationBox = await this.donationBoxRepository.findOne({
         where: { id },
+        relations: ["assignedUsers"],
       });
 
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
 
-      // Soft delete by setting is_archived to true
-      await this.donationBoxRepository.update(id, { is_archived: true });
+      const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
+      const before = this.donationBoxAuditSnapshot(donationBox);
+      const archivePatch: Record<string, unknown> = { is_archived: true };
+      if (auditUserId != null) {
+        archivePatch.updated_by = auditUserId;
+      }
+
+      const auditChanges = buildDonationBoxFieldChanges(before, archivePatch);
+      if (auditChanges.length > 0) {
+        await this.donationBoxAuditService.log({
+          donationBoxId: id,
+          action: DonationBoxAuditAction.ARCHIVED,
+          source: DonationBoxAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+        });
+      }
+
+      await this.donationBoxRepository.update(id, archivePatch as any);
 
       return { message: "Donation box archived successfully" };
     } catch (error) {

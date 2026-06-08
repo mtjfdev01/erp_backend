@@ -3,8 +3,9 @@ import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 
 //nullabe true to all column
-@Entity("recurring_donations")
-export class RecurringDonation extends BaseEntity {
+/** Legacy plan row linked from donations.recurrence_id (pre-Stripe subscription ledger). */
+@Entity("recurring_donation_plans")
+export class RecurringDonationPlan extends BaseEntity {
   // Foreign key relationship to Donor
   @ManyToOne(() => Donor, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "donor_id" })
@@ -67,3 +68,6 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "boolean", nullable: true, default: false })
   email_sent: boolean;
 }
+
+/** @deprecated Use RecurringDonationPlan — table is recurring_donation_plans */
+export { RecurringDonationPlan as RecurringDonation };

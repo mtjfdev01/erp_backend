@@ -22,6 +22,13 @@ import {
   encryptDonorPassword,
   generateRandomPassword,
 } from "src/utils/crypto/donor-password-vault";
+import { DonorAuditService } from "./audit/donor-audit.service";
+import { DonorAuditAction } from "./audit/donor-audit-action.enum";
+import { DonorAuditSource } from "./audit/donor-audit-source.enum";
+import {
+  DONOR_AUDIT_SENSITIVE_FIELDS,
+} from "./audit/donor-audit.constants";
+import { buildDonorFieldChanges } from "./audit/donor-audit.util";
 
 interface PaginationOptions {
   page: number;
@@ -50,7 +57,61 @@ export class DonorService {
     private readonly cityRepository: Repository<City>,
     private readonly usersService: UsersService,
     private readonly dashboardAggregateService: DashboardAggregateService,
+    private readonly donorAuditService: DonorAuditService,
   ) {}
+
+  private donorAuditUserId(userId: number | null | undefined): number | null {
+    if (userId == null || Number(userId) === -1) return null;
+    return Number(userId);
+  }
+
+  private donorAuditSnapshot(donor: Donor): Record<string, unknown> {
+    return {
+      donor_type: donor.donor_type,
+      email: donor.email,
+      phone: donor.phone,
+      cnic: donor.cnic,
+      source: donor.source,
+      address: donor.address,
+      city: donor.city,
+      country: donor.country,
+      postal_code: donor.postal_code,
+      notes: donor.notes,
+      name: donor.name,
+      first_name: donor.first_name,
+      last_name: donor.last_name,
+      company_name: donor.company_name,
+      company_registration: donor.company_registration,
+      contact_person: donor.contact_person,
+      designation: donor.designation,
+      company_address: donor.company_address,
+      company_phone: donor.company_phone,
+      company_email: donor.company_email,
+      is_active: donor.is_active,
+      is_archived: donor.is_archived,
+      recurring: donor.recurring,
+      multi_time_donor: donor.multi_time_donor,
+      notification_subscription: donor.notification_subscription,
+      assigned_to_user_id: donor.assigned_to?.id ?? null,
+      referrer_user_id: donor.referred_by?.id ?? null,
+    };
+  }
+
+  private buildDonorPatch(dto: UpdateDonorDto): Record<string, unknown> {
+    const d = dto as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    for (const key of Object.keys(d)) {
+      if (d[key] === undefined || DONOR_AUDIT_SENSITIVE_FIELDS.has(key)) {
+        continue;
+      }
+      patch[key] = d[key];
+    }
+    return patch;
+  }
+
+  async getDonorAuditHistory(donorId: number) {
+    return this.donorAuditService.findByDonorId(donorId);
+  }
 
   /**
    * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
@@ -177,6 +238,7 @@ export class DonorService {
       const enc = encryptDonorPassword(plainPassword);
 
       // Create donor entity
+      const auditUserId = this.donorAuditUserId(user?.id);
       const donor = this.donorRepository.create({
         ...createDonorDto,
         password: hashedPassword,
@@ -184,7 +246,9 @@ export class DonorService {
         password_enc_version: enc.version,
         assigned_to,
         referred_by,
-        created_by: user,
+        ...(auditUserId != null
+          ? { created_by: { id: auditUserId } as any }
+          : {}),
       });
 
       // Save and return
@@ -203,6 +267,61 @@ export class DonorService {
       }
       throw new ConflictException(`Failed to create donor: ${error.message}`);
     }
+  }
+
+  /**
+   * CSV / data-import row — same persistence rules as register(), no HTTP DTO validation.
+   */
+  async importDonorRow(
+    row: Record<string, any>,
+    user: any,
+  ): Promise<Donor> {
+    const createDonorDto = {
+      donor_type: row.donor_type,
+      email: String(row.email || "")
+        .trim()
+        .toLowerCase(),
+      phone: String(row.phone || "").trim(),
+      password: row.password,
+      source: row.source,
+      address: row.address,
+      city: row.city,
+      country: row.country,
+      postal_code: row.postal_code,
+      notes: row.notes,
+      name: row.name,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      cnic: row.cnic,
+      company_name: row.company_name,
+      company_registration: row.company_registration,
+      contact_person: row.contact_person,
+      designation: row.designation,
+      company_address: row.company_address,
+      company_phone: row.company_phone,
+      company_email: row.company_email,
+      assigned_to_user_id: row.assigned_to_user_id,
+      referrer_user_id: row.referrer_user_id,
+    } as CreateDonorDto;
+
+    const saved = await this.register(createDonorDto, user);
+
+    const patch: Partial<Donor> = {};
+    if (row.is_active !== undefined) patch.is_active = row.is_active;
+    if (row.notification_subscription !== undefined) {
+      patch.notification_subscription = row.notification_subscription;
+    }
+    if (row.recurring !== undefined) patch.recurring = row.recurring;
+    if (row.multi_time_donor !== undefined) {
+      patch.multi_time_donor = row.multi_time_donor;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await this.donorRepository.update(saved.id, patch);
+      Object.assign(saved, patch);
+    }
+
+    return saved;
   }
 
   /**
@@ -490,7 +609,7 @@ export class DonorService {
       // i want donations also here
       const donor = await this.donorRepository.findOne({
         where: { id, is_archived: false },
-        relations: ["donations"],
+        relations: ["donations", "created_by", "updated_by", "assigned_to", "referred_by"],
       });
 
       if (!donor) {
@@ -567,27 +686,84 @@ export class DonorService {
   /**
    * Update donor information
    */
-  async update(id: number, updateDonorDto: UpdateDonorDto): Promise<Donor> {
+  async update(
+    id: number,
+    updateDonorDto: UpdateDonorDto,
+    user?: any,
+  ): Promise<Donor> {
     try {
       const donor = await this.donorRepository.findOne({
         where: { id, is_archived: false },
+        relations: ["assigned_to", "referred_by"],
       });
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
 
-      // // If password is being updated, hash it
-      // if (updateDonorDto.password) {
-      //   updateDonorDto.password = await bcrypt.hash(updateDonorDto.password, 10);
-      // }
+      const auditUserId = this.donorAuditUserId(user?.id);
+      const before = this.donorAuditSnapshot(donor);
+      const dto = { ...updateDonorDto } as Record<string, unknown>;
+      const patch = this.buildDonorPatch(updateDonorDto);
 
-      // Update donor
-      Object.assign(donor, updateDonorDto);
+      if (dto.assigned_to_user_id !== undefined) {
+        const assignedId =
+          dto.assigned_to_user_id === null || dto.assigned_to_user_id === ""
+            ? null
+            : Number(dto.assigned_to_user_id);
+        if (assignedId) {
+          const assignedUser = await this.usersService.findOne(assignedId);
+          if (!assignedUser) {
+            throw new NotFoundException("Assigned to user not found");
+          }
+          donor.assigned_to = assignedUser as any;
+        } else {
+          donor.assigned_to = null;
+        }
+        patch.assigned_to_user_id = assignedId;
+      }
+
+      if (dto.referrer_user_id !== undefined) {
+        const referrerId =
+          dto.referrer_user_id === null || dto.referrer_user_id === ""
+            ? null
+            : Number(dto.referrer_user_id);
+        if (referrerId) {
+          const referrer = await this.userRepository.findOne({
+            where: { id: referrerId },
+          });
+          if (!referrer) {
+            throw new NotFoundException("Referrer user not found");
+          }
+          donor.referred_by = referrer as any;
+        } else {
+          donor.referred_by = null;
+        }
+        patch.referrer_user_id = referrerId;
+      }
+
+      if (auditUserId != null) {
+        donor.updated_by = { id: auditUserId } as any;
+      }
+
+      const auditChanges = buildDonorFieldChanges(before, patch);
+      const { assigned_to_user_id: _a, referrer_user_id: _r, ...scalarPatch } =
+        patch;
+      Object.assign(donor, scalarPatch);
       const updatedDonor = await this.donorRepository.save(donor);
 
-      // Remove password from response
+      if (auditChanges.length > 0) {
+        await this.donorAuditService.log({
+          donorId: id,
+          action: DonorAuditAction.UPDATED,
+          source: DonorAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+        });
+      }
+
       delete updatedDonor.password;
+      delete (updatedDonor as any).password_enc;
 
       return updatedDonor;
     } catch (error) {
@@ -678,16 +854,37 @@ export class DonorService {
     try {
       const donor = await this.donorRepository.findOne({
         where: { id, is_archived: false },
+        relations: ["assigned_to", "referred_by"],
       });
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
 
-      // Soft delete - set is_active to false
+      const auditUserId = this.donorAuditUserId(user?.id);
+      const before = this.donorAuditSnapshot(donor);
+      const archivePatch = {
+        is_active: false,
+        is_archived: true,
+      };
+      const auditChanges = buildDonorFieldChanges(before, archivePatch);
+
       donor.is_active = false;
       donor.is_archived = true;
-      donor.updated_by = user;
+      if (auditUserId != null) {
+        donor.updated_by = { id: auditUserId } as any;
+      }
+
+      if (auditChanges.length > 0) {
+        await this.donorAuditService.log({
+          donorId: id,
+          action: DonorAuditAction.ARCHIVED,
+          source: DonorAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+        });
+      }
+
       await this.donorRepository.save(donor);
 
       return { message: "Donor deactivated successfully" };

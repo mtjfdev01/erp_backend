@@ -12,6 +12,7 @@ import {
 import { Request, Response } from "express";
 import { DonationsService } from "./donations.service";
 import { DonorService } from "src/dms/donor/donor.service";
+import { renderApgAutoPostHtml } from "./alfalah/apg-gateway-html.util";
 
 @Controller("donations/public")
 export class PublicDonationsController {
@@ -35,6 +36,94 @@ export class PublicDonationsController {
         status: "error",
         message: "Donations API error",
         error: error.message,
+      });
+    }
+  }
+
+  // APG IPN listener — POST with ?url=... (GET that URL for order status)
+  @Post("alfalah/listener")
+  async handleAlfalahListener(@Query() query: any, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.handleAlfalahListener(query);
+      return res.status(HttpStatus.OK).json(result);
+    } catch (error) {
+      console.error("Alfalah listener error:", error.message);
+      return res.status(HttpStatus.OK).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Browser return from APG (card handshake or payment result) — redirects to frontend
+  @Get("alfalah/return")
+  async handleAlfalahReturn(@Query() query: any, @Res() res: Response) {
+    try {
+      const result = await this.donationsService.handleAlfalahReturn(query);
+      const frontendBase =
+        process.env.BASE_Frontend_URL?.replace(/\/thanks\/?$/, "") ||
+        "https://donation.mtjfoundation.org";
+
+      if (result.type === "card_sso_form") {
+        // Auto-POST SSO from API (avoids huge ?form= URLs and missing /donate/alfalah-card handler)
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(HttpStatus.OK).send(
+          renderApgAutoPostHtml(
+            result.formAction,
+            result.formFields,
+            "Redirecting to Bank Alfalah",
+          ),
+        );
+      }
+
+      const status = result.status || "pending";
+      let path = "/pending";
+      let statusParam = "pending";
+      if (status === "completed") {
+        path = "/thank-you";
+        statusParam = "success";
+      } else if (status === "failed") {
+        path = "/payment-failed";
+        statusParam = "failed";
+      }
+      return res.redirect(
+        302,
+        `${frontendBase}${path}?donationId=${result.donationId}&status=${statusParam}`,
+      );
+    } catch (error) {
+      console.error("Alfalah return error:", error.message, error?.stack);
+      const frontendBase =
+        process.env.BASE_Frontend_URL?.replace(/\/thanks\/?$/, "") ||
+        "https://donation.mtjfoundation.org";
+      const donationId = query?.donationId || query?.O || query?.o || "";
+      const reason = encodeURIComponent(
+        String(error?.message || "alfalah_return_failed").slice(0, 200),
+      );
+      const q = donationId
+        ? `donationId=${encodeURIComponent(donationId)}&status=pending&alfalahError=${reason}`
+        : `status=pending&alfalahError=${reason}`;
+      return res.redirect(302, `${frontendBase}/pending?${q}`);
+    }
+  }
+
+  @Get("alfalah/status")
+  async getAlfalahStatus(@Res() res: Response) {
+    try {
+      const result = await this.donationsService.getAlfalahHandshakeHealth();
+      return res.status(
+        result.success ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE,
+      ).json({
+        success: result.success,
+        status: result.success ? "active" : "unavailable",
+        message: result.message,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      return res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
+        success: false,
+        status: "unavailable",
+        message: error.message,
+        timestamp: new Date().toISOString(),
       });
     }
   }

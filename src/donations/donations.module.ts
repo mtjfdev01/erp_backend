@@ -15,24 +15,29 @@ import { PermissionsModule } from "src/permissions/permissions.module";
 import { EmailModule } from "../email/email.module";
 import { PayfastService } from "./payfast.service";
 import { StripeService } from "./stripe.service";
+import { AlfalahService } from "./alfalah/alfalah.service";
 import { DonorModule } from "../dms/donor/donor.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
-import { RecurringDonation } from "src/dms/recurring_donations/entities/recurring_donation.entity";
+import { RecurringDonationPlan } from "src/dms/recurring_donations/entities/recurring_donation.entity";
 import { CampaignsModule } from "../dms/campaigns/campaigns.module";
 import { DashboardModule } from "../dashboard/dashboard.module";
 import { DonationsReceiptsService } from "./receipts.service";
 import { ProgressTrackersModule } from "../progress_tracking/progress_trackers/progress-trackers.module";
 import { ProgressBatchesModule } from "../progress_tracking/progress_batches/progress-batches.module";
 import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
+import { DonationAuditModule } from "./audit/donation-audit.module";
+import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-donations-stripe.module";
 
 @Module({
   imports: [
+    DonationAuditModule,
+    RecurringDonationsStripeModule,
     TypeOrmModule.forFeature([
       Donation,
       DonationInKind,
       User,
-      RecurringDonation,
+      RecurringDonationPlan,
       City,
       ProgressWorkflowTemplate,
     ]),
@@ -61,6 +66,7 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
     DonationsReceiptsService,
     PayfastService,
     StripeService,
+    AlfalahService,
     WhatsAppService,
   ],
   exports: [DonationsService],

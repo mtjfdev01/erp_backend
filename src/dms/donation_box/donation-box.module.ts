@@ -9,9 +9,11 @@ import { DonationBoxDonationModule } from "./donation_box_donation/donation_box_
 import { Route } from "../geographic/routes/entities/route.entity";
 import { City } from "../geographic/cities/entities/city.entity";
 import { User } from "../../users/user.entity";
+import { DonationBoxAuditModule } from "./audit/donation-box-audit.module";
 
 @Module({
   imports: [
+    DonationBoxAuditModule,
     TypeOrmModule.forFeature([DonationBox, Route, City, User]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",

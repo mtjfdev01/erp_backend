@@ -11,9 +11,11 @@ import { UsersModule } from "src/users/users.module";
 import { DashboardModule } from "../../dashboard/dashboard.module";
 import { DonorPasswordBackfillService } from "./donor-password-backfill.service";
 import { DonorPasswordBackfillRunner } from "./donor-password-backfill.runner";
+import { DonorAuditModule } from "./audit/donor-audit.module";
 
 @Module({
   imports: [
+    DonorAuditModule,
     TypeOrmModule.forFeature([Donor, User, City]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
