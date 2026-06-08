@@ -376,24 +376,15 @@ export class TasksService {
         dto.assigned_users,
       );
 
-      // Handle MOV checklist - encode into description if provided
-      let descriptionWithMov = dto.description || "";
+      // Handle MOV checklist - store only in mov_items, not in description
+      let movItemsFromDto: string[] = [];
       if (dto.mov_checklist && dto.mov_checklist.length > 0) {
-        const movHeader = "[MOV CHECKLIST]";
-        const movItems = dto.mov_checklist.map((item) => item.text);
-        const movContent = movItems.map((item) => `- ${item}`).join("\n");
-        const movBlock = `${movHeader}\n${movContent}`;
-
-        if (descriptionWithMov && descriptionWithMov.trim()) {
-          descriptionWithMov = `${descriptionWithMov.trim()}\n\n${movBlock}`;
-        } else {
-          descriptionWithMov = movBlock;
-        }
+        movItemsFromDto = dto.mov_checklist.map((item) => item.text);
       }
 
       const task = this.taskRepo.create({
         title: dto.title,
-        description: descriptionWithMov,
+        description: dto.description || "",
         department: dto.department,
         priority: dto.priority,
         workflow_type: dto.workflow_type || TaskWorkflowType.STANDARD,
@@ -431,6 +422,7 @@ export class TasksService {
         )
           ? dto.approval_required_user_ids
           : null,
+        mov_items: movItemsFromDto.length > 0 ? movItemsFromDto : null,
       });
 
       const saved = await this.taskRepo.save(task);
@@ -587,6 +579,10 @@ export class TasksService {
       delete safeFilters.assignee_id;
       delete safeFilters.assigned_user_id;
 
+      // Declare searchTerm and userNameFilter early
+      const searchTerm = safeFilters.search;
+      const userNameFilter = safeFilters.user_name;
+
       if (startDate) {
         qb.andWhere("task.created_at >= :start_date", {
           start_date: startDate,
@@ -622,7 +618,6 @@ export class TasksService {
       }
 
       // Handle search filter - extend to include assigned user names
-      const searchTerm = safeFilters.search;
       if (searchTerm && searchTerm.trim() !== "") {
         qb.andWhere(
           new Brackets((searchQb) => {
@@ -649,7 +644,6 @@ export class TasksService {
       }
 
       // Handle user name filter - dedicated filter for searching by assigned user name
-      const userNameFilter = safeFilters.user_name;
       if (userNameFilter && userNameFilter.trim() !== "") {
         const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
 
@@ -661,6 +655,13 @@ export class TasksService {
 
       // Remove user_name from safeFilters so it's not passed to applyCommonFilters
       delete safeFilters.user_name;
+
+      // Now make a copy of safeFilters for count query builder
+      const countSafeFilters = { ...safeFilters };
+      
+      // Clean up countSafeFilters to remove any extra fields we don't want (like reported_to)
+      const countExcludeFields = ["reported_to"];
+      countExcludeFields.forEach(field => delete countSafeFilters[field]);
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
@@ -728,18 +729,231 @@ export class TasksService {
       qb.orderBy(`task.${sortName}`, sortOrder as "ASC" | "DESC");
 
       const skip = (page - 1) * pageSize;
-      qb.skip(skip).take(pageSize);
+      if (pageSize !== -1) {
+        qb.skip(skip).take(pageSize);
+      }
 
       const [data, total] = await qb.getManyAndCount();
+
+      // Calculate category-specific counts
+      let assignedToMeCount = 0;
+      let assignedToTeamCount = 0;
+      let otherTasksCount = 0;
+
+      // Create a separate query builder for counts (without pagination)
+      const countQb = this.taskRepo.createQueryBuilder("task");
+      await this.applyRoleFilters(countQb, currentUser);
+
+      // Apply all the same filters to countQb as we did to qb
+      if (startDate) {
+        countQb.andWhere("task.created_at >= :start_date", {
+          start_date: startDate,
+        });
+      }
+      if (endDate) {
+        countQb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+      }
+      if (exactDate) {
+        countQb.andWhere("DATE(task.created_at) = :exact_date", {
+          exact_date: exactDate,
+        });
+      }
+
+      if (
+        assigneeIdRaw !== undefined &&
+        assigneeIdRaw !== null &&
+        assigneeIdRaw !== ""
+      ) {
+        const assigneeId = Number(assigneeIdRaw);
+        if (!isNaN(assigneeId)) {
+          countQb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.assigned_user_ids @> ARRAY[:assigneeId]::int[]", {
+                assigneeId,
+              });
+              dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+                metaObj: JSON.stringify([{ user_id: assigneeId }]),
+              });
+            }),
+          );
+        }
+      }
+
+      // Handle search filter
+      if (searchTerm && searchTerm.trim() !== "") {
+        countQb.andWhere(
+          new Brackets((searchQb) => {
+            searchQb.where("LOWER(task.title) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere(
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
+              { searchTerm: `%${searchTerm.toLowerCase()}%` },
+            );
+          }),
+        );
+      }
+
+      // Handle user name filter
+      if (userNameFilter && userNameFilter.trim() !== "") {
+        const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
+        countQb.andWhere(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
+          { userName: userSearchTerm },
+        );
+      }
+
+      // Apply common filters
+      applyCommonFilters(countQb, countSafeFilters, this.searchableColumns, "task");
+
+      if (viewTypeFilter === "created" && currentUser) {
+        countQb.andWhere("task.created_by_id = :currentUserId", {
+          currentUserId: currentUser.id,
+        });
+      } else if (viewTypeFilter === "assigned" && currentUser) {
+        countQb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
+            });
+          }),
+        );
+      }
+
+      if (departmentFilter) {
+        const lowerDept = String(departmentFilter).toLowerCase();
+        countQb.andWhere(
+          new Brackets((deptQb) => {
+            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
+            if (currentUser) {
+              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
+                userId: currentUser.id,
+              });
+              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
+                userId: currentUser.id,
+              });
+              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
+              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
+            }
+            
+            // Then apply the department filter
+            if (strictDepartment === true || strictDepartment === "true") {
+              deptQb.orWhere("task.department = :filterDept", {
+                filterDept: lowerDept,
+              });
+            } else {
+              deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
+                deptMeta: JSON.stringify([{ department: lowerDept }]),
+              });
+              deptQb.orWhere("task.department = :department", {
+                department: lowerDept,
+              });
+            }
+          }),
+        );
+      }
+
+      // Calculate assigned_to_me count
+      if (currentUser) {
+        const assignedToMeQb = countQb.clone();
+        assignedToMeQb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where("task.assigned_user_ids @> ARRAY[:currentUserId]::int[]", {
+              currentUserId: currentUser.id,
+            });
+            dqb.orWhere(
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId)",
+              { currentUserId: currentUser.id },
+            );
+          }),
+        );
+        assignedToMeCount = await assignedToMeQb.getCount();
+
+        // Calculate assigned_to_team count (only if user is manager)
+        if (currentUser?.department) {
+          const isManager = [
+            'dept_head',
+            'manager',
+            'assistant_manager',
+            'team_lead',
+            'coordinator'
+          ].includes(String(currentUser.role || '').toLowerCase());
+          
+          if (isManager) {
+            const assignedToTeamQb = countQb.clone();
+            // Not assigned to me
+            assignedToTeamQb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL", {
+                  currentUserId: currentUser.id,
+                });
+                dqb.orWhere("NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL", {
+                  currentUserId: currentUser.id,
+                });
+              }),
+            );
+            // Assigned to someone from same department and user_id != current user id
+            assignedToTeamQb.andWhere(
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+              { dept: currentUser.department, currentUserId: currentUser.id },
+            );
+            assignedToTeamCount = await assignedToTeamQb.getCount();
+          }
+        }
+
+        // Calculate other_tasks count
+        const otherTasksQb = countQb.clone();
+        // Not assigned to current user
+        otherTasksQb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where("NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL", {
+              currentUserId: currentUser.id,
+            });
+            dqb.orWhere("NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL", {
+              currentUserId: currentUser.id,
+            });
+          }),
+        );
+        // Not assigned to team (if applicable)
+        if (currentUser?.department && [
+            'dept_head',
+            'manager',
+            'assistant_manager',
+            'team_lead',
+            'coordinator'
+          ].includes(String(currentUser.role || '').toLowerCase())) {
+          otherTasksQb.andWhere(
+            "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+            { dept: currentUser.department, currentUserId: currentUser.id },
+          );
+        }
+        otherTasksCount = await otherTasksQb.getCount();
+      }
+
       return {
         data,
         pagination: {
           page,
           pageSize,
           total,
-          totalPages: Math.ceil(total / pageSize),
-          hasNext: page < Math.ceil(total / pageSize),
-          hasPrev: page > 1,
+          totalPages: pageSize === -1 ? 1 : Math.ceil(total / pageSize),
+          hasNext: pageSize === -1 ? false : page < Math.ceil(total / pageSize),
+          hasPrev: pageSize === -1 ? false : page > 1,
+        },
+        categoryCounts: {
+          assigned_to_me: assignedToMeCount,
+          assigned_to_team: assignedToTeamCount,
+          other_tasks: otherTasksCount,
         },
       };
     } catch (e) {
@@ -1383,6 +1597,37 @@ export class TasksService {
         (task as any).recurrence_info = recurrence_info;
       }
 
+      // Backward compatibility: extract MOV items from description and clean up description
+      const movHeader = "[MOV CHECKLIST]";
+      if (!Array.isArray(task.mov_items) || task.mov_items.length === 0) {
+        const desc = task.description || "";
+        const movStartIndex = desc.indexOf(movHeader);
+        if (movStartIndex !== -1) {
+          // Extract MOV items
+          const extractedMovItems = desc
+            .substring(movStartIndex + movHeader.length)
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.startsWith("-"))
+            .map((line) => line.substring(1).trim());
+          
+          // Set extracted MOV items to task.mov_items
+          if (extractedMovItems.length > 0) {
+            task.mov_items = extractedMovItems;
+          }
+          
+          // Clean up description by removing MOV checklist
+          task.description = desc.substring(0, movStartIndex).trim();
+        }
+      } else {
+        // If we already have mov_items, make sure description is clean
+        const desc = task.description || "";
+        const movStartIndex = desc.indexOf(movHeader);
+        if (movStartIndex !== -1) {
+          task.description = desc.substring(0, movStartIndex).trim();
+        }
+      }
+
       return task;
     } catch (e) {
       throw e;
@@ -1543,18 +1788,37 @@ export class TasksService {
         updatedRejectedByIds = null;
       }
 
-      if (dto.mov_items) {
+      // Determine final MOV items (use dto.mov_items if provided, else existing)
+      let finalMovItems = Array.isArray(dto.mov_items) && dto.mov_items.length > 0
+        ? dto.mov_items
+        : task.mov_items;
+
+      // Determine final description: only the actual task description, no MOV items
+      let finalDescription = task.description;
+      if (dto.description != null) {
+        finalDescription = dto.description;
+      }
+
+      // Backward compatibility: if we don't have mov_items but do have MOV checklist in description, extract it
+      if (!Array.isArray(finalMovItems) || finalMovItems.length === 0) {
         const movHeader = "[MOV CHECKLIST]";
-        const movContent = dto.mov_items.map((item) => `- ${item}`).join("\n");
-        const movBlock = `${movHeader}\n${movContent}`;
-
-        const desc = task.description || "";
-        const movStartIndex = desc.indexOf(movHeader);
-
+        const movStartIndex = finalDescription.indexOf(movHeader);
         if (movStartIndex !== -1) {
-          task.description = `${desc.substring(0, movStartIndex).trim()}\n\n${movBlock}`;
-        } else {
-          task.description = `${desc.trim()}\n\n${movBlock}`;
+          // Extract MOV items from description
+          const extractedMovItems = finalDescription
+            .substring(movStartIndex + movHeader.length)
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.startsWith("-"))
+            .map((line) => line.substring(1).trim());
+          
+          // Update finalDescription to remove MOV checklist
+          finalDescription = finalDescription.substring(0, movStartIndex).trim();
+          
+          // Set extracted items as final mov_items if we have any
+          if (extractedMovItems.length > 0) {
+            finalMovItems = extractedMovItems;
+          }
         }
       }
 
@@ -1568,7 +1832,7 @@ export class TasksService {
       const oldProgress = task.progress;
       Object.assign(task, {
         title: dto.title ?? task.title,
-        description: dto.description ?? task.description,
+        description: finalDescription,
         department: dto.department ?? task.department,
         priority: dto.priority ?? task.priority,
         status: dto.status ?? task.status,
@@ -1607,6 +1871,9 @@ export class TasksService {
         approved_by_id: updatedApprovedByIds,
         rejected_by_id: updatedRejectedByIds,
         updated_by_id: currentUser?.id ?? task.updated_by_id,
+        mov_items: Array.isArray(finalMovItems) && finalMovItems.length > 0
+          ? finalMovItems
+          : task.mov_items,
       });
       const saved = await this.taskRepo.save(task);
 

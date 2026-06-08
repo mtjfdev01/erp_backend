@@ -178,6 +178,9 @@ export class Task {
   @Column({ type: "text", nullable: true })
   last_progress_notes: string;
 
+  @Column({ type: "text", array: true, nullable: true })
+  mov_items: string[];
+
   @OneToMany(() => TaskAttachment, (att) => att.task, { cascade: true })
   attachments: TaskAttachment[];
 
