@@ -288,58 +288,67 @@ export class TasksService {
 
     qb.andWhere(
       new Brackets((mainQb) => {
-        // A. Super Admin & Admin: Always see all tasks
-        const roleStr = String(user.role).toLowerCase();
-        if (roleStr === UserRole.SUPER_ADMIN || roleStr === UserRole.ADMIN) {
-          mainQb.where("1=1");
-          return;
-        }
-
-        // B. Required Approver: See tasks they need to approve (even across departments)
-        mainQb.where(
-          "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
-          {
-            userId: user.id,
-          },
-        );
-
-        // C. Direct Involvement: See tasks where user is assigned, creator, or reporter (regardless of department)
-        mainQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
-          userId: user.id,
-        });
-        mainQb.orWhere("task.created_by_id = :userId", { userId: user.id });
-        mainQb.orWhere("task.reported_by_id = :userId", { userId: user.id });
-
-        // D. Role-based Department Visibility: Leaders see all tasks within their department
-        const leadershipRoles = [
-          UserRole.DEPT_HEAD,
-          UserRole.MANAGER,
-          UserRole.ASSISTANT_MANAGER,
-          UserRole.TEAM_LEAD,
-          UserRole.COORDINATOR,
-          UserRole.SYSTEM_ADMIN,
-        ];
-
-        if (
-          user.department &&
-          roleStr &&
-          leadershipRoles.map((r) => r.toLowerCase()).includes(roleStr)
-        ) {
-          mainQb.orWhere("task.department = :userDept", {
-            userDept: user.department.toLowerCase(),
-          });
-
-          // E. Cross-department visibility for Managers:
-          // If a task is assigned to a user who belongs to the manager's department,
-          // the manager should see it even if the task's primary department is different.
-          mainQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
-            deptMeta: JSON.stringify([
-              { department: String(user.department).toLowerCase() },
-            ]),
-          });
-        }
+        this.applyRoleFiltersWithoutBrackets(mainQb, user);
       }),
     );
+  }
+
+  private applyRoleFiltersWithoutBrackets(
+    qb: any, // Using any for flexibility since it's a query builder sub-query
+    user?: User,
+  ): void {
+    if (!user) return;
+
+    // A. Super Admin & Admin: Always see all tasks
+    const roleStr = String(user.role).toLowerCase();
+    if (roleStr === UserRole.SUPER_ADMIN || roleStr === UserRole.ADMIN) {
+      qb.where("1=1");
+      return;
+    }
+
+    // B. Required Approver: See tasks they need to approve (even across departments)
+    qb.where(
+      "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+      {
+        userId: user.id,
+      },
+    );
+
+    // C. Direct Involvement: See tasks where user is assigned, creator, or reporter (regardless of department)
+    qb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
+      userId: user.id,
+    });
+    qb.orWhere("task.created_by_id = :userId", { userId: user.id });
+    qb.orWhere("task.reported_by_id = :userId", { userId: user.id });
+
+    // D. Role-based Department Visibility: Leaders see all tasks within their department
+    const leadershipRoles = [
+      UserRole.DEPT_HEAD,
+      UserRole.MANAGER,
+      UserRole.ASSISTANT_MANAGER,
+      UserRole.TEAM_LEAD,
+      UserRole.COORDINATOR,
+      UserRole.SYSTEM_ADMIN,
+    ];
+
+    if (
+      user.department &&
+      roleStr &&
+      leadershipRoles.map((r) => r.toLowerCase()).includes(roleStr)
+    ) {
+      qb.orWhere("task.department = :userDept", {
+        userDept: user.department.toLowerCase(),
+      });
+
+      // E. Cross-department visibility for Managers:
+      // If a task is assigned to a user who belongs to the manager's department,
+      // the manager should see it even if the task's primary department is different.
+      qb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
+        deptMeta: JSON.stringify([
+          { department: String(user.department).toLowerCase() },
+        ]),
+      });
+    }
   }
 
   private async getAssignedUsersMeta(
@@ -681,6 +690,30 @@ export class TasksService {
             });
           }),
         );
+      } else if (viewTypeFilter === "assigned_to_team" && currentUser) {
+        // Tasks assigned to team members (not current user) from same department
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere(
+              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+              { currentUserId: currentUser.id },
+            );
+          }),
+        );
+        qb.andWhere(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+          { dept: currentUser.department, currentUserId: currentUser.id },
+        );
+      } else if (viewTypeFilter === "approval_tasks" && currentUser) {
+        // Tasks where current user is an approver
+        qb.andWhere(
+          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
+          { currentUserId: currentUser.id },
+        );
       }
 
       if (departmentFilter) {
@@ -828,6 +861,30 @@ export class TasksService {
             });
           }),
         );
+      } else if (viewTypeFilter === "assigned_to_team" && currentUser) {
+        // Tasks assigned to team members (not current user) from same department
+        countQb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere(
+              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+              { currentUserId: currentUser.id },
+            );
+          }),
+        );
+        countQb.andWhere(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+          { dept: currentUser.department, currentUserId: currentUser.id },
+        );
+      } else if (viewTypeFilter === "approval_tasks" && currentUser) {
+        // Tasks where current user is an approver
+        countQb.andWhere(
+          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
+          { currentUserId: currentUser.id },
+        );
       }
 
       if (departmentFilter) {
@@ -941,8 +998,8 @@ export class TasksService {
       }
 
       return {
-        data,
-        pagination: {
+          data,
+          pagination: {
           page,
           pageSize,
           total,
@@ -969,11 +1026,6 @@ export class TasksService {
       const isSuperAdminOrAdmin = 
         currentUser && 
         (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
-      
-      // Only apply role filters if user is not admin/super admin
-      if (!isSuperAdminOrAdmin) {
-        await this.applyRoleFilters(qb, currentUser);
-      }
 
       if (filters.start_date) {
         qb.andWhere("task.created_at >= :start_date", {
@@ -984,30 +1036,6 @@ export class TasksService {
         qb.andWhere("task.created_at <= :end_date", {
           end_date: filters.end_date,
         });
-      }
-      if (filters.department) {
-        const lowerDept = String(filters.department).toLowerCase();
-        if (
-          filters.strictDepartment === true ||
-          filters.strictDepartment === "true"
-        ) {
-          qb.andWhere("task.department = :filterDept", {
-            filterDept: lowerDept,
-          });
-        } else {
-          qb.andWhere(
-            new Brackets((dqb) => {
-              // We cannot easily do case-insensitive JSONB containment, so we'll just check exact
-              dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
-                deptMeta: JSON.stringify([{ department: lowerDept }]),
-              });
-
-              dqb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            }),
-          );
-        }
       }
       if (filters.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -1031,6 +1059,89 @@ export class TasksService {
             });
           }),
         );
+      } else if (filters.view_type === "assigned_to_team" && currentUser) {
+        // Tasks assigned to team members (not current user) from same department
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere(
+              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+              { currentUserId: currentUser.id },
+            );
+          }),
+        );
+        qb.andWhere(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+          { dept: currentUser.department, currentUserId: currentUser.id },
+        );
+      } else if (filters.view_type === "approval_tasks" && currentUser) {
+        // Tasks where current user is an approver
+        qb.andWhere(
+          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
+          { currentUserId: currentUser.id },
+        );
+      }
+
+      // Apply visibility filters last, in a single bracket to ensure correct logic
+      if (!isSuperAdminOrAdmin) {
+        qb.andWhere(
+          new Brackets((mainQb) => {
+            // First, include all tasks the user would normally see
+            // (assigned, created, reported, dept head/manager sees dept tasks)
+            this.applyRoleFiltersWithoutBrackets(mainQb, currentUser);
+
+            // Then, if there's a department filter, also apply it as an option
+            if (filters.department) {
+              const lowerDept = String(filters.department).toLowerCase();
+              mainQb.orWhere(
+                new Brackets((dqb) => {
+                  if (
+                    filters.strictDepartment === true ||
+                    filters.strictDepartment === "true"
+                  ) {
+                    dqb.where("task.department = :filterDept", {
+                      filterDept: lowerDept,
+                    });
+                  } else {
+                    dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                      deptMeta: JSON.stringify([{ department: lowerDept }]),
+                    });
+                    dqb.orWhere("task.department = :filterDept", {
+                      filterDept: lowerDept,
+                    });
+                  }
+                }),
+              );
+            }
+          }),
+        );
+      } else {
+        // Admin/super admin: just apply department filter if present
+        if (filters.department) {
+          const lowerDept = String(filters.department).toLowerCase();
+          if (
+            filters.strictDepartment === true ||
+            filters.strictDepartment === "true"
+          ) {
+            qb.andWhere("task.department = :filterDept", {
+              filterDept: lowerDept,
+            });
+          } else {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                  deptMeta: JSON.stringify([{ department: lowerDept }]),
+                });
+                dqb.orWhere("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              }),
+            );
+          }
+        }
       }
 
       const totalTasks = await qb.getCount();
@@ -1175,10 +1286,6 @@ export class TasksService {
       const isSuperAdminOrAdmin = 
         currentUser && 
         (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
-      
-      if (!isSuperAdminOrAdmin) {
-        await this.applyRoleFilters(qb, currentUser);
-      }
 
       if (query.start_date) {
         qb.andWhere(`${dateField} >= :start_date`, {
@@ -1187,28 +1294,6 @@ export class TasksService {
       }
       if (query.end_date) {
         qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
-      }
-      if (query.department) {
-        const lowerDept = String(query.department).toLowerCase();
-        if (
-          query.strictDepartment === true ||
-          query.strictDepartment === "true"
-        ) {
-          qb.andWhere("task.department = :filterDept", {
-            filterDept: lowerDept,
-          });
-        } else {
-          qb.andWhere(
-            new Brackets((dqb) => {
-              dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
-                deptMeta: JSON.stringify([{ department: lowerDept }]),
-              });
-              dqb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            }),
-          );
-        }
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -1232,6 +1317,89 @@ export class TasksService {
             });
           }),
         );
+      } else if (query.view_type === "assigned_to_team" && currentUser) {
+        // Tasks assigned to team members (not current user) from same department
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where(
+              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+              { currentUserId: currentUser.id },
+            );
+            dqb.orWhere(
+              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+              { currentUserId: currentUser.id },
+            );
+          }),
+        );
+        qb.andWhere(
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+          { dept: currentUser.department, currentUserId: currentUser.id },
+        );
+      } else if (query.view_type === "approval_tasks" && currentUser) {
+        // Tasks where current user is an approver
+        qb.andWhere(
+          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
+          { currentUserId: currentUser.id },
+        );
+      }
+
+      // Apply visibility filters last, in a single bracket to ensure correct logic
+      if (!isSuperAdminOrAdmin) {
+        qb.andWhere(
+          new Brackets((mainQb) => {
+            // First, include all tasks the user would normally see
+            // (assigned, created, reported, dept head/manager sees dept tasks)
+            this.applyRoleFiltersWithoutBrackets(mainQb, currentUser);
+
+            // Then, if there's a department filter, also apply it as an option
+            if (query.department) {
+              const lowerDept = String(query.department).toLowerCase();
+              mainQb.orWhere(
+                new Brackets((dqb) => {
+                  if (
+                    query.strictDepartment === true ||
+                    query.strictDepartment === "true"
+                  ) {
+                    dqb.where("task.department = :filterDept", {
+                      filterDept: lowerDept,
+                    });
+                  } else {
+                    dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                      deptMeta: JSON.stringify([{ department: lowerDept }]),
+                    });
+                    dqb.orWhere("task.department = :filterDept", {
+                      filterDept: lowerDept,
+                    });
+                  }
+                }),
+              );
+            }
+          }),
+        );
+      } else {
+        // Admin/super admin: just apply department filter if present
+        if (query.department) {
+          const lowerDept = String(query.department).toLowerCase();
+          if (
+            query.strictDepartment === true ||
+            query.strictDepartment === "true"
+          ) {
+            qb.andWhere("task.department = :filterDept", {
+              filterDept: lowerDept,
+            });
+          } else {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                  deptMeta: JSON.stringify([{ department: lowerDept }]),
+                });
+                dqb.orWhere("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              }),
+            );
+          }
+        }
       }
 
       const tasks = await qb.getMany();
@@ -1257,7 +1425,7 @@ export class TasksService {
       let totalDays = 0;
       let completedCount = 0;
 
-      // Collect all user IDs from tasks
+      // Collect all user IDs from tasks FIRST
       const allUserIds = new Set<number>();
       for (const t of tasks) {
         if (Array.isArray(t.assigned_user_ids)) {
@@ -1265,26 +1433,16 @@ export class TasksService {
         }
       }
 
-      // Fetch users with role-based filtering
+      // Fetch all users that are assigned to any of the filtered tasks
       const usersListQuery = this.userRepo
         .createQueryBuilder("user")
         .where("(user.isActive = true OR user.isActive IS NULL)");
 
-      if (query.department) {
-        const lowerDept = String(query.department).toLowerCase();
-        usersListQuery.andWhere("user.department = :dept", { dept: lowerDept });
-      } else if (currentUser && !isSuperAdminOrAdmin) {
-        // If not super admin/admin, restrict to users in the same role scope
-        const reportScope = await this.getTaskScope(currentUser);
-        if (reportScope === "department" && currentUser.department) {
-          usersListQuery.andWhere("user.department = :dept", { 
-            dept: currentUser.department.toLowerCase() 
-          });
-        } else if (reportScope === "self") {
-          // Only include the current user
-          usersListQuery.andWhere("user.id = :userId", { userId: currentUser.id });
-        }
-        // For team/org scope, we'll let it include more users but still apply task-level filtering
+      // If there are user IDs in allUserIds, filter to include only those users
+      if (allUserIds.size > 0) {
+        usersListQuery.andWhere("user.id IN (:...userIds)", { 
+          userIds: Array.from(allUserIds) 
+        });
       }
 
       const usersList = await usersListQuery.getMany();
