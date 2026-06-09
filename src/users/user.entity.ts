@@ -3,7 +3,9 @@ import {
   Column,
   PrimaryGeneratedColumn,
   OneToOne,
+  ManyToOne,
   ManyToMany,
+  JoinColumn,
   UpdateDateColumn,
 } from "typeorm";
 import { PermissionsEntity } from "../permissions/entities/permissions.entity";
@@ -165,6 +167,13 @@ export class User {
     default: null,
   })
   assigned_cities: number[];
+
+  @Column({ name: "manager_id", type: "int", nullable: true })
+  manager_id: number | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "manager_id" })
+  manager: User;
 
   // One-to-One relationship with permissions
   @OneToOne(() => PermissionsEntity, (permissions) => permissions.user)

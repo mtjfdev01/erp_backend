@@ -6,6 +6,7 @@ import { PermissionsController } from "./permissions.controller";
 // import { PermissionsSeeder } from './seeder/permissions.seeder';
 import { PermissionsEntity } from "./entities/permissions.entity";
 import { User } from "../users/user.entity";
+import { DataScopeService } from "./data-scope/data-scope.service";
 
 @Module({
   imports: [TypeOrmModule.forFeature([PermissionsEntity, User])],
@@ -13,11 +14,13 @@ import { User } from "../users/user.entity";
   providers: [
     PermissionsService,
     PermissionsGuard,
+    DataScopeService,
     // PermissionsSeeder,
   ],
   exports: [
     PermissionsService,
     PermissionsGuard,
+    DataScopeService,
     // PermissionsSeeder,
   ],
 })

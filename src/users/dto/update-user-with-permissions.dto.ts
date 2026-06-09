@@ -67,6 +67,10 @@ export class UpdateUserWithPermissionsDto {
   @IsOptional()
   blood_group?: string;
 
+  @IsOptional()
+  @IsNumber()
+  manager_id?: number | null;
+
   @IsString()
   @IsOptional()
   password?: string;

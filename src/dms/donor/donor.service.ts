@@ -29,6 +29,8 @@ import {
   DONOR_AUDIT_SENSITIVE_FIELDS,
 } from "./audit/donor-audit.constants";
 import { buildDonorFieldChanges } from "./audit/donor-audit.util";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 
 interface PaginationOptions {
   page: number;
@@ -58,7 +60,28 @@ export class DonorService {
     private readonly usersService: UsersService,
     private readonly dashboardAggregateService: DashboardAggregateService,
     private readonly donorAuditService: DonorAuditService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveDonorScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "donors",
+    );
+  }
+
+  assertDonorRecordAccess(scope: ResolvedDataScope, record: Donor): void {
+    this.dataScopeService.assertRecordAccess(scope, record, {
+      useAssignedTo: true,
+    });
+  }
 
   private donorAuditUserId(userId: number | null | undefined): number | null {
     if (userId == null || Number(userId) === -1) return null;
@@ -331,6 +354,7 @@ export class DonorService {
     options: any,
     assignedCityNames?: string[] | null,
     sourceAccess?: { online: boolean; offline: boolean },
+    currentUser?: { id?: number; role?: string; department?: string },
   ) {
     try {
       const {
@@ -418,6 +442,13 @@ export class DonorService {
           "LOWER(TRIM(donor.city)) IN (:...assignedCityNames)",
           { assignedCityNames },
         );
+      }
+
+      if (currentUser?.id) {
+        const scope = await this.resolveDonorScope(currentUser);
+        this.dataScopeService.applyToQuery(queryBuilder, "donor", scope, {
+          assignedToColumn: "donor.assigned_to",
+        });
       }
 
       // Apply sorting

@@ -62,6 +62,8 @@ import {
   buildDonationFieldChanges,
   buildDonationStatusChange,
 } from "./audit/donation-audit.util";
+import { DataScopeService } from "../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
 
 @Injectable()
 export class DonationsService {
@@ -113,7 +115,61 @@ export class DonationsService {
     private readonly workflowTemplatesRepo: Repository<ProgressWorkflowTemplate>,
     private readonly donationAuditService: DonationAuditService,
     private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveDonationListScope(
+    user: { id?: number; role?: string; department?: string } | null | undefined,
+    sourceAccess: { online: boolean; offline: boolean },
+  ): Promise<ResolvedDataScope | null> {
+    if (!user?.id || user.id === -1) return null;
+
+    const onlineScope = await this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      "online_donations",
+    );
+    const offlineScope = await this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      "offline_donations",
+    );
+
+    if (sourceAccess.online && sourceAccess.offline) {
+      return this.dataScopeService.mergeScopes(onlineScope, offlineScope);
+    }
+    if (sourceAccess.online) return onlineScope;
+    if (sourceAccess.offline) return offlineScope;
+    return onlineScope;
+  }
+
+  async resolveDonationRecordScope(
+    user: { id?: number; role?: string; department?: string } | null | undefined,
+    donationSource: string | null | undefined,
+  ): Promise<ResolvedDataScope | null> {
+    if (!user?.id || user.id === -1) return null;
+    const module =
+      donationSource === "website" ? "online_donations" : "offline_donations";
+    return this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      module,
+    );
+  }
+
+  assertDonationRecordAccess(
+    scope: ResolvedDataScope | null,
+    record: Donation,
+  ): void {
+    if (!scope) return;
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
 
   // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
 
@@ -2156,6 +2212,7 @@ export class DonationsService {
     relationsFilters?: Record<string, Record<string, any>>,
     user?: any,
     assignedCityNames?: string[] | null,
+    dataScope?: ResolvedDataScope | null,
   ) {
     try {
       const restrictedEmails = [
@@ -2285,6 +2342,10 @@ export class DonationsService {
         );
       }
 
+      if (dataScope) {
+        this.dataScopeService.applyToQuery(query, "donation", dataScope);
+      }
+
       // Pagination
       const skip = (page - 1) * pageSize;
       query.skip(skip).take(pageSize);
@@ -2374,6 +2435,9 @@ export class DonationsService {
           { geoCityNamesSum: assignedCityNames },
         );
       }
+      if (dataScope) {
+        this.dataScopeService.applyToQuery(sumQuery, "donation", dataScope);
+      }
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;
 
@@ -2402,6 +2466,7 @@ export class DonationsService {
       const donation = await this.donationRepository
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
+        .leftJoinAndSelect("donation.created_by", "created_by")
         .where("donation.id = :id", { id })
         .getOne();
 

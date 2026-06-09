@@ -154,6 +154,7 @@ export class DonationBoxController {
           end_date,
         },
         assignedCityIds,
+        currentUser,
       );
 
       return res.status(HttpStatus.OK).json({
@@ -223,6 +224,9 @@ export class DonationBoxController {
   ) {
     try {
       const existing = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      this.donationBoxService.assertDonationBoxRecordAccess(scope, existing);
       if (existing.city_id) {
         await this.checkGeographicAccess(currentUser.id, existing.city_id);
       }
@@ -266,6 +270,9 @@ export class DonationBoxController {
   ) {
     try {
       const result = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      this.donationBoxService.assertDonationBoxRecordAccess(scope, result);
 
       // Geographic access check
       if (result.city_id) {
@@ -311,6 +318,9 @@ export class DonationBoxController {
     try {
       // Check geographic access on existing box
       const existingBox = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      this.donationBoxService.assertDonationBoxRecordAccess(scope, existingBox);
       if (existingBox.city_id) {
         await this.checkGeographicAccess(currentUser.id, existingBox.city_id);
       }
@@ -358,6 +368,9 @@ export class DonationBoxController {
     try {
       // Check geographic access
       const existingBox = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      this.donationBoxService.assertDonationBoxRecordAccess(scope, existingBox);
       if (existingBox.city_id) {
         await this.checkGeographicAccess(currentUser.id, existingBox.city_id);
       }

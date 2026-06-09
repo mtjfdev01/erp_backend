@@ -162,6 +162,7 @@ export class DonationBoxDonationController {
           end_date,
         },
         assignedCityIds,
+        currentUser,
       );
 
       return res.status(HttpStatus.OK).json({
@@ -271,6 +272,14 @@ export class DonationBoxDonationController {
   ) {
     try {
       const existing = await this.donationBoxDonationService.findOne(+id);
+      const scope =
+        await this.donationBoxDonationService.resolveCollectionScope(
+          currentUser,
+        );
+      this.donationBoxDonationService.assertCollectionRecordAccess(
+        scope,
+        existing,
+      );
       if (existing.donation_box_id) {
         await this.checkGeographicAccessByBoxId(
           currentUser?.id,
@@ -320,6 +329,14 @@ export class DonationBoxDonationController {
   ) {
     try {
       const result = await this.donationBoxDonationService.findOne(+id);
+      const scope =
+        await this.donationBoxDonationService.resolveCollectionScope(
+          currentUser,
+        );
+      this.donationBoxDonationService.assertCollectionRecordAccess(
+        scope,
+        result,
+      );
 
       // Geographic access check via parent donation box
       if (result.donation_box_id) {
@@ -366,10 +383,19 @@ export class DonationBoxDonationController {
     @Res() res: Response,
   ) {
     try {
-      const currentUserId = req.user?.id;
+      const currentUser = req.user;
+      const currentUserId = currentUser?.id;
 
       // Geographic access check on the existing record's parent donation box
       const existing = await this.donationBoxDonationService.findOne(+id);
+      const scope =
+        await this.donationBoxDonationService.resolveCollectionScope(
+          currentUser,
+        );
+      this.donationBoxDonationService.assertCollectionRecordAccess(
+        scope,
+        existing,
+      );
       if (existing.donation_box_id) {
         await this.checkGeographicAccessByBoxId(
           currentUserId,
@@ -420,6 +446,14 @@ export class DonationBoxDonationController {
     try {
       // Geographic access check on the existing record's parent donation box
       const existing = await this.donationBoxDonationService.findOne(+id);
+      const scope =
+        await this.donationBoxDonationService.resolveCollectionScope(
+          currentUser,
+        );
+      this.donationBoxDonationService.assertCollectionRecordAccess(
+        scope,
+        existing,
+      );
       if (existing.donation_box_id) {
         await this.checkGeographicAccessByBoxId(
           currentUser?.id,

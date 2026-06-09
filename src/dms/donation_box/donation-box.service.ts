@@ -19,6 +19,8 @@ import { DonationBoxAuditService } from "./audit/donation-box-audit.service";
 import { DonationBoxAuditAction } from "./audit/donation-box-audit-action.enum";
 import { DonationBoxAuditSource } from "./audit/donation-box-audit-source.enum";
 import { buildDonationBoxFieldChanges } from "./audit/donation-box-audit.util";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 
 interface PaginationOptions {
   page: number;
@@ -48,7 +50,29 @@ export class DonationBoxService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly donationBoxAuditService: DonationBoxAuditService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveDonationBoxScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "donation_box",
+    );
+  }
+
+  assertDonationBoxRecordAccess(
+    scope: ResolvedDataScope,
+    record: DonationBox,
+  ): void {
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
 
   private donationBoxAuditUserId(
     userId: number | null | undefined,
@@ -261,7 +285,11 @@ export class DonationBoxService {
   /**
    * Find all donation boxes with pagination and filtering
    */
-  async findAll(options: PaginationOptions, assignedCityIds?: number[] | null) {
+  async findAll(
+    options: PaginationOptions,
+    assignedCityIds?: number[] | null,
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     try {
       const {
         page = 1,
@@ -323,6 +351,11 @@ export class DonationBoxService {
         query.andWhere("donation_box.city_id IN (:...assignedCityIds)", {
           assignedCityIds,
         });
+      }
+
+      if (currentUser?.id) {
+        const scope = await this.resolveDonationBoxScope(currentUser);
+        this.dataScopeService.applyToQuery(query, "donation_box", scope);
       }
 
       // Apply sorting

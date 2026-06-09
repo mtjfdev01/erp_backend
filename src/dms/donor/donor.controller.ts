@@ -271,6 +271,7 @@ export class DonorController {
         },
         assignedCityNames,
         sourceAccess,
+        user,
       );
 
       return res.status(HttpStatus.OK).json({
@@ -338,6 +339,8 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorRecordAccess(scope, existing);
         await this.checkDonorPermission(user.id, existing.source, "view");
         await this.checkGeographicAccess(user.id, existing.city);
       }
@@ -374,6 +377,8 @@ export class DonorController {
       const result = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorRecordAccess(scope, result);
         await this.checkDonorPermission(user.id, result.source, "view");
         await this.checkGeographicAccess(user.id, result.city);
       }
@@ -410,6 +415,8 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorRecordAccess(scope, existing);
         await this.checkDonorPermission(user.id, existing.source, "update");
         await this.checkGeographicAccess(user.id, existing.city);
       }
@@ -442,6 +449,8 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorRecordAccess(scope, existing);
         await this.checkDonorPermission(user.id, existing.source, "delete");
         await this.checkGeographicAccess(user.id, existing.city);
       }

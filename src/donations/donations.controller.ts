@@ -95,6 +95,18 @@ export class DonationsController {
    * Check if user has permission for at least one donation type (online or offline).
    * Returns which types the user can access.
    */
+  private async assertDonationDataScope(
+    user: { id?: number; role?: string; department?: string } | null,
+    donation: { donation_source?: string | null; created_by?: any },
+  ): Promise<void> {
+    if (!user?.id) return;
+    const scope = await this.donationsService.resolveDonationRecordScope(
+      user,
+      donation.donation_source,
+    );
+    this.donationsService.assertDonationRecordAccess(scope, donation as any);
+  }
+
   private async getDonationSourceAccess(
     userId: number,
     action: string,
@@ -329,6 +341,13 @@ export class DonationsController {
         ...filters,
       };
 
+      const dataScope = user?.id
+        ? await this.donationsService.resolveDonationListScope(
+            user,
+            sourceAccess,
+          )
+        : null;
+
       const result = await this.donationsService.findAll(
         page,
         pageSize,
@@ -340,6 +359,7 @@ export class DonationsController {
         relationsFilters,
         user,
         assignedCityNames,
+        dataScope,
       );
 
       return res.status(HttpStatus.OK).json({
@@ -369,6 +389,7 @@ export class DonationsController {
       // First fetch the donation to check its source
       const donation = await this.donationsService.findOne(+id);
       if (user?.id) {
+        await this.assertDonationDataScope(user, donation);
         await this.checkDonationPermission(
           user.id,
           donation.donation_source,
@@ -410,6 +431,7 @@ export class DonationsController {
       const user = req?.user ?? null;
       const existing = await this.donationsService.findOne(+id);
       if (user?.id) {
+        await this.assertDonationDataScope(user, existing);
         await this.checkDonationPermission(
           user.id,
           existing.donation_source,
@@ -451,6 +473,7 @@ export class DonationsController {
       const result = await this.donationsService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        await this.assertDonationDataScope(user, result);
         await this.checkDonationPermission(
           user.id,
           result.donation_source,
@@ -640,6 +663,7 @@ export class DonationsController {
       // Fetch existing donation to check its source
       const existing = await this.donationsService.findOne(+id);
       if (user?.id) {
+        await this.assertDonationDataScope(user, existing);
         await this.checkDonationPermission(
           user.id,
           existing.donation_source,
@@ -686,6 +710,7 @@ export class DonationsController {
       const user = req?.user ?? null;
       const existing = await this.donationsService.findOne(+id);
       if (user?.id) {
+        await this.assertDonationDataScope(user, existing);
         await this.checkDonationPermission(
           user.id,
           existing.donation_source,
@@ -727,6 +752,7 @@ export class DonationsController {
       const user = req?.user ?? null;
       const existing = await this.donationsService.findOne(+id);
       if (user?.id) {
+        await this.assertDonationDataScope(user, existing);
         await this.checkDonationPermission(
           user.id,
           existing.donation_source,

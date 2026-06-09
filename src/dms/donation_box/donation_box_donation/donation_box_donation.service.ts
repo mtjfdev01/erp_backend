@@ -26,6 +26,8 @@ import { DonationBoxDonationAuditSource } from "./audit/donation-box-donation-au
 import {
   buildDonationBoxDonationFieldChanges,
 } from "./audit/donation-box-donation-audit.util";
+import { DataScopeService } from "../../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../../permissions/data-scope/data-scope.types";
 
 interface PaginationOptions {
   page: number;
@@ -53,7 +55,29 @@ export class DonationBoxDonationService {
     private readonly userRepository: Repository<User>,
     private readonly dashboardAggregateService: DashboardAggregateService,
     private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveCollectionScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "donation_box_donations",
+    );
+  }
+
+  assertCollectionRecordAccess(
+    scope: ResolvedDataScope,
+    record: DonationBoxDonation,
+  ): void {
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
 
   /** Staff user id for created_by / updated_by. */
   private donationBoxDonationAuditUserId(
@@ -256,7 +280,11 @@ export class DonationBoxDonationService {
   /**
    * Find all collections with pagination and filtering
    */
-  async findAll(options: PaginationOptions, assignedCityIds?: number[] | null) {
+  async findAll(
+    options: PaginationOptions,
+    assignedCityIds?: number[] | null,
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     try {
       const {
         page = 1,
@@ -311,6 +339,15 @@ export class DonationBoxDonationService {
         query.andWhere("donation_box.city_id IN (:...assignedCityIds)", {
           assignedCityIds,
         });
+      }
+
+      if (currentUser?.id) {
+        const scope = await this.resolveCollectionScope(currentUser);
+        this.dataScopeService.applyToQuery(
+          query,
+          "donation_box_donation",
+          scope,
+        );
       }
 
       // Apply sorting (whitelist to prevent SQL injection)

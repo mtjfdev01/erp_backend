@@ -21,6 +21,8 @@ import { AppealsBenificiariesModule } from './appeals_benificiaries/appeals_beni
 import { AppealUpdatesModule } from './appeal_updates/appeal_updates.module';
 import { AppealMediaModule } from './appeal_media/appeal_media.module';
 import { SocialMediaModule } from './social_media/social_media.module';
+import { OfflineSyncModule } from './offline-sync/offline-sync.module';
+import { ReceiptTemplatesModule } from './receipt_templates/receipt_templates.module';
 
 @Module({
   controllers: [DmsController],
@@ -49,6 +51,8 @@ import { SocialMediaModule } from './social_media/social_media.module';
     AppealUpdatesModule,
     AppealMediaModule,
     SocialMediaModule,
+    OfflineSyncModule,
+    ReceiptTemplatesModule,
   ],
 })
 export class DmsModule {}

@@ -85,4 +85,8 @@ export class CreateUserDto {
   @IsArray()
   @IsNumber({}, { each: true })
   assigned_cities?: number[];
+
+  @IsOptional()
+  @IsNumber()
+  manager_id?: number | null;
 }

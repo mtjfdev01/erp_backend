@@ -25,5 +25,6 @@ import { DonationBoxDonationAuditModule } from "./audit/donation-box-donation-au
   ],
   controllers: [DonationBoxDonationController],
   providers: [DonationBoxDonationService],
+  exports: [DonationBoxDonationService],
 })
 export class DonationBoxDonationModule {}

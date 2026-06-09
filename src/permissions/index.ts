@@ -3,6 +3,11 @@ export { PermissionsModule } from "./permissions.module";
 
 // Export services
 export { PermissionsService } from "./permissions.service";
+export { DataScopeService } from "./data-scope/data-scope.service";
+export type {
+  DataScopeType,
+  ResolvedDataScope,
+} from "./data-scope/data-scope.types";
 
 // Export guards
 export { PermissionsGuard } from "./guards/permissions.guard";
