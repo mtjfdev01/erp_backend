@@ -79,7 +79,7 @@ export class ResumeAiExtractionService {
   }
 
   private getModel(): string {
-    return this.config.get<string>("OPENAI_TEXT_MODEL") || "gpt-4o-mini";
+    return this.config.get<string>("OPENAI_TEXT_MODEL") || "gpt-5-nano";
   }
 
   private resolveContentType(file: Express.Multer.File): string {
@@ -162,7 +162,7 @@ applicant_name, phone, email, cnic, address, city, role, experience, education, 
     const completion = await client.chat.completions.create({
       model: this.getModel(),
       messages: [{ role: "user", content }],
-      temperature: 0.1,
+      temperature: 1,
       response_format: { type: "json_object" },
     });
 
@@ -194,7 +194,7 @@ applicant_name, phone, email, cnic, address, city, role, experience, education, 
             ],
           },
         ],
-        temperature: 0.1,
+        temperature: 1,
         response_format: { type: "json_object" },
       });
 
