@@ -9,7 +9,6 @@ import { CommunicationController } from "../utils/controllers/communication.cont
 import { Donation } from "./entities/donation.entity";
 import { DonationInKind } from "../dms/donation_in_kind/entities/donation_in_kind.entity";
 import { User } from "../users/user.entity";
-import { City } from "../dms/geographic/cities/entities/city.entity";
 import { JwtModule } from "@nestjs/jwt";
 import { PermissionsModule } from "src/permissions/permissions.module";
 import { EmailModule } from "../email/email.module";
@@ -28,6 +27,8 @@ import { ProgressBatchesModule } from "../progress_tracking/progress_batches/pro
 import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
 import { DonationAuditModule } from "./audit/donation-audit.module";
 import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-donations-stripe.module";
+import { DonationGeoBackfillService } from "./donation-geo-backfill.service";
+import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
 
 @Module({
   imports: [
@@ -38,7 +39,6 @@ import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-
       DonationInKind,
       User,
       RecurringDonationPlan,
-      City,
       ProgressWorkflowTemplate,
     ]),
     JwtModule.register({
@@ -68,6 +68,8 @@ import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-
     StripeService,
     AlfalahService,
     WhatsAppService,
+    DonationGeoBackfillService,
+    DonationGeoBackfillRunner,
   ],
   exports: [DonationsService],
 })

@@ -23,6 +23,8 @@ import { AppealMediaModule } from './appeal_media/appeal_media.module';
 import { SocialMediaModule } from './social_media/social_media.module';
 import { OfflineSyncModule } from './offline-sync/offline-sync.module';
 import { ReceiptTemplatesModule } from './receipt_templates/receipt_templates.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { DonorRelationshipModule } from './donor_relationship/donor-relationship.module';
 
 @Module({
   controllers: [DmsController],
@@ -53,6 +55,8 @@ import { ReceiptTemplatesModule } from './receipt_templates/receipt_templates.mo
     SocialMediaModule,
     OfflineSyncModule,
     ReceiptTemplatesModule,
+    ReconciliationModule,
+    DonorRelationshipModule,
   ],
 })
 export class DmsModule {}

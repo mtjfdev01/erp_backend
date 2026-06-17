@@ -152,7 +152,7 @@ export class UsersController {
     "super_admin",
   ])
   async findOne(@Param("id") id: string) {
-    return this.usersService.findOne(this.parseUserIdOrThrow(id));
+    return this.usersService.findOneForView(this.parseUserIdOrThrow(id));
   }
 
   @Patch(":id")

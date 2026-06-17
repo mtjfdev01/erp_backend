@@ -6,6 +6,7 @@ import { PermissionsEntity } from "../permissions/entities/permissions.entity";
 import { JwtModule } from "@nestjs/jwt";
 import { UsersController } from "./user.controller";
 import { PermissionsModule } from "../permissions/permissions.module";
+import { GeographicAssignmentModule } from "../dms/geographic/geographic-assignment/geographic-assignment.module";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PermissionsModule } from "../permissions/permissions.module";
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
+    GeographicAssignmentModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

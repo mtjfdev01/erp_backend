@@ -15,6 +15,11 @@ import * as bcrypt from "bcrypt";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UpdateUserWithPermissionsDto } from "./dto/update-user-with-permissions.dto";
+import {
+  UserGeographicContext,
+  USER_GEOGRAPHIC_SELECT,
+} from "./user-geographic.types";
+import { GeographicAssignmentService } from "../dms/geographic/geographic-assignment/geographic-assignment.service";
 
 interface PaginationOptions {
   page: number;
@@ -37,7 +42,46 @@ export class UsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(PermissionsEntity)
     private readonly permissionsRepository: Repository<PermissionsEntity>,
+    private readonly geographicAssignmentService: GeographicAssignmentService,
   ) {}
+
+  pickGeographicContext(
+    user: Pick<
+      User,
+      | "assigned_countries"
+      | "assigned_regions"
+      | "assigned_districts"
+      | "assigned_tehsils"
+      | "assigned_cities"
+      | "assigned_routes"
+      | "geographic_off"
+      | "manager_id"
+    > | null | undefined,
+  ): UserGeographicContext {
+    return {
+      assigned_countries: user?.assigned_countries ?? null,
+      assigned_regions: user?.assigned_regions ?? null,
+      assigned_districts: user?.assigned_districts ?? null,
+      assigned_tehsils: user?.assigned_tehsils ?? null,
+      assigned_cities: user?.assigned_cities ?? null,
+      assigned_routes: user?.assigned_routes ?? null,
+      geographic_off: user?.geographic_off === true,
+      manager_id: user?.manager_id ?? null,
+    };
+  }
+
+  async getGeographicContextByUserId(
+    userId: number,
+  ): Promise<UserGeographicContext | null> {
+    if (!userId || userId === -1) return null;
+    const user = await this.userRepository
+      .createQueryBuilder("user")
+      .select([...USER_GEOGRAPHIC_SELECT])
+      .where("user.id = :id", { id: userId })
+      .getOne();
+    if (!user) return null;
+    return this.pickGeographicContext(user);
+  }
 
   async create(
     email: string,
@@ -238,6 +282,65 @@ export class UsersService {
       throw new NotFoundException("User not found");
     }
     return user;
+  }
+
+  private hasGeographicAssignments(user: User): boolean {
+    return (
+      (user.assigned_countries?.length ?? 0) > 0 ||
+      (user.assigned_regions?.length ?? 0) > 0 ||
+      (user.assigned_districts?.length ?? 0) > 0 ||
+      (user.assigned_tehsils?.length ?? 0) > 0 ||
+      (user.assigned_cities?.length ?? 0) > 0 ||
+      (user.assigned_routes?.length ?? 0) > 0
+    );
+  }
+
+  async findOneForView(id: number) {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      relations: ["permissions", "manager"],
+    });
+    if (!user) {
+      throw new NotFoundException("User not found");
+    }
+
+    const {
+      password: _password,
+      resetToken: _resetToken,
+      resetTokenExpiry: _resetTokenExpiry,
+      manager,
+      ...safeUser
+    } = user;
+
+    const managerSummary = manager
+      ? {
+          id: manager.id,
+          first_name: manager.first_name,
+          last_name: manager.last_name,
+          email: manager.email,
+        }
+      : null;
+
+    let geographic_assignments: Awaited<
+      ReturnType<GeographicAssignmentService["resolve"]>
+    > = [];
+
+    if (this.hasGeographicAssignments(user)) {
+      geographic_assignments = await this.geographicAssignmentService.resolve({
+        countries: user.assigned_countries ?? [],
+        regions: user.assigned_regions ?? [],
+        districts: user.assigned_districts ?? [],
+        tehsils: user.assigned_tehsils ?? [],
+        cities: user.assigned_cities ?? [],
+        routes: user.assigned_routes ?? [],
+      });
+    }
+
+    return {
+      ...safeUser,
+      manager: managerSummary,
+      geographic_assignments,
+    };
   }
 
   async update(

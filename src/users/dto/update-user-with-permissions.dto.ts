@@ -8,6 +8,7 @@ import {
   IsObject,
   IsArray,
   IsNumber,
+  IsBoolean,
 } from "class-validator";
 import { UserRole, Department } from "../user.entity";
 
@@ -100,6 +101,15 @@ export class UpdateUserWithPermissionsDto {
   @IsArray()
   @IsNumber({}, { each: true })
   assigned_cities?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_routes?: number[];
+
+  @IsOptional()
+  @IsBoolean()
+  geographic_off?: boolean;
 
   // Permissions field
   @IsObject()

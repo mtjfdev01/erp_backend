@@ -2,9 +2,10 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donor, DonorType } from "./entities/donor.entity";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
@@ -13,9 +14,8 @@ import {
   FilterPayload,
 } from "../../utils/filters/common-filter.util";
 import * as bcrypt from "bcrypt";
-import { User, Department } from "src/users/user.entity";
+import { User } from "src/users/user.entity";
 import { UsersService } from "src/users/users.service";
-import { City } from "../geographic/cities/entities/city.entity";
 import { DashboardAggregateService } from "../../dashboard/dashboard-aggregate.service";
 import {
   decryptDonorPassword,
@@ -31,6 +31,9 @@ import {
 import { buildDonorFieldChanges } from "./audit/donor-audit.util";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
+import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
+import { buildDonorGeoSearch } from "./utils/donor-geo.util";
 
 interface PaginationOptions {
   page: number;
@@ -55,12 +58,11 @@ export class DonorService {
     private readonly donorRepository: Repository<Donor>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(City)
-    private readonly cityRepository: Repository<City>,
     private readonly usersService: UsersService,
     private readonly dashboardAggregateService: DashboardAggregateService,
     private readonly donorAuditService: DonorAuditService,
     private readonly dataScopeService: DataScopeService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
 
   async resolveDonorScope(currentUser?: {
@@ -83,9 +85,68 @@ export class DonorService {
     });
   }
 
+  private toDonorGeoRecord(donor: Donor) {
+    return {
+      city: donor.city,
+      country: donor.country,
+      address: donor.address,
+      company_address: donor.company_address,
+      geo_search: donor.geo_search,
+      created_by: donor.created_by,
+    };
+  }
+
+  /**
+   * When geographic territory filter is active, geo match governs access.
+   * Otherwise fall back to data scope (created_by / assigned_to).
+   */
+  assertDonorViewAccess(
+    dataScope: ResolvedDataScope,
+    donor: Donor,
+    geoScope?: ResolvedGeographicScope | null,
+  ): void {
+    if (geoScope && this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+      if (
+        !this.geographicScopeService.recordMatches(
+          geoScope,
+          "donors",
+          this.toDonorGeoRecord(donor),
+        )
+      ) {
+        throw new ForbiddenException(
+          "You do not have geographic access to this record",
+        );
+      }
+      return;
+    }
+
+    this.assertDonorRecordAccess(dataScope, donor);
+  }
+
+  private applyDonorListDataScope(
+    query: SelectQueryBuilder<Donor>,
+    dataScope: ResolvedDataScope | null,
+    geoScope?: ResolvedGeographicScope | null,
+  ): void {
+    if (!dataScope) return;
+    if (
+      geoScope &&
+      this.geographicScopeService.isGeographicFilterActive(geoScope)
+    ) {
+      return;
+    }
+    this.dataScopeService.applyToQuery(query, "donor", dataScope, {
+      assignedToColumn: "donor.assigned_to",
+    });
+  }
+
   private donorAuditUserId(userId: number | null | undefined): number | null {
     if (userId == null || Number(userId) === -1) return null;
     return Number(userId);
+  }
+
+  private applyGeoSearchToDonor(donor: Donor): void {
+    donor.geo_search = buildDonorGeoSearch(donor);
   }
 
   private donorAuditSnapshot(donor: Donor): Record<string, unknown> {
@@ -134,89 +195,6 @@ export class DonorService {
 
   async getDonorAuditHistory(donorId: number) {
     return this.donorAuditService.findByDonorId(donorId);
-  }
-
-  /**
-   * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
-   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
-   */
-  async resolveUserGeography(userId: number): Promise<string[] | null> {
-    try {
-      if (userId === -1) return null;
-
-      const user = await this.userRepository.findOne({ where: { id: userId } });
-      if (!user) return null;
-
-      if (user.department !== Department.FUND_RAISING) return null;
-
-      const assignedCountries = user.assigned_countries || [];
-      const assignedRegions = user.assigned_regions || [];
-      const assignedDistricts = user.assigned_districts || [];
-      const assignedTehsils = user.assigned_tehsils || [];
-      const assignedCities = user.assigned_cities || [];
-
-      if (
-        !assignedCountries.length &&
-        !assignedRegions.length &&
-        !assignedDistricts.length &&
-        !assignedTehsils.length &&
-        !assignedCities.length
-      ) {
-        return null;
-      }
-
-      const allCityNames: Set<string> = new Set();
-
-      if (assignedCities.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.id IN (:...ids)", { ids: assignedCities })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      if (assignedTehsils.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      if (assignedDistricts.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      if (assignedRegions.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      if (assignedCountries.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      return allCityNames.size > 0 ? Array.from(allCityNames) : null;
-    } catch (error) {
-      console.error("Error resolving user geography:", error);
-      return null;
-    }
   }
 
   /**
@@ -273,6 +251,8 @@ export class DonorService {
           ? { created_by: { id: auditUserId } as any }
           : {}),
       });
+
+      this.applyGeoSearchToDonor(donor);
 
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
@@ -352,7 +332,7 @@ export class DonorService {
    */
   async findAll(
     options: any,
-    assignedCityNames?: string[] | null,
+    geoScope?: ResolvedGeographicScope | null,
     sourceAccess?: { online: boolean; offline: boolean },
     currentUser?: { id?: number; role?: string; department?: string },
   ) {
@@ -386,6 +366,7 @@ export class DonorService {
         "contact_person",
         "city",
         "country",
+        "geo_search",
       ];
 
       // Create base query
@@ -436,19 +417,18 @@ export class DonorService {
         });
       }
 
-      // Geographic filter — restrict donors to user's assigned city names
-      if (assignedCityNames && assignedCityNames.length > 0) {
-        queryBuilder.andWhere(
-          "LOWER(TRIM(donor.city)) IN (:...assignedCityNames)",
-          { assignedCityNames },
+      if (geoScope) {
+        this.geographicScopeService.applyToQuery(
+          queryBuilder,
+          "donors",
+          "donor",
+          geoScope,
         );
       }
 
       if (currentUser?.id) {
         const scope = await this.resolveDonorScope(currentUser);
-        this.dataScopeService.applyToQuery(queryBuilder, "donor", scope, {
-          assignedToColumn: "donor.assigned_to",
-        });
+        this.applyDonorListDataScope(queryBuilder, scope, geoScope);
       }
 
       // Apply sorting
@@ -619,6 +599,8 @@ export class DonorService {
         notification_subscription: notification_subscription !== false,
       });
 
+      this.applyGeoSearchToDonor(donor);
+
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
 
@@ -781,6 +763,7 @@ export class DonorService {
       const { assigned_to_user_id: _a, referrer_user_id: _r, ...scalarPatch } =
         patch;
       Object.assign(donor, scalarPatch);
+      this.applyGeoSearchToDonor(donor);
       const updatedDonor = await this.donorRepository.save(donor);
 
       if (auditChanges.length > 0) {

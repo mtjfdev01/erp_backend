@@ -168,6 +168,18 @@ export class User {
   })
   assigned_cities: number[];
 
+  @Column({
+    name: "assigned_routes",
+    type: "jsonb",
+    nullable: true,
+    default: null,
+  })
+  assigned_routes: number[];
+
+  /** When true, fund_raising DMS geographic filters are not applied (permissions still apply). */
+  @Column({ name: "geographic_off", type: "boolean", default: false })
+  geographic_off: boolean;
+
   @Column({ name: "manager_id", type: "int", nullable: true })
   manager_id: number | null;
 

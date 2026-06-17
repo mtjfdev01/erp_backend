@@ -10,6 +10,7 @@ export const DONATION_AUDIT_PATCH_FIELDS = [
   "status",
   "country",
   "city",
+  "address",
   "project_id",
   "project_name",
   "campaign_id",

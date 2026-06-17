@@ -8,6 +8,12 @@ export type {
   DataScopeType,
   ResolvedDataScope,
 } from "./data-scope/data-scope.types";
+export { GeographicScopeService } from "./geographic-scope/geographic-scope.service";
+export type {
+  GeographicEntityKey,
+  GeographicScopeSummary,
+  ResolvedGeographicScope,
+} from "./geographic-scope/geographic-scope.types";
 
 // Export guards
 export { PermissionsGuard } from "./guards/permissions.guard";
@@ -18,6 +24,20 @@ export {
   RequiredPermissions,
   PERMISSION_KEY,
 } from "./decorators/require-permission.decorator";
+
+export {
+  DONATION_VIEW_PERMISSIONS,
+  DONATION_CREATE_PERMISSIONS,
+  DONATION_UPDATE_PERMISSIONS,
+  DONATION_DELETE_PERMISSIONS,
+  DONATION_VIEW_GUARD,
+  DONATION_VIEW_STAFF_GUARD,
+  DONATION_LIST_VIEW_PERMISSIONS,
+  DONATION_FILTER_OPTIONS_GUARD,
+  DONATION_CREATE_GUARD,
+  DONATION_UPDATE_GUARD,
+  DONATION_DELETE_GUARD,
+} from "./donation-permissions.constants";
 
 // Export entities
 export { PermissionsEntity } from "./entities/permissions.entity";

@@ -75,6 +75,10 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true })
   country: string;
 
+  /** Normalized lowercase search blob from country, city, address, and company_address. */
+  @Column({ type: "text", nullable: true, default: null })
+  geo_search: string;
+
   @Column({ nullable: true })
   postal_code: string;
 

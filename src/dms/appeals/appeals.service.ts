@@ -14,6 +14,13 @@ import { AppealFiltersDto } from "./dto/appeal-filters.dto";
 import { AppealsBenificiariesService } from "../appeals_benificiaries/appeals_benificiaries.service";
 import { AppealMediaService } from "../appeal_media/appeal_media.service";
 import { AppealMediaType } from "../appeal_media/entities/appeal_media.entity";
+import {
+  clampLookupLimit,
+  LOOKUP_PROFILES,
+  LookupOption,
+  selectEntityFields,
+  toLookupOptions,
+} from "../../utils/lookup";
 
 export type AppealWithStats = Appeal & {
   raised_amount: number;
@@ -220,6 +227,34 @@ export class AppealsService {
 
     const rows = await qb.getMany();
     return Promise.all(rows.map((row) => this.enrichWithStats(row)));
+  }
+
+  async listForOptions(params?: {
+    search?: string;
+    limit?: number;
+  }): Promise<LookupOption[]> {
+    const profile = LOOKUP_PROFILES.appeals;
+    const take = clampLookupLimit(params?.limit, profile);
+    const qb = this.appealRepo
+      .createQueryBuilder("a")
+      .select(selectEntityFields("a", profile.fields))
+      .where("a.status != :archived", { archived: AppealStatus.ARCHIVED })
+      .andWhere("a.is_archived = false")
+      .orderBy("a.title", "ASC")
+      .take(take);
+
+    if (params?.search?.trim()) {
+      qb.andWhere("a.title ILIKE :search", {
+        search: `%${params.search.trim()}%`,
+      });
+    }
+
+    const rows = await qb.getMany();
+    return toLookupOptions(rows as unknown as Array<Record<string, unknown>>, {
+      valueField: profile.valueField,
+      labelField: profile.labelField,
+      labelFallback: (row) => `Appeal #${row.id}`,
+    });
   }
 
   async findOne(id: number, withRelations = true): Promise<Appeal> {

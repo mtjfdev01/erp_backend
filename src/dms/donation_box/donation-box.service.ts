@@ -2,9 +2,10 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, In } from "typeorm";
+import { Repository, In, ILike, SelectQueryBuilder } from "typeorm";
 import { DonationBox } from "./entities/donation-box.entity";
 import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
 import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
@@ -14,13 +15,17 @@ import {
 } from "../../utils/filters/common-filter.util";
 import { Route } from "../geographic/routes/entities/route.entity";
 import { City } from "../geographic/cities/entities/city.entity";
-import { User, Department } from "../../users/user.entity";
+import { User } from "../../users/user.entity";
 import { DonationBoxAuditService } from "./audit/donation-box-audit.service";
 import { DonationBoxAuditAction } from "./audit/donation-box-audit-action.enum";
 import { DonationBoxAuditSource } from "./audit/donation-box-audit-source.enum";
 import { buildDonationBoxFieldChanges } from "./audit/donation-box-audit.util";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
+import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
+import { DonationBoxGeoRecord } from "../../permissions/geographic-scope/geographic-scope.types";
+import { buildDonationBoxGeoSearch } from "./utils/donation-box-geo.util";
 
 interface PaginationOptions {
   page: number;
@@ -51,6 +56,7 @@ export class DonationBoxService {
     private readonly userRepository: Repository<User>,
     private readonly donationBoxAuditService: DonationBoxAuditService,
     private readonly dataScopeService: DataScopeService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
 
   async resolveDonationBoxScope(currentUser?: {
@@ -72,6 +78,88 @@ export class DonationBoxService {
     record: DonationBox,
   ): void {
     this.dataScopeService.assertRecordAccess(scope, record);
+  }
+
+  private toDonationBoxGeoRecord(box: DonationBox): DonationBoxGeoRecord {
+    return {
+      city_id: box.city_id,
+      route_id: box.route_id,
+      landmark_marketplace: box.landmark_marketplace,
+      geo_search: box.geo_search,
+      created_by: box.created_by,
+    };
+  }
+
+  /**
+   * When geographic territory filter is active, geo match governs access.
+   * Otherwise fall back to data scope (created_by).
+   */
+  assertDonationBoxViewAccess(
+    dataScope: ResolvedDataScope,
+    box: DonationBox,
+    geoScope?: ResolvedGeographicScope | null,
+  ): void {
+    if (
+      geoScope &&
+      this.geographicScopeService.isGeographicFilterActive(geoScope)
+    ) {
+      if (
+        !this.geographicScopeService.recordMatches(
+          geoScope,
+          "donation_boxes",
+          this.toDonationBoxGeoRecord(box),
+        )
+      ) {
+        throw new ForbiddenException(
+          "You do not have geographic access to this record",
+        );
+      }
+      return;
+    }
+
+    this.assertDonationBoxRecordAccess(dataScope, box);
+  }
+
+  private applyDonationBoxListDataScope(
+    query: SelectQueryBuilder<DonationBox>,
+    dataScope: ResolvedDataScope | null,
+    geoScope?: ResolvedGeographicScope | null,
+  ): void {
+    if (!dataScope) return;
+    if (
+      geoScope &&
+      this.geographicScopeService.isGeographicFilterActive(geoScope)
+    ) {
+      return;
+    }
+    this.dataScopeService.applyToQuery(query, "donation_box", dataScope);
+  }
+
+  private async resolveCityName(cityId?: number | null): Promise<string | null> {
+    if (!cityId) return null;
+    const city = await this.cityRepository.findOne({
+      where: { id: cityId },
+      select: ["id", "name"],
+    });
+    return city?.name ?? null;
+  }
+
+  private async refreshDonationBoxGeoSearch(boxId: number): Promise<void> {
+    const box = await this.donationBoxRepository.findOne({
+      where: { id: boxId },
+      relations: ["route", "route.region", "route.country"],
+    });
+    if (!box) return;
+
+    const cityName = await this.resolveCityName(box.city_id);
+    const geo_search = buildDonationBoxGeoSearch({
+      landmark_marketplace: box.landmark_marketplace,
+      shop_name: box.shop_name,
+      route: box.route,
+      city_name: cityName,
+    });
+
+    await this.donationBoxRepository.update(boxId, { geo_search });
   }
 
   private donationBoxAuditUserId(
@@ -136,90 +224,6 @@ export class DonationBoxService {
   }
 
   /**
-   * Resolve a user's geographic assignments (IDs) to a unique list of city IDs.
-   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
-   * Returns an array of city IDs for WHERE IN filtering.
-   */
-  async resolveUserGeographyCityIds(userId: number): Promise<number[] | null> {
-    try {
-      if (userId === -1) return null;
-
-      const user = await this.userRepository.findOne({ where: { id: userId } });
-      if (!user) return null;
-
-      // If user is not fund_raising department, no geo filter
-      if (user.department !== Department.FUND_RAISING) return null;
-
-      const assignedCountries = user.assigned_countries || [];
-      const assignedRegions = user.assigned_regions || [];
-      const assignedDistricts = user.assigned_districts || [];
-      const assignedTehsils = user.assigned_tehsils || [];
-      const assignedCities = user.assigned_cities || [];
-
-      // If no geographic assignments at all, no filter needed
-      if (
-        !assignedCountries.length &&
-        !assignedRegions.length &&
-        !assignedDistricts.length &&
-        !assignedTehsils.length &&
-        !assignedCities.length
-      ) {
-        return null;
-      }
-
-      const allCityIds: Set<number> = new Set();
-
-      // 1. Direct city IDs
-      assignedCities.forEach((id) => allCityIds.add(id));
-
-      // 2. Tehsil IDs → get all cities under those tehsils
-      if (assignedTehsils.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.id")
-          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
-          .getMany();
-        cities.forEach((c) => allCityIds.add(c.id));
-      }
-
-      // 3. District IDs → get all cities under those districts
-      if (assignedDistricts.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.id")
-          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
-          .getMany();
-        cities.forEach((c) => allCityIds.add(c.id));
-      }
-
-      // 4. Region IDs → get all cities under those regions
-      if (assignedRegions.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.id")
-          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
-          .getMany();
-        cities.forEach((c) => allCityIds.add(c.id));
-      }
-
-      // 5. Country IDs → get all cities under those countries
-      if (assignedCountries.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.id")
-          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
-          .getMany();
-        cities.forEach((c) => allCityIds.add(c.id));
-      }
-
-      return allCityIds.size > 0 ? Array.from(allCityIds) : null;
-    } catch (error) {
-      console.error("Error resolving user geography city IDs:", error);
-      return null;
-    }
-  }
-
-  /**
    * Create a new donation box
    */
   async create(
@@ -230,6 +234,7 @@ export class DonationBoxService {
       // Validate that route exists
       const route = await this.routeRepository.findOne({
         where: { id: createDonationBoxDto.route_id },
+        relations: ["region", "country"],
       });
 
       if (!route) {
@@ -270,6 +275,12 @@ export class DonationBoxService {
           ? { created_by: { id: auditUserId } as any }
           : {}),
         assignedUsers: assignedUsers,
+        geo_search: buildDonationBoxGeoSearch({
+          landmark_marketplace: boxData.landmark_marketplace,
+          shop_name: boxData.shop_name,
+          route,
+          city_name: await this.resolveCityName(boxData.city_id),
+        }),
       });
 
       // Save and return
@@ -283,11 +294,111 @@ export class DonationBoxService {
   }
 
   /**
+   * Resolve route for CSV import — by route_id or route_name (+ optional city).
+   */
+  async resolveRouteForImport(params: {
+    route_id?: number;
+    route_name?: string;
+    city_id?: number;
+    city_name?: string;
+  }): Promise<{ route_id: number; city_id?: number }> {
+    if (params.route_id) {
+      const route = await this.routeRepository.findOne({
+        where: { id: params.route_id },
+      });
+      if (!route) {
+        throw new NotFoundException(
+          `Route with ID ${params.route_id} not found`,
+        );
+      }
+      return { route_id: route.id, city_id: params.city_id };
+    }
+
+    const routeName = params.route_name?.trim();
+    if (!routeName) {
+      throw new NotFoundException("route_id or route_name is required");
+    }
+
+    let cityId = params.city_id;
+    if (!cityId && params.city_name?.trim()) {
+      const cities = await this.cityRepository.find({
+        where: { name: ILike(params.city_name.trim()) },
+      });
+      if (cities.length === 0) {
+        throw new NotFoundException(`City "${params.city_name}" not found`);
+      }
+      if (cities.length > 1) {
+        throw new NotFoundException(
+          `Multiple cities match "${params.city_name}" — use city_id`,
+        );
+      }
+      cityId = cities[0].id;
+    }
+
+    const qb = this.routeRepository
+      .createQueryBuilder("route")
+      .where("LOWER(route.name) = LOWER(:name)", { name: routeName });
+
+    if (cityId) {
+      qb.innerJoin("route.cities", "city").andWhere("city.id = :cityId", {
+        cityId,
+      });
+    }
+
+    const routes = await qb.getMany();
+    if (routes.length === 0) {
+      throw new NotFoundException(
+        `Route "${routeName}" not found${cityId ? ` for city_id ${cityId}` : ""}`,
+      );
+    }
+    if (routes.length > 1) {
+      throw new NotFoundException(
+        `Multiple routes named "${routeName}" — provide city_id or city_name`,
+      );
+    }
+
+    return { route_id: routes[0].id, city_id: cityId };
+  }
+
+  /**
+   * CSV / data-import row — same persistence rules as create().
+   */
+  async importDonationBoxRow(
+    row: Record<string, unknown>,
+    user: any,
+  ): Promise<DonationBox> {
+    const resolved = await this.resolveRouteForImport({
+      route_id: row.route_id as number | undefined,
+      route_name: row.route_name as string | undefined,
+      city_id: row.city_id as number | undefined,
+      city_name: row.city_name as string | undefined,
+    });
+
+    const createDto = {
+      key_no: row.key_no as string | undefined,
+      route_id: resolved.route_id,
+      city_id: resolved.city_id ?? (row.city_id as number | undefined),
+      shop_name: String(row.shop_name || "").trim(),
+      shopkeeper: row.shopkeeper as string | undefined,
+      cell_no: row.cell_no as string | undefined,
+      landmark_marketplace: row.landmark_marketplace as string | undefined,
+      box_type: row.box_type,
+      status: row.status,
+      frequency: row.frequency,
+      active_since: row.active_since,
+      notes: row.notes as string | undefined,
+      assigned_user_ids: (row.assigned_user_ids as number[]) || [],
+    } as CreateDonationBoxDto;
+
+    return this.create(createDto, user);
+  }
+
+  /**
    * Find all donation boxes with pagination and filtering
    */
   async findAll(
     options: PaginationOptions,
-    assignedCityIds?: number[] | null,
+    geoScope?: ResolvedGeographicScope | null,
     currentUser?: { id?: number; role?: string; department?: string },
   ) {
     try {
@@ -346,16 +457,18 @@ export class DonationBoxService {
 
       applyCommonFilters(query, filters, searchFields, "donation_box");
 
-      // Apply geographic restriction if user has assigned cities
-      if (assignedCityIds && assignedCityIds.length > 0) {
-        query.andWhere("donation_box.city_id IN (:...assignedCityIds)", {
-          assignedCityIds,
-        });
+      if (geoScope) {
+        this.geographicScopeService.applyToQuery(
+          query,
+          "donation_boxes",
+          "donation_box",
+          geoScope,
+        );
       }
 
       if (currentUser?.id) {
         const scope = await this.resolveDonationBoxScope(currentUser);
-        this.dataScopeService.applyToQuery(query, "donation_box", scope);
+        this.applyDonationBoxListDataScope(query, scope, geoScope);
       }
 
       // Apply sorting
@@ -497,6 +610,11 @@ export class DonationBoxService {
       const auditChanges = buildDonationBoxFieldChanges(before, auditPatch);
       if (Object.keys(scalarPatch).length > 0) {
         await this.donationBoxRepository.update(id, scalarPatch as any);
+      }
+
+      const geoFields = ["route_id", "city_id", "landmark_marketplace", "shop_name"];
+      if (geoFields.some((field) => field in scalarPatch)) {
+        await this.refreshDonationBoxGeoSearch(id);
       }
 
       if (auditChanges.length > 0) {
@@ -644,10 +762,13 @@ export class DonationBoxService {
     }
   }
 
-  async getDonationBoxListForDropdown(options?: {
-    activeOnly?: boolean;
-    status?: string;
-  }) {
+  async getDonationBoxListForDropdown(
+    options?: {
+      activeOnly?: boolean;
+      status?: string;
+    },
+    geoScope?: ResolvedGeographicScope | null,
+  ) {
     const queryBuilder = this.donationBoxRepository
       .createQueryBuilder("box")
       .leftJoin("box.route", "route")
@@ -669,6 +790,15 @@ export class DonationBoxService {
 
     if (options?.status) {
       queryBuilder.andWhere("box.status = :status", { status: options.status });
+    }
+
+    if (geoScope) {
+      this.geographicScopeService.applyToQuery(
+        queryBuilder,
+        "donation_boxes",
+        "box",
+        geoScope,
+      );
     }
 
     queryBuilder.orderBy("box.shop_name", "ASC");

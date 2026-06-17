@@ -8,7 +8,7 @@ import {
 import { CreateDonationDto } from "./dto/create-donation.dto";
 import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, SelectQueryBuilder } from "typeorm";
+import { Brackets, Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "./entities/donation.entity";
 import {
   DonationInKind,
@@ -47,7 +47,6 @@ import axios from "axios";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { RecurringDonationPlan } from "src/dms/recurring_donations/entities/recurring_donation.entity";
-import { City } from "../dms/geographic/cities/entities/city.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import { ProgressTrackersService } from "../progress_tracking/progress_trackers/progress-trackers.service";
@@ -64,6 +63,13 @@ import {
 } from "./audit/donation-audit.util";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
+import { GeographicScopeService } from "../permissions/geographic-scope/geographic-scope.service";
+import { ResolvedGeographicScope } from "../permissions/geographic-scope/geographic-scope.types";
+import {
+  buildDonationGeoSnapshotForBackfill,
+  buildDonationGeoSnapshotForCreate,
+  mergeDonationGeoForUpdate,
+} from "./utils/donation-geo.util";
 
 @Injectable()
 export class DonationsService {
@@ -102,8 +108,6 @@ export class DonationsService {
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonationPlan)
     private recurringDonationPlanRepository: Repository<RecurringDonationPlan>,
-    @InjectRepository(City)
-    private cityRepository: Repository<City>,
     private donorService: DonorService,
     private notificationsService: NotificationsService,
     private whatsAppService: WhatsAppService,
@@ -116,7 +120,23 @@ export class DonationsService {
     private readonly donationAuditService: DonationAuditService,
     private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
     private readonly dataScopeService: DataScopeService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
+
+  private async syncDonationGeoFromDonorIfNeeded(
+    donationId: number,
+    donor?: Donor | null,
+  ): Promise<void> {
+    if (!donor?.id) return;
+
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+    });
+    if (!donation) return;
+
+    const snapshot = buildDonationGeoSnapshotForBackfill(donation, donor);
+    await this.donationRepository.update(donationId, snapshot);
+  }
 
   async resolveDonationListScope(
     user: { id?: number; role?: string; department?: string } | null | undefined,
@@ -168,7 +188,93 @@ export class DonationsService {
     record: Donation,
   ): void {
     if (!scope) return;
+    // Website donations are system-created (no staff owner); geographic scope governs access.
+    if (record.donation_source === "website") return;
     this.dataScopeService.assertRecordAccess(scope, record);
+  }
+
+  private resolveDonationListMode(
+    filters: FilterPayload,
+    donationSourceNot: string | null | undefined,
+  ): "online" | "offline" | "both" {
+    if (filters.donation_source === "website") return "online";
+    if (
+      donationSourceNot !== undefined &&
+      donationSourceNot !== null &&
+      donationSourceNot !== ""
+    ) {
+      return "offline";
+    }
+    return "both";
+  }
+
+  /**
+   * Data scope on created_by. Skipped when geographic territory filter is active
+   * (website donations have no created_by; offline rows are gated by geo instead).
+   */
+  private applyDonationListDataScope(
+    query: SelectQueryBuilder<Donation>,
+    scope: ResolvedDataScope | null,
+    listMode: "online" | "offline" | "both",
+    geoScope?: ResolvedGeographicScope | null,
+    paramSuffix = "",
+  ): void {
+    if (!scope) return;
+    if (scope.bypass || scope.type === "org" || !scope.allowedUserIds?.length) {
+      return;
+    }
+
+    if (geoScope && this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+      return;
+    }
+
+    if (listMode === "online") {
+      return;
+    }
+
+    if (listMode === "offline") {
+      this.dataScopeService.applyToQuery(query, "donation", scope);
+      return;
+    }
+
+    const paramKey = `dataScopeMixed${paramSuffix}`;
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where(`donation.donation_source = :${paramKey}_website`, {
+          [`${paramKey}_website`]: "website",
+        });
+        qb.orWhere(`donation.created_by IN (:...${paramKey}_userIds)`, {
+          [`${paramKey}_userIds`]: scope.allowedUserIds,
+        });
+      }),
+    );
+  }
+
+  private logFinalQuery(
+    label: string,
+    qb: SelectQueryBuilder<Donation>,
+  ): void {
+    this.logger.log(
+      `[donations.findAll:${label}] SQL:\n${qb.getQuery()}\nPARAMS: ${JSON.stringify(qb.getParameters())}`,
+    );
+  }
+
+  /**
+   * Applies offline donation filter: donation_source != value (typically 'website').
+   */
+  private applyDonationSourceNotFilter(
+    query: SelectQueryBuilder<Donation>,
+    notSource: string | null | undefined,
+    paramSuffix = "",
+  ): void {
+    if (notSource === undefined || notSource === null || notSource === "") {
+      return;
+    }
+    const paramKey = `donationSourceNot${paramSuffix}`;
+    query.andWhere(
+      `COALESCE(donation.donation_source, '') != :${paramKey}`,
+      { [paramKey]: String(notSource) },
+    );
   }
 
   // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
@@ -292,6 +398,7 @@ export class DonationsService {
     }
 
     await this.donationRepository.update(donationId, { donor_id: donor.id });
+    await this.syncDonationGeoFromDonorIfNeeded(donationId, donor);
 
     if (this.isDonationRecurring(createDonationDto)) {
       const donation = await this.donationRepository.findOne({
@@ -946,116 +1053,6 @@ export class DonationsService {
 
   //   return qb.orderBy('d.id', 'DESC').getOne();
   // }
-
-  /**
-   * Resolve a user's geographic assignments (IDs) to a unique list of city name strings.
-   * Returns null if the user has no geographic assignments (meaning no geo filter needed).
-   * Returns an array of city name strings (lowercase trimmed) for WHERE IN filtering.
-   */
-  async resolveUserGeography(userId: number): Promise<string[] | null> {
-    try {
-      // Skip for system/public user
-      if (userId === -1) return null;
-
-      const user = await this.userRepository.findOne({ where: { id: userId } });
-      if (!user) return null;
-
-      // If user is not fund_raising department, no geo filter
-      if (user.department !== Department.FUND_RAISING) return null;
-
-      const assignedCountries = user.assigned_countries || [];
-      const assignedRegions = user.assigned_regions || [];
-      const assignedDistricts = user.assigned_districts || [];
-      const assignedTehsils = user.assigned_tehsils || [];
-      const assignedCities = user.assigned_cities || [];
-
-      // If no geographic assignments at all, no filter needed (user sees everything they have permission for)
-      if (
-        !assignedCountries.length &&
-        !assignedRegions.length &&
-        !assignedDistricts.length &&
-        !assignedTehsils.length &&
-        !assignedCities.length
-      ) {
-        return null;
-      }
-
-      // Collect all city names from each level
-      const allCityNames: Set<string> = new Set();
-
-      // 1. Direct city IDs → get their names
-      if (assignedCities.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.id IN (:...ids)", { ids: assignedCities })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      // 2. Tehsil IDs → get all cities under those tehsils
-      if (assignedTehsils.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.tehsil_id IN (:...ids)", { ids: assignedTehsils })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      // 3. District IDs → get all cities under those districts
-      if (assignedDistricts.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.district_id IN (:...ids)", { ids: assignedDistricts })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      // 4. Region IDs → get all cities under those regions
-      if (assignedRegions.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.region_id IN (:...ids)", { ids: assignedRegions })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      // 5. Country IDs → get all cities under those countries
-      if (assignedCountries.length) {
-        const cities = await this.cityRepository
-          .createQueryBuilder("city")
-          .select("city.name")
-          .where("city.country_id IN (:...ids)", { ids: assignedCountries })
-          .getMany();
-        cities.forEach((c) => allCityNames.add(c.name.toLowerCase().trim()));
-      }
-
-      // Return unique city names array (or null if none resolved)
-      return allCityNames.size > 0 ? Array.from(allCityNames) : null;
-    } catch (error) {
-      console.error("Error resolving user geography:", error);
-      return null; // On error, don't block — just skip geo filtering
-    }
-  }
-
-  /**
-   * Get a donor's city by donor ID (for geographic access check on offline donations).
-   */
-  async getDonorCityById(donorId: number): Promise<string | null> {
-    try {
-      const donor = await this.donorRepository.findOne({
-        where: { id: donorId },
-        select: ["id", "city"],
-      });
-      return donor?.city || null;
-    } catch (error) {
-      console.error("Error fetching donor city:", error);
-      return null;
-    }
-  }
 
   // Get users who should receive donation notifications
   private async getDonationUsers(): Promise<number[]> {
@@ -1922,8 +1919,18 @@ export class DonationsService {
           }
         }
 
+        const geoSnapshot = buildDonationGeoSnapshotForCreate(
+          {
+            country: createDonationDto.country,
+            city: createDonationDto.city,
+            address: createDonationDto.address,
+          },
+          donor,
+        );
+
         const donation = this.donationRepository.create({
           ...createDonationDto,
+          ...geoSnapshot,
           donor_id: donorId,
           campaign_id: campaignId,
           created_by: this.donationAuditUserId(user) as any,
@@ -2211,7 +2218,7 @@ export class DonationsService {
     multiselectFilters: any[] = [],
     relationsFilters?: Record<string, Record<string, any>>,
     user?: any,
-    assignedCityNames?: string[] | null,
+    geoScope?: ResolvedGeographicScope | null,
     dataScope?: ResolvedDataScope | null,
   ) {
     try {
@@ -2221,7 +2228,7 @@ export class DonationsService {
       ];
       console.log("user email in donation listing", user?.email);
       console.log("multiselectFilters", multiselectFilters);
-      const entitySearchFields = ["city"];
+      const entitySearchFields = ["city", "country", "address", "geo_search"];
       // Special filters (not donation table columns)
       const progressTemplateIdRaw = (filters as any)
         ?.progress_workflow_template_id;
@@ -2235,6 +2242,16 @@ export class DonationsService {
         // prevent applyCommonFilters() from trying to match a non-existent donation column
         delete (filters as any).progress_workflow_template_id;
       }
+
+      const donationSourceNot = (filters as Record<string, unknown>)
+        ._donation_source_not;
+      if ((filters as Record<string, unknown>)._donation_source_not !== undefined) {
+        delete (filters as Record<string, unknown>)._donation_source_not;
+      }
+      const donationListMode = this.resolveDonationListMode(
+        filters,
+        donationSourceNot as string | null | undefined,
+      );
 
       const query = this.donationRepository
         .createQueryBuilder("donation")
@@ -2253,6 +2270,10 @@ export class DonationsService {
       }
       query.getRawMany();
       // Apply filters
+      this.applyDonationSourceNotFilter(
+        query,
+        donationSourceNot as string | null | undefined,
+      );
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       // applyHybridFilters(query, hybridFilters, 'donation');
@@ -2326,25 +2347,21 @@ export class DonationsService {
         applyMultiselectFilters(query, msFiltersRest, "donation");
       }
 
-      // 5) Geographic filter — restrict donations to user's assigned city names
-      //    Online donations (website) → filter by donation.city
-      //    Offline donations (non-website) → filter by donor.city (since donation.city may be empty)
-      if (assignedCityNames && assignedCityNames.length > 0) {
-        query.andWhere(
-          `(
-            (donation.donation_source = 'website' AND LOWER(TRIM(donation.city)) IN (:...geoCityNames))
-            OR
-            (COALESCE(donation.donation_source, '') != 'website' AND donation.donor_id IN (
-              SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNames)
-            ))
-          )`,
-          { geoCityNames: assignedCityNames },
+      if (geoScope) {
+        this.geographicScopeService.applyToQuery(
+          query,
+          "donations",
+          "donation",
+          geoScope,
         );
       }
 
-      if (dataScope) {
-        this.dataScopeService.applyToQuery(query, "donation", dataScope);
-      }
+      this.applyDonationListDataScope(
+        query,
+        dataScope,
+        donationListMode,
+        geoScope,
+      );
 
       // Pagination
       const skip = (page - 1) * pageSize;
@@ -2352,6 +2369,8 @@ export class DonationsService {
 
       // Sorting
       query.orderBy(`donation.${sortField}`, sortOrder);
+
+      this.logFinalQuery("list", query);
 
       // Get paginated data + total count
       const [data, total] = await query.getManyAndCount();
@@ -2369,6 +2388,11 @@ export class DonationsService {
         );
 
       // Apply same filters to keep consistent
+      this.applyDonationSourceNotFilter(
+        sumQuery,
+        donationSourceNot as string | null | undefined,
+        "Sum",
+      );
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
       // applyHybridFilters(sumQuery, hybridFilters, 'donation');
       applyRelationsSearch(
@@ -2422,22 +2446,22 @@ export class DonationsService {
           ptidSum: progressTemplateId,
         });
       }
-      // Apply same geographic filter to sum query
-      if (assignedCityNames && assignedCityNames.length > 0) {
-        sumQuery.andWhere(
-          `(
-            (donation.donation_source = 'website' AND LOWER(TRIM(donation.city)) IN (:...geoCityNamesSum))
-            OR
-            (COALESCE(donation.donation_source, '') != 'website' AND donation.donor_id IN (
-              SELECT d.id FROM donors d WHERE LOWER(TRIM(d.city)) IN (:...geoCityNamesSum)
-            ))
-          )`,
-          { geoCityNamesSum: assignedCityNames },
+      if (geoScope) {
+        this.geographicScopeService.applyToQuery(
+          sumQuery,
+          "donations",
+          "donation",
+          geoScope,
         );
       }
-      if (dataScope) {
-        this.dataScopeService.applyToQuery(sumQuery, "donation", dataScope);
-      }
+      this.applyDonationListDataScope(
+        sumQuery,
+        dataScope,
+        donationListMode,
+        geoScope,
+        "Sum",
+      );
+      this.logFinalQuery("sum", sumQuery);
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;
 
@@ -2551,6 +2575,27 @@ export class DonationsService {
       }
 
       const patch = this.buildDonationPatch(updateDonationDto);
+      const geoTouched =
+        patch.country !== undefined ||
+        patch.city !== undefined ||
+        patch.address !== undefined;
+      if (geoTouched) {
+        Object.assign(
+          patch,
+          mergeDonationGeoForUpdate(
+            {
+              country: donation.country,
+              city: donation.city,
+              address: donation.address,
+            },
+            {
+              country: patch.country as string | null | undefined,
+              city: patch.city as string | null | undefined,
+              address: patch.address as string | null | undefined,
+            },
+          ),
+        );
+      }
       const auditUserId = this.donationAuditUserId(user);
       if (auditUserId != null) {
         patch.updated_by = auditUserId;
@@ -2597,6 +2642,7 @@ export class DonationsService {
       "status",
       "country",
       "city",
+      "address",
       "project_id",
       "project_name",
       "campaign_id",
@@ -2636,6 +2682,11 @@ export class DonationsService {
         continue;
       }
       if (key === "on_behalf_names") {
+        const v = d[key];
+        patch[key] = v === "" || v === null ? null : String(v);
+        continue;
+      }
+      if (key === "country" || key === "city" || key === "address") {
         const v = d[key];
         patch[key] = v === "" || v === null ? null : String(v);
         continue;
@@ -3528,8 +3579,7 @@ export class DonationsService {
   // ─── Bank Alfalah APG — credit/debit card only (page redirection) ───────────
 
   /**
-   * APG card Step 1 only — browser POST HS/HS/HS (HS_IsRedirectionRequest=0).
-   * Step 2 SSO runs on GET /alfalah/return when APG sends auth_token.
+   * APG card — server handshake (HS/HS/HS) then SSO form for browser POST.
    */
   private async startAlfalahPayment(savedDonation: Donation) {
     const orderRef = String(savedDonation.id);
@@ -3538,15 +3588,22 @@ export class DonationsService {
       status: "pending",
     });
 
-    const step1 = this.alfalahService.buildCardHandshakeForm(orderRef);
+    const handshake =
+      await this.alfalahService.initiateCardHandshake(orderRef);
+
+    const sso = this.alfalahService.buildCardSsoForm({
+      authToken: handshake.authToken,
+      transactionReference: orderRef,
+      amount: Number(savedDonation.amount),
+    });
+
     return {
       donationId: savedDonation.id,
       transactionReference: orderRef,
-      cardStep: 1,
-      formAction: step1.action,
-      formFields: step1.fields,
-      message:
-        "Redirecting to Bank Alfalah. After confirmation you will continue to secure card checkout.",
+      cardStep: 2,
+      formAction: sso.action,
+      formFields: sso.fields,
+      message: "Redirecting to Bank Alfalah secure card checkout.",
     };
   }
 

@@ -6,6 +6,9 @@ import {
 import { PermissionsService } from "../permissions/permissions.service";
 import { parseCsvBuffer } from "./utils/csv-parse.util";
 import { DonorsImportHandler } from "./handlers/donors-import.handler";
+import { DonationBoxImportHandler } from "./handlers/donation-box-import.handler";
+import { DonationBoxDonationsImportHandler } from "./handlers/donation-box-donations-import.handler";
+import { VolunteersImportHandler } from "./handlers/volunteers-import.handler";
 import {
   EntityImportHandler,
   ImportBatchResult,
@@ -26,10 +29,19 @@ export class DataImportService {
 
   constructor(
     private readonly donorsImportHandler: DonorsImportHandler,
+    private readonly donationBoxImportHandler: DonationBoxImportHandler,
+    private readonly donationBoxDonationsImportHandler: DonationBoxDonationsImportHandler,
+    private readonly volunteersImportHandler: VolunteersImportHandler,
     private readonly permissionsService: PermissionsService,
   ) {
     this.handlers = new Map<string, EntityImportHandler>([
       [donorsImportHandler.entityName, donorsImportHandler],
+      [donationBoxImportHandler.entityName, donationBoxImportHandler],
+      [
+        donationBoxDonationsImportHandler.entityName,
+        donationBoxDonationsImportHandler,
+      ],
+      [volunteersImportHandler.entityName, volunteersImportHandler],
     ]);
   }
 
@@ -66,6 +78,54 @@ export class DataImportService {
         notification_subscription: "true",
         recurring: "false",
         multi_time_donor: "false",
+      };
+    }
+    if (entityName === "donation_box") {
+      return {
+        shop_name: "Sample General Store",
+        route_id: "1",
+        city_id: "1",
+        key_no: "KEY-001",
+        shopkeeper: "Ahmed Khan",
+        cell_no: "03001234567",
+        landmark_marketplace: "Main Bazaar",
+        box_type: "medium",
+        status: "active",
+        frequency: "weekly",
+        active_since: new Date().toISOString().split("T")[0],
+        notes: "Imported via CSV",
+        assigned_user_ids: "",
+      };
+    }
+    if (entityName === "donation_box_donations") {
+      return {
+        key_no: "KEY-001",
+        collection_amount: "1500",
+        collection_date: new Date().toISOString().split("T")[0],
+        collector_name: "Field Officer",
+        payment_method: "cash",
+        status: "pending",
+        notes: "Imported via CSV",
+        receipt_number: "",
+      };
+    }
+    if (entityName === "volunteers") {
+      return {
+        name: "Sample Volunteer",
+        phone: "03001234567",
+        email: "volunteer@example.com",
+        cnic: "35202-1234567-1",
+        gender: "male",
+        city: "Lahore",
+        area: "Model Town",
+        availability: "weekends",
+        availability_days: "saturday;sunday",
+        skills: "teaching;field_work",
+        interest_areas: "education;health",
+        status: "pending",
+        verification_status: "unverified",
+        source: "import",
+        comments: "Imported via CSV",
       };
     }
     return {};
@@ -121,6 +181,45 @@ export class DataImportService {
       if (!canCreate) {
         throw new BadRequestException(
           "Insufficient permissions to import donors",
+        );
+      }
+      return;
+    }
+
+    if (entity === "donation_box") {
+      const canCreate = await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.donation_box.create",
+      );
+      if (!canCreate) {
+        throw new BadRequestException(
+          "Insufficient permissions to import donation boxes",
+        );
+      }
+      return;
+    }
+
+    if (entity === "donation_box_donations") {
+      const canCreate = await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.donation_box_donations.create",
+      );
+      if (!canCreate) {
+        throw new BadRequestException(
+          "Insufficient permissions to import donation box collections",
+        );
+      }
+      return;
+    }
+
+    if (entity === "volunteers") {
+      const canCreate = await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.volunteers.create",
+      );
+      if (!canCreate) {
+        throw new BadRequestException(
+          "Insufficient permissions to import volunteers",
         );
       }
       return;

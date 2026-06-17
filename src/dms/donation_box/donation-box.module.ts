@@ -10,6 +10,8 @@ import { Route } from "../geographic/routes/entities/route.entity";
 import { City } from "../geographic/cities/entities/city.entity";
 import { User } from "../../users/user.entity";
 import { DonationBoxAuditModule } from "./audit/donation-box-audit.module";
+import { DonationBoxGeoBackfillService } from "./donation-box-geo-backfill.service";
+import { DonationBoxGeoBackfillRunner } from "./donation-box-geo-backfill.runner";
 
 @Module({
   imports: [
@@ -23,7 +25,11 @@ import { DonationBoxAuditModule } from "./audit/donation-box-audit.module";
     DonationBoxDonationModule,
   ],
   controllers: [DonationBoxController],
-  providers: [DonationBoxService],
+  providers: [
+    DonationBoxService,
+    DonationBoxGeoBackfillService,
+    DonationBoxGeoBackfillRunner,
+  ],
   exports: [DonationBoxService, TypeOrmModule], // Export for other modules
 })
 export class DonationBoxModule {}

@@ -31,6 +31,8 @@ import { SetAppealStatusDto } from "./dto/set-status.dto";
 import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions";
+import { APPEALS_OPTIONS_GUARD } from "../../utils/lookup";
+import { JwtGuard } from "../../auth/jwt.guard";
 
 const APPEAL_IMAGE_PURPOSES = new Set<AppealImagePurpose>([
   "cover",
@@ -153,6 +155,34 @@ export class AppealsController {
         success: false,
         message: error.message,
         data: null,
+      });
+    }
+  }
+
+  /** Slim id/title list for filters (e.g. donations list). */
+  @Get("options")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([...APPEALS_OPTIONS_GUARD])
+  async options(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.appealsService.listForOptions({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Appeal options retrieved",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: [],
       });
     }
   }

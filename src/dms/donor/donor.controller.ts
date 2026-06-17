@@ -22,6 +22,7 @@ import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { PermissionsService } from "../../permissions/permissions.service";
+import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
 import { JwtGuard } from "src/auth/jwt.guard";
 
 @Controller("donors")
@@ -30,6 +31,7 @@ export class DonorController {
   constructor(
     private readonly donorService: DonorService,
     private readonly permissionsService: PermissionsService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
 
   /**
@@ -123,25 +125,24 @@ export class DonorController {
     return { online: hasOnline, offline: hasOffline };
   }
 
-  /**
-   * Check if a donor falls within the user's assigned geography.
-   */
-  private async checkGeographicAccess(
-    userId: number,
-    donorCity: string | null | undefined,
-  ): Promise<void> {
-    if (!userId || userId === -1 || !donorCity) return;
-
-    const assignedCityNames =
-      await this.donorService.resolveUserGeography(userId);
-    if (assignedCityNames === null) return;
-
-    const normalizedCity = donorCity.toLowerCase().trim();
-    if (!assignedCityNames.includes(normalizedCity)) {
-      throw new ForbiddenException(
-        "You do not have geographic access to this donor",
-      );
-    }
+  private async resolveGeoScope(user: {
+    id?: number;
+    role?: string;
+    department?: string;
+    assigned_countries?: number[] | null;
+    assigned_regions?: number[] | null;
+    assigned_districts?: number[] | null;
+    assigned_tehsils?: number[] | null;
+    assigned_cities?: number[] | null;
+    assigned_routes?: number[] | null;
+    geographic_off?: boolean;
+  } | null) {
+    if (!user?.id || user.id === -1) return null;
+    return this.geographicScopeService.resolveForUser(
+      user.id,
+      user.role,
+      user as any,
+    );
   }
 
   @Post("register")
@@ -240,13 +241,7 @@ export class DonorController {
         });
       }
 
-      // Resolve user's geographic assignments to city name strings
-      let assignedCityNames: string[] | null = null;
-      if (user?.id && user.id !== -1) {
-        assignedCityNames = await this.donorService.resolveUserGeography(
-          user.id,
-        );
-      }
+      const geoScope = await this.resolveGeoScope(user);
 
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
@@ -269,7 +264,7 @@ export class DonorController {
             : undefined,
           source: requestedSource,
         },
-        assignedCityNames,
+        geoScope,
         sourceAccess,
         user,
       );
@@ -308,7 +303,9 @@ export class DonorController {
       const result = await this.donorService.findByEmailOrPhone(email, phone);
       if (result && req?.user?.id) {
         await this.checkDonorPermission(req.user.id, result.source, "view");
-        await this.checkGeographicAccess(req.user.id, result.city);
+        const geoScope = await this.resolveGeoScope(req.user);
+        const scope = await this.donorService.resolveDonorScope(req.user);
+        this.donorService.assertDonorViewAccess(scope, result, geoScope);
       }
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -339,10 +336,10 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
         const scope = await this.donorService.resolveDonorScope(user);
-        this.donorService.assertDonorRecordAccess(scope, existing);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
         await this.checkDonorPermission(user.id, existing.source, "view");
-        await this.checkGeographicAccess(user.id, existing.city);
       }
       const history = await this.donorService.getDonorAuditHistory(+id);
       return res.status(HttpStatus.OK).json({
@@ -377,10 +374,10 @@ export class DonorController {
       const result = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
         const scope = await this.donorService.resolveDonorScope(user);
-        this.donorService.assertDonorRecordAccess(scope, result);
+        this.donorService.assertDonorViewAccess(scope, result, geoScope);
         await this.checkDonorPermission(user.id, result.source, "view");
-        await this.checkGeographicAccess(user.id, result.city);
       }
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -415,10 +412,10 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
         const scope = await this.donorService.resolveDonorScope(user);
-        this.donorService.assertDonorRecordAccess(scope, existing);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
         await this.checkDonorPermission(user.id, existing.source, "update");
-        await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.update(+id, updateDonorDto, user);
       return res.status(HttpStatus.OK).json({
@@ -449,10 +446,10 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
         const scope = await this.donorService.resolveDonorScope(user);
-        this.donorService.assertDonorRecordAccess(scope, existing);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
         await this.checkDonorPermission(user.id, existing.source, "delete");
-        await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.remove(+id, req.user);
       return res.status(HttpStatus.OK).json({
@@ -488,8 +485,10 @@ export class DonorController {
       const existing = await this.donorService.findOne(+id);
       const user = req?.user ?? null;
       if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
         await this.checkDonorPermission(user.id, existing.source, "update");
-        await this.checkGeographicAccess(user.id, existing.city);
       }
       const result = await this.donorService.changePassword(
         +id,
@@ -540,8 +539,10 @@ export class DonorController {
       // Ensure requester can view this donor type + geo
       const donor = await this.donorService.findOne(donorId);
       if (req?.user?.id) {
+        const geoScope = await this.resolveGeoScope(req.user);
+        const scope = await this.donorService.resolveDonorScope(req.user);
+        this.donorService.assertDonorViewAccess(scope, donor, geoScope);
         await this.checkDonorPermission(req.user.id, donor.source, "view");
-        await this.checkGeographicAccess(req.user.id, donor.city);
       }
 
       const data = await this.donorService.revealDonorPassword(donorId);
@@ -587,8 +588,10 @@ export class DonorController {
 
       const donor = await this.donorService.findOne(donorId);
       if (req?.user?.id) {
+        const geoScope = await this.resolveGeoScope(req.user);
+        const scope = await this.donorService.resolveDonorScope(req.user);
+        this.donorService.assertDonorViewAccess(scope, donor, geoScope);
         await this.checkDonorPermission(req.user.id, donor.source, "update");
-        await this.checkGeographicAccess(req.user.id, donor.city);
       }
 
       const data = await this.donorService.resetPasswordAdmin(donorId);

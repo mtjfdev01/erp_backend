@@ -93,6 +93,10 @@ export class AuthController {
     // Extract permissions from the user relation
     const permissions = user.permissions?.permissions || {};
 
+    const geographic = this.authService.getGeographicContextForUser(user);
+    const geographicScope =
+      await this.authService.getGeographicScopeSummaryForUser(user);
+
     return {
       user: {
         id: user.id,
@@ -109,6 +113,8 @@ export class AuthController {
         joining_date: user.joining_date,
         emergency_contact: user.emergency_contact,
         blood_group: user.blood_group,
+        ...geographic,
+        geographic_scope: geographicScope,
       },
       permissions,
     };

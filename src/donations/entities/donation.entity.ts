@@ -59,6 +59,13 @@ export class Donation extends BaseEntity {
   @Column({ type: "varchar", nullable: true, default: null })
   city: string;
 
+  @Column({ type: "text", nullable: true, default: null })
+  address: string;
+
+  /** Normalized lowercase search blob built from country, city, and address. */
+  @Column({ type: "text", nullable: true, default: null })
+  geo_search: string;
+
   @Column({ type: "varchar", nullable: true, default: "pending" })
   status: string;
 
@@ -108,4 +115,23 @@ export class Donation extends BaseEntity {
   /** Optional: names for Qurbani / on-behalf dedications (free text). */
   @Column({ type: "text", nullable: true, default: null })
   on_behalf_names: string | null;
+
+  /** Bank reconciliation — Faysal / other statement imports (additive, nullable). */
+  @Column({ type: "varchar", nullable: true, default: null })
+  tran_seq_no: string | null;
+
+  @Column({ type: "date", nullable: true, default: null })
+  effect_date: Date | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  tran_type: string | null;
+
+  @Column({ type: "text", nullable: true, default: null })
+  tran_description: string | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  stan: string | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  reference_no: string | null;
 }

@@ -9,6 +9,7 @@ import {
   IsNotEmpty,
   IsArray,
   IsNumber,
+  IsBoolean,
 } from "class-validator";
 import { UserRole, Department } from "../user.entity";
 
@@ -87,6 +88,15 @@ export class CreateUserDto {
   assigned_cities?: number[];
 
   @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assigned_routes?: number[];
+
+  @IsOptional()
   @IsNumber()
   manager_id?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  geographic_off?: boolean;
 }

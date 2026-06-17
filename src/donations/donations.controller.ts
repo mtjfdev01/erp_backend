@@ -24,12 +24,13 @@ import { UpdateDonationNoteDto } from "./dto/update-donation-note.dto";
 import { CurrentUser } from "src/auth/current-user.decorator";
 import { ConditionalJwtGuard } from "src/auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
-import { RequiredPermissions } from "src/permissions";
+import { DONATION_UPDATE_GUARD, RequiredPermissions } from "src/permissions";
 import { PermissionsService } from "src/permissions/permissions.service";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { DonationsReceiptsService } from "./receipts.service";
 import { UserOrDonorJwtGuard } from "src/auth/guards/user-or-donor-jwt.guard";
 import { DonorService } from "src/dms/donor/donor.service";
+import { GeographicScopeService } from "src/permissions/geographic-scope/geographic-scope.service";
 
 @Controller("donations")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -41,6 +42,7 @@ export class DonationsController {
     private readonly permissionsService: PermissionsService,
     private readonly receiptsService: DonationsReceiptsService,
     private readonly donorService: DonorService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
 
   /**
@@ -139,53 +141,55 @@ export class DonationsController {
 
   /**
    * Check if a donation falls within the user's assigned geography.
-   * For online donations (website) → checks donation.city
-   * For offline donations → checks the donor's city
-   * Throws ForbiddenException if the user has geographic restrictions and the donation is outside their area.
+   * Uses donation geo snapshot first; falls back to donor for legacy rows.
    */
   private async checkGeographicAccess(
     userId: number,
     donation: {
       city?: string | null;
+      country?: string | null;
+      address?: string | null;
+      geo_search?: string | null;
       donation_source?: string | null;
       donor_id?: number | null;
-      donor?: any;
+      donor?: {
+        city?: string | null;
+        address?: string | null;
+        company_address?: string | null;
+        country?: string | null;
+      } | null;
     },
+    userRole?: string,
+    userSnapshot?: Record<string, unknown> | null,
   ): Promise<void> {
     if (!userId || userId === -1) return;
 
-    const assignedCityNames =
-      await this.donationsService.resolveUserGeography(userId);
-    // null means no geographic restrictions
-    if (assignedCityNames === null) return;
-
-    let cityToCheck: string | null | undefined = null;
-
-    if (donation.donation_source === "website") {
-      // Online donation — check donation's own city
-      cityToCheck = donation.city;
-    } else {
-      // Offline donation — check the donor's city
-      cityToCheck = donation.donor?.city || null;
-
-      // If donor is not loaded/joined, fetch donor city by donor_id
-      if (!cityToCheck && donation.donor_id) {
-        const donorCity = await this.donationsService.getDonorCityById(
-          donation.donor_id,
-        );
-        cityToCheck = donorCity;
+    const record = { ...donation };
+    if (
+      donation.donation_source !== "website" &&
+      !donation.donor &&
+      donation.donor_id
+    ) {
+      try {
+        const donor = await this.donorService.findOne(donation.donor_id);
+        record.donor = {
+          city: donor.city,
+          address: donor.address,
+          company_address: donor.company_address,
+          country: donor.country,
+        };
+      } catch {
+        // leave donor unset — matcher allows when donor cannot be loaded
       }
     }
 
-    // If no city to check (neither on donation nor donor), allow access
-    if (!cityToCheck) return;
-
-    const normalizedCity = cityToCheck.toLowerCase().trim();
-    if (!assignedCityNames.includes(normalizedCity)) {
-      throw new ForbiddenException(
-        "You do not have geographic access to this donation",
-      );
-    }
+    await this.geographicScopeService.assertRecordAccess(
+      userId,
+      "donations",
+      record,
+      userRole,
+      userSnapshot as any,
+    );
   }
 
   @Post()
@@ -258,11 +262,7 @@ export class DonationsController {
 
   @Post(":id/process-batching")
   @UseGuards(JwtGuard, PermissionsGuard)
-  @RequiredPermissions([
-    "fund_raising.donations.update",
-    "super_admin",
-    "fund_raising_manager",
-  ])
+  @RequiredPermissions([...DONATION_UPDATE_GUARD])
   async processBatching(
     @Param("id") id: string,
     @Res() res: Response,
@@ -322,13 +322,14 @@ export class DonationsController {
       }
       // If both are true, no filter needed (user can see everything)
 
-      // Resolve user's geographic assignments to city name strings for filtering
-      let assignedCityNames: string[] | null = null;
-      if (user?.id && user.id !== -1) {
-        assignedCityNames = await this.donationsService.resolveUserGeography(
-          user.id,
-        );
-      }
+      const geoScope =
+        user?.id && user.id !== -1
+          ? await this.geographicScopeService.resolveForUser(
+              user.id,
+              user.role,
+              user,
+            )
+          : null;
 
       // Extract hybrid filters and convert to new format
       const hybridFilters = payload.hybrid_filters || [];
@@ -358,7 +359,7 @@ export class DonationsController {
         payload?.multiselectFilters || [],
         relationsFilters,
         user,
-        assignedCityNames,
+        geoScope,
         dataScope,
       );
 
@@ -395,7 +396,7 @@ export class DonationsController {
           donation.donation_source,
           "view",
         );
-        await this.checkGeographicAccess(user.id, donation);
+        await this.checkGeographicAccess(user.id, donation, user.role, user);
       }
 
       const result = await this.donationsService.getProviderStatus(+id);
@@ -437,7 +438,7 @@ export class DonationsController {
           existing.donation_source,
           "view",
         );
-        await this.checkGeographicAccess(user.id, existing);
+        await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
 
       const history = await this.donationsService.getDonationAuditHistory(+id);
@@ -479,7 +480,7 @@ export class DonationsController {
           result.donation_source,
           "view",
         );
-        await this.checkGeographicAccess(user.id, result);
+        await this.checkGeographicAccess(user.id, result, user.role, user);
       }
 
       return res.status(HttpStatus.OK).json({
@@ -537,7 +538,7 @@ export class DonationsController {
           donation.donation_source,
           "view",
         );
-        await this.checkGeographicAccess(req.user.id, donation);
+        await this.checkGeographicAccess(req.user.id, donation, req.user.role, req.user);
         return res.status(HttpStatus.OK).json({
           success: true,
           message: "Donation retrieved successfully",
@@ -622,7 +623,7 @@ export class DonationsController {
           donation.donation_source,
           "view",
         );
-        await this.checkGeographicAccess(user.id, donation);
+        await this.checkGeographicAccess(user.id, donation, user.role, user);
       }
 
       const sent = await this.receiptsService.sendDonationReceipt(donation);
@@ -669,7 +670,7 @@ export class DonationsController {
           existing.donation_source,
           "update",
         );
-        await this.checkGeographicAccess(user.id, existing);
+        await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
 
       const result = await this.donationsService.update(
@@ -716,7 +717,7 @@ export class DonationsController {
           existing.donation_source,
           "update",
         );
-        await this.checkGeographicAccess(user.id, existing);
+        await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
 
       const result = await this.donationsService.updateNote(
@@ -758,7 +759,7 @@ export class DonationsController {
           existing.donation_source,
           "delete",
         );
-        await this.checkGeographicAccess(user.id, existing);
+        await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
 
       const result = await this.donationsService.remove(+id, user);
@@ -828,7 +829,7 @@ export class DonationsController {
           existing.donation_source,
           "update",
         );
-        await this.checkGeographicAccess(user.id, existing);
+        await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
 
       console.log("Donation status action payload:", updateStatusDto);

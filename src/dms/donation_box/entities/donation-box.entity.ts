@@ -60,6 +60,10 @@ export class DonationBox extends BaseEntity {
   @Column({ nullable: true })
   landmark_marketplace: string;
 
+  /** Normalized search blob from route, region, city, landmark, and shop name. */
+  @Column({ type: "text", nullable: true, default: null })
+  geo_search: string;
+
   // Box Details
   @Column({
     type: "enum",
