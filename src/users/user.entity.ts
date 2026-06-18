@@ -62,6 +62,19 @@ export class User {
   @Column()
   password: string;
 
+  // Encrypted copy for admin reveal (same vault as donor passwords).
+  @Column({ type: "text", nullable: true })
+  password_enc: string | null;
+
+  @Column({ type: "int", default: 0 })
+  password_enc_version: number;
+
+  @Column({ type: "timestamp", nullable: true })
+  password_last_revealed_at: Date | null;
+
+  @Column({ type: "int", default: 0 })
+  password_reveal_count: number;
+
   @Column({
     type: "enum",
     enum: UserRole,

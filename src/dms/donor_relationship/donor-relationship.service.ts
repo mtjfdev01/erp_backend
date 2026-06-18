@@ -5,12 +5,14 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { DonorInteraction } from "./entities/donor-interaction.entity";
 import { DonorFollowup } from "./entities/donor-followup.entity";
 import { Donor } from "../donor/entities/donor.entity";
 import { CreateDonorInteractionDto } from "./dto/create-interaction.dto";
+import { UpdateDonorInteractionDto } from "./dto/update-interaction.dto";
 import { RescheduleFollowupDto } from "./dto/reschedule-followup.dto";
+import { UpdateDonorFollowupDto } from "./dto/update-followup.dto";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { User, UserRole } from "../../users/user.entity";
@@ -82,11 +84,143 @@ export class DonorRelationshipService {
   async getDonorInteractions(donorId: number, user: CurrentUser) {
     await this.assertDonorAccess(donorId, user);
 
-    return this.interactionRepository.find({
-      where: { donor_id: donorId },
+    const interactions = await this.interactionRepository.find({
+      where: { donor_id: donorId, is_archived: false },
       relations: ["created_by", "assigned_to", "donor"],
       order: { activity_datetime: "DESC" },
     });
+
+    if (!interactions.length) {
+      return [];
+    }
+
+    const interactionIds = interactions.map((row) => row.id);
+    const completedFollowups = await this.followupRepository.find({
+      where: {
+        interaction_id: In(interactionIds),
+        status: "completed",
+        is_archived: false,
+      },
+      select: ["interaction_id"],
+    });
+    const completedFollowupIds = new Set(
+      completedFollowups
+        .map((row) => row.interaction_id)
+        .filter((id): id is number => id != null),
+    );
+
+    return interactions.map((interaction) => ({
+      ...interaction,
+      has_completed_followup: completedFollowupIds.has(interaction.id),
+    }));
+  }
+
+  async updateInteraction(
+    id: number,
+    dto: UpdateDonorInteractionDto,
+    user: CurrentUser,
+  ) {
+    const interaction = await this.findInteractionById(id, user);
+    await this.assertCanModifyInteraction(interaction, user);
+
+    if (dto.activity_type !== undefined) {
+      interaction.activity_type = dto.activity_type;
+    }
+    if (dto.custom_activity_title !== undefined) {
+      interaction.custom_activity_title = dto.custom_activity_title || null;
+    }
+    if (dto.user_action_text !== undefined) {
+      interaction.user_action_text = dto.user_action_text;
+    }
+    if (dto.donor_response_text !== undefined) {
+      interaction.donor_response_text = dto.donor_response_text || null;
+    }
+    if (dto.donor_response_type !== undefined) {
+      interaction.donor_response_type = dto.donor_response_type || null;
+    }
+    if (dto.next_action_text !== undefined) {
+      interaction.next_action_text = dto.next_action_text || null;
+    }
+    if (dto.status !== undefined) {
+      interaction.status = dto.status;
+    }
+    if (dto.activity_datetime !== undefined) {
+      const activityDatetime = new Date(dto.activity_datetime);
+      if (Number.isNaN(activityDatetime.getTime())) {
+        throw new BadRequestException("Invalid activity_datetime");
+      }
+      interaction.activity_datetime = activityDatetime;
+    }
+    if (dto.next_followup_datetime !== undefined) {
+      interaction.next_followup_datetime =
+        dto.next_followup_datetime == null || dto.next_followup_datetime === ""
+          ? null
+          : new Date(dto.next_followup_datetime);
+      if (
+        interaction.next_followup_datetime &&
+        Number.isNaN(interaction.next_followup_datetime.getTime())
+      ) {
+        throw new BadRequestException("Invalid next_followup_datetime");
+      }
+    }
+
+    interaction.updated_by = { id: user.id } as User;
+    const saved = await this.interactionRepository.save(interaction);
+    await this.syncFollowupFromInteraction(saved, user);
+
+    return this.findInteractionById(saved.id, user);
+  }
+
+  async deleteInteraction(id: number, user: CurrentUser) {
+    const interaction = await this.findInteractionById(id, user);
+    await this.assertCanModifyInteraction(interaction, user);
+
+    interaction.is_archived = true;
+    interaction.updated_by = { id: user.id } as User;
+    await this.interactionRepository.save(interaction);
+
+    await this.followupRepository.update(
+      { interaction_id: interaction.id, is_archived: false },
+      { is_archived: true },
+    );
+
+    return { id: interaction.id, deleted: true };
+  }
+
+  async updateFollowup(
+    id: number,
+    dto: UpdateDonorFollowupDto,
+    user: CurrentUser,
+  ) {
+    const followup = await this.loadFollowupForMutation(id, user);
+
+    if (dto.followup_title !== undefined) {
+      followup.followup_title = dto.followup_title;
+    }
+    if (dto.followup_reason !== undefined) {
+      followup.followup_reason = dto.followup_reason || null;
+    }
+    if (dto.due_datetime !== undefined) {
+      const due = new Date(dto.due_datetime);
+      if (Number.isNaN(due.getTime())) {
+        throw new BadRequestException("Invalid due_datetime");
+      }
+      followup.due_datetime = due;
+      if (followup.status === "pending") {
+        followup.status = "rescheduled";
+      }
+    }
+    if (dto.status !== undefined) {
+      followup.status = dto.status;
+      if (dto.status === "completed") {
+        followup.completed_at = new Date();
+        followup.completed_by_user_id = user.id;
+      }
+    }
+
+    followup.updated_by = { id: user.id } as User;
+    await this.followupRepository.save(followup);
+    return followup;
   }
 
   async getMyFollowups(
@@ -108,7 +242,8 @@ export class DonorRelationshipService {
       .leftJoinAndSelect("followup.donor", "donor")
       .leftJoinAndSelect("donor.assigned_to", "donor_assigned")
       .leftJoinAndSelect("followup.interaction", "interaction")
-      .where("followup.assigned_to_user_id = :userId", { userId: user.id });
+      .where("followup.assigned_to_user_id = :userId", { userId: user.id })
+      .andWhere("followup.is_archived = :archived", { archived: false });
 
     if (bucket === "completed") {
       qb.andWhere("followup.status = :status", { status: "completed" });
@@ -158,18 +293,14 @@ export class DonorRelationshipService {
     dto: RescheduleFollowupDto,
     user: CurrentUser,
   ) {
-    const followup = await this.loadFollowupForUser(id, user);
-    const due = new Date(dto.due_datetime);
-    if (Number.isNaN(due.getTime())) {
-      throw new BadRequestException("Invalid due_datetime");
-    }
-    followup.due_datetime = due;
-    followup.status = "rescheduled";
-    if (dto.followup_reason) {
-      followup.followup_reason = dto.followup_reason;
-    }
-    await this.followupRepository.save(followup);
-    return followup;
+    return this.updateFollowup(
+      id,
+      {
+        due_datetime: dto.due_datetime,
+        followup_reason: dto.followup_reason,
+      },
+      user,
+    );
   }
 
   async getManagementOverview(user: CurrentUser, filters?: { fromDate?: string; toDate?: string }) {
@@ -243,7 +374,7 @@ export class DonorRelationshipService {
 
   private async findInteractionById(id: number, user: CurrentUser) {
     const interaction = await this.interactionRepository.findOne({
-      where: { id },
+      where: { id, is_archived: false },
       relations: ["donor", "created_by", "assigned_to"],
     });
     if (!interaction) {
@@ -254,18 +385,133 @@ export class DonorRelationshipService {
   }
 
   private async loadFollowupForUser(id: number, user: CurrentUser) {
+    const followup = await this.loadFollowupForMutation(id, user);
+    if (Number(followup.assigned_to_user_id) !== Number(user.id)) {
+      if (!(await this.canBypassDonorAssignment(user))) {
+        throw new ForbiddenException("This follow-up is not assigned to you");
+      }
+    }
+    return followup;
+  }
+
+  private async loadFollowupForMutation(id: number, user: CurrentUser) {
     const followup = await this.followupRepository.findOne({
-      where: { id },
-      relations: ["donor", "donor.assigned_to"],
+      where: { id, is_archived: false },
+      relations: ["donor", "donor.assigned_to", "interaction"],
     });
     if (!followup) {
       throw new NotFoundException("Follow-up not found");
     }
-    if (Number(followup.assigned_to_user_id) !== Number(user.id)) {
-      throw new ForbiddenException("This follow-up is not assigned to you");
-    }
     await this.assertDonorAccess(followup.donor_id, user);
+    if (!(await this.canBypassDonorAssignment(user))) {
+      if (Number(followup.assigned_to_user_id) !== Number(user.id)) {
+        throw new ForbiddenException("This follow-up is not assigned to you");
+      }
+    }
+    await this.assertCanModifyFollowup(followup, user);
     return followup;
+  }
+
+  private async syncFollowupFromInteraction(
+    interaction: DonorInteraction,
+    user: CurrentUser,
+  ) {
+    if (!interaction.next_followup_datetime) {
+      return;
+    }
+
+    const due = new Date(interaction.next_followup_datetime);
+    if (Number.isNaN(due.getTime())) {
+      return;
+    }
+
+    const title =
+      interaction.next_action_text?.slice(0, 255) ||
+      `Follow-up: ${interaction.activity_type}`;
+
+    const openFollowup = await this.followupRepository.findOne({
+      where: {
+        interaction_id: interaction.id,
+        status: In(["pending", "rescheduled"]),
+        is_archived: false,
+      },
+    });
+
+    if (openFollowup) {
+      openFollowup.due_datetime = due;
+      openFollowup.followup_title = title;
+      openFollowup.followup_reason = interaction.next_action_text || null;
+      openFollowup.updated_by = { id: user.id } as User;
+      await this.followupRepository.save(openFollowup);
+      return;
+    }
+
+    if (["completed", "closed"].includes(interaction.status)) {
+      return;
+    }
+
+    const donor = await this.donorRepository.findOne({
+      where: { id: interaction.donor_id },
+      relations: ["assigned_to"],
+    });
+    if (!donor) {
+      return;
+    }
+
+    await this.createFollowupFromInteraction(
+      interaction,
+      donor,
+      due,
+      interaction.assigned_to_user_id ??
+        this.getDonorAssignedUserId(donor) ??
+        user.id,
+    );
+  }
+
+  private async assertCanModifyInteraction(
+    interaction: DonorInteraction,
+    user: CurrentUser,
+  ) {
+    const lockedByStatus = ["completed", "closed"].includes(interaction.status);
+    const hasCompletedFollowup = await this.followupRepository.exist({
+      where: {
+        interaction_id: interaction.id,
+        status: "completed",
+        is_archived: false,
+      },
+    });
+
+    if (!lockedByStatus && !hasCompletedFollowup) {
+      return;
+    }
+
+    if (!(await this.isSuperAdmin(user))) {
+      throw new ForbiddenException(
+        "Only super admin can modify completed interactions or interactions with completed follow-ups",
+      );
+    }
+  }
+
+  private async assertCanModifyFollowup(
+    followup: DonorFollowup,
+    user: CurrentUser,
+  ) {
+    if (followup.status !== "completed") {
+      return;
+    }
+    if (!(await this.isSuperAdmin(user))) {
+      throw new ForbiddenException(
+        "Only super admin can modify completed follow-ups",
+      );
+    }
+  }
+
+  private async isSuperAdmin(user: CurrentUser): Promise<boolean> {
+    if (user?.role === UserRole.SUPER_ADMIN) {
+      return true;
+    }
+    const perms = await this.permissionsService.getUserPermissions(user.id);
+    return perms?.super_admin === true;
   }
 
   private async createFollowupFromInteraction(

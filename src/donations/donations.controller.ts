@@ -301,9 +301,9 @@ export class DonationsController {
       // Extract pagination and sorting
       const pagination = payload.pagination || {};
       const page = pagination.page || 1;
-      let pageSize = pagination.pageSize || 10;
-      if (pagination.pageSize == 0) {
-        pageSize = 0;
+      let pageSize = pagination.pageSize ?? 10;
+      if (pagination.pageSize == 0 || pagination.pageSize == -1) {
+        pageSize = -1;
       }
 
       const sortField = pagination.sortField || "created_at";

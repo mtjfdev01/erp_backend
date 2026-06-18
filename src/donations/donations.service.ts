@@ -82,6 +82,7 @@ export class DonationsService {
     "cheque",
     "in_kind",
     "online",
+    "reconciliation",
   ] as const;
 
   private static readonly ONLINE_DONATION_METHODS = [
@@ -122,6 +123,18 @@ export class DonationsService {
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
   ) {}
+
+  private async syncDonorLastDonationDate(
+    donation?: Pick<Donation, "donor_id" | "date" | "created_at"> | null,
+  ): Promise<void> {
+    const donorId = donation?.donor_id;
+    if (!donorId) {
+      return;
+    }
+    const donationDate =
+      donation?.date ?? donation?.created_at ?? new Date();
+    await this.donorService.updateLastDonationDate(donorId, donationDate);
+  }
 
   private async syncDonationGeoFromDonorIfNeeded(
     donationId: number,
@@ -1940,6 +1953,7 @@ export class DonationsService {
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
+        await this.syncDonorLastDonationDate(savedDonation);
 
         if (!deferPostCreate) {
           await this.maybeCreateProgressTrackerForNewDonation(
@@ -2363,9 +2377,12 @@ export class DonationsService {
         geoScope,
       );
 
-      // Pagination
-      const skip = (page - 1) * pageSize;
-      query.skip(skip).take(pageSize);
+      // Pagination — pageSize -1 (or 0) means view all
+      const viewAll = pageSize === -1 || pageSize === 0;
+      if (!viewAll) {
+        const skip = (page - 1) * pageSize;
+        query.skip(skip).take(pageSize);
+      }
 
       // Sorting
       query.orderBy(`donation.${sortField}`, sortOrder);
@@ -2374,7 +2391,7 @@ export class DonationsService {
 
       // Get paginated data + total count
       const [data, total] = await query.getManyAndCount();
-      const totalPages = Math.ceil(total / pageSize);
+      const totalPages = viewAll ? 1 : Math.ceil(total / pageSize);
 
       // ✅ Get SUM(amount) with same filters
       const sumQuery = this.donationRepository
@@ -2470,12 +2487,12 @@ export class DonationsService {
       return {
         data,
         pagination: {
-          page,
+          page: viewAll ? 1 : page,
           pageSize,
           total,
           totalPages,
-          hasNext: page < totalPages,
-          hasPrev: page > 1,
+          hasNext: viewAll ? false : page < totalPages,
+          hasPrev: viewAll ? false : page > 1,
         },
         totalDonationAmount, // 👈 extra key added here
       };

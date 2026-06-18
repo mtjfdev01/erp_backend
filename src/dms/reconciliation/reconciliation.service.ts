@@ -47,6 +47,10 @@ import { Donor, DonorType } from "../donor/entities/donor.entity";
 import { Donation } from "../../donations/entities/donation.entity";
 
 import { buildDonationGeoSearch } from "../../donations/utils/donation-geo.util";
+import {
+  RECONCILIATION_DONATION_METHOD,
+  RECONCILIATION_DONATION_SOURCE,
+} from "../../donations/donation-channel.constants";
 
 import { buildDonorGeoSearch } from "../donor/utils/donor-geo.util";
 
@@ -1014,9 +1018,9 @@ export class ReconciliationService {
 
       bank: bankName,
 
-      donation_source: "reconciliation",
+      donation_source: RECONCILIATION_DONATION_SOURCE,
 
-      donation_method: "bank_transfer",
+      donation_method: RECONCILIATION_DONATION_METHOD,
 
       donation_type: "general",
 

@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -13,7 +14,9 @@ import {
 import { Response } from "express";
 import { DonorRelationshipService } from "./donor-relationship.service";
 import { CreateDonorInteractionDto } from "./dto/create-interaction.dto";
+import { UpdateDonorInteractionDto } from "./dto/update-interaction.dto";
 import { RescheduleFollowupDto } from "./dto/reschedule-followup.dto";
+import { UpdateDonorFollowupDto } from "./dto/update-followup.dto";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
@@ -88,6 +91,63 @@ export class DonorRelationshipController {
     }
   }
 
+  @Patch("interactions/:id")
+  @RequiredPermissions([
+    "fund_raising.donor_relationship.update",
+    "super_admin",
+  ])
+  async updateInteraction(
+    @Param("id") id: string,
+    @Body() dto: UpdateDonorInteractionDto,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.service.updateInteraction(+id, dto, user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Interaction updated",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status || error?.getStatus?.() || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to update interaction",
+        data: null,
+      });
+    }
+  }
+
+  @Delete("interactions/:id")
+  @RequiredPermissions([
+    "fund_raising.donor_relationship.delete",
+    "super_admin",
+  ])
+  async deleteInteraction(
+    @Param("id") id: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.service.deleteInteraction(+id, user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Interaction deleted",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status || error?.getStatus?.() || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to delete interaction",
+        data: null,
+      });
+    }
+  }
+
   @Get("follow-ups")
   @RequiredPermissions([
     "fund_raising.donor_relationship.list_view",
@@ -120,6 +180,35 @@ export class DonorRelationshipController {
         message: error?.message,
         data: [],
         pagination: null,
+      });
+    }
+  }
+
+  @Patch("follow-ups/:id")
+  @RequiredPermissions([
+    "fund_raising.donor_relationship.update",
+    "super_admin",
+  ])
+  async updateFollowup(
+    @Param("id") id: string,
+    @Body() dto: UpdateDonorFollowupDto,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.service.updateFollowup(+id, dto, user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Follow-up updated",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status || error?.getStatus?.() || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to update follow-up",
+        data: null,
       });
     }
   }

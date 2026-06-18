@@ -144,6 +144,19 @@ export class UsersController {
     );
   }
 
+  @Get(":id/reveal-password")
+  @RequiredPermissions(["super_admin", "read_only_super_admin", "users.update"])
+  async revealPassword(@Param("id") id: string) {
+    const data = await this.usersService.revealUserPassword(
+      this.parseUserIdOrThrow(id),
+    );
+    return {
+      success: true,
+      message: "Password revealed",
+      data,
+    };
+  }
+
   @Get(":id")
   @RequiredPermissions([
     "users.view",

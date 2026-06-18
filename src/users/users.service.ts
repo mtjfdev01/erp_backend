@@ -20,6 +20,10 @@ import {
   USER_GEOGRAPHIC_SELECT,
 } from "./user-geographic.types";
 import { GeographicAssignmentService } from "../dms/geographic/geographic-assignment/geographic-assignment.service";
+import {
+  decryptDonorPassword,
+  encryptDonorPassword,
+} from "../utils/crypto/donor-password-vault";
 
 interface PaginationOptions {
   page: number;
@@ -97,9 +101,12 @@ export class UsersService {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const enc = encryptDonorPassword(password);
     const user = this.userRepository.create({
       email,
       password: hashedPassword,
+      password_enc: enc.payload,
+      password_enc_version: enc.version,
       department,
       role,
     });
@@ -194,13 +201,11 @@ export class UsersService {
     if (existingUser) {
       throw new ConflictException("Email already exists");
     }
-    const hashedPassword = await bcrypt.hash(
-      createUserDto.password || "defaultPassword123",
-      10,
-    );
+    const plainPassword = createUserDto.password || "defaultPassword123";
+    const passwordFields = await this.buildPasswordFields(plainPassword);
     const user = this.userRepository.create({
       ...createUserDto,
-      password: hashedPassword,
+      ...passwordFields,
     });
     return await this.userRepository.save(user);
   }
@@ -306,6 +311,10 @@ export class UsersService {
 
     const {
       password: _password,
+      password_enc: _passwordEnc,
+      password_enc_version: _passwordEncVersion,
+      password_last_revealed_at: _passwordLastRevealedAt,
+      password_reveal_count: _passwordRevealCount,
       resetToken: _resetToken,
       resetTokenExpiry: _resetTokenExpiry,
       manager,
@@ -439,11 +448,8 @@ export class UsersService {
         );
       }
 
-      // Hash the new password
-      const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-
-      // Update the password
-      user.password = hashedNewPassword;
+      const passwordFields = await this.buildPasswordFields(newPassword);
+      Object.assign(user, passwordFields);
       await this.userRepository.save(user);
 
       return { message: "Password changed successfully" };
@@ -485,11 +491,8 @@ export class UsersService {
         );
       }
 
-      // Hash the new password
-      const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-
-      // Update the password
-      targetUser.password = hashedNewPassword;
+      const passwordFields = await this.buildPasswordFields(newPassword);
+      Object.assign(targetUser, passwordFields);
       await this.userRepository.save(targetUser);
 
       return { message: "Password changed successfully" };
@@ -502,6 +505,46 @@ export class UsersService {
       }
       throw new ConflictException("Failed to change password");
     }
+  }
+
+  async revealUserPassword(userId: number): Promise<{ password: string }> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId, is_archived: false },
+    });
+    if (!user) {
+      throw new NotFoundException("User not found");
+    }
+    if (!user.password_enc || !user.password_enc_version) {
+      throw new NotFoundException(
+        "No stored password available for this user. Change the password once to enable reveal.",
+      );
+    }
+
+    const password = decryptDonorPassword(
+      user.password_enc,
+      user.password_enc_version,
+    );
+
+    await this.userRepository.update(userId, {
+      password_last_revealed_at: new Date(),
+      password_reveal_count: (user.password_reveal_count || 0) + 1,
+    });
+
+    return { password };
+  }
+
+  private async buildPasswordFields(plainPassword: string): Promise<{
+    password: string;
+    password_enc: string;
+    password_enc_version: number;
+  }> {
+    const password = await bcrypt.hash(plainPassword, 10);
+    const enc = encryptDonorPassword(plainPassword);
+    return {
+      password,
+      password_enc: enc.payload,
+      password_enc_version: enc.version,
+    };
   }
 
   private validatePasswordStrength(password: string): {

@@ -911,6 +911,48 @@ export class DonorService {
   }
 
   /**
+   * Update donor last donation date when a non-anonymous donation is recorded.
+   */
+  async updateLastDonationDate(
+    donorId: number,
+    donationDate?: Date | string | null,
+  ): Promise<void> {
+    if (!donorId || Number(donorId) <= 0) {
+      return;
+    }
+
+    try {
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId, is_archived: false },
+      });
+      if (!donor) {
+        return;
+      }
+
+      const at = donationDate ? new Date(donationDate) : new Date();
+      if (Number.isNaN(at.getTime())) {
+        return;
+      }
+
+      const existing = donor.last_donation_date
+        ? new Date(donor.last_donation_date)
+        : null;
+      if (
+        existing &&
+        !Number.isNaN(existing.getTime()) &&
+        existing.getTime() >= at.getTime()
+      ) {
+        return;
+      }
+
+      donor.last_donation_date = at;
+      await this.donorRepository.save(donor);
+    } catch (error) {
+      console.error("Failed to update donor last donation date:", error);
+    }
+  }
+
+  /**
    * Update donation statistics
    */
   async updateDonationStats(donorId: number, amount: number): Promise<void> {
