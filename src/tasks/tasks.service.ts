@@ -7,7 +7,7 @@ import {
   Logger,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, SelectQueryBuilder, IsNull, Not, Brackets } from "typeorm";
+import { Repository, SelectQueryBuilder, IsNull, Not, Brackets, In } from "typeorm";
 import {
   Task,
   TaskStatus,
@@ -37,6 +37,15 @@ import { PermissionsService } from "../permissions/permissions.service";
 import * as fs from "fs";
 import * as path from "path";
 import { TaskApproval } from "./entities/task-approval.entity";
+import { TaskDueReminder } from "./entities/task-due-reminder.entity";
+import { CreateTaskDueReminderDto } from "./dto/create-task-due-reminder.dto";
+import {
+  computeRemindOnDate,
+  dueDateToPktDateString,
+  formatDateOnlyPkt,
+  getPktHour,
+  isReminderSlotInPast,
+} from "./utils/task-reminder-pkt.util";
 
 @Injectable()
 export class TasksService {
@@ -60,6 +69,8 @@ export class TasksService {
     private readonly timeEntryRepo: Repository<TaskTimeEntry>,
     @InjectRepository(TaskApproval)
     private readonly taskApprovalRepo: Repository<TaskApproval>,
+    @InjectRepository(TaskDueReminder)
+    private readonly dueReminderRepo: Repository<TaskDueReminder>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
   ) {}
@@ -2071,6 +2082,34 @@ export class TasksService {
         }
       }
       await this.logActivity(saved, currentUser, "updated", { changes: dto });
+
+      if (newDueDate !== oldDueDate || dto.due_date === null || dto.due_date === "") {
+        await this.deleteDueRemindersForTask(saved.id);
+      }
+
+      const terminalStatuses = [
+        TaskStatus.COMPLETED,
+        TaskStatus.CLOSED,
+        TaskStatus.CANCELLED,
+      ];
+      if (terminalStatuses.includes(saved.status)) {
+        await this.deleteDueRemindersForTask(saved.id);
+      }
+
+      if (Array.isArray(dto.assigned_users)) {
+        const oldIds = new Set(
+          (task.assigned_user_ids || []).map((v) => Number(v)),
+        );
+        const newIds = new Set(
+          (saved.assigned_user_ids || []).map((v) => Number(v)),
+        );
+        for (const uid of oldIds) {
+          if (!newIds.has(uid)) {
+            await this.deleteDueRemindersForTaskUser(saved.id, uid);
+          }
+        }
+      }
+
       return this.findOne(saved.id, currentUser);
     } catch (e) {
       throw e;
@@ -2181,6 +2220,14 @@ export class TasksService {
       to_status: updated.status,
       notes: dto.notes ? dto.notes.slice(0, 500) : undefined,
     });
+    const terminalStatuses = [
+      TaskStatus.COMPLETED,
+      TaskStatus.CLOSED,
+      TaskStatus.CANCELLED,
+    ];
+    if (terminalStatuses.includes(updated.status)) {
+      await this.deleteDueRemindersForTask(updated.id);
+    }
     return this.findOne(id, currentUser);
   }
 
@@ -2191,6 +2238,9 @@ export class TasksService {
   ): Promise<Task> {
     try {
       const task = await this.findOne(id, currentUser);
+      const oldAssignedUserIds = Array.isArray(task.assigned_user_ids)
+        ? [...task.assigned_user_ids]
+        : [];
       task.status =
         task.status === TaskStatus.DRAFT ? TaskStatus.OPEN : task.status;
 
@@ -2212,6 +2262,19 @@ export class TasksService {
       }
 
       const saved = await this.taskRepo.save(task);
+
+      if (Array.isArray(dto.assigned_users) && oldAssignedUserIds.length > 0) {
+        const oldSet = new Set(oldAssignedUserIds.map((v) => Number(v)));
+        const newSet = new Set(
+          (saved.assigned_user_ids || []).map((v) => Number(v)),
+        );
+        for (const uid of oldSet) {
+          if (!newSet.has(uid)) {
+            await this.deleteDueRemindersForTaskUser(saved.id, uid);
+          }
+        }
+      }
+
       await this.logActivity(saved, currentUser, "assigned", {
         assigned_user_ids: saved.assigned_user_ids,
       });
@@ -2260,6 +2323,18 @@ export class TasksService {
       }
 
       const saved = await this.taskRepo.save(task);
+
+      if (Array.isArray(dto.assigned_users) && oldAssignedUserIds) {
+        const oldSet = new Set(oldAssignedUserIds.map((v) => Number(v)));
+        const newSet = new Set(
+          (saved.assigned_user_ids || []).map((v) => Number(v)),
+        );
+        for (const uid of oldSet) {
+          if (!newSet.has(uid)) {
+            await this.deleteDueRemindersForTaskUser(saved.id, uid);
+          }
+        }
+      }
 
       const fromItems: any[] = [];
       const toItems: any[] = [];
@@ -2515,6 +2590,7 @@ export class TasksService {
         task.completed_date = task.completed_date ?? new Date();
       }
       const saved = await this.taskRepo.save(task);
+      await this.deleteDueRemindersForTask(saved.id);
       await this.logActivity(saved, currentUser, "completed", {});
       return saved;
     } catch (e) {
@@ -2623,10 +2699,19 @@ export class TasksService {
   ): Promise<TaskComment> {
     try {
       const task = await this.findOne(id, currentUser);
+      const mentionedUserIds = Array.from(
+        new Set(
+          (dto.mentioned_user_ids || [])
+            .map((v) => Number(v))
+            .filter((v) => Number.isInteger(v) && v > 0),
+        ),
+      );
       const comment = this.commentRepo.create({
         task,
         content: dto.content,
         author: currentUser,
+        mentioned_user_ids:
+          mentionedUserIds.length > 0 ? mentionedUserIds : null,
       });
       const saved = await this.commentRepo.save(comment);
       const withAuthor = await this.commentRepo.findOne({
@@ -2635,10 +2720,54 @@ export class TasksService {
       });
       await this.logActivity(task, currentUser, "comment_added", {
         content: dto.content?.slice(0, 120),
+        mentioned_user_ids: mentionedUserIds,
       });
+
+      if (mentionedUserIds.length > 0) {
+        await this.notifyMentionedUsersOnComment(
+          task,
+          dto.content,
+          mentionedUserIds,
+          currentUser,
+        );
+      }
+
       return withAuthor || saved;
     } catch (e) {
       throw e;
+    }
+  }
+
+  private async notifyMentionedUsersOnComment(
+    task: Task,
+    commentContent: string,
+    mentionedUserIds: number[],
+    author: User,
+  ): Promise<void> {
+    const authorId = Number(author.id);
+    const recipientIds = mentionedUserIds.filter((uid) => uid !== authorId);
+    if (recipientIds.length === 0) return;
+
+    const users = await this.userRepo.find({
+      where: { id: In(recipientIds) },
+    });
+
+    const authorName = this.userDisplayName(author) || "A colleague";
+
+    for (const user of users) {
+      if (!user?.email) continue;
+      try {
+        await this.emailService.sendTaskCommentMentionEmail(
+          user,
+          task,
+          commentContent,
+          authorName,
+        );
+      } catch (emailErr: any) {
+        this.logger.warn(
+          `Failed to send comment mention email to user ${user.id}: ${emailErr?.message}`,
+        );
+      }
     }
   }
 
@@ -2865,11 +2994,193 @@ export class TasksService {
   async remove(id: number, currentUser: User): Promise<{ deleted: boolean }> {
     try {
       const task = await this.findOne(id, currentUser);
+      await this.deleteDueRemindersForTask(task.id);
       await this.taskRepo.delete(task.id);
       return { deleted: true };
     } catch (e) {
       throw e;
     }
+  }
+
+  private isUserAssignedToTask(task: Task, userId: number): boolean {
+    const ids = Array.isArray(task.assigned_user_ids)
+      ? task.assigned_user_ids.map((v) => Number(v))
+      : [];
+    return ids.includes(Number(userId));
+  }
+
+  private canManageDueReminders(task: Task, user: User): boolean {
+    if (
+      user.role === UserRole.SUPER_ADMIN ||
+      user.role === UserRole.ADMIN
+    ) {
+      return true;
+    }
+    return this.isUserAssignedToTask(task, Number(user.id));
+  }
+
+  async deleteDueRemindersForTask(taskId: number): Promise<void> {
+    await this.dueReminderRepo.delete({ task_id: taskId });
+  }
+
+  async deleteDueRemindersForTaskUser(
+    taskId: number,
+    userId: number,
+  ): Promise<void> {
+    await this.dueReminderRepo.delete({ task_id: taskId, user_id: userId });
+  }
+
+  async listDueReminders(
+    taskId: number,
+    currentUser: User,
+  ): Promise<TaskDueReminder[]> {
+    const task = await this.findOne(taskId, currentUser);
+    if (!this.canManageDueReminders(task, currentUser)) {
+      throw new ForbiddenException(
+        "Only assignees can manage due date reminders for this task",
+      );
+    }
+
+    const qb = this.dueReminderRepo
+      .createQueryBuilder("r")
+      .where("r.task_id = :taskId", { taskId })
+      .orderBy("r.remind_on_date", "ASC")
+      .addOrderBy("r.remind_at_hour", "ASC");
+
+    if (
+      currentUser.role !== UserRole.SUPER_ADMIN &&
+      currentUser.role !== UserRole.ADMIN
+    ) {
+      qb.andWhere("r.user_id = :userId", { userId: Number(currentUser.id) });
+    }
+
+    return qb.getMany();
+  }
+
+  async createDueReminder(
+    taskId: number,
+    dto: CreateTaskDueReminderDto,
+    currentUser: User,
+  ): Promise<TaskDueReminder> {
+    const task = await this.findOne(taskId, currentUser);
+    if (!this.canManageDueReminders(task, currentUser)) {
+      throw new ForbiddenException(
+        "Only assignees can add due date reminders for this task",
+      );
+    }
+    if (!task.due_date) {
+      throw new BadRequestException(
+        "Set a due date on this task before adding reminders",
+      );
+    }
+
+    const remindOnDate = computeRemindOnDate(task.due_date, dto.offset_days);
+    if (isReminderSlotInPast(remindOnDate, dto.remind_at_hour)) {
+      throw new BadRequestException(
+        "Reminder date and time must be in the future (Pakistan time)",
+      );
+    }
+
+    const reminder = this.dueReminderRepo.create({
+      task_id: task.id,
+      user_id: Number(currentUser.id),
+      offset_days: dto.offset_days,
+      remind_on_date: remindOnDate,
+      remind_at_hour: dto.remind_at_hour,
+      created_by: currentUser,
+      updated_by: currentUser,
+    });
+
+    try {
+      return await this.dueReminderRepo.save(reminder);
+    } catch (e: any) {
+      if (e?.code === "23505") {
+        throw new ConflictException(
+          "You already have a reminder at that date and hour for this task",
+        );
+      }
+      throw e;
+    }
+  }
+
+  async deleteDueReminder(
+    taskId: number,
+    reminderId: number,
+    currentUser: User,
+  ): Promise<{ deleted: boolean }> {
+    const task = await this.findOne(taskId, currentUser);
+    if (!this.canManageDueReminders(task, currentUser)) {
+      throw new ForbiddenException(
+        "Only assignees can remove due date reminders for this task",
+      );
+    }
+
+    const reminder = await this.dueReminderRepo.findOne({
+      where: { id: reminderId, task_id: taskId },
+    });
+    if (!reminder) {
+      throw new NotFoundException("Reminder not found");
+    }
+
+    if (
+      currentUser.role !== UserRole.SUPER_ADMIN &&
+      currentUser.role !== UserRole.ADMIN &&
+      Number(reminder.user_id) !== Number(currentUser.id)
+    ) {
+      throw new ForbiddenException("You can only delete your own reminders");
+    }
+
+    await this.dueReminderRepo.delete(reminder.id);
+    return { deleted: true };
+  }
+
+  async processDueReminders(): Promise<number> {
+    const today = formatDateOnlyPkt(new Date());
+    const hour = getPktHour(new Date());
+
+    const reminders = await this.dueReminderRepo
+      .createQueryBuilder("r")
+      .leftJoinAndSelect("r.task", "task")
+      .leftJoinAndSelect("r.user", "user")
+      .where("r.remind_on_date = :today", { today })
+      .andWhere("r.remind_at_hour = :hour", { hour })
+      .getMany();
+
+    const terminalStatuses = [
+      TaskStatus.COMPLETED,
+      TaskStatus.CLOSED,
+      TaskStatus.CANCELLED,
+    ];
+
+    for (const reminder of reminders) {
+      try {
+        const task = reminder.task;
+        const user = reminder.user;
+        const canEmail =
+          task &&
+          user?.email &&
+          task.due_date &&
+          !terminalStatuses.includes(task.status) &&
+          this.isUserAssignedToTask(task, user.id);
+
+        if (canEmail) {
+          await this.emailService.sendTaskDueReminderEmail(
+            user,
+            task,
+            reminder.offset_days,
+            dueDateToPktDateString(task.due_date),
+          );
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `Due reminder ${reminder.id} email failed: ${e?.message}`,
+        );
+      } finally {
+        await this.dueReminderRepo.delete(reminder.id);
+      }
+    }
+
+    return reminders.length;
   }
 
   async processRecurrence(): Promise<number> {

@@ -27,6 +27,7 @@ import { AssignTaskDto } from "./dto/assign-task.dto";
 import { ApproveTaskDto } from "./dto/approve-task.dto";
 import { AddAttachmentDto } from "./dto/add-attachment.dto";
 import { AddCommentDto } from "./dto/add-comment.dto";
+import { CreateTaskDueReminderDto } from "./dto/create-task-due-reminder.dto";
 import { TimeEntryDto } from "./dto/time-entry.dto";
 import { UpdateTaskProgressDto } from "./dto/update-task-progress.dto";
 import { StatusTransitionDto } from "./dto/status-transition.dto";
@@ -417,6 +418,65 @@ export class TasksController {
     @Res() res: Response,
   ) {
     const result = await this.tasksService.addComment(+id, dto, user);
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+  @Get(":id/due-reminders")
+  @RequiredPermissions([
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+    "super_admin",
+  ])
+  async listDueReminders(
+    @Param("id") id: string,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.listDueReminders(+id, user);
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+  @Post(":id/due-reminders")
+  @RequiredPermissions([
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+    "super_admin",
+  ])
+  async createDueReminder(
+    @Param("id") id: string,
+    @Body() dto: CreateTaskDueReminderDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.createDueReminder(+id, dto, user);
+    return res
+      .status(HttpStatus.CREATED)
+      .json({ success: true, data: result });
+  }
+
+  @Delete(":id/due-reminders/:reminderId")
+  @RequiredPermissions([
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+    "super_admin",
+  ])
+  async deleteDueReminder(
+    @Param("id") id: string,
+    @Param("reminderId") reminderId: string,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.deleteDueReminder(
+      +id,
+      +reminderId,
+      user,
+    );
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
 

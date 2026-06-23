@@ -1379,6 +1379,163 @@ export class EmailService implements OnModuleInit {
     }
   }
 
+  async sendTaskCommentMentionEmail(
+    user: {
+      email?: string;
+      first_name?: string;
+      last_name?: string;
+    },
+    task: { id?: number; title?: string },
+    commentContent: string,
+    mentionedByName: string,
+  ): Promise<boolean> {
+    try {
+      if (!user?.email) return false;
+
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const baseFrontendUrl = (
+        this.configService.get<string>("BASE_Frontend_URL") || ""
+      ).replace(/\/$/, "");
+      const taskTitle = task?.title || "Task";
+      const taskId = task?.id;
+      const taskLink =
+        baseFrontendUrl && taskId
+          ? `${baseFrontendUrl}/tasks/view/${taskId}`
+          : null;
+      const recipientName =
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.email;
+      const safeComment = String(commentContent || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `You were mentioned on task: ${taskTitle}`,
+        html: `
+          <h1>You were mentioned in a task comment</h1>
+          <p>Hi ${recipientName},</p>
+          <p><strong>${mentionedByName}</strong> mentioned you in a comment on task: <strong>${taskTitle}</strong></p>
+          <blockquote style="border-left:4px solid #ccc;margin:16px 0;padding:8px 16px;color:#333;">
+            ${safeComment}
+          </blockquote>
+          ${
+            taskLink
+              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this task.</p>"
+          }
+        `,
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Task comment mention email sent to ${user.email} for task ${taskId}`,
+        );
+      } else if (result.error) {
+        this.logger.warn(
+          `Resend error (comment mention): ${JSON.stringify(result.error)}`,
+        );
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send task comment mention email: ${e?.message}`,
+      );
+      return false;
+    }
+  }
+
+  async sendTaskDueReminderEmail(
+    user: {
+      email?: string;
+      first_name?: string;
+      last_name?: string;
+    },
+    task: { id?: number; title?: string },
+    offsetDays: number,
+    dueDateLabel: string,
+  ): Promise<boolean> {
+    try {
+      if (!user?.email) return false;
+
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const baseFrontendUrl = (
+        this.configService.get<string>("BASE_Frontend_URL") || ""
+      ).replace(/\/$/, "");
+      const taskTitle = task?.title || "Task";
+      const taskId = task?.id;
+      const taskLink =
+        baseFrontendUrl && taskId
+          ? `${baseFrontendUrl}/tasks/view/${taskId}`
+          : null;
+      const recipientName =
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.email;
+
+      let duePhrase = `due in ${offsetDays} days`;
+      if (offsetDays === 0) duePhrase = "due today";
+      else if (offsetDays === 1) duePhrase = "due tomorrow";
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `Task reminder: "${taskTitle}" is ${duePhrase}`,
+        html: `
+          <h1>Task due date reminder</h1>
+          <p>Hi ${recipientName},</p>
+          <p>This is a reminder that your assigned task <strong>${taskTitle}</strong> is <strong>${duePhrase}</strong>.</p>
+          <p><strong>Due date:</strong> ${dueDateLabel}</p>
+          ${
+            taskLink
+              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this task.</p>"
+          }
+        `,
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Task due reminder email sent to ${user.email} for task ${taskId}`,
+        );
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(`Failed to send task due reminder email: ${e?.message}`);
+      return false;
+    }
+  }
+
   async sendTaskOverdueNotification(
     toEmail: string,
     task: any,

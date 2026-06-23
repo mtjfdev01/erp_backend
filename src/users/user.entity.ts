@@ -29,6 +29,9 @@ export enum UserRole {
   FIELD_OFFICER = "field_officer",
   VOLUNTEER = "volunteer",
   DEPT_HEAD = "dept_head",
+  ASST_CRD_OFFICER = "asst_crd_officer",
+  CRD_OFFICER = "crd_officer",
+  INTERNEE = "internee",
 }
 
 export enum Department {

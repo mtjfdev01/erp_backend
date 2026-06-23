@@ -56,9 +56,9 @@ import { S3StorageModule } from "./utils/storage/s3-storage.module";
       synchronize: true,
       extra: {
         max: 5,
-        connectionTimeoutMillis: 15000,
-        query_timeout: 60000,
-        statement_timeout: 60000,
+        connectionTimeoutMillis: 60000,
+        query_timeout: 180000,
+        statement_timeout: 180000,
       },
     }),
     ScheduleModule.forRoot(), // Enable cron jobs globally
