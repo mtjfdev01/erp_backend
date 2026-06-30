@@ -40,11 +40,12 @@ import { TaskApproval } from "./entities/task-approval.entity";
 import { TaskDueReminder } from "./entities/task-due-reminder.entity";
 import { CreateTaskDueReminderDto } from "./dto/create-task-due-reminder.dto";
 import {
-  computeRemindOnDate,
   dueDateToPktDateString,
+  daysUntilDueFromTodayPkt,
   formatDateOnlyPkt,
   getPktHour,
   isReminderSlotInPast,
+  normalizeRemindDateString,
 } from "./utils/task-reminder-pkt.util";
 
 @Injectable()
@@ -390,7 +391,19 @@ export class TasksService {
     }));
   }
 
+  /** System/cron task creation — no permission checks; created_by is null. */
+  async createSystemTask(dto: CreateTaskDto): Promise<Task> {
+    return this.createInternal(dto, null);
+  }
+
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
+    return this.createInternal(dto, currentUser);
+  }
+
+  private async createInternal(
+    dto: CreateTaskDto,
+    currentUser: User | null,
+  ): Promise<Task> {
     try {
       const assignedUsersMeta = await this.getAssignedUsersMeta(
         dto.assigned_users,
@@ -400,6 +413,10 @@ export class TasksService {
       let movItemsFromDto: string[] = [];
       if (dto.mov_checklist && dto.mov_checklist.length > 0) {
         movItemsFromDto = dto.mov_checklist.map((item) => item.text);
+      } else if (Array.isArray((dto as any).mov_items)) {
+        movItemsFromDto = (dto as any).mov_items.filter(
+          (t: unknown) => typeof t === "string" && t.trim().length > 0,
+        );
       }
 
       const task = this.taskRepo.create({
@@ -2912,7 +2929,19 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
-    const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+    let value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+
+    // Donation pending follow-up: two mutually exclusive MOV items — one check = done.
+    if (
+      typeof task.project_id === "string" &&
+      task.project_id.startsWith("donation-pending:") &&
+      Array.isArray(task.mov_items) &&
+      task.mov_items.length === 2 &&
+      value >= 50 &&
+      value < 100
+    ) {
+      value = 100;
+    }
     const oldProgress = task.progress;
     const oldStatus = task.status;
 
@@ -3074,7 +3103,10 @@ export class TasksService {
       );
     }
 
-    const remindOnDate = computeRemindOnDate(task.due_date, dto.offset_days);
+    const remindOnDate = normalizeRemindDateString(dto.remind_on_date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(remindOnDate)) {
+      throw new BadRequestException("Invalid reminder date");
+    }
     if (isReminderSlotInPast(remindOnDate, dto.remind_at_hour)) {
       throw new BadRequestException(
         "Reminder date and time must be in the future (Pakistan time)",
@@ -3084,7 +3116,7 @@ export class TasksService {
     const reminder = this.dueReminderRepo.create({
       task_id: task.id,
       user_id: Number(currentUser.id),
-      offset_days: dto.offset_days,
+      offset_days: null,
       remind_on_date: remindOnDate,
       remind_at_hour: dto.remind_at_hour,
       created_by: currentUser,
@@ -3164,10 +3196,14 @@ export class TasksService {
           this.isUserAssignedToTask(task, user.id);
 
         if (canEmail) {
+          const daysUntilDue =
+            reminder.offset_days != null
+              ? reminder.offset_days
+              : daysUntilDueFromTodayPkt(task.due_date);
           await this.emailService.sendTaskDueReminderEmail(
             user,
             task,
-            reminder.offset_days,
+            daysUntilDue,
             dueDateToPktDateString(task.due_date),
           );
         }

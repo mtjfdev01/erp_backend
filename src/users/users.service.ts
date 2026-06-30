@@ -39,7 +39,32 @@ interface PaginationOptions {
 @Injectable()
 export class UsersService {
   // Define searchable columns for user search
-  private readonly searchableColumns = ["first_name", "last_name", "email"];
+  private readonly searchableColumns = [
+    "first_name",
+    "last_name",
+    "email",
+    "user_code",
+  ];
+
+  private normalizeUserCode(code?: string | null): string | null {
+    if (code == null) return null;
+    const trimmed = String(code).trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private async assertUserCodeAvailable(
+    code: string | null,
+    excludeUserId?: number,
+  ): Promise<void> {
+    if (!code) return;
+    const existing = await this.userRepository.findOne({
+      where: { user_code: code },
+      select: ["id"],
+    });
+    if (existing && existing.id !== excludeUserId) {
+      throw new ConflictException("User code already exists");
+    }
+  }
 
   constructor(
     @InjectRepository(User)
@@ -203,9 +228,12 @@ export class UsersService {
     }
     const plainPassword = createUserDto.password || "defaultPassword123";
     const passwordFields = await this.buildPasswordFields(plainPassword);
+    const userCode = this.normalizeUserCode(createUserDto.user_code);
+    await this.assertUserCodeAvailable(userCode);
     const user = this.userRepository.create({
       ...createUserDto,
       ...passwordFields,
+      user_code: userCode,
     });
     return await this.userRepository.save(user);
   }
@@ -249,6 +277,7 @@ export class UsersService {
       "first_name",
       "last_name",
       "email",
+      "user_code",
       "department",
       "role",
       "created_at",
@@ -364,6 +393,12 @@ export class UsersService {
 
       // Extract user data and permissions
       const { permissions, ...userData } = updateDto;
+
+      if (Object.prototype.hasOwnProperty.call(userData, "user_code")) {
+        const userCode = this.normalizeUserCode(userData.user_code);
+        await this.assertUserCodeAvailable(userCode, id);
+        userData.user_code = userCode;
+      }
 
       // Update user data
       const user = await this.findOne(id);
@@ -624,6 +659,7 @@ export class UsersService {
         "user.department",
         "user.role",
         "user.isActive",
+        "user.user_code",
       ]);
 
     // // Filter by active status if specified
@@ -665,6 +701,7 @@ export class UsersService {
       last_name: user.last_name,
       full_name:
         `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email,
+      user_code: user.user_code,
       department: user.department,
       role: user.role,
       isActive: user.isActive,

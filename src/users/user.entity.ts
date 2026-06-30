@@ -32,6 +32,7 @@ export enum UserRole {
   ASST_CRD_OFFICER = "asst_crd_officer",
   CRD_OFFICER = "crd_officer",
   INTERNEE = "internee",
+  CALL_CENTER_AGENT = "call_center_agent",
 }
 
 export enum Department {
@@ -115,6 +116,10 @@ export class User {
   // New fields in snake_case
   @Column({ name: "first_name", nullable: true })
   first_name: string;
+
+  /** Stable internal HR record id; unchanged across transfers / role updates. */
+  @Column({ name: "user_code", type: "varchar", nullable: true, unique: true })
+  user_code: string | null;
 
   @Column({ name: "last_name", nullable: true })
   last_name: string;

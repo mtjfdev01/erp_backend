@@ -25,8 +25,8 @@ export class TaskDueReminder extends BaseEntity {
   @JoinColumn({ name: "user_id" })
   user: User;
 
-  @Column({ type: "int" })
-  offset_days: number;
+  @Column({ type: "int", nullable: true })
+  offset_days: number | null;
 
   @Column({ type: "date" })
   remind_on_date: string;

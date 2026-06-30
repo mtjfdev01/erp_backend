@@ -1,10 +1,8 @@
-import { IsInt, Max, Min } from "class-validator";
+import { IsDateString, IsInt, Max, Min } from "class-validator";
 
 export class CreateTaskDueReminderDto {
-  @IsInt()
-  @Min(0)
-  @Max(365)
-  offset_days: number;
+  @IsDateString()
+  remind_on_date: string;
 
   @IsInt()
   @Min(0)

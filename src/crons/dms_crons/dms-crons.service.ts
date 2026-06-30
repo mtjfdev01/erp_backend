@@ -4,6 +4,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In, Not, IsNull, FindOperator } from "typeorm";
 import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsService } from "../../donations/donations.service";
+import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
 
 @Injectable()
 export class DmsCronsService {
@@ -13,7 +14,36 @@ export class DmsCronsService {
     @InjectRepository(Donation)
     private readonly donationRepository: Repository<Donation>,
     private readonly donationsService: DonationsService,
+    private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
   ) {}
+
+  /**
+   * Every minute — today's **website** donations (pending or failed, PKT), 3+ minutes old.
+   */
+  @Cron("* * * * *", {
+    name: "pending-donation-call-center-follow-up",
+    timeZone: "Asia/Karachi",
+  })
+  async handlePendingDonationCallCenterFollowUp() {
+    try {
+      const result =
+        await this.donationPendingFollowUpService.processPendingDonationFollowUps(
+          {
+            enforcePendingMinutes: true,
+          },
+        );
+      if (result.created > 0) {
+        this.logger.log(
+          `Pending donation follow-up: created ${result.created} task(s) — ids: ${result.taskIds.join(", ")}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Pending donation call-center follow-up cron failed: ${error?.message}`,
+        error?.stack,
+      );
+    }
+  }
 
   /**
    * Nightly cron - Runs at 1:30 AM every day (Asia/Karachi)
@@ -249,5 +279,12 @@ export class DmsCronsService {
       );
       throw error;
     }
+  }
+
+  /** Manual trigger for pending donation → call-center task creation. */
+  async runPendingDonationCallCenterFollowUp(donationDate?: string) {
+    return this.donationPendingFollowUpService.processPendingDonationFollowUps({
+      donationDate,
+    });
   }
 }

@@ -139,6 +139,29 @@ export class DonationsController {
     return { online: hasOnline, offline: hasOffline };
   }
 
+  private async checkDonationReceiptPermission(
+    userId: number,
+    action: "view" | "send",
+  ): Promise<void> {
+    if (userId === -1) return;
+
+    const hasSuperAdmin = await this.permissionsService.hasPermission(
+      userId,
+      "super_admin",
+    );
+    if (hasSuperAdmin) return;
+
+    const hasPermission = await this.permissionsService.hasPermission(
+      userId,
+      `communication.donation_receipts.${action}`,
+    );
+    if (!hasPermission) {
+      throw new ForbiddenException(
+        `Insufficient permissions for donation receipts (${action})`,
+      );
+    }
+  }
+
   /**
    * Check if a donation falls within the user's assigned geography.
    * Uses donation geo snapshot first; falls back to donor for legacy rows.
@@ -464,6 +487,61 @@ export class DonationsController {
     }
   }
 
+  @Get(":id/receipt")
+  async getDonationReceipt(
+    @Param("id") id: string,
+    @Query("style") style: string,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const donationId = Number(id);
+      if (!donationId || Number.isNaN(donationId)) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "Invalid donation id",
+          data: null,
+        });
+      }
+
+      const user = req?.user ?? null;
+      const donation = await this.donationsService.findOne(donationId);
+
+      if (user?.id) {
+        await this.checkDonationPermission(
+          user.id,
+          donation.donation_source,
+          "view",
+        );
+        await this.checkDonationReceiptPermission(user.id, "view");
+        await this.checkGeographicAccess(user.id, donation, user.role, user);
+      }
+
+      const receiptStyle = this.receiptsService.normalizeStyle(donation, style);
+      const html = this.receiptsService.buildReceiptHtml(donation, receiptStyle);
+
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation receipt generated",
+        data: { html, style: receiptStyle },
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(":id")
   async findOne(
     @Param("id") id: string,
@@ -601,6 +679,7 @@ export class DonationsController {
   @Post("sendDonationReceipt/:id")
   async sendDonationReceipt(
     @Param("id") id: string,
+    @Body() body: { style?: string },
     @Res() res: Response,
     @Req() req: any,
   ) {
@@ -623,10 +702,14 @@ export class DonationsController {
           donation.donation_source,
           "view",
         );
+        await this.checkDonationReceiptPermission(user.id, "send");
         await this.checkGeographicAccess(user.id, donation, user.role, user);
       }
 
-      const sent = await this.receiptsService.sendDonationReceipt(donation);
+      const sent = await this.receiptsService.sendDonationReceipt(
+        donation,
+        body?.style,
+      );
 
       return res.status(HttpStatus.OK).json({
         success: true,

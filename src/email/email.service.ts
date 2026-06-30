@@ -1503,13 +1503,17 @@ export class EmailService implements OnModuleInit {
         user.email;
 
       let duePhrase = `due in ${offsetDays} days`;
-      if (offsetDays === 0) duePhrase = "due today";
+      if (offsetDays < 0) duePhrase = "overdue";
+      else if (offsetDays === 0) duePhrase = "due today";
       else if (offsetDays === 1) duePhrase = "due tomorrow";
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [user.email],
-        subject: `Task reminder: "${taskTitle}" is ${duePhrase}`,
+        subject:
+          offsetDays < 0
+            ? `Task reminder: "${taskTitle}" is overdue`
+            : `Task reminder: "${taskTitle}" is ${duePhrase}`,
         html: `
           <h1>Task due date reminder</h1>
           <p>Hi ${recipientName},</p>
