@@ -494,13 +494,24 @@ export class DonationsController {
       // Extract filters
       const filters = payload.filters || {};
 
-      // Inject donation_source filter based on user permissions
-      if (!sourceAccess.online && sourceAccess.offline) {
-        // User can only see offline donations (everything except 'website')
-        filters._donation_source_not = "website";
-      } else if (sourceAccess.online && !sourceAccess.offline) {
-        // User can only see online donations
-        filters.donation_source = "website";
+      // Donor-scoped list: all donations for that donor (any donation_source)
+      const isDonorScopedList =
+        filters.donor_id !== undefined &&
+        filters.donor_id !== null &&
+        filters.donor_id !== "";
+
+      // Inject donation_source filter based on user permissions (skip when filtering by donor)
+      if (!isDonorScopedList) {
+        if (!sourceAccess.online && sourceAccess.offline) {
+          // User can only see offline donations (everything except 'website')
+          filters._donation_source_not = "website";
+        } else if (sourceAccess.online && !sourceAccess.offline) {
+          // User can only see online donations
+          filters.donation_source = "website";
+        }
+      } else {
+        delete filters.donation_source;
+        delete filters._donation_source_not;
       }
       // If both are true, no filter needed (user can see everything)
 

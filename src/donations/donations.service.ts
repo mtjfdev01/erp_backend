@@ -8,7 +8,7 @@ import {
 import { CreateDonationDto } from "./dto/create-donation.dto";
 import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Brackets, Repository, SelectQueryBuilder } from "typeorm";
+import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "./entities/donation.entity";
 import {
   DonationInKind,
@@ -227,10 +227,10 @@ export class DonationsService {
     scope: ResolvedDataScope | null,
     record: Donation,
   ): void {
-    if (!scope) return;
-    // Website donations are system-created (no staff owner); geographic scope governs access.
-    if (record.donation_source === "website") return;
-    this.dataScopeService.assertRecordAccess(scope, record);
+    // Online (website): no staff owner; geographic scope governs access.
+    // Offline (non-website): offline permission sees all such rows; no created_by gate.
+    // Permission checks (online/offline module) and geo still apply at the controller.
+    return;
   }
 
   private resolveDonationListMode(
@@ -249,45 +249,19 @@ export class DonationsService {
   }
 
   /**
-   * Data scope on created_by. Skipped when geographic territory filter is active
-   * (website donations have no created_by; offline rows are gated by geo instead).
+   * Data scope on created_by — not applied for donations.
+   * Online list: donation_source = website (permission-gated).
+   * Offline list: donation_source != website — offline permission sees all such rows.
+   * Geographic territory filter (when active) still applies separately.
    */
   private applyDonationListDataScope(
-    query: SelectQueryBuilder<Donation>,
-    scope: ResolvedDataScope | null,
-    listMode: "online" | "offline" | "both",
-    geoScope?: ResolvedGeographicScope | null,
-    paramSuffix = "",
+    _query: SelectQueryBuilder<Donation>,
+    _scope: ResolvedDataScope | null,
+    _listMode: "online" | "offline" | "both",
+    _geoScope?: ResolvedGeographicScope | null,
+    _paramSuffix = "",
   ): void {
-    if (!scope) return;
-    if (scope.bypass || scope.type === "org" || !scope.allowedUserIds?.length) {
-      return;
-    }
-
-    if (geoScope && this.geographicScopeService.isGeographicFilterActive(geoScope)) {
-      return;
-    }
-
-    if (listMode === "online") {
-      return;
-    }
-
-    if (listMode === "offline") {
-      this.dataScopeService.applyToQuery(query, "donation", scope);
-      return;
-    }
-
-    const paramKey = `dataScopeMixed${paramSuffix}`;
-    query.andWhere(
-      new Brackets((qb) => {
-        qb.where(`donation.donation_source = :${paramKey}_website`, {
-          [`${paramKey}_website`]: "website",
-        });
-        qb.orWhere(`donation.created_by IN (:...${paramKey}_userIds)`, {
-          [`${paramKey}_userIds`]: scope.allowedUserIds,
-        });
-      }),
-    );
+    return;
   }
 
   private logFinalQuery(
