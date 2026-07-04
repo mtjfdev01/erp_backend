@@ -70,7 +70,13 @@ export function applyCommonFilters(
   }
 
   // Apply equality filters for all other fields except search, date, start_date, end_date
-  const excludeFields = ["search", "date", "start_date", "end_date"];
+  const excludeFields = [
+    "search",
+    "date",
+    "start_date",
+    "end_date",
+    "range_filters",
+  ];
   Object.keys(filters).forEach((field) => {
     if (
       !excludeFields.includes(field) &&
@@ -249,6 +255,37 @@ export function normalizeRelationsFilters(
 }
 
 /**
+ * Applies date filtering logic on a specific date column (not always `date`).
+ */
+export function applyDateFilterOnColumn(
+  queryBuilder: SelectQueryBuilder<any>,
+  filters: Pick<FilterPayload, "date" | "start_date" | "end_date">,
+  entityAlias: string,
+  columnName: string,
+): void {
+  const dateField = `${entityAlias}.${columnName}`;
+
+  if (filters.start_date && filters.end_date) {
+    queryBuilder.andWhere(`${dateField} BETWEEN :startDate AND :endDate`, {
+      startDate: filters.start_date,
+      endDate: filters.end_date,
+    });
+  } else if (filters.start_date && !filters.end_date) {
+    queryBuilder.andWhere(`${dateField} >= :startDate`, {
+      startDate: filters.start_date,
+    });
+  } else if (filters.end_date && !filters.start_date) {
+    queryBuilder.andWhere(`${dateField} <= :endDate`, {
+      endDate: filters.end_date,
+    });
+  } else if (filters.date) {
+    queryBuilder.andWhere(`${dateField} = :exactDate`, {
+      exactDate: filters.date,
+    });
+  }
+}
+
+/**
  * Applies date filtering logic
  */
 function applyDateFilter(
@@ -256,33 +293,7 @@ function applyDateFilter(
   filters: FilterPayload,
   entityAlias: string,
 ): void {
-  const dateField = `${entityAlias}.date`;
-
-  // If both start_date and end_date are provided
-  if (filters.start_date && filters.end_date) {
-    queryBuilder.andWhere(`${dateField} BETWEEN :startDate AND :endDate`, {
-      startDate: filters.start_date,
-      endDate: filters.end_date,
-    });
-  }
-  // If only start_date is provided
-  else if (filters.start_date && !filters.end_date) {
-    queryBuilder.andWhere(`${dateField} >= :startDate`, {
-      startDate: filters.start_date,
-    });
-  }
-  // If only end_date is provided
-  else if (filters.end_date && !filters.start_date) {
-    queryBuilder.andWhere(`${dateField} <= :endDate`, {
-      endDate: filters.end_date,
-    });
-  }
-  // If only date is provided (exact match)
-  else if (filters.date) {
-    queryBuilder.andWhere(`${dateField} = :exactDate`, {
-      exactDate: filters.date,
-    });
-  }
+  applyDateFilterOnColumn(queryBuilder, filters, entityAlias, "date");
 }
 
 /**

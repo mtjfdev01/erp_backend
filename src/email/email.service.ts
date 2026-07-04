@@ -1307,6 +1307,57 @@ export class EmailService implements OnModuleInit {
     }
   }
 
+  async sendDonationBoxRelocationEmail(data: {
+    to: string | string[];
+    performerName: string;
+    boxLabel: string;
+    donationBoxId: number;
+    previousShop: Record<string, unknown>;
+    newShop: Record<string, unknown>;
+    relocationNote?: string | null;
+  }): Promise<boolean> {
+    const prev = data.previousShop || {};
+    const next = data.newShop || {};
+    const noteBlock = data.relocationNote
+      ? `<p><strong>Relocation note:</strong> ${data.relocationNote}</p>`
+      : "";
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+        <h2 style="margin-bottom: 8px;">Donation box relocated</h2>
+        <p>${data.performerName} relocated <strong>${data.boxLabel}</strong> to a new shop placement.</p>
+        <table style="border-collapse: collapse; width: 100%; max-width: 640px; margin: 16px 0;">
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;"><strong>Previous shop</strong></td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.shop_name || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">Previous shopkeeper</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.shopkeeper || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">Previous route</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.route_name || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;"><strong>New shop</strong></td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.shop_name || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New shopkeeper</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.shopkeeper || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New route</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.route_name || "—"}</td></tr>
+          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New city</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.city_name || "—"}</td></tr>
+        </table>
+        ${noteBlock}
+        <p>View the donation box record in ERP for full audit history.</p>
+      </div>
+    `;
+
+    const text = [
+      "Donation box relocated",
+      `${data.performerName} relocated ${data.boxLabel} to a new shop.`,
+      `Previous: ${prev.shop_name || "—"} (${prev.route_name || "—"})`,
+      `New: ${next.shop_name || "—"} (${next.route_name || "—"})`,
+      data.relocationNote ? `Note: ${data.relocationNote}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return this.sendReportEmail({
+      to: data.to,
+      subject: `Donation box relocated — ${data.boxLabel}`,
+      html,
+      text,
+    });
+  }
+
   //  Tasks Section
   async sendTaskAssignmentEmail(
     user: any,

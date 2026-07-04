@@ -70,6 +70,7 @@ import {
   buildDonationGeoSnapshotForCreate,
   mergeDonationGeoForUpdate,
 } from "./utils/donation-geo.util";
+import { DonationAllotmentsService } from "./allotments/donation-allotments.service";
 
 @Injectable()
 export class DonationsService {
@@ -122,7 +123,33 @@ export class DonationsService {
     private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly donationAllotmentsService: DonationAllotmentsService,
   ) {}
+
+  /** Fire-and-forget pending allotment when a donation newly becomes completed. */
+  private afterDonationMarkedCompleted(
+    donationId: number,
+    source: string,
+    previousStatus?: string | null,
+  ): void {
+    if (String(previousStatus || "").toLowerCase() === "completed") {
+      return;
+    }
+    void this.donationAllotmentsService
+      .onDonationCompleted(donationId, source)
+      .catch((err) => {
+        this.logger.warn(
+          `Allotment hook failed for donation ${donationId}: ${err?.message}`,
+        );
+      });
+    void this.donorService
+      .markMatureDonorFromCompletedDonation(donationId)
+      .catch((err) => {
+        this.logger.warn(
+          `Mature donor hook failed for donation ${donationId}: ${err?.message}`,
+        );
+      });
+  }
 
   private async syncDonorLastDonationDate(
     donation?: Pick<Donation, "donor_id" | "date" | "created_at"> | null,
@@ -299,7 +326,7 @@ export class DonationsService {
     return Number(id);
   }
 
-  /** Website checkout: defer donor link, progress, and notifications until after HTTP response. */
+  /** Website checkout: invoice first (201), then donor link fully awaited on the server. */
   shouldDeferDonorPostCreate(createDonationDto: CreateDonationDto): boolean {
     if (createDonationDto.donor_id || createDonationDto.previous_donation_id) {
       return false;
@@ -477,7 +504,7 @@ export class DonationsService {
   }
 
   /**
-   * Runs after the HTTP response for fast website checkout (donor link, progress, notifications).
+   * Donor link, progress, notifications — runs after 201 is sent; fully awaited on the server.
    */
   async finalizeDonationPostCreate(
     donationId: number,
@@ -1513,6 +1540,14 @@ export class DonationsService {
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
+      if (donationStatus === "completed") {
+        this.afterDonationMarkedCompleted(
+          donationId,
+          "provider_status_sync",
+          previousStatus,
+        );
+      }
+
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
     }
 
@@ -1948,6 +1983,9 @@ export class DonationsService {
           campaign_id: campaignId,
           created_by: this.donationAuditUserId(user) as any,
           recurrence_id: recurringRowId,
+          // Manual add omits this field; do not write null (would override column default).
+          donation_source:
+            createDonationDto.donation_source?.trim() || "website",
         });
         savedDonation = await this.donationRepository.save(donation);
         console.log(
@@ -2508,6 +2546,7 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
         .leftJoinAndSelect("donation.created_by", "created_by")
+        .leftJoinAndSelect("donation.credited_to", "credited_to")
         .where("donation.id = :id", { id })
         .getOne();
 
@@ -2817,6 +2856,14 @@ export class DonationsService {
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
 
+      if (newStatus === "completed") {
+        this.afterDonationMarkedCompleted(
+          donationId,
+          "staff_status_action",
+          donation.status,
+        );
+      }
+
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       return {
@@ -2989,6 +3036,14 @@ export class DonationsService {
       // Update the donation
       await this.donationRepository.update(parseInt(donationId), updateData);
 
+      if (newStatus === "completed") {
+        this.afterDonationMarkedCompleted(
+          parseInt(donationId, 10),
+          `gateway_${paymentMethod}`,
+          donation.status,
+        );
+      }
+
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Get updated donation
@@ -3157,6 +3212,11 @@ export class DonationsService {
 
       let batching: any = null;
       if (newStatus === "completed") {
+        this.afterDonationMarkedCompleted(
+          parseInt(basket_id, 10),
+          "payfast_ipn",
+          donation.status,
+        );
         try {
           batching = await this.processDonationBatchingAfterPaymentSuccess({
             donationId: parseInt(basket_id),
@@ -3257,6 +3317,14 @@ export class DonationsService {
         status: status,
       });
 
+      if (String(status).toLowerCase() === "completed") {
+        this.afterDonationMarkedCompleted(
+          parseInt(id, 10),
+          "public_status_update",
+          donation.status,
+        );
+      }
+
       console.log(
         `Donation ${id} updated successfully with order_id: ${order_id} and status: ${status}`,
       );
@@ -3317,6 +3385,11 @@ export class DonationsService {
               status: "completed",
               orderId: orderIdForDonation,
             });
+            this.afterDonationMarkedCompleted(
+              parsedDonationId,
+              "stripe_webhook_checkout",
+              donation.status,
+            );
             console.log(
               `Stripe webhook: Donation ${parsedDonationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
             );
@@ -3344,6 +3417,11 @@ export class DonationsService {
               status: "completed",
               orderId: paymentIntent.id || donation.orderId,
             });
+            this.afterDonationMarkedCompleted(
+              parsedDonationId,
+              "stripe_webhook_payment_intent",
+              donation.status,
+            );
             console.log(
               `Stripe webhook (embed): Donation ${parsedDonationId} marked completed (payment_intent: ${paymentIntent.id})`,
             );
@@ -3522,6 +3600,14 @@ export class DonationsService {
         message_sent,
         email_sent,
       });
+
+      if (status === "completed") {
+        this.afterDonationMarkedCompleted(
+          parseInt(invoice_number, 10),
+          "blinq_callback",
+          donation.status,
+        );
+      }
 
       if (status === "completed") {
         // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
@@ -3843,6 +3929,11 @@ export class DonationsService {
 
     let batching: any = null;
     if (newStatus === "completed") {
+      this.afterDonationMarkedCompleted(
+        donationId,
+        opts?.source || "alfalah_ipn",
+        donation.status,
+      );
       try {
         batching = await this.processDonationBatchingAfterPaymentSuccess({
           donationId,

@@ -13,9 +13,9 @@ import { UpdateDonationBoxDonationDto } from "./dto/update-donation_box_donation
 import { DonationBox } from "../entities/donation-box.entity";
 import {
   applyCommonFilters,
+  applyDateFilterOnColumn,
   FilterPayload,
-  applyHybridFilters,
-  HybridFilter,
+  RangeFilter,
 } from "../../../utils/filters/common-filter.util";
 import { User } from "../../../users/user.entity";
 import { DashboardAggregateService } from "../../../dashboard/dashboard-aggregate.service";
@@ -41,6 +41,9 @@ interface PaginationOptions {
   donation_box_id?: number;
   status?: string;
   payment_method?: string;
+  min_amount?: number | string;
+  max_amount?: number | string;
+  date?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -138,6 +141,7 @@ export class DonationBoxDonationService {
       query,
       "donation_box_donation",
       dataScope,
+      { assignedToColumn: "collected_by.id" },
     );
   }
 
@@ -372,13 +376,15 @@ export class DonationBoxDonationService {
         donation_box_id,
         status = "",
         payment_method = "",
+        min_amount,
+        max_amount,
+        date,
         start_date,
         end_date,
       } = options;
 
       const skip = (page - 1) * pageSize;
 
-      // Define searchable fields
       const searchFields = [
         "collector_name",
         "notes",
@@ -386,30 +392,60 @@ export class DonationBoxDonationService {
         "receipt_number",
         "cheque_number",
         "bank_name",
+        "donation_box.shop_name",
+        "donation_box.key_no",
       ];
 
-      // Build query with relations
       const query = this.donationBoxDonationRepository
         .createQueryBuilder("donation_box_donation")
         .leftJoinAndSelect("donation_box_donation.donation_box", "donation_box")
         .leftJoinAndSelect("donation_box_donation.collected_by", "collected_by")
         .leftJoinAndSelect("donation_box_donation.verified_by", "verified_by")
-        .leftJoinAndSelect("donation_box.route", "route");
+        .leftJoinAndSelect("donation_box.route", "route")
+        .where("donation_box_donation.is_archived = :archived", {
+          archived: false,
+        });
 
-      // Apply common filters
+      const rangeFilters: RangeFilter[] = [];
+      if (min_amount !== undefined && min_amount !== "" && min_amount !== null) {
+        rangeFilters.push({
+          column: "collection_amount",
+          operator: "gte",
+          value: Number(min_amount),
+        });
+      }
+      if (max_amount !== undefined && max_amount !== "" && max_amount !== null) {
+        rangeFilters.push({
+          column: "collection_amount",
+          operator: "lte",
+          value: Number(max_amount),
+        });
+      }
+
       const filters: FilterPayload = {
         search,
         status,
         payment_method,
-        start_date,
-        end_date,
+        range_filters: rangeFilters,
       };
 
       if (donation_box_id) {
         filters.donation_box_id = donation_box_id;
       }
 
-      applyCommonFilters(query, filters, searchFields, "donation_box_donation");
+      applyCommonFilters(
+        query,
+        filters,
+        searchFields,
+        "donation_box_donation",
+      );
+
+      applyDateFilterOnColumn(
+        query,
+        { date, start_date, end_date },
+        "donation_box_donation",
+        "collection_date",
+      );
 
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -439,11 +475,13 @@ export class DonationBoxDonationService {
         : "collection_date";
       query.orderBy(`donation_box_donation.${safeSortField}`, sortOrder);
 
+      query.distinct(true);
+
       // Apply pagination
       query.skip(skip).take(pageSize);
 
-      // Execute query
-      const [data, total] = await query.getManyAndCount();
+      const total = await query.clone().skip(undefined).take(undefined).getCount();
+      const data = await query.getMany();
       const totalPages = Math.ceil(total / pageSize);
 
       return {

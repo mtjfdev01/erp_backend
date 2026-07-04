@@ -3,14 +3,18 @@ import {
   ConflictException,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
+  Logger,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In, ILike, SelectQueryBuilder } from "typeorm";
 import { DonationBox } from "./entities/donation-box.entity";
 import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
 import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
+import { RelocateDonationBoxDto } from "./dto/relocate-donation-box.dto";
 import {
   applyCommonFilters,
+  applyDateFilterOnColumn,
   FilterPayload,
 } from "../../utils/filters/common-filter.util";
 import { Route } from "../geographic/routes/entities/route.entity";
@@ -26,6 +30,10 @@ import { GeographicScopeService } from "../../permissions/geographic-scope/geogr
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../permissions/geographic-scope/geographic-scope.types";
 import { buildDonationBoxGeoSearch } from "./utils/donation-box-geo.util";
+import { NotificationsService } from "../../notifications/notifications.service";
+import { NotificationType } from "../../notifications/entities/notification.entity";
+import { EmailService } from "../../email/email.service";
+import { PermissionsEntity } from "../../permissions/entities/permissions.entity";
 
 interface PaginationOptions {
   page: number;
@@ -33,18 +41,23 @@ interface PaginationOptions {
   sortField?: string;
   sortOrder?: "ASC" | "DESC";
   search?: string;
-  region?: string;
-  city?: string;
+  region_id?: number | string;
+  city_id?: number | string;
+  route_id?: number | string;
+  assigned_user_id?: number | string;
   box_type?: string;
   status?: string;
   frequency?: string;
   is_active?: boolean;
+  date?: string;
   start_date?: string;
   end_date?: string;
 }
 
 @Injectable()
 export class DonationBoxService {
+  private readonly logger = new Logger(DonationBoxService.name);
+
   constructor(
     @InjectRepository(DonationBox)
     private readonly donationBoxRepository: Repository<DonationBox>,
@@ -54,9 +67,13 @@ export class DonationBoxService {
     private readonly cityRepository: Repository<City>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(PermissionsEntity)
+    private readonly permissionsRepository: Repository<PermissionsEntity>,
     private readonly donationBoxAuditService: DonationBoxAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly notificationsService: NotificationsService,
+    private readonly emailService: EmailService,
   ) {}
 
   async resolveDonationBoxScope(currentUser?: {
@@ -132,7 +149,9 @@ export class DonationBoxService {
     ) {
       return;
     }
-    this.dataScopeService.applyToQuery(query, "donation_box", dataScope);
+    this.dataScopeService.applyToQuery(query, "donation_box", dataScope, {
+      assignedToColumn: "assignedUsers.id",
+    });
   }
 
   private async resolveCityName(cityId?: number | null): Promise<string | null> {
@@ -408,54 +427,84 @@ export class DonationBoxService {
         sortField = "created_at",
         sortOrder = "DESC",
         search = "",
-        region = "",
-        city = "",
+        region_id,
+        city_id,
+        route_id,
+        assigned_user_id,
         box_type = "",
         status = "",
         frequency = "",
         is_active,
+        date,
         start_date,
         end_date,
       } = options;
 
       const skip = (page - 1) * pageSize;
 
-      // Define searchable fields (only string fields that can be used with LOWER())
       const searchFields = [
         "key_no",
         "shop_name",
         "shopkeeper",
         "cell_no",
         "landmark_marketplace",
-        "route.name", // Search in route name from joined table
+        "route.name",
       ];
 
-      // Build query with filters and relations
       const query = this.donationBoxRepository
         .createQueryBuilder("donation_box")
         .leftJoinAndSelect("donation_box.route", "route")
-        .leftJoinAndSelect("route.cities", "cities")
         .leftJoinAndSelect("route.region", "region")
         .leftJoinAndSelect("route.country", "country")
-        .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers");
+        .leftJoinAndMapOne(
+          "donation_box.city",
+          City,
+          "box_city",
+          "box_city.id = donation_box.city_id",
+        )
+        .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers")
+        .where("donation_box.is_archived = :archived", { archived: false });
 
-      // Apply common filters
       const filters: FilterPayload = {
         search,
-        region,
-        city,
         box_type,
         status,
         frequency,
-        start_date,
-        end_date,
       };
 
-      if (is_active !== undefined) {
-        filters.is_active = is_active;
+      if (city_id) {
+        filters.city_id = city_id;
+      }
+      if (route_id) {
+        filters.route_id = route_id;
       }
 
       applyCommonFilters(query, filters, searchFields, "donation_box");
+
+      applyDateFilterOnColumn(
+        query,
+        { date, start_date, end_date },
+        "donation_box",
+        "active_since",
+      );
+
+      if (region_id) {
+        query.andWhere("region.id = :regionId", {
+          regionId: Number(region_id),
+        });
+      }
+
+      if (assigned_user_id) {
+        query.andWhere("assignedUsers.id = :assignedUserId", {
+          assignedUserId: Number(assigned_user_id),
+        });
+      }
+
+      if (is_active !== undefined) {
+        query.andWhere("donation_box.is_active = :isActive", {
+          isActive: is_active,
+        });
+      }
 
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -472,13 +521,28 @@ export class DonationBoxService {
       }
 
       // Apply sorting
-      query.orderBy(`donation_box.${sortField}`, sortOrder);
+      const allowedSortFields = [
+        "created_at",
+        "active_since",
+        "box_id_no",
+        "shop_name",
+        "box_type",
+        "status",
+        "key_no",
+      ];
+      const safeSortField = allowedSortFields.includes(sortField)
+        ? sortField
+        : "created_at";
+      query.orderBy(`donation_box.${safeSortField}`, sortOrder);
+
+      query.distinct(true);
 
       // Apply pagination
       query.skip(skip).take(pageSize);
 
-      // Execute query
-      const [data, total] = await query.getManyAndCount();
+      // Execute query — count without collection joins to avoid inflated totals
+      const total = await query.clone().skip(undefined).take(undefined).getCount();
+      const data = await query.getMany();
       const totalPages = Math.ceil(total / pageSize);
 
       return {
@@ -649,6 +713,281 @@ export class DonationBoxService {
       console.error("Error updating donation box:", error.message);
       throw new Error(`Failed to update donation box: ${error.message}`);
     }
+  }
+
+  private formatUserName(user?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    id?: number;
+  } | null): string {
+    if (!user) return "Unknown user";
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+    return name || user.email || `User #${user.id}`;
+  }
+
+  private async buildShopPlacementSummary(
+    box: DonationBox,
+  ): Promise<Record<string, unknown>> {
+    const cityName = await this.resolveCityName(box.city_id);
+    const assignees = (box.assignedUsers || [])
+      .map((u) => this.formatUserName(u))
+      .join(", ");
+    return {
+      key_no: box.key_no,
+      shop_name: box.shop_name,
+      shopkeeper: box.shopkeeper,
+      cell_no: box.cell_no,
+      landmark_marketplace: box.landmark_marketplace,
+      route_id: box.route_id,
+      route_name: box.route?.name ?? null,
+      city_id: box.city_id,
+      city_name: cityName,
+      region_name: box.route?.region?.name ?? null,
+      assigned_officers: assignees || null,
+      active_since: box.active_since,
+    };
+  }
+
+  private async resolveRelocationNotifyTargets(performerUserId: number): Promise<{
+    userIds: number[];
+    emails: string[];
+  }> {
+    const performer = await this.userRepository.findOne({
+      where: { id: performerUserId, is_archived: false },
+      relations: ["manager"],
+    });
+
+    const userIds = new Set<number>();
+    const emails = new Set<string>();
+
+    if (performer?.manager_id) {
+      userIds.add(Number(performer.manager_id));
+      const manager =
+        performer.manager ||
+        (await this.userRepository.findOne({
+          where: { id: performer.manager_id, is_archived: false },
+          select: ["id", "email", "first_name", "last_name"],
+        }));
+      if (manager?.email) {
+        emails.add(manager.email);
+      }
+    }
+
+    if (userIds.size === 0) {
+      const managerRows = await this.permissionsRepository
+        .createQueryBuilder("perm")
+        .select("perm.user_id", "user_id")
+        .where(`perm.permissions->>'fund_raising_manager' = 'true'`)
+        .getRawMany();
+
+      for (const row of managerRows) {
+        const uid = Number(row.user_id);
+        if (Number.isFinite(uid) && uid > 0) {
+          userIds.add(uid);
+        }
+      }
+
+      if (userIds.size > 0) {
+        const managers = await this.userRepository.findBy({
+          id: In(Array.from(userIds)),
+        });
+        managers.forEach((manager) => {
+          if (manager.email) emails.add(manager.email);
+        });
+      }
+    }
+
+    return {
+      userIds: Array.from(userIds),
+      emails: Array.from(emails),
+    };
+  }
+
+  private async notifyManagerOnRelocation(params: {
+    donationBoxId: number;
+    keyNo: string | null;
+    performer: User | null;
+    previousShop: Record<string, unknown>;
+    newShop: Record<string, unknown>;
+    relocationNote?: string | null;
+  }): Promise<void> {
+    if (!params.performer?.id) return;
+
+    try {
+      const { userIds, emails } = await this.resolveRelocationNotifyTargets(
+        params.performer.id,
+      );
+      if (userIds.length === 0) {
+        this.logger.warn(
+          `No manager recipients for donation box #${params.donationBoxId} relocation`,
+        );
+        return;
+      }
+
+      const boxLabel = params.keyNo
+        ? `Key ${params.keyNo}`
+        : `Box #${params.donationBoxId}`;
+      const fromShop = String(params.previousShop.shop_name || "—");
+      const toShop = String(params.newShop.shop_name || "—");
+
+      await this.notificationsService.create(
+        {
+          title: "Donation box relocated to new shop",
+          message: `${this.formatUserName(params.performer)} moved ${boxLabel} from "${fromShop}" to "${toShop}".`,
+          type: NotificationType.INFO,
+          link: `/dms/donation_box/view/${params.donationBoxId}`,
+          metadata: {
+            donation_box_id: params.donationBoxId,
+            action: "donation_box_shop_relocated",
+            previous_shop: params.previousShop,
+            new_shop: params.newShop,
+            relocation_note: params.relocationNote || null,
+          },
+        },
+        userIds,
+        params.performer,
+      );
+
+      if (emails.length > 0) {
+        await this.emailService.sendDonationBoxRelocationEmail({
+          to: emails,
+          performerName: this.formatUserName(params.performer),
+          boxLabel,
+          donationBoxId: params.donationBoxId,
+          previousShop: params.previousShop,
+          newShop: params.newShop,
+          relocationNote: params.relocationNote,
+        });
+      }
+    } catch (error: any) {
+      this.logger.warn(
+        `Failed relocation notifications for box #${params.donationBoxId}: ${error?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Move an existing physical box to a new shop / location.
+   * Writes a dedicated audit record and notifies the reporting manager.
+   */
+  async relocateToNewShop(
+    id: number,
+    dto: RelocateDonationBoxDto,
+    currentUser?: { id?: number },
+  ): Promise<DonationBox> {
+    const donationBox = await this.donationBoxRepository.findOne({
+      where: { id, is_archived: false },
+      relations: ["assignedUsers", "route", "route.region", "route.cities"],
+    });
+
+    if (!donationBox) {
+      throw new NotFoundException(`Donation box with ID ${id} not found`);
+    }
+
+    const route = await this.routeRepository.findOne({
+      where: { id: dto.route_id },
+      relations: ["region"],
+    });
+    if (!route) {
+      throw new NotFoundException(`Route with ID ${dto.route_id} not found`);
+    }
+
+    const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
+    const before = this.donationBoxAuditSnapshot(donationBox);
+    const previousShop = await this.buildShopPlacementSummary(donationBox);
+
+    const auditPatch: Record<string, unknown> = {
+      route_id: dto.route_id,
+      city_id: dto.city_id ?? donationBox.city_id,
+      shop_name: dto.shop_name.trim(),
+      shopkeeper: dto.shopkeeper?.trim() || null,
+      cell_no: dto.cell_no?.trim() || null,
+      landmark_marketplace: dto.landmark_marketplace?.trim() || null,
+      active_since:
+        dto.active_since ||
+        new Date().toISOString().slice(0, 10),
+    };
+
+    if (dto.assigned_user_ids !== undefined) {
+      let assignedUsers: User[] = [];
+      if (dto.assigned_user_ids.length > 0) {
+        assignedUsers = await this.userRepository.findBy({
+          id: In(dto.assigned_user_ids),
+        });
+        if (assignedUsers.length !== dto.assigned_user_ids.length) {
+          throw new NotFoundException("One or more assigned users were not found");
+        }
+      }
+      donationBox.assignedUsers = assignedUsers;
+      auditPatch.assigned_user_ids = assignedUsers
+        .map((u) => u.id)
+        .sort((a, b) => a - b);
+      await this.donationBoxRepository.save(donationBox);
+    }
+
+    const auditChanges = buildDonationBoxFieldChanges(before, auditPatch);
+    const shopFieldsChanged = auditChanges.some((change) =>
+      [
+        "shop_name",
+        "shopkeeper",
+        "cell_no",
+        "landmark_marketplace",
+        "route_id",
+        "city_id",
+        "assigned_user_ids",
+        "active_since",
+      ].includes(change.field),
+    );
+
+    if (!shopFieldsChanged) {
+      throw new BadRequestException(
+        "No shop or placement changes detected. Update the new shop details before saving.",
+      );
+    }
+
+    const scalarPatch = { ...auditPatch };
+    if (auditUserId != null) {
+      scalarPatch.updated_by = auditUserId;
+    }
+
+    await this.donationBoxRepository.update(id, scalarPatch as any);
+    await this.refreshDonationBoxGeoSearch(id);
+
+    const updated = await this.findOne(id);
+    const newShop = await this.buildShopPlacementSummary(updated);
+
+    const performer = auditUserId
+      ? await this.userRepository.findOne({
+          where: { id: auditUserId },
+          select: ["id", "first_name", "last_name", "email", "manager_id"],
+        })
+      : null;
+
+    await this.donationBoxAuditService.log({
+      donationBoxId: id,
+      action: DonationBoxAuditAction.SHOP_RELOCATED,
+      source: DonationBoxAuditSource.STAFF_UI,
+      changes: auditChanges,
+      performedByUserId: auditUserId,
+      metadata: {
+        relocation_note: dto.relocation_note?.trim() || null,
+        previous_shop: previousShop,
+        new_shop: newShop,
+        action: "donation_box_shop_relocated",
+      },
+    });
+
+    await this.notifyManagerOnRelocation({
+      donationBoxId: id,
+      keyNo: updated.key_no,
+      performer,
+      previousShop,
+      newShop,
+      relocationNote: dto.relocation_note,
+    });
+
+    return updated;
   }
 
   /**

@@ -13,6 +13,7 @@ import {
 import { CreateTaskDto } from "../tasks/dto/create-task.dto";
 import {
   DONATION_PENDING_MOV_ITEMS,
+  DONATION_PENDING_TASK_GENERATION_ENABLED,
   PENDING_DONATION_FOLLOW_UP_MINUTES,
   donationPendingTaskProjectId,
   isPktToday,
@@ -82,6 +83,13 @@ export class DonationPendingFollowUpService {
       donationDate,
       enforcePendingMinutes,
     };
+
+    if (!DONATION_PENDING_TASK_GENERATION_ENABLED) {
+      this.logger.debug(
+        "Donation pending follow-up task generation is disabled (DONATION_PENDING_TASK_GENERATION_ENABLED=false)",
+      );
+      return result;
+    }
 
     const qb = this.donationRepository
       .createQueryBuilder("donation")

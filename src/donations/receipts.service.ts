@@ -56,10 +56,15 @@ export class DonationsReceiptsService {
     );
   }
 
-  private displayAmount(donation: any): string | number {
+  private displayAmount(donation: any): string {
     const raw = donation?.paid_amount ?? donation?.amount;
     if (raw == null || raw === "") return "-";
-    return raw;
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return String(raw);
+    return num.toLocaleString("en-PK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   }
 
   private formatReceiptDate(donation: any): string {

@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donor, DonorType } from "./entities/donor.entity";
+import { Donation } from "../../donations/entities/donation.entity";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
 import {
@@ -49,6 +50,8 @@ interface PaginationOptions {
   end_date?: string;
   /** Narrow list to website (online) vs non-website (offline) donors */
   source?: "online" | "offline";
+  /** Filter donors assigned to this user id, or the literal "me" for current user */
+  assigned_to_user_id?: number | string;
 }
 
 @Injectable()
@@ -56,6 +59,8 @@ export class DonorService {
   constructor(
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(Donation)
+    private readonly donationRepository: Repository<Donation>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly usersService: UsersService,
@@ -140,6 +145,22 @@ export class DonorService {
     });
   }
 
+  private async assertAssignedFilterAllowed(
+    currentUser: { id?: number; role?: string; department?: string } | undefined,
+    assigneeUserId: number,
+  ): Promise<void> {
+    if (!currentUser?.id) return;
+
+    const scope = await this.resolveDonorScope(currentUser);
+    if (scope.bypass || scope.type === "org") return;
+
+    if (scope.allowedUserIds?.includes(assigneeUserId)) return;
+
+    throw new ForbiddenException(
+      "You cannot filter donors by this assigned user",
+    );
+  }
+
   private donorAuditUserId(userId: number | null | undefined): number | null {
     if (userId == null || Number(userId) === -1) return null;
     return Number(userId);
@@ -175,6 +196,7 @@ export class DonorService {
       is_archived: donor.is_archived,
       recurring: donor.recurring,
       multi_time_donor: donor.multi_time_donor,
+      is_mature_donor: donor.is_mature_donor,
       notification_subscription: donor.notification_subscription,
       assigned_to_user_id: donor.assigned_to?.id ?? null,
       referrer_user_id: donor.referred_by?.id ?? null,
@@ -350,7 +372,9 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
+        is_mature_donor,
         source,
+        assigned_to_user_id,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -381,6 +405,7 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
+        is_mature_donor,
       };
 
       applyCommonFilters(queryBuilder, filters, searchFields, "donor");
@@ -431,6 +456,28 @@ export class DonorService {
         this.applyDonorListDataScope(queryBuilder, scope, geoScope);
       }
 
+      if (
+        assigned_to_user_id !== undefined &&
+        assigned_to_user_id !== null &&
+        String(assigned_to_user_id).trim() !== ""
+      ) {
+        let assigneeId: number;
+        if (String(assigned_to_user_id).toLowerCase() === "me") {
+          assigneeId = Number(currentUser?.id);
+        } else {
+          assigneeId = Number(assigned_to_user_id);
+        }
+
+        if (!Number.isFinite(assigneeId) || assigneeId <= 0) {
+          throw new ForbiddenException("Invalid assigned user filter");
+        }
+
+        await this.assertAssignedFilterAllowed(currentUser, assigneeId);
+        queryBuilder.andWhere("donor.assigned_to = :assigneeFilterId", {
+          assigneeFilterId: assigneeId,
+        });
+      }
+
       // Apply sorting
       const validSortFields = [
         "name",
@@ -472,6 +519,9 @@ export class DonorService {
         },
       };
     } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw error;
+      }
       throw new NotFoundException(
         `Failed to retrieve donors: ${error.message}`,
       );
@@ -949,6 +999,31 @@ export class DonorService {
       await this.donorRepository.save(donor);
     } catch (error) {
       console.error("Failed to update donor last donation date:", error);
+    }
+  }
+
+  /**
+   * Mark donor mature when a donation completes (idempotent).
+   */
+  async markMatureDonorFromCompletedDonation(
+    donationId: number,
+  ): Promise<void> {
+    if (!donationId || donationId <= 0) return;
+
+    try {
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId, is_archived: false },
+        select: ["id", "donor_id", "status"],
+      });
+      if (!donation?.donor_id) return;
+      if (String(donation.status || "").toLowerCase() !== "completed") return;
+
+      await this.donorRepository.update(
+        { id: donation.donor_id, is_mature_donor: false },
+        { is_mature_donor: true },
+      );
+    } catch (error) {
+      console.error("Failed to mark mature donor:", error);
     }
   }
 

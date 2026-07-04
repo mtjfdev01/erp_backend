@@ -616,11 +616,15 @@ export const DONATION_RECEIPT_CSS = `
         }
 `;
 
-/** horizontal.html — monetary / wide receipt */
+/** horizontal.html — monetary / wide receipt (table layout for email + print) */
 export const HORIZONTAL_RECEIPT_FORMAT = (
   params: HorizontalReceiptParams,
 ): string => {
   const p = params;
+  const underline = "border-bottom: 2px solid #000; padding-bottom: 1px;";
+  const cell = "padding: 5px 8px 12px 8px; vertical-align: top; font-family: monospace, Arial, sans-serif; font-size: 14px; line-height: 1.7;";
+  const labelStrong = "font-weight: bold;";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -629,80 +633,132 @@ export const HORIZONTAL_RECEIPT_FORMAT = (
     <title>Horizontal Receipt - Molana Tariq Jamil Foundation</title>
     <style>${HORIZONTAL_RECEIPT_CSS}</style>
 </head>
-<body>
-    <div class="HorizontalContainer">
-        <header class="horizontal-header">
-            <h1 class="title">Molana Tariq Jamil Foundation</h1>
-        </header>
-
-        <div class="header-container">
-            <div class="left-logo">
-                <img src="${escapeHtml(p.logoUrl)}" alt="Logo">
-            </div>
-            <div class="right-content">
-                <p class="paragraph">MTJ Foundation a Non-Profit Organization, Reviving Love for Humanity.Registered and Accredited</p>
-                <ul class="ul-paragraph">
-                    ${renderAccreditationList()}
-                </ul>
-            </div>
-        </div>
-
-        <div class="receipt-container">
-            <h2>Original Receipt</h2>
-            <div class="row">
-               <p>Receipt No: <span>${escapeHtml(p.receiptNo)}</span></p>
-                <p>Date: <span>${escapeHtml(p.receiptDate)}</span></p>
-            </div>
-             <div class="row">
-                <p>project: <span>${escapeHtml(p.project)}</span></p>
-                <p>Donation Type: <span>${escapeHtml(p.donationType)}</span></p>
-            </div>
-            <div class="row">
-                <p>Donor Name: <span class="underline">${escapeHtml(p.donorName)}</span></p>
-            </div>
-            <div class="row">
-                 <p>Address:<span class="underline">${escapeHtml(p.address)}</span></p>
-            </div>
-            <div class="row">
-                <p>Contact No: <span class="underline">${escapeHtml(p.contactNo)}</span></p>
-                <p>Email: <span class="underline">${escapeHtml(p.email)}</span></p>
-            </div>
-            <div class="row">
-                <p>Description: <span class="underline">${escapeHtml(p.description)}</span></p>
-            </div>
-             <div class="row">
-                <p>Amount: <span>${escapeHtml(p.amount)}</span></p>
-                <p>Currency: <span>${escapeHtml(p.currency)}</span></p>
-                <p>Payment Type: <span>${escapeHtml(p.paymentType)}</span></p>
-               <p>Instrument No: <span>${escapeHtml(p.instrumentNo)}</span></p>
-            </div>
-        </div>
-
-        <div class="office-container">
-            <div class="office-box">
-                <h4>Head Office</h4>
-                <p>Makhdoum Pur Road, Tulamba,District Khanewal.</p>
-                <p><strong>UAN:</strong><span>061-111-786-853 | 0303-2440000</span></p>
-            </div>
-            <div class="office-box">
-                <h4>Regional Office (Karachi)</h4>
-                <p>Shop #1, 190-1/A, Khayyam Chambers, Nursery Market, PECHS Block-2, Main Shahra-e-Faisal, near Blue Ribbon Bakery, Karachi.</p>
-                <p><strong>UAN:</strong><span>021-111-786-853 | 0303-2440000</span></p>
-                <p><strong>Email:</strong> <span>donate@mtjfoundation.org</span></p>
-            </div>
-            <div class="office-box">
-                <h4>Regional Office (Multan)</h4>
-                <p>House #89, Block C, Model Town, Multan.</p>
-                <p><strong>UAN:</strong><span>061-111-786-853 | 0303-2440000</span></p>
-            </div>
-             <div class="office-box">
-                <h4>Regional Office (Lahore)</h4>
-                <p>59-B, Faisal Town, Opposite Moon Market, Lahore.</p>
-                <p><strong>UAN:</strong><span>042-111-786-853 | 0300-4425557</span></p>
-                <p><strong>Email:</strong> <span>fundraising@mtjfoundation.org</span></p>
-            </div>
-        </div>
-    </div>
+<body style="margin: 0; padding: 20px; background-color: #f5f5f5;">
+    <table width="1000" align="center" cellpadding="0" cellspacing="0" border="0" style="max-width: 1000px; width: 100%; border: 3px solid #000; background: #fff; font-family: Poppins, Arial, sans-serif;">
+        <tr>
+            <td style="text-align: center; padding: 18px 12px;">
+                <h1 style="margin: 0; font-size: 25px; font-weight: 550; color: #111;">Molana Tariq Jamil Foundation</h1>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding: 0 20px;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family: 'Times New Roman', Times, serif;">
+                    <tr>
+                        <td width="15%" valign="top" style="padding: 10px;">
+                            <img src="${escapeHtml(p.logoUrl)}" alt="Logo" style="display: block; margin: auto; width: 100%; max-width: 120px; height: auto;" />
+                        </td>
+                        <td valign="top" style="padding: 10px;">
+                            <p style="line-height: 1.3; font-size: 13px; text-align: left; margin: 0 0 10px 0;">
+                                MTJ Foundation a Non-Profit Organization, Reviving Love for Humanity.Registered and Accredited
+                            </p>
+                            <ul style="text-align: left; padding-left: 20px; margin: 0; font-size: 13px; line-height: 1.5;">
+                                ${renderAccreditationList()}
+                            </ul>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding: 10px 20px 0 20px;">
+                <table width="88%" align="center" cellpadding="0" cellspacing="0" border="0" style="width: 88%; margin: 20px auto; font-family: monospace, Arial, sans-serif; line-height: 1.7;">
+                    <tr>
+                        <td colspan="4" align="center" style="padding-bottom: 20px;">
+                            <h2 style="margin: 0; text-align: center; font-size: 18px;">Original Receipt</h2>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">Receipt No:</span> ${escapeHtml(p.receiptNo)}
+                        </td>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">Date:</span> ${escapeHtml(p.receiptDate)}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">project:</span> ${escapeHtml(p.project)}
+                        </td>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">Donation Type:</span> ${escapeHtml(p.donationType)}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" style="${cell}">
+                            <span style="${labelStrong}">Donor Name:</span>
+                            <span style="${underline} display: inline-block; min-width: 70%;">${escapeHtml(p.donorName)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" style="${cell}">
+                            <span style="${labelStrong}">Address:</span>
+                            <span style="${underline} display: inline-block; min-width: 85%;">${escapeHtml(p.address)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">Contact No:</span>
+                            <span style="${underline}">${escapeHtml(p.contactNo)}</span>
+                        </td>
+                        <td colspan="2" width="50%" style="${cell}">
+                            <span style="${labelStrong}">Email:</span>
+                            <span style="${underline}">${escapeHtml(p.email)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" style="${cell}">
+                            <span style="${labelStrong}">Description:</span>
+                            <span style="${underline} display: inline-block; min-width: 75%;">${escapeHtml(p.description)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td width="25%" style="${cell}">
+                            <span style="${labelStrong}">Amount:</span> ${escapeHtml(p.amount)}
+                        </td>
+                        <td width="25%" style="${cell}">
+                            <span style="${labelStrong}">Currency:</span> ${escapeHtml(p.currency)}
+                        </td>
+                        <td width="25%" style="${cell}">
+                            <span style="${labelStrong}">Payment Type:</span> ${escapeHtml(p.paymentType)}
+                        </td>
+                        <td width="25%" style="${cell}">
+                            <span style="${labelStrong}">Instrument No:</span> ${escapeHtml(p.instrumentNo)}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td style="padding: 0 0 20px 0;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f5; margin-top: 20px; border-top: 1px solid #ddd;">
+                    <tr>
+                        <td width="25%" valign="top" style="background-color: #cfcfcf; padding: 10px 15px; border-right: 2px solid #555; font-family: Poppins, Arial, sans-serif;">
+                            <h4 style="margin: 0 0 5px 0; font-weight: bold; font-size: 14px;">Head Office</h4>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 0;">Makhdoum Pur Road, Tulamba,District Khanewal.</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>UAN:</strong> 061-111-786-853 | 0303-2440000</p>
+                        </td>
+                        <td width="25%" valign="top" style="background-color: #cfcfcf; padding: 10px 15px; border-right: 2px solid #555; font-family: Poppins, Arial, sans-serif;">
+                            <h4 style="margin: 0 0 5px 0; font-weight: bold; font-size: 14px;">Regional Office (Karachi)</h4>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 0;">Shop #1, 190-1/A, Khayyam Chambers, Nursery Market, PECHS Block-2, Main Shahra-e-Faisal, near Blue Ribbon Bakery, Karachi.</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>UAN:</strong> 021-111-786-853 | 0303-2440000</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>Email:</strong> donate@mtjfoundation.org</p>
+                        </td>
+                        <td width="25%" valign="top" style="background-color: #cfcfcf; padding: 10px 15px; border-right: 2px solid #555; font-family: Poppins, Arial, sans-serif;">
+                            <h4 style="margin: 0 0 5px 0; font-weight: bold; font-size: 14px;">Regional Office (Multan)</h4>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 0;">House #89, Block C, Model Town, Multan.</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>UAN:</strong> 061-111-786-853 | 0303-2440000</p>
+                        </td>
+                        <td width="25%" valign="top" style="background-color: #cfcfcf; padding: 10px 15px; font-family: Poppins, Arial, sans-serif;">
+                            <h4 style="margin: 0 0 5px 0; font-weight: bold; font-size: 14px;">Regional Office (Lahore)</h4>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 0;">59-B, Faisal Town, Opposite Moon Market, Lahore.</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>UAN:</strong> 042-111-786-853 | 0300-4425557</p>
+                            <p style="font-size: 11px; line-height: 1.4; margin: 4px 0 0 0;"><strong>Email:</strong> fundraising@mtjfoundation.org</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>`;
 };

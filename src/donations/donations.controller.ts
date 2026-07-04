@@ -24,13 +24,16 @@ import { UpdateDonationNoteDto } from "./dto/update-donation-note.dto";
 import { CurrentUser } from "src/auth/current-user.decorator";
 import { ConditionalJwtGuard } from "src/auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
-import { DONATION_UPDATE_GUARD, RequiredPermissions } from "src/permissions";
+import { DONATION_UPDATE_GUARD, RequiredPermissions, DONATION_ALLOTMENT_LIST_VIEW_GUARD, DONATION_ALLOTMENT_APPROVE_GUARD, DONATION_ALLOTMENT_CREATE_GUARD, DONATION_ALLOTMENT_VIEW_GUARD, DONATION_VIEW_GUARD } from "src/permissions";
 import { PermissionsService } from "src/permissions/permissions.service";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { DonationsReceiptsService } from "./receipts.service";
 import { UserOrDonorJwtGuard } from "src/auth/guards/user-or-donor-jwt.guard";
 import { DonorService } from "src/dms/donor/donor.service";
 import { GeographicScopeService } from "src/permissions/geographic-scope/geographic-scope.service";
+import { DonationAllotmentsService } from "./allotments/donation-allotments.service";
+import { CreateDonationAllotmentDto } from "./allotments/dto/create-donation-allotment.dto";
+import { ReviewDonationAllotmentDto } from "./allotments/dto/review-donation-allotment.dto";
 
 @Controller("donations")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -43,6 +46,7 @@ export class DonationsController {
     private readonly receiptsService: DonationsReceiptsService,
     private readonly donorService: DonorService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly donationAllotmentsService: DonationAllotmentsService,
   ) {}
 
   /**
@@ -62,7 +66,6 @@ export class DonationsController {
     donationSource: string | null | undefined,
     action: string,
   ): Promise<void> {
-    // Super admin and user id -1 bypass
     if (userId === -1) return;
 
     const hasSuperAdmin = await this.permissionsService.hasPermission(
@@ -232,23 +235,31 @@ export class DonationsController {
       }
 
       console.log("donation api called________________________");
+      // 1) Create invoice (donation + gateway) — user waits only for this
       const { data, donationId, deferPostCreate } =
         await this.donationsService.create(createDonationDto, user);
 
+      // 2) Send payment/invoice to user immediately
       res.status(HttpStatus.CREATED).json({
         success: true,
         message: "Donation created successfully",
         data,
       });
 
+      // 3) Always run donor link to completion on the server (awaited, not void).
+      // Client already has 201; failures here are logged and do not change the response.
       if (deferPostCreate) {
-        void this.donationsService
-          .finalizeDonationPostCreate(donationId, createDonationDto, user)
-          .catch((err) =>
-            this.logger.error(
-              `finalizeDonationPostCreate failed for donation ${donationId}: ${err?.message || err}`,
-            ),
+        try {
+          await this.donationsService.finalizeDonationPostCreate(
+            donationId,
+            createDonationDto,
+            user,
           );
+        } catch (err: any) {
+          this.logger.error(
+            `finalizeDonationPostCreate failed for donation ${donationId}: ${err?.message || err}`,
+          );
+        }
       }
 
       return;
@@ -281,6 +292,154 @@ export class DonationsController {
       status: status || undefined,
       paymentMethod: paymentMethod || undefined,
     });
+  }
+
+  @Get("allotments/pending-approval")
+  @RequiredPermissions([...DONATION_ALLOTMENT_LIST_VIEW_GUARD])
+  async listPendingAllotments(@Res() res: Response, @Req() req: any) {
+    try {
+      const user = req?.user ?? null;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          success: false,
+          message: "Authentication required",
+          data: null,
+        });
+      }
+      const data =
+        await this.donationAllotmentsService.listPendingForApprover(user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Pending allotments retrieved",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load pending allotments",
+        data: null,
+      });
+    }
+  }
+
+  @Get("allotments/pending-approval/count")
+  @RequiredPermissions([...DONATION_ALLOTMENT_LIST_VIEW_GUARD])
+  async countPendingAllotments(@Res() res: Response, @Req() req: any) {
+    try {
+      const user = req?.user ?? null;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          success: false,
+          message: "Authentication required",
+          data: null,
+        });
+      }
+      const count =
+        await this.donationAllotmentsService.countPendingForApprover(user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Pending allotment count retrieved",
+        data: { count },
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Failed to count pending allotments",
+        data: null,
+      });
+    }
+  }
+
+  @Patch("allotments/:allotmentId/approve")
+  @RequiredPermissions([...DONATION_ALLOTMENT_APPROVE_GUARD])
+  async approveAllotment(
+    @Param("allotmentId") allotmentId: string,
+    @Body() dto: ReviewDonationAllotmentDto,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const user = req?.user ?? null;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          success: false,
+          message: "Authentication required",
+          data: null,
+        });
+      }
+      const data = await this.donationAllotmentsService.approve(
+        +allotmentId,
+        user,
+        dto,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Allotment approved",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to approve allotment",
+        data: null,
+      });
+    }
+  }
+
+  @Patch("allotments/:allotmentId/reject")
+  @RequiredPermissions([...DONATION_ALLOTMENT_APPROVE_GUARD])
+  async rejectAllotment(
+    @Param("allotmentId") allotmentId: string,
+    @Body() dto: ReviewDonationAllotmentDto,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const user = req?.user ?? null;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          success: false,
+          message: "Authentication required",
+          data: null,
+        });
+      }
+      const data = await this.donationAllotmentsService.reject(
+        +allotmentId,
+        user,
+        dto,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Allotment rejected",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to reject allotment",
+        data: null,
+      });
+    }
   }
 
   @Post(":id/process-batching")
@@ -398,6 +557,107 @@ export class DonationsController {
         message: error.message,
         data: [],
         pagination: null,
+      });
+    }
+  }
+
+  @Get(":id/allotments")
+  @RequiredPermissions([
+    ...DONATION_ALLOTMENT_VIEW_GUARD,
+    ...DONATION_VIEW_GUARD,
+  ])
+  async listDonationAllotments(
+    @Param("id") id: string,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const donation = await this.donationsService.findOne(+id);
+      const user = req?.user ?? null;
+      if (user?.id) {
+        await this.assertDonationDataScope(user, donation);
+        await this.checkDonationPermission(
+          user.id,
+          donation.donation_source,
+          "view",
+        );
+        await this.checkGeographicAccess(user.id, donation, user.role, user);
+      }
+      const data = await this.donationAllotmentsService.listForDonation(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation allotments retrieved",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load allotments",
+        data: null,
+      });
+    }
+  }
+
+  @Post(":id/allotments")
+  @RequiredPermissions([
+    ...DONATION_ALLOTMENT_CREATE_GUARD,
+    ...DONATION_UPDATE_GUARD,
+  ])
+  async createDonationAllotment(
+    @Param("id") id: string,
+    @Body() dto: CreateDonationAllotmentDto,
+    @Res() res: Response,
+    @Req() req: any,
+  ) {
+    try {
+      const user = req?.user ?? null;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          success: false,
+          message: "Authentication required",
+          data: null,
+        });
+      }
+      const donation = await this.donationsService.findOne(+id);
+      await this.assertDonationDataScope(user, donation);
+      await this.checkDonationPermission(
+        user.id,
+        donation.donation_source,
+        "update",
+      );
+      await this.checkGeographicAccess(user.id, donation, user.role, user);
+
+      const data = await this.donationAllotmentsService.createRequest(
+        +id,
+        user,
+        dto,
+      );
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "Allotment request submitted for manager approval",
+        data,
+      });
+    } catch (error: any) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error?.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to create allotment request",
+        data: null,
       });
     }
   }

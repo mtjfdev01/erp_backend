@@ -4,6 +4,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { DonorService } from "./donor.service";
 import { DonorController } from "./donor.controller";
 import { Donor } from "./entities/donor.entity";
+import { Donation } from "../../donations/entities/donation.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { User } from "src/users/user.entity";
 import { UsersModule } from "src/users/users.module";
@@ -12,12 +13,14 @@ import { DonorPasswordBackfillService } from "./donor-password-backfill.service"
 import { DonorPasswordBackfillRunner } from "./donor-password-backfill.runner";
 import { DonorGeoBackfillService } from "./donor-geo-backfill.service";
 import { DonorGeoBackfillRunner } from "./donor-geo-backfill.runner";
+import { DonorMatureBackfillService } from "./donor-mature-backfill.service";
+import { DonorMatureBackfillRunner } from "./donor-mature-backfill.runner";
 import { DonorAuditModule } from "./audit/donor-audit.module";
 
 @Module({
   imports: [
     DonorAuditModule,
-    TypeOrmModule.forFeature([Donor, User]),
+    TypeOrmModule.forFeature([Donor, User, Donation]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },
@@ -33,6 +36,8 @@ import { DonorAuditModule } from "./audit/donor-audit.module";
     DonorPasswordBackfillRunner,
     DonorGeoBackfillService,
     DonorGeoBackfillRunner,
+    DonorMatureBackfillService,
+    DonorMatureBackfillRunner,
   ],
   exports: [DonorService, TypeOrmModule], // Export TypeOrmModule for Donor repository
 })

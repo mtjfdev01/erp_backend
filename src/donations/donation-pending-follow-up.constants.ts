@@ -1,12 +1,14 @@
 /** Task.project_id prefix — one follow-up task per donation. */
 export const DONATION_PENDING_TASK_PROJECT_PREFIX = "donation-pending:";
 
+/** Set to true when call-center follow-up task generation should run (cron + manual). */
+export const DONATION_PENDING_TASK_GENERATION_ENABLED = false;
+
 /** Minutes after creation before a pending donation triggers a call-center task. */
 export const PENDING_DONATION_FOLLOW_UP_MINUTES = 3;
 
 export const DONATION_PENDING_MOV_ITEMS = [
-  "Contacted Donor",
-  "Not Contacted Donor",
+  "Contacted Donor"
 ] as const;
 
 /** Website donations in these statuses may trigger a call-center follow-up task. */

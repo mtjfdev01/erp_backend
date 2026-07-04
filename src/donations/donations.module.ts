@@ -32,6 +32,10 @@ import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
 import { DonationPendingFollowUpService } from "./donation-pending-follow-up.service";
 import { Task } from "../tasks/entities/task.entity";
 import { TasksModule } from "../tasks/tasks.module";
+import { DonationAllotment } from "./allotments/entities/donation-allotment.entity";
+import { DonationAllotmentsService } from "./allotments/donation-allotments.service";
+import { Donor } from "../dms/donor/entities/donor.entity";
+import { PermissionsEntity } from "../permissions/entities/permissions.entity";
 
 @Module({
   imports: [
@@ -45,6 +49,9 @@ import { TasksModule } from "../tasks/tasks.module";
       RecurringDonationPlan,
       ProgressWorkflowTemplate,
       Task,
+      DonationAllotment,
+      Donor,
+      PermissionsEntity,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -76,7 +83,12 @@ import { TasksModule } from "../tasks/tasks.module";
     DonationGeoBackfillService,
     DonationGeoBackfillRunner,
     DonationPendingFollowUpService,
+    DonationAllotmentsService,
   ],
-  exports: [DonationsService, DonationPendingFollowUpService],
+  exports: [
+    DonationsService,
+    DonationPendingFollowUpService,
+    DonationAllotmentsService,
+  ],
 })
 export class DonationsModule {}

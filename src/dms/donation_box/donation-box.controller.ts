@@ -16,6 +16,7 @@ import { Response } from "express";
 import { DonationBoxService } from "./donation-box.service";
 import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
 import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
+import { RelocateDonationBoxDto } from "./dto/relocate-donation-box.dto";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { JwtGuard } from "src/auth/jwt.guard";
@@ -140,11 +141,15 @@ export class DonationBoxController {
     @Query("sortField") sortField?: string,
     @Query("sortOrder") sortOrder?: "ASC" | "DESC",
     @Query("search") search?: string,
-    @Query("region") region?: string,
-    @Query("city") city?: string,
+    @Query("region_id") region_id?: string,
+    @Query("city_id") city_id?: string,
+    @Query("route_id") route_id?: string,
+    @Query("assigned_user_id") assigned_user_id?: string,
     @Query("box_type") box_type?: string,
     @Query("status") status?: string,
+    @Query("frequency") frequency?: string,
     @Query("is_active") is_active?: string,
+    @Query("date") date?: string,
     @Query("start_date") start_date?: string,
     @Query("end_date") end_date?: string,
     @Res() res?: Response,
@@ -169,11 +174,15 @@ export class DonationBoxController {
           sortField,
           sortOrder,
           search,
-          region,
-          city,
+          region_id: region_id || undefined,
+          city_id: city_id || undefined,
+          route_id: route_id || undefined,
+          assigned_user_id: assigned_user_id || undefined,
           box_type,
           status,
+          frequency: frequency || undefined,
           is_active: is_active ? is_active === "true" : undefined,
+          date,
           start_date,
           end_date,
         },
@@ -346,6 +355,80 @@ export class DonationBoxController {
       return res.status(status).json({
         success: false,
         message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Patch(":id/relocate")
+  @RequiredPermissions([
+    "fund_raising.donation_box.update",
+    "super_admin",
+    "fund_raising_manager",
+  ])
+  async relocate(
+    @Param("id") id: string,
+    @Body() relocateDto: RelocateDonationBoxDto,
+    @Res() res: Response,
+    @CurrentUser() currentUser?: any,
+  ) {
+    try {
+      const existingBox = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      const geoScope = currentUser?.id
+        ? await this.geographicScopeService.resolveForUser(
+            currentUser.id,
+            currentUser.role,
+            currentUser,
+          )
+        : null;
+      this.donationBoxService.assertDonationBoxViewAccess(
+        scope,
+        existingBox,
+        geoScope,
+      );
+
+      if (relocateDto.city_id || relocateDto.route_id) {
+        await this.checkGeographicAccess(
+          currentUser.id,
+          {
+            city_id: relocateDto.city_id,
+            route_id: relocateDto.route_id,
+            landmark_marketplace: relocateDto.landmark_marketplace,
+          },
+          currentUser.role,
+          currentUser,
+        );
+      }
+
+      const result = await this.donationBoxService.relocateToNewShop(
+        +id,
+        relocateDto,
+        currentUser,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation box relocated to new shop successfully",
+        data: result,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
+      const status =
+        error?.status === 400
+          ? HttpStatus.BAD_REQUEST
+          : error?.message?.includes("not found")
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to relocate donation box",
         data: null,
       });
     }

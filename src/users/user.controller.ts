@@ -11,6 +11,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { UsersService } from "./users.service";
+import { UserPerformanceService } from "./user-performance.service";
 import { JwtGuard } from "../auth/jwt.guard";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { User, Department } from "./user.entity";
@@ -26,7 +27,10 @@ import { RequiredPermissions } from "../permissions/decorators/require-permissio
 @Controller("users")
 @UseGuards(JwtGuard, PermissionsGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly userPerformanceService: UserPerformanceService,
+  ) {}
 
   private parseUserIdOrThrow(id: string): number {
     const parsedId = Number(id);
@@ -77,10 +81,19 @@ export class UsersController {
   @Get("options")
   @UseGuards(JwtGuard)
   async getUserOptions(
+    @CurrentUser() user: User,
     @Query("active") activeOnly?: string,
     @Query("department") department?: string,
     @Query("search") search?: string,
+    @Query("assignment_scope") assignmentScope?: string,
   ) {
+    if (assignmentScope === "donor_assigned_filter") {
+      return this.usersService.getUsersForDonorAssignedFilter(user, {
+        department: department || Department.FUND_RAISING,
+        search: search || undefined,
+      });
+    }
+
     return this.usersService.getUserListForDropdown({
       activeOnly: activeOnly === "true",
       department: department || undefined,
@@ -142,6 +155,18 @@ export class UsersController {
       pageNum,
       pageSizeNum,
     );
+  }
+
+  @Get(":id/performance-dashboard")
+  async getPerformanceDashboard(
+    @Param("id") id: string,
+    @CurrentUser() user: User,
+  ) {
+    const data = await this.userPerformanceService.getPerformanceDashboard(
+      this.parseUserIdOrThrow(id),
+      user,
+    );
+    return { success: true, data };
   }
 
   @Get(":id/reveal-password")

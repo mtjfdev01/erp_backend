@@ -20,6 +20,7 @@ import {
   USER_GEOGRAPHIC_SELECT,
 } from "./user-geographic.types";
 import { GeographicAssignmentService } from "../dms/geographic/geographic-assignment/geographic-assignment.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import {
   decryptDonorPassword,
   encryptDonorPassword,
@@ -72,7 +73,19 @@ export class UsersService {
     @InjectRepository(PermissionsEntity)
     private readonly permissionsRepository: Repository<PermissionsEntity>,
     private readonly geographicAssignmentService: GeographicAssignmentService,
+    private readonly permissionsService: PermissionsService,
   ) {}
+
+  private isManagerRole(role?: string | null): boolean {
+    const normalized = String(role || "").toLowerCase();
+    return [
+      "manager",
+      "assistant_manager",
+      "team_lead",
+      "department_head",
+      "director",
+    ].includes(normalized);
+  }
 
   pickGeographicContext(
     user: Pick<
@@ -694,7 +707,11 @@ export class UsersService {
 
     console.log("querybuilder results", queryBuilder.getQueryAndParameters());
     // Transform to include full_name
-    return users.map((user) => ({
+    return users.map((user) => this.toUserDropdownOption(user));
+  }
+
+  private toUserDropdownOption(user: User) {
+    return {
       id: user.id,
       email: user.email,
       first_name: user.first_name,
@@ -705,7 +722,80 @@ export class UsersService {
       department: user.department,
       role: user.role,
       isActive: user.isActive,
-    }));
+    };
+  }
+
+  /**
+   * Users visible in donor "assigned to" list filter.
+   * Super admin: all users in department; managers: self + direct reports; others: self only.
+   */
+  async getUsersForDonorAssignedFilter(
+    currentUser: Pick<User, "id" | "role" | "department">,
+    options?: { search?: string; department?: string },
+  ) {
+    const permissions = await this.permissionsService.getUserPermissions(
+      currentUser.id,
+    );
+    const isSuperAdmin =
+      currentUser.role === UserRole.SUPER_ADMIN ||
+      permissions?.super_admin === true;
+    const isManager =
+      permissions?.fund_raising_manager === true ||
+      this.isManagerRole(currentUser.role);
+
+    let allowedIds: number[] | null = null;
+    if (!isSuperAdmin) {
+      if (isManager) {
+        const reports = await this.userRepository.find({
+          where: { manager_id: currentUser.id, is_archived: false },
+          select: ["id"],
+        });
+        allowedIds = Array.from(
+          new Set([currentUser.id, ...reports.map((r) => r.id)]),
+        );
+      } else {
+        allowedIds = [currentUser.id];
+      }
+    }
+
+    const queryBuilder = this.userRepository
+      .createQueryBuilder("user")
+      .select([
+        "user.id",
+        "user.email",
+        "user.first_name",
+        "user.last_name",
+        "user.department",
+        "user.role",
+        "user.isActive",
+        "user.user_code",
+      ])
+      .where("user.is_archived = :archived", { archived: false });
+
+    if (options?.department) {
+      queryBuilder.andWhere("user.department = :department", {
+        department: options.department,
+      });
+    }
+
+    if (allowedIds !== null) {
+      queryBuilder.andWhere("user.id IN (:...allowedIds)", { allowedIds });
+    }
+
+    if (options?.search && options.search.trim() !== "") {
+      const searchTerm = `%${options.search.trim()}%`;
+      queryBuilder.andWhere(
+        "(COALESCE(user.first_name, '') ILIKE :searchTerm OR COALESCE(user.last_name, '') ILIKE :searchTerm OR user.email ILIKE :searchTerm OR COALESCE(user.user_code, '') ILIKE :searchTerm)",
+        { searchTerm },
+      );
+    }
+
+    queryBuilder
+      .orderBy("user.first_name", "ASC")
+      .addOrderBy("user.last_name", "ASC");
+
+    const users = await queryBuilder.getMany();
+    return users.map((user) => this.toUserDropdownOption(user));
   }
 
   async findByIds(ids: number[]): Promise<User[]> {
