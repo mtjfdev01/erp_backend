@@ -5,6 +5,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Min,
+  Max,
 } from "class-validator";
 
 export class RelocateDonationBoxDto {
@@ -44,4 +46,23 @@ export class RelocateDonationBoxDto {
   @IsString()
   @IsOptional()
   relocation_note?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(-90)
+  @Max(90)
+  registration_latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(-180)
+  @Max(180)
+  registration_longitude?: number;
+
+  @IsString()
+  @IsOptional()
+  registration_location_name?: string;
+
+  @IsOptional()
+  registration_location_details?: Record<string, string>;
 }

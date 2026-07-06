@@ -98,6 +98,7 @@ export class TasksController {
         status: query.status || "",
         priority: query.priority || "",
         user_name: query.user_name || "",
+        assignee_id: query.assignee_id || "",
       },
       strictDepartment: query.strictDepartment === "true" || false,
     };

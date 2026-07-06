@@ -30,6 +30,9 @@ import { GeographicScopeService } from "../../permissions/geographic-scope/geogr
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../permissions/geographic-scope/geographic-scope.types";
 import { buildDonationBoxGeoSearch } from "./utils/donation-box-geo.util";
+import { DEFAULT_DONATION_BOX_COLLECTION_RADIUS_METERS } from "../../utils/geo/geo-distance.util";
+import { reverseGeocodeLocationDetails } from "../../utils/geo/reverse-geocode.util";
+import { ResolvedLocationDetails } from "../../utils/geo/location-details.types";
 import { NotificationsService } from "../../notifications/notifications.service";
 import { NotificationType } from "../../notifications/entities/notification.entity";
 import { EmailService } from "../../email/email.service";
@@ -287,9 +290,18 @@ export class DonationBoxService {
 
       // Create donation box entity
       const { assigned_user_ids, ...boxData } = createDonationBoxDto;
+
+      if (boxData.require_collection_location !== false) {
+        await this.enrichRegistrationLocationFields(boxData);
+      }
+
       const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
       const donationBox = this.donationBoxRepository.create({
         ...boxData,
+        require_collection_location: boxData.require_collection_location !== false,
+        location_radius_meters:
+          boxData.location_radius_meters ||
+          DEFAULT_DONATION_BOX_COLLECTION_RADIUS_METERS,
         ...(auditUserId != null
           ? { created_by: { id: auditUserId } as any }
           : {}),
@@ -377,6 +389,58 @@ export class DonationBoxService {
     }
 
     return { route_id: routes[0].id, city_id: cityId };
+  }
+
+  async resolveLocationDetails(
+    latitude: number,
+    longitude: number,
+  ): Promise<ResolvedLocationDetails | null> {
+    return reverseGeocodeLocationDetails(latitude, longitude);
+  }
+
+  async resolveLocationName(
+    latitude: number,
+    longitude: number,
+  ): Promise<string | null> {
+    const details = await this.resolveLocationDetails(latitude, longitude);
+    return details?.display_name || null;
+  }
+
+  private async enrichRegistrationLocationFields<
+    T extends {
+      registration_latitude?: number;
+      registration_longitude?: number;
+      registration_location_name?: string;
+      registration_location_details?: Record<string, string> | null;
+    },
+  >(boxData: T): Promise<T> {
+    if (
+      boxData.registration_latitude == null ||
+      boxData.registration_longitude == null
+    ) {
+      return boxData;
+    }
+
+    if (boxData.registration_location_details) {
+      if (!boxData.registration_location_name) {
+        boxData.registration_location_name =
+          boxData.registration_location_details.display_name || undefined;
+      }
+      return boxData;
+    }
+
+    const details = await reverseGeocodeLocationDetails(
+      Number(boxData.registration_latitude),
+      Number(boxData.registration_longitude),
+    );
+
+    if (details) {
+      boxData.registration_location_details = details as Record<string, string>;
+      boxData.registration_location_name =
+        boxData.registration_location_name || details.display_name || undefined;
+    }
+
+    return boxData;
   }
 
   /**
@@ -909,6 +973,26 @@ export class DonationBoxService {
         new Date().toISOString().slice(0, 10),
     };
 
+    if (dto.registration_latitude != null && dto.registration_longitude != null) {
+      auditPatch.registration_latitude = dto.registration_latitude;
+      auditPatch.registration_longitude = dto.registration_longitude;
+      if (dto.registration_location_details) {
+        auditPatch.registration_location_details = dto.registration_location_details;
+        auditPatch.registration_location_name =
+          dto.registration_location_name ||
+          dto.registration_location_details.display_name ||
+          null;
+      } else {
+        const details = await reverseGeocodeLocationDetails(
+          Number(dto.registration_latitude),
+          Number(dto.registration_longitude),
+        );
+        auditPatch.registration_location_details = details;
+        auditPatch.registration_location_name =
+          dto.registration_location_name || details?.display_name || null;
+      }
+    }
+
     if (dto.assigned_user_ids !== undefined) {
       let assignedUsers: User[] = [];
       if (dto.assigned_user_ids.length > 0) {
@@ -937,6 +1021,10 @@ export class DonationBoxService {
         "city_id",
         "assigned_user_ids",
         "active_since",
+        "registration_latitude",
+        "registration_longitude",
+        "registration_location_name",
+        "registration_location_details",
       ].includes(change.field),
     );
 

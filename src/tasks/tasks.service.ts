@@ -1831,7 +1831,9 @@ export class TasksService {
       if (
         task.status === TaskStatus.COMPLETED &&
         dto.status !== TaskStatus.PENDING_APPROVAL &&
-        dto.status !== TaskStatus.CLOSED
+        dto.status !== TaskStatus.CLOSED &&
+        dto.status !== TaskStatus.IN_PROGRESS &&
+        dto.status !== TaskStatus.OPEN
       ) {
         if (
           currentUser.role !== UserRole.SUPER_ADMIN &&
@@ -1866,25 +1868,43 @@ export class TasksService {
           [TaskStatus.DRAFT]: [TaskStatus.OPEN],
           [TaskStatus.OPEN]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
           [TaskStatus.IN_PROGRESS]: [
+            TaskStatus.OPEN,
             TaskStatus.COMPLETED,
             TaskStatus.CANCELLED,
             TaskStatus.BLOCKED,
           ],
-          [TaskStatus.BLOCKED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+          [TaskStatus.BLOCKED]: [
+            TaskStatus.OPEN,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.CANCELLED,
+          ],
           [TaskStatus.COMPLETED]:
             task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED
-              ? [TaskStatus.PENDING_APPROVAL, TaskStatus.IN_PROGRESS]
-              : [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS],
+              ? [
+                  TaskStatus.PENDING_APPROVAL,
+                  TaskStatus.IN_PROGRESS,
+                  TaskStatus.OPEN,
+                ]
+              : [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS, TaskStatus.OPEN],
           [TaskStatus.PENDING_APPROVAL]: [
+            TaskStatus.OPEN,
             TaskStatus.APPROVED,
             TaskStatus.REJECTED,
             TaskStatus.CLOSED,
             TaskStatus.IN_PROGRESS,
           ],
-          [TaskStatus.APPROVED]: [TaskStatus.CLOSED],
-          [TaskStatus.REJECTED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
-          [TaskStatus.CLOSED]: [],
-          [TaskStatus.CANCELLED]: [],
+          [TaskStatus.APPROVED]: [
+            TaskStatus.CLOSED,
+            TaskStatus.PENDING_APPROVAL,
+            TaskStatus.IN_PROGRESS,
+          ],
+          [TaskStatus.REJECTED]: [
+            TaskStatus.OPEN,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.CANCELLED,
+          ],
+          [TaskStatus.CLOSED]: [TaskStatus.OPEN, TaskStatus.IN_PROGRESS],
+          [TaskStatus.CANCELLED]: [TaskStatus.OPEN],
         };
 
         const validNext = allowedTransitions[oldStatus] || [];

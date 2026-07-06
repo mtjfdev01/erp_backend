@@ -128,6 +128,43 @@ export class DonationBoxController {
     );
   }
 
+  @Get("reverse-geocode")
+  @UseGuards(JwtGuard)
+  async reverseGeocode(
+    @Query("lat") lat: string,
+    @Query("lng") lng: string,
+    @Res() res: Response,
+  ) {
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "Valid lat and lng query parameters are required",
+        data: null,
+      });
+    }
+
+    const locationDetails = await this.donationBoxService.resolveLocationDetails(
+      latitude,
+      longitude,
+    );
+
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: locationDetails
+        ? "Location details resolved"
+        : "Coordinates captured but place details could not be resolved",
+      data: {
+        location_name: locationDetails?.display_name || null,
+        location_details: locationDetails,
+        latitude,
+        longitude,
+      },
+    });
+  }
+
   @Get()
   @RequiredPermissions([
     "fund_raising.donation_box.list_view",

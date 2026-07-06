@@ -405,10 +405,30 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
-        is_mature_donor,
       };
 
       applyCommonFilters(queryBuilder, filters, searchFields, "donor");
+
+      // Matured donors: at least one completed donation (live check, not flag-only)
+      if (is_mature_donor === true) {
+        queryBuilder.andWhere(
+          `EXISTS (
+            SELECT 1 FROM donations d
+            WHERE d.donor_id = donor.id
+              AND d.is_archived = false
+              AND LOWER(COALESCE(d.status, '')) = 'completed'
+          )`,
+        );
+      } else if (is_mature_donor === false) {
+        queryBuilder.andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM donations d
+            WHERE d.donor_id = donor.id
+              AND d.is_archived = false
+              AND LOWER(COALESCE(d.status, '')) = 'completed'
+          )`,
+        );
+      }
 
       queryBuilder.andWhere("donor.is_archived = :is_archived", {
         is_archived: false,

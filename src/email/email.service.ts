@@ -1486,11 +1486,6 @@ export class EmailService implements OnModuleInit {
           <blockquote style="border-left:4px solid #ccc;margin:16px 0;padding:8px 16px;color:#333;">
             ${safeComment}
           </blockquote>
-          ${
-            taskLink
-              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
-              : "<p>Please log in to the ERP to view this task.</p>"
-          }
         `,
       });
 
@@ -1570,11 +1565,6 @@ export class EmailService implements OnModuleInit {
           <p>Hi ${recipientName},</p>
           <p>This is a reminder that your assigned task <strong>${taskTitle}</strong> is <strong>${duePhrase}</strong>.</p>
           <p><strong>Due date:</strong> ${dueDateLabel}</p>
-          ${
-            taskLink
-              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
-              : "<p>Please log in to the ERP to view this task.</p>"
-          }
         `,
       });
 

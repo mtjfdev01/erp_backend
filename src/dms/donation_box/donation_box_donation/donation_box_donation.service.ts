@@ -31,6 +31,10 @@ import { ResolvedDataScope } from "../../../permissions/data-scope/data-scope.ty
 import { GeographicScopeService } from "../../../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../../permissions/geographic-scope/geographic-scope.types";
+import { PermissionsService } from "../../../permissions/permissions.service";
+import { assertCollectorWithinBoxLocation } from "../utils/donation-box-location.util";
+import { DEFAULT_DONATION_BOX_COLLECTION_RADIUS_METERS } from "../../../utils/geo/geo-distance.util";
+import { reverseGeocodeLocationDetails } from "../../../utils/geo/reverse-geocode.util";
 
 interface PaginationOptions {
   page: number;
@@ -61,7 +65,24 @@ export class DonationBoxDonationService {
     private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly permissionsService: PermissionsService,
   ) {}
+
+  private async canBypassCollectionLocationCheck(
+    userId?: number,
+  ): Promise<boolean> {
+    if (!userId) return false;
+
+    const permissions = await this.permissionsService.getUserPermissions(userId);
+    if (permissions?.super_admin === true) {
+      return true;
+    }
+
+    return this.permissionsService.hasPermission(
+      userId,
+      "fund_raising.donation_box_donations.bypass_location",
+    );
+  }
 
   async resolveCollectionScope(currentUser?: {
     id?: number;
@@ -198,6 +219,7 @@ export class DonationBoxDonationService {
   async create(
     createDonationBoxDonationDto: CreateDonationBoxDonationDto,
     currentUserId?: number,
+    options?: { skipLocationCheck?: boolean },
   ): Promise<DonationBoxDonation> {
     try {
       // Validate that donation box exists
@@ -209,6 +231,36 @@ export class DonationBoxDonationService {
         throw new NotFoundException(
           `Donation box with ID ${createDonationBoxDonationDto.donation_box_id} not found`,
         );
+      }
+
+      const bypassLocation =
+        options?.skipLocationCheck ||
+        donationBox.require_collection_location === false ||
+        (await this.canBypassCollectionLocationCheck(currentUserId));
+
+      if (!bypassLocation) {
+        assertCollectorWithinBoxLocation(
+          donationBox,
+          createDonationBoxDonationDto.collector_latitude,
+          createDonationBoxDonationDto.collector_longitude,
+        );
+      }
+
+      if (
+        createDonationBoxDonationDto.collector_latitude != null &&
+        createDonationBoxDonationDto.collector_longitude != null &&
+        !createDonationBoxDonationDto.collector_location_details
+      ) {
+        const details = await reverseGeocodeLocationDetails(
+          Number(createDonationBoxDonationDto.collector_latitude),
+          Number(createDonationBoxDonationDto.collector_longitude),
+        );
+        createDonationBoxDonationDto.collector_location_details =
+          details as Record<string, string> | undefined;
+        createDonationBoxDonationDto.collector_location_name =
+          createDonationBoxDonationDto.collector_location_name ||
+          details?.display_name ||
+          undefined;
       }
 
       // Validate collection amount
@@ -355,7 +407,9 @@ export class DonationBoxDonationService {
       receipt_number: row.receipt_number as string | undefined,
     } as CreateDonationBoxDonationDto;
 
-    return this.create(createDto, user?.id);
+    return this.create(createDto, user?.id, {
+      skipLocationCheck: await this.canBypassCollectionLocationCheck(user?.id),
+    });
   }
 
   /**

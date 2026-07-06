@@ -7,6 +7,7 @@ import {
   IsArray,
   IsNotEmpty,
   Min,
+  Max,
 } from "class-validator";
 import {
   CollectionStatus,
@@ -92,4 +93,23 @@ export class CreateDonationBoxDonationDto {
   @IsString()
   @IsOptional()
   receipt_number?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(-90)
+  @Max(90)
+  collector_latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(-180)
+  @Max(180)
+  collector_longitude?: number;
+
+  @IsString()
+  @IsOptional()
+  collector_location_name?: string;
+
+  @IsOptional()
+  collector_location_details?: Record<string, string>;
 }
