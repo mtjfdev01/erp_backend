@@ -2,7 +2,7 @@
 export const DONATION_PENDING_TASK_PROJECT_PREFIX = "donation-pending:";
 
 /** Set to true when call-center follow-up task generation should run (cron + manual). */
-export const DONATION_PENDING_TASK_GENERATION_ENABLED = false;
+export const DONATION_PENDING_TASK_GENERATION_ENABLED = true;
 
 /** Minutes after creation before a pending donation triggers a call-center task. */
 export const PENDING_DONATION_FOLLOW_UP_MINUTES = 3;

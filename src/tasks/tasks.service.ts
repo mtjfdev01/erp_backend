@@ -3016,25 +3016,55 @@ export class TasksService {
           ],
         });
       const tasks = await qb.getMany();
+      let processedCount = 0;
+
       for (const t of tasks) {
+        const assigneeIds = Array.isArray(t.assigned_user_ids)
+          ? t.assigned_user_ids
+              .map((v) => Number(v))
+              .filter((v) => !Number.isNaN(v))
+          : [];
+
+        if (assigneeIds.length === 0) {
+          this.logger.warn(
+            `Skipping overdue email for task ${t.id}: no assignees`,
+          );
+          continue;
+        }
+
         const escalationLevel = 1;
-        const adminEmail =
-          process.env.NOTIFICATION_EMAIL || "dev@mtjfoundation.org";
-        const success = await this.emailService.sendTaskOverdueNotification(
-          adminEmail,
-          t,
-          escalationLevel,
-        );
-        if (success) {
+        let sentAny = false;
+
+        for (const userId of assigneeIds) {
+          try {
+            const user = await this.userRepo.findOne({ where: { id: userId } });
+            if (!user?.email) continue;
+
+            const success = await this.emailService.sendTaskOverdueNotification(
+              user,
+              t,
+              escalationLevel,
+            );
+            if (success) sentAny = true;
+          } catch (emailErr: any) {
+            this.logger.warn(
+              `Failed overdue email to user ${userId} for task ${t.id}: ${emailErr?.message}`,
+            );
+          }
+        }
+
+        if (sentAny) {
           t.overdue_email_sent = true;
           await this.taskRepo.save(t);
           await this.logActivity(t, null as any, "overdue_escalated", {
             escalation_level: escalationLevel,
-            notes: "Initial overdue notification sent. Duplicate daily emails suppressed.",
+            notes:
+              "Overdue notification sent to assignee(s). Duplicate daily emails suppressed.",
           });
+          processedCount++;
         }
       }
-      return tasks.length;
+      return processedCount;
     } catch (e) {
       throw e;
     }

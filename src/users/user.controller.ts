@@ -78,6 +78,32 @@ export class UsersController {
     });
   }
 
+  @Get("export")
+  @RequiredPermissions([
+    "users.csv_xport",
+    "admin.users.csv_xport",
+    "users.list_view",
+    "super_admin",
+  ])
+  async exportUsers(
+    @Query("search") search: string = "",
+    @Query("department") department: string = "",
+    @Query("role") role: string = "",
+    @Query("isActive") isActive: string = "",
+  ) {
+    const data = await this.usersService.exportUsers({
+      search,
+      department,
+      role,
+      isActive: isActive ? isActive === "true" : undefined,
+    });
+    return {
+      success: true,
+      message: `Exported ${data.length} user(s)`,
+      data,
+    };
+  }
+
   @Get("options")
   @UseGuards(JwtGuard)
   async getUserOptions(

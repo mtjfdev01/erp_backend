@@ -9,6 +9,7 @@ import { DonorsImportHandler } from "./handlers/donors-import.handler";
 import { DonationBoxImportHandler } from "./handlers/donation-box-import.handler";
 import { DonationBoxDonationsImportHandler } from "./handlers/donation-box-donations-import.handler";
 import { VolunteersImportHandler } from "./handlers/volunteers-import.handler";
+import { UsersImportHandler } from "./handlers/users-import.handler";
 import {
   EntityImportHandler,
   ImportBatchResult,
@@ -32,6 +33,7 @@ export class DataImportService {
     private readonly donationBoxImportHandler: DonationBoxImportHandler,
     private readonly donationBoxDonationsImportHandler: DonationBoxDonationsImportHandler,
     private readonly volunteersImportHandler: VolunteersImportHandler,
+    private readonly usersImportHandler: UsersImportHandler,
     private readonly permissionsService: PermissionsService,
   ) {
     this.handlers = new Map<string, EntityImportHandler>([
@@ -42,6 +44,7 @@ export class DataImportService {
         donationBoxDonationsImportHandler,
       ],
       [volunteersImportHandler.entityName, volunteersImportHandler],
+      [usersImportHandler.entityName, usersImportHandler],
     ]);
   }
 
@@ -126,6 +129,20 @@ export class DataImportService {
         verification_status: "unverified",
         source: "import",
         comments: "Imported via CSV",
+      };
+    }
+    if (entityName === "users") {
+      return {
+        first_name: "Sample",
+        last_name: "User",
+        email: "sample.user@example.com",
+        department: "fund_raising",
+        role: "user",
+        password: "ChangeMe@123",
+        phone: "03001234567",
+        gender: "male",
+        blood_group: "B+",
+        isActive: "true",
       };
     }
     return {};
@@ -220,6 +237,21 @@ export class DataImportService {
       if (!canCreate) {
         throw new BadRequestException(
           "Insufficient permissions to import volunteers",
+        );
+      }
+      return;
+    }
+
+    if (entity === "users") {
+      const canCreate =
+        (await this.permissionsService.hasPermission(userId, "users.create")) ||
+        (await this.permissionsService.hasPermission(
+          userId,
+          "admin.users.create",
+        ));
+      if (!canCreate) {
+        throw new BadRequestException(
+          "Insufficient permissions to import users",
         );
       }
       return;

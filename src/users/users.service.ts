@@ -251,6 +251,170 @@ export class UsersService {
     return await this.userRepository.save(user);
   }
 
+  /**
+   * CSV / data-import row — creates a user without the admin-role gate
+   * (permission is enforced by DataImportService).
+   */
+  async importUserRow(
+    row: Record<string, unknown>,
+    _user?: any,
+  ): Promise<User> {
+    const email = String(row.email || "")
+      .trim()
+      .toLowerCase();
+    if (!email) {
+      throw new ConflictException("email is required");
+    }
+
+    const existingUser = await this.userRepository.findOne({
+      where: { email },
+    });
+    if (existingUser) {
+      throw new ConflictException(`Email already exists: ${email}`);
+    }
+
+    const departmentRaw = String(row.department || "")
+      .trim()
+      .toLowerCase();
+    const roleRaw = String(row.role || "")
+      .trim()
+      .toLowerCase();
+
+    const departmentValues = Object.values(Department) as string[];
+    const roleValues = Object.values(UserRole) as string[];
+
+    if (!departmentValues.includes(departmentRaw)) {
+      throw new ConflictException(
+        `Invalid department "${departmentRaw}". Must be one of: ${departmentValues.join(", ")}`,
+      );
+    }
+    if (!roleValues.includes(roleRaw)) {
+      throw new ConflictException(
+        `Invalid role "${roleRaw}". Must be one of: ${roleValues.join(", ")}`,
+      );
+    }
+
+    const first_name = String(row.first_name || "").trim();
+    const last_name = String(row.last_name || "").trim();
+    if (!first_name || !last_name) {
+      throw new ConflictException("first_name and last_name are required");
+    }
+
+    const plainPassword =
+      String(row.password || "").trim() || "ChangeMe@123";
+    const passwordFields = await this.buildPasswordFields(plainPassword);
+    const userCode = this.normalizeUserCode(
+      row.user_code != null ? String(row.user_code) : null,
+    );
+    await this.assertUserCodeAvailable(userCode);
+
+    const isActiveRaw = row.isActive ?? row.is_active;
+    let isActive = true;
+    if (isActiveRaw !== undefined && isActiveRaw !== null && String(isActiveRaw).trim() !== "") {
+      const v = String(isActiveRaw).trim().toLowerCase();
+      isActive = ["true", "1", "yes", "y"].includes(v);
+    }
+
+    const managerIdRaw = row.manager_id;
+    let manager_id: number | null = null;
+    if (
+      managerIdRaw !== undefined &&
+      managerIdRaw !== null &&
+      String(managerIdRaw).trim() !== ""
+    ) {
+      const parsed = Number(managerIdRaw);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new ConflictException("Invalid manager_id");
+      }
+      manager_id = parsed;
+    }
+
+    const user = this.userRepository.create({
+      first_name,
+      last_name,
+      email,
+      phone: row.phone != null ? String(row.phone).trim() || null : null,
+      dob: row.dob != null ? String(row.dob).trim() || null : null,
+      address: row.address != null ? String(row.address).trim() || null : null,
+      cnic: row.cnic != null ? String(row.cnic).trim() || null : null,
+      gender: row.gender != null ? String(row.gender).trim().toLowerCase() || null : null,
+      joining_date:
+        row.joining_date != null
+          ? String(row.joining_date).trim() || null
+          : null,
+      emergency_contact:
+        row.emergency_contact != null
+          ? String(row.emergency_contact).trim() || null
+          : null,
+      blood_group:
+        row.blood_group != null
+          ? String(row.blood_group).trim() || null
+          : null,
+      department: departmentRaw as Department,
+      role: roleRaw as UserRole,
+      ...passwordFields,
+      user_code: userCode,
+      isActive,
+      manager_id,
+    });
+
+    return await this.userRepository.save(user);
+  }
+
+  async exportUsers(options: {
+    search?: string;
+    department?: string;
+    role?: string;
+    isActive?: boolean;
+  }) {
+    const {
+      search = "",
+      department = "",
+      role = "",
+      isActive,
+    } = options;
+
+    const queryBuilder = this.userRepository.createQueryBuilder("user");
+
+    const filters: FilterPayload = {
+      search,
+      department,
+      role,
+    };
+    applyCommonFilters(queryBuilder, filters, this.searchableColumns, "user");
+
+    if (isActive !== undefined) {
+      queryBuilder.andWhere("user.isActive = :isActive", { isActive });
+    }
+
+    queryBuilder.orderBy("user.id", "ASC");
+
+    const users = await queryBuilder.getMany();
+
+    return users.map((u) => ({
+      id: u.id,
+      user_code: u.user_code ?? "",
+      first_name: u.first_name ?? "",
+      last_name: u.last_name ?? "",
+      email: u.email ?? "",
+      phone: u.phone ?? "",
+      department: u.department ?? "",
+      role: u.role ?? "",
+      gender: u.gender ?? "",
+      dob: u.dob ?? "",
+      cnic: u.cnic ?? "",
+      address: u.address ?? "",
+      joining_date: u.joining_date ?? "",
+      emergency_contact: u.emergency_contact ?? "",
+      blood_group: u.blood_group ?? "",
+      isActive: u.isActive ? "true" : "false",
+      manager_id: u.manager_id ?? "",
+      created_at: u.created_at
+        ? new Date(u.created_at).toISOString().slice(0, 10)
+        : "",
+    }));
+  }
+
   async findAll(options: PaginationOptions) {
     const {
       page = 1,

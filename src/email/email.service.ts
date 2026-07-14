@@ -1582,11 +1582,13 @@ export class EmailService implements OnModuleInit {
   }
 
   async sendTaskOverdueNotification(
-    toEmail: string,
+    user: { email: string; first_name?: string; last_name?: string },
     task: any,
     escalationLevel: number,
   ): Promise<boolean> {
     try {
+      if (!user?.email) return false;
+
       const fromEmail = this.configService.get<string>(
         "RESEND_FROM_EMAIL",
         "info@mtjfoundation.com",
@@ -1601,19 +1603,22 @@ export class EmailService implements OnModuleInit {
         return false;
       }
 
-      const subject = `Urgent: Task Overdue Escalation (Level ${escalationLevel}) - ${task.title}`;
+      const recipientName =
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.email;
+      const subject = `Urgent: Your task is overdue - ${task.title}`;
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
-        to: [toEmail],
+        to: [user.email],
         subject,
-        html: generateTaskOverdueTemplate(task, escalationLevel),
+        html: generateTaskOverdueTemplate(task, escalationLevel, recipientName),
       });
 
       const success = !!result.data?.id;
       if (success) {
         this.logger.log(
-          `Sent task overdue notification via Resend to ${toEmail} (id: ${result.data?.id})`,
+          `Sent task overdue notification via Resend to ${user.email} (id: ${result.data?.id})`,
         );
       } else if (result.error) {
         this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);

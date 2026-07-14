@@ -1,16 +1,9 @@
 export const generateTaskOverdueTemplate = (
   task: any,
-  escalationLevel: number,
+  _escalationLevel: number,
+  recipientName?: string,
 ): string => {
-  const assignees =
-    (Array.isArray(task.assigned_users_meta) &&
-      task.assigned_users_meta
-        .map((m: any) => (m && m.user_id != null ? String(m.user_id) : null))
-        .filter((v: string | null) => v !== null)
-        .join(", ")) ||
-    (Array.isArray(task.assigned_user_ids) &&
-      task.assigned_user_ids.map((id) => String(id)).join(", ")) ||
-    "Unassigned";
+  const greeting = recipientName ? `Hi ${recipientName},` : "Hi,";
 
   return `
       <!DOCTYPE html>
@@ -30,15 +23,14 @@ export const generateTaskOverdueTemplate = (
             <h1>Task Overdue Alert</h1>
           </div>
           <div class="content">
-            <p><strong>Escalation Level: ${escalationLevel}</strong></p>
-            <p>The following task is overdue and requires immediate attention:</p>
+            <p>${greeting}</p>
+            <p>Your assigned task is overdue and requires immediate attention.</p>
             <div class="details">
               <p><strong>Title:</strong> ${task.title}</p>
               <p><strong>Due Date:</strong> ${task.due_date}</p>
               <p><strong>Priority:</strong> ${task.priority}</p>
-              <p><strong>Assigned To:</strong> ${assignees}</p>
             </div>
-            <p>Please take necessary actions.</p>
+            <p>Please review and complete it as soon as possible.</p>
           </div>
         </div>
       </body>

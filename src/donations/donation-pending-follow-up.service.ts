@@ -38,6 +38,7 @@ export interface PendingDonationFollowUpResult {
   skippedExisting: number;
   skippedNoAgents: number;
   skippedStatusChanged: number;
+  skippedDuplicate: number;
   errors: number;
   taskIds: number[];
   donationDate: string;
@@ -78,6 +79,7 @@ export class DonationPendingFollowUpService {
       skippedExisting: 0,
       skippedNoAgents: 0,
       skippedStatusChanged: 0,
+      skippedDuplicate: 0,
       errors: 0,
       taskIds: [],
       donationDate,
@@ -154,6 +156,14 @@ export class DonationPendingFollowUpService {
           continue;
         }
 
+        if (await this.isDuplicatePendingDonation(fresh)) {
+          result.skippedDuplicate += 1;
+          this.logger.debug(
+            `Skipping follow-up task for duplicate donation #${fresh.id}`,
+          );
+          continue;
+        }
+
         const task = await this.createFollowUpTask(fresh, agentIds);
         result.created += 1;
         result.taskIds.push(task.id);
@@ -169,6 +179,59 @@ export class DonationPendingFollowUpService {
     }
 
     return result;
+  }
+
+  /**
+   * Matches daily cleanup rules: same donor + same donation.date.
+   * - Pending: completed that day → duplicate; else only oldest pending gets a task.
+   * - Failed: only newest failed that day gets a task; older faileds are duplicates.
+   */
+  private async isDuplicatePendingDonation(
+    donation: Donation,
+  ): Promise<boolean> {
+    if (!donation.donor_id || !donation.date) {
+      return false;
+    }
+
+    const sameDay = await this.donationRepository
+      .createQueryBuilder("donation")
+      .where("donation.donor_id = :donorId", { donorId: donation.donor_id })
+      .andWhere("donation.date = :donationDate", {
+        donationDate: donation.date,
+      })
+      .orderBy("donation.id", "ASC")
+      .getMany();
+
+    const status = String(donation.status || "").toLowerCase();
+    const hasCompleted = sameDay.some(
+      (d) => String(d.status || "").toLowerCase() === "completed",
+    );
+
+    if (status === "pending") {
+      if (hasCompleted) {
+        return true;
+      }
+      const pendings = sameDay.filter(
+        (d) => String(d.status || "").toLowerCase() === "pending",
+      );
+      if (pendings.length <= 1) {
+        return false;
+      }
+      return donation.id !== pendings[0]?.id;
+    }
+
+    if (status === "failed") {
+      const faileds = sameDay.filter(
+        (d) => String(d.status || "").toLowerCase() === "failed",
+      );
+      if (faileds.length <= 1) {
+        return false;
+      }
+      const newestFailedId = faileds[faileds.length - 1]?.id;
+      return donation.id !== newestFailedId;
+    }
+
+    return false;
   }
 
   private async getCallCenterAgentIds(): Promise<number[]> {

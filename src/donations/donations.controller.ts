@@ -488,7 +488,7 @@ export class DonationsController {
         pageSize = -1;
       }
 
-      const sortField = pagination.sortField || "created_at";
+      const sortField = pagination.sortField || "id";
       const sortOrder = pagination.sortOrder || "DESC";
 
       // Extract filters
