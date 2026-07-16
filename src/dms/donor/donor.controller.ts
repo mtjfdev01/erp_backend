@@ -388,10 +388,15 @@ export class DonorController {
         this.donorService.assertDonorViewAccess(scope, result, geoScope);
         await this.checkDonorPermission(user.id, result.source, "view");
       }
+      const donation_stats =
+        await this.donorService.getCompletedDonationStats(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Donor retrieved successfully",
-        data: result,
+        data: {
+          ...result,
+          donation_stats,
+        },
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {

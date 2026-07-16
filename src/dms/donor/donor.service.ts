@@ -1022,6 +1022,69 @@ export class DonorService {
     }
   }
 
+  async getCompletedDonationStats(donorId: number): Promise<{
+    total_donated: number;
+    total_donations: number;
+    currency: string | null;
+    first_donation: {
+      id: number;
+      amount: number | null;
+      currency: string | null;
+      date: Date | string | null;
+    } | null;
+    last_donation: {
+      id: number;
+      amount: number | null;
+      currency: string | null;
+      date: Date | string | null;
+    } | null;
+  }> {
+    const aggregates = await this.donationRepository
+      .createQueryBuilder("d")
+      .select("COUNT(d.id)", "total_donations")
+      .addSelect("COALESCE(SUM(d.amount), 0)", "total_donated")
+      .where("d.donor_id = :donorId", { donorId })
+      .andWhere("LOWER(d.status) = :status", { status: "completed" })
+      .andWhere("d.is_archived = false")
+      .getRawOne();
+
+    const firstDonation = await this.donationRepository
+      .createQueryBuilder("d")
+      .select(["d.id", "d.amount", "d.currency", "d.date"])
+      .where("d.donor_id = :donorId", { donorId })
+      .andWhere("LOWER(d.status) = :status", { status: "completed" })
+      .andWhere("d.is_archived = false")
+      .orderBy("d.id", "ASC")
+      .getOne();
+
+    const lastDonation = await this.donationRepository
+      .createQueryBuilder("d")
+      .select(["d.id", "d.amount", "d.currency", "d.date"])
+      .where("d.donor_id = :donorId", { donorId })
+      .andWhere("LOWER(d.status) = :status", { status: "completed" })
+      .andWhere("d.is_archived = false")
+      .orderBy("d.id", "DESC")
+      .getOne();
+
+    const mapDonation = (d: Donation | null) =>
+      d
+        ? {
+            id: d.id,
+            amount: d.amount == null ? null : Number(d.amount),
+            currency: d.currency || null,
+            date: d.date ?? null,
+          }
+        : null;
+
+    return {
+      total_donated: Number(aggregates?.total_donated || 0),
+      total_donations: Number(aggregates?.total_donations || 0),
+      currency: lastDonation?.currency || firstDonation?.currency || null,
+      first_donation: mapDonation(firstDonation),
+      last_donation: mapDonation(lastDonation),
+    };
+  }
+
   /**
    * Mark donor mature when a donation completes (idempotent).
    */
