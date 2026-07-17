@@ -8,6 +8,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { UsersController } from "./user.controller";
 import { PermissionsModule } from "../permissions/permissions.module";
 import { GeographicAssignmentModule } from "../dms/geographic/geographic-assignment/geographic-assignment.module";
+import { EmailModule } from "../email/email.module";
 import { Task } from "../tasks/entities/task.entity";
 import { Donor } from "../dms/donor/entities/donor.entity";
 import { Donation } from "../donations/entities/donation.entity";
@@ -37,6 +38,7 @@ import { DonationAllotment } from "../donations/allotments/entities/donation-all
     }),
     PermissionsModule,
     GeographicAssignmentModule,
+    EmailModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, UserPerformanceService],

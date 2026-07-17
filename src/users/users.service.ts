@@ -2,6 +2,9 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  Logger,
+  HttpException,
+  HttpStatus,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -12,6 +15,7 @@ import {
   FilterPayload,
 } from "../utils/filters/common-filter.util";
 import * as bcrypt from "bcrypt";
+import * as crypto from "crypto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UpdateUserWithPermissionsDto } from "./dto/update-user-with-permissions.dto";
@@ -25,6 +29,7 @@ import {
   decryptDonorPassword,
   encryptDonorPassword,
 } from "../utils/crypto/donor-password-vault";
+import { EmailService } from "../email/email.service";
 
 interface PaginationOptions {
   page: number;
@@ -39,6 +44,8 @@ interface PaginationOptions {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   // Define searchable columns for user search
   private readonly searchableColumns = [
     "first_name",
@@ -74,6 +81,7 @@ export class UsersService {
     private readonly permissionsRepository: Repository<PermissionsEntity>,
     private readonly geographicAssignmentService: GeographicAssignmentService,
     private readonly permissionsService: PermissionsService,
+    private readonly emailService: EmailService,
   ) {}
 
   private isManagerRole(role?: string | null): boolean {
@@ -171,6 +179,104 @@ export class UsersService {
     }
 
     return user;
+  }
+
+  /**
+   * Forgot password: if email exists, generate a temporary password,
+   * save it, and email it. Always returns a generic message (no email enumeration).
+   */
+  private getLocalDateKey(date = new Date()): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const genericMessage =
+      "If an account exists for this email, a new password has been sent.";
+    const maxPerDay = 5;
+
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      return { message: genericMessage };
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { email: normalizedEmail, is_archived: false },
+    });
+
+    if (!user || user.isActive === false) {
+      return { message: genericMessage };
+    }
+
+    const today = this.getLocalDateKey();
+    const resetDay =
+      user.password_reset_day != null
+        ? String(user.password_reset_day).slice(0, 10)
+        : null;
+    const count =
+      resetDay === today ? Number(user.password_reset_count || 0) : 0;
+
+    if (count >= maxPerDay) {
+      throw new HttpException(
+        "You have reached the maximum of 5 password reset requests for today. Please try again tomorrow.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const plainPassword = this.generateTemporaryPassword();
+    const passwordFields = await this.buildPasswordFields(plainPassword);
+    Object.assign(user, passwordFields, {
+      password_reset_day: today,
+      password_reset_count: count + 1,
+    });
+    await this.userRepository.save(user);
+
+    const sent = await this.emailService.sendTemporaryPasswordEmail({
+      to: user.email,
+      userName:
+        [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+        user.email,
+      temporaryPassword: plainPassword,
+    });
+
+    if (!sent) {
+      this.logger.error(
+        `Password was reset for ${user.email} but email failed to send`,
+      );
+      throw new ConflictException(
+        "Could not send email. Please try again later or contact support.",
+      );
+    }
+
+    this.logger.log(
+      `Temporary password emailed to ${user.email} (reset ${count + 1}/${maxPerDay} today)`,
+    );
+    return { message: genericMessage };
+  }
+
+  private generateTemporaryPassword(): string {
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lower = "abcdefghijkmnopqrstuvwxyz";
+    const digits = "23456789";
+    const special = "!@#$%&*";
+    const pick = (chars: string) =>
+      chars[crypto.randomInt(0, chars.length)];
+    const base = [
+      pick(upper),
+      pick(lower),
+      pick(digits),
+      pick(special),
+      ...Array.from({ length: 8 }, () =>
+        pick(upper + lower + digits + special),
+      ),
+    ];
+    for (let i = base.length - 1; i > 0; i -= 1) {
+      const j = crypto.randomInt(0, i + 1);
+      [base[i], base[j]] = [base[j], base[i]];
+    }
+    return base.join("");
   }
 
   async seedUsers(): Promise<void> {
@@ -523,6 +629,8 @@ export class UsersService {
       password_reveal_count: _passwordRevealCount,
       resetToken: _resetToken,
       resetTokenExpiry: _resetTokenExpiry,
+      password_reset_day: _passwordResetDay,
+      password_reset_count: _passwordResetCount,
       manager,
       ...safeUser
     } = user;

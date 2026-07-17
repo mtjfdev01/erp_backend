@@ -113,6 +113,13 @@ export class User {
   @Column({ nullable: true })
   resetTokenExpiry: Date;
 
+  /** Calendar day (YYYY-MM-DD) for forgot-password rate limiting. */
+  @Column({ name: "password_reset_day", type: "date", nullable: true })
+  password_reset_day: string | null;
+
+  @Column({ name: "password_reset_count", type: "int", default: 0 })
+  password_reset_count: number;
+
   // New fields in snake_case
   @Column({ name: "first_name", nullable: true })
   first_name: string;

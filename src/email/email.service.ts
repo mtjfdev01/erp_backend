@@ -1629,4 +1629,67 @@ export class EmailService implements OnModuleInit {
       return false;
     }
   }
+
+  /**
+   * Send temporary password after forgot-password / admin reset.
+   */
+  async sendTemporaryPasswordEmail(params: {
+    to: string;
+    userName: string;
+    temporaryPassword: string;
+  }): Promise<boolean> {
+    try {
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [params.to],
+        subject: "Your temporary password — MTJF ERP",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; color: #0f2744;">
+            <h2 style="margin-bottom: 8px;">Password reset</h2>
+            <p>Hello ${params.userName},</p>
+            <p>A new temporary password was generated for your MTJF ERP account.</p>
+            <p style="font-size: 18px; font-weight: bold; letter-spacing: 1px; background: #f1f5f9; padding: 12px 16px; border-radius: 8px;">
+              ${params.temporaryPassword}
+            </p>
+            <p>Please sign in with this password and change it from your profile as soon as possible.</p>
+            <p style="color: #64748b; font-size: 13px;">If you did not request this, contact your administrator.</p>
+          </div>
+        `,
+        text: `Hello ${params.userName},\n\nYour temporary password is: ${params.temporaryPassword}\n\nPlease sign in and change it as soon as possible.`,
+        headers: {
+          "X-Mailer": "MTJ Foundation ERP",
+          "Reply-To": fromEmail,
+        },
+      });
+
+      if (result.error !== null) {
+        this.logger.warn(
+          `Resend error sending temp password: ${JSON.stringify(result.error)}`,
+        );
+        return false;
+      }
+
+      this.logger.log(`Temporary password email sent to ${params.to}`);
+      return true;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to send temporary password email: ${error?.message}`,
+      );
+      return false;
+    }
+  }
 }

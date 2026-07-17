@@ -4,6 +4,7 @@ import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { UsersModule } from "../users/users.module";
 import { PermissionsModule } from "../permissions/permissions.module";
+import { EmailModule } from "../email/email.module";
 import { JwtGuard } from "./jwt.guard";
 import { ConditionalJwtGuard } from "./guards/conditional-jwt.guard";
 import { AuthRequestUserService } from "./auth-request-user.service";
@@ -14,6 +15,7 @@ import { UserOrDonorJwtGuard } from "./guards/user-or-donor-jwt.guard";
   imports: [
     forwardRef(() => UsersModule),
     PermissionsModule,
+    EmailModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },
