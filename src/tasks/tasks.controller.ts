@@ -17,7 +17,7 @@ import {
 } from "@nestjs/common";
 import { Response } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { diskStorage } from "multer";
+import { diskStorage, memoryStorage } from "multer";
 import * as fs from "fs";
 import * as path from "path";
 import { TasksService } from "./tasks.service";
@@ -32,6 +32,8 @@ import { TimeEntryDto } from "./dto/time-entry.dto";
 import { UpdateTaskProgressDto } from "./dto/update-task-progress.dto";
 import { StatusTransitionDto } from "./dto/status-transition.dto";
 import { TaskApprovalStateDto } from "./dto/task-approval-response.dto";
+import { VoiceTaskTranscriptDto } from "./dto/voice-task-transcript.dto";
+import { TaskVoiceAiService } from "./task-voice-ai.service";
 import { JwtGuard } from "../auth/jwt.guard";
 import { PermissionsGuard } from "../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../permissions";
@@ -41,7 +43,51 @@ import { User, UserRole } from "../users/user.entity";
 @Controller("tasks")
 @UseGuards(JwtGuard, PermissionsGuard)
 export class TasksController {
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(
+    private readonly tasksService: TasksService,
+    private readonly taskVoiceAiService: TaskVoiceAiService,
+  ) {}
+
+  /** Voice: transcribe recorded audio to text (auth only, no extra permissions). */
+  @Post("voice/transcribe")
+  @UseInterceptors(
+    FileInterceptor("audio", {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async transcribeVoice(
+    @UploadedFile() file: Express.Multer.File,
+    @Res() res: Response,
+  ) {
+    const result = await this.taskVoiceAiService.transcribeAudio(file);
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+  /** Voice: build a validated CreateTaskDto from confirmed transcript. */
+  @Post("voice/build-payload")
+  async buildVoiceTaskPayload(
+    @Body() dto: VoiceTaskTranscriptDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.taskVoiceAiService.buildPayloadFromTranscript(
+      dto.transcript,
+      user,
+    );
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+  /** Voice: create task from validated payload (auth only for now). */
+  @Post("voice/create")
+  async createVoiceTask(
+    @Body() dto: CreateTaskDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.create(dto, user);
+    return res.status(HttpStatus.CREATED).json({ success: true, data: result });
+  }
 
   @Post()
   @RequiredPermissions(["tasking.tasks.create", "tasks.create", "super_admin"])
