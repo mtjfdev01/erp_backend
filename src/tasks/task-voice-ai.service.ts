@@ -6,10 +6,11 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import OpenAI, { toFile } from "openai";
 import { User, Department } from "../users/user.entity";
 import { CreateTaskDto } from "./dto/create-task.dto";
+import { VoiceTaskOutputLanguage, VoiceKnownUserDto } from "./dto/voice-task-transcript.dto";
 import {
   TaskPriority,
   TaskType,
@@ -34,7 +35,15 @@ export interface VoiceTaskExtract {
   priority: TaskPriority | null;
   due_date: string | null;
   assignee_names: string[];
+  assignee_ids: number[];
 }
+
+export type VoiceRosterUser = {
+  id: number;
+  first_name?: string | null;
+  last_name?: string | null;
+  department?: string | null;
+};
 
 export interface VoiceTaskBuildResult {
   transcript: string;
@@ -46,6 +55,7 @@ export interface VoiceTaskBuildResult {
     start_date: string;
     department: Department;
     assignee_labels: string[];
+    output_language: VoiceTaskOutputLanguage;
   };
   payload: CreateTaskDto;
   warnings: string[];
@@ -105,12 +115,38 @@ export class TaskVoiceAiService {
     return !Number.isNaN(parsed.getTime());
   }
 
-  private normalizePriority(value: unknown): TaskPriority {
+  private normalizePriority(value: unknown): TaskPriority | null {
     const raw = String(value || "").trim().toLowerCase();
     if (Object.values(TaskPriority).includes(raw as TaskPriority)) {
       return raw as TaskPriority;
     }
-    return TaskPriority.MEDIUM;
+
+    const keywordMap: Array<[string, TaskPriority]> = [
+      ["critical", TaskPriority.CRITICAL],
+      ["fori", TaskPriority.CRITICAL],
+      ["jaldi", TaskPriority.CRITICAL],
+      ["bahut zaroori", TaskPriority.CRITICAL],
+      ["high", TaskPriority.HIGH],
+      ["urgent", TaskPriority.HIGH],
+      ["aham", TaskPriority.HIGH],
+      ["ahmi", TaskPriority.HIGH],
+      ["oonchi", TaskPriority.HIGH],
+      ["ziyada", TaskPriority.HIGH],
+      ["low", TaskPriority.LOW],
+      ["kam", TaskPriority.LOW],
+      ["dheemi", TaskPriority.LOW],
+      ["medium", TaskPriority.MEDIUM],
+      ["normal", TaskPriority.MEDIUM],
+      ["darmiyani", TaskPriority.MEDIUM],
+    ];
+
+    for (const [keyword, priority] of keywordMap) {
+      if (raw === keyword || raw.includes(keyword)) {
+        return priority;
+      }
+    }
+
+    return null;
   }
 
   private truncateTitle(text: string): string {
@@ -131,7 +167,10 @@ export class TaskVoiceAiService {
     return mime;
   }
 
-  async transcribeAudio(file: Express.Multer.File): Promise<{ transcript: string }> {
+  async transcribeAudio(
+    file: Express.Multer.File,
+    language: "ur" | "en" = "ur",
+  ): Promise<{ transcript: string }> {
     if (!file?.buffer?.length) {
       throw new BadRequestException("Audio file is required");
     }
@@ -145,12 +184,17 @@ export class TaskVoiceAiService {
 
     const client = this.getClient();
     const ext = file.originalname?.split(".").pop() || "webm";
+    const whisperLang = language === "en" ? "en" : "ur";
 
     try {
       const result = await client.audio.transcriptions.create({
         file: await toFile(file.buffer, `recording.${ext}`),
         model: this.getTranscriptionModel(),
-        language: "en",
+        language: whisperLang,
+        prompt:
+          whisperLang === "ur"
+            ? "Urdu and Roman Urdu ERP task instructions. Names, priorities, kal, parso, assignee."
+            : "English ERP task instructions. Names, priorities, due dates, assignee.",
       });
 
       const transcript = String(result.text || "").trim();
@@ -169,24 +213,72 @@ export class TaskVoiceAiService {
     }
   }
 
-  private buildExtractPrompt(transcript: string, today: string): string {
+  private buildExtractPrompt(
+    transcript: string,
+    today: string,
+    outputLanguage: VoiceTaskOutputLanguage,
+    knownUsers: VoiceRosterUser[],
+  ): string {
     const priorities = Object.values(TaskPriority).join(", ");
+    const tomorrow = this.tomorrowIso();
+    const langRule =
+      outputLanguage === "ur"
+        ? `IMPORTANT: title and description MUST be written in Urdu (Urdu script or clear Roman Urdu). Translate from English if the speech was in English.`
+        : `IMPORTANT: title and description MUST be written in English. Translate from Urdu if the speech was in Urdu.`;
+
+    const urExample = `{"title":"ڈونر احمد کو کال کرنا","description":"علی کے لیے کل high priority فالو اپ","priority":"high","due_date":"${tomorrow}","assignee_names":["Ali"],"assignee_ids":[]}`;
+    const enExample = `{"title":"Call donor Ahmed","description":"High priority follow-up for Ali tomorrow","priority":"high","due_date":"${tomorrow}","assignee_names":["Ali"],"assignee_ids":[]}`;
+    const exampleOutput =
+      outputLanguage === "ur" ? urExample : enExample;
+
+    const rosterLines = knownUsers
+      .slice(0, 300)
+      .map((u) => {
+        const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+        return `- id=${u.id} name="${name || "Unknown"}"`;
+      })
+      .join("\n");
+
+    const rosterBlock = rosterLines
+      ? `Known staff roster (match spoken names to these exact spellings / ids):
+${rosterLines}
+
+When an assignee is mentioned, prefer the closest roster match.
+- Prefer returning assignee_ids with the exact roster id(s).
+- Also return assignee_names using the exact roster spelling (e.g. spoken "Hasan" → roster "Hassan").
+- Never invent people who are not in the roster unless no close match exists.`
+      : `No staff roster provided. Return assignee_names from speech as heard.`;
+
     return `You extract task fields from spoken instructions for an internal ERP task system.
 
-Today's date is ${today} (YYYY-MM-DD). Resolve relative dates like "tomorrow" or "next Friday" to YYYY-MM-DD.
+The speaker may use English, Urdu, Roman Urdu, or a mix (e.g. "Ali ko kal donor follow up ka high priority task banao").
+
+${langRule}
+
+${rosterBlock}
+
+Today's date is ${today} (YYYY-MM-DD). Resolve relative dates to YYYY-MM-DD, including:
+- English: tomorrow, today, next week, next Friday, in 3 days
+- Urdu/Roman Urdu: kal (tomorrow), aaj (today), parso (day after tomorrow), aglay hafte (next week), agla juma (next Friday)
 
 Return ONLY valid JSON with these keys:
 - title: short task title (string or null)
 - description: fuller task description (string or null)
-- priority: one of ${priorities} or null
+- priority: exactly one of ${priorities} or null. Map Urdu intent: aham/oonchi/ziyada/fori/jaldi → high or critical; kam/dheemi → low; otherwise medium.
 - due_date: YYYY-MM-DD or null
-- assignee_names: array of person names mentioned as assignees (empty array if none)
+- assignee_names: array of person names (empty array if none). Prefer exact roster spellings.
+- assignee_ids: array of integer user ids from the roster (empty array if none / uncertain).
 
 Rules:
 - Keep title concise (max ~12 words).
 - Use description for extra context from the speech.
 - Do not invent assignees if not mentioned.
-- If no clear title, derive one from the main action.
+- If no clear title, derive one from the main action in the required output language (${outputLanguage === "ur" ? "Urdu" : "English"}).
+- priority in JSON must be English enum only: low, medium, high, critical (or null).
+- Handle near-homophones carefully: Hasan↔Hassan, Alee↔Ali, Ahmed↔Ahmad.
+
+Example output for this request (title/description language = ${outputLanguage === "ur" ? "Urdu" : "English"}):
+${exampleOutput}
 
 Spoken transcript:
 """${transcript}"""`;
@@ -213,17 +305,23 @@ Spoken transcript:
             .filter(Boolean)
         : [];
 
+      const idsRaw = parsed.assignee_ids;
+      const assignee_ids = Array.isArray(idsRaw)
+        ? idsRaw
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n > 0)
+        : [];
+
       const due = str("due_date");
       const priorityRaw = str("priority");
 
       return {
         title: str("title"),
         description: str("description"),
-        priority: priorityRaw
-          ? this.normalizePriority(priorityRaw)
-          : null,
+        priority: priorityRaw ? this.normalizePriority(priorityRaw) : null,
         due_date: this.isValidIsoDate(due) ? due : null,
         assignee_names,
+        assignee_ids,
       };
     } catch (err: any) {
       this.logger.error(`Failed to parse task extract JSON: ${err?.message || err}`);
@@ -233,6 +331,8 @@ Spoken transcript:
 
   private async extractFromTranscript(
     transcript: string,
+    outputLanguage: VoiceTaskOutputLanguage,
+    knownUsers: VoiceRosterUser[],
   ): Promise<VoiceTaskExtract> {
     const client = this.getClient();
     const today = this.todayIso();
@@ -242,7 +342,12 @@ Spoken transcript:
       messages: [
         {
           role: "user",
-          content: this.buildExtractPrompt(transcript, today),
+          content: this.buildExtractPrompt(
+            transcript,
+            today,
+            outputLanguage,
+            knownUsers,
+          ),
         },
       ],
       // gpt-5-* models only support the default temperature
@@ -260,22 +365,68 @@ Spoken transcript:
       .replace(/\s+/g, " ");
   }
 
-  private userDisplayName(user: User): string {
-    return [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  private levenshtein(a: string, b: string): number {
+    const s = this.normalizeName(a);
+    const t = this.normalizeName(b);
+    if (s === t) return 0;
+    if (!s.length) return t.length;
+    if (!t.length) return s.length;
+
+    const rows = s.length + 1;
+    const cols = t.length + 1;
+    const matrix: number[][] = Array.from({ length: rows }, () =>
+      Array(cols).fill(0),
+    );
+    for (let i = 0; i < rows; i += 1) matrix[i][0] = i;
+    for (let j = 0; j < cols; j += 1) matrix[0][j] = j;
+
+    for (let i = 1; i < rows; i += 1) {
+      for (let j = 1; j < cols; j += 1) {
+        const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost,
+        );
+      }
+    }
+    return matrix[s.length][t.length];
   }
 
-  private scoreNameMatch(query: string, user: User): number {
+  private userDisplayName(
+    user: Pick<User, "first_name" | "last_name" | "email" | "id"> | VoiceRosterUser,
+  ): string {
+    const first = (user as any).first_name;
+    const last = (user as any).last_name;
+    const name = [first, last].filter(Boolean).join(" ").trim();
+    if (name) return name;
+    return (user as any).email || `User #${user.id}`;
+  }
+
+  private scoreNameMatch(
+    query: string,
+    user: Pick<User, "first_name" | "last_name" | "email" | "id"> | VoiceRosterUser,
+  ): number {
     const q = this.normalizeName(query);
     if (!q) return 0;
 
-    const full = this.normalizeName(this.userDisplayName(user));
-    const first = this.normalizeName(user.first_name || "");
-    const last = this.normalizeName(user.last_name || "");
-    const emailLocal = this.normalizeName((user.email || "").split("@")[0] || "");
+    const full = this.normalizeName(this.userDisplayName(user as any));
+    const first = this.normalizeName((user as any).first_name || "");
+    const last = this.normalizeName((user as any).last_name || "");
+    const emailLocal = this.normalizeName(
+      String((user as any).email || "").split("@")[0] || "",
+    );
 
     if (full && full === q) return 100;
-    if (first && first === q) return 90;
-    if (last && last === q) return 85;
+    if (first && first === q) return 95;
+    if (last && last === q) return 90;
+
+    // Near-spellings: Hasan ↔ Hassan (edit distance 1–2)
+    const firstDist = first ? this.levenshtein(q, first) : 99;
+    const fullDist = full ? this.levenshtein(q, full) : 99;
+    if (firstDist === 1 || fullDist === 1) return 88;
+    if (firstDist === 2 || fullDist === 2) return 78;
+
     if (full && full.includes(q)) return 75;
     if (q.includes(full) && full) return 70;
     if (first && q.includes(first)) return 60;
@@ -284,41 +435,77 @@ Spoken transcript:
   }
 
   private async resolveAssignees(
-    names: string[],
+    extract: VoiceTaskExtract,
     currentUser: User,
+    knownUsers: VoiceRosterUser[],
   ): Promise<{ users: User[]; warnings: string[] }> {
     const warnings: string[] = [];
-    const cleanedNames = names.map((n) => String(n || "").trim()).filter(Boolean);
-
-    if (cleanedNames.length === 0) {
-      return { users: [currentUser], warnings };
-    }
-
-    const candidates = await this.userRepo.find({
-      where: { is_archived: false, isActive: true },
-      take: 500,
-    });
-
     const matched: User[] = [];
     const seen = new Set<number>();
 
-    for (const name of cleanedNames) {
-      let best: User | null = null;
-      let bestScore = 0;
+    const pushUser = (user: User | null | undefined) => {
+      if (!user?.id || seen.has(user.id)) return;
+      matched.push(user);
+      seen.add(user.id);
+    };
 
-      for (const candidate of candidates) {
-        const score = this.scoreNameMatch(name, candidate);
-        if (score > bestScore) {
-          bestScore = score;
-          best = candidate;
+    // 1) Prefer explicit IDs from model (validated against roster or DB)
+    const rosterById = new Map(knownUsers.map((u) => [u.id, u]));
+    const idCandidates = extract.assignee_ids.filter((id) =>
+      knownUsers.length ? rosterById.has(id) : true,
+    );
+
+    if (idCandidates.length > 0) {
+      const fromDb = await this.userRepo.find({
+        where: { id: In(idCandidates) },
+      });
+      for (const id of idCandidates) {
+        const found = fromDb.find((u) => u.id === id);
+        if (found) pushUser(found);
+      }
+    }
+
+    // 2) Name match against roster / DB users
+    const cleanedNames = extract.assignee_names
+      .map((n) => String(n || "").trim())
+      .filter(Boolean);
+
+    if (cleanedNames.length > 0 && matched.length === 0) {
+      let candidates: Array<User | VoiceRosterUser> = knownUsers;
+      if (candidates.length === 0) {
+        candidates = await this.userRepo.find({
+          where: { is_archived: false, isActive: true },
+          take: 500,
+        });
+      }
+
+      const matchedRosterIds: number[] = [];
+      for (const name of cleanedNames) {
+        let best: User | VoiceRosterUser | null = null;
+        let bestScore = 0;
+
+        for (const candidate of candidates) {
+          const score = this.scoreNameMatch(name, candidate);
+          if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+          }
+        }
+
+        if (best && bestScore >= 55) {
+          matchedRosterIds.push(best.id);
+        } else {
+          warnings.push(`Could not match assignee "${name}".`);
         }
       }
 
-      if (best && bestScore >= 55 && !seen.has(best.id)) {
-        matched.push(best);
-        seen.add(best.id);
-      } else {
-        warnings.push(`Could not match assignee "${name}".`);
+      if (matchedRosterIds.length > 0) {
+        const fromDb = await this.userRepo.find({
+          where: { id: In(matchedRosterIds) },
+        });
+        for (const id of matchedRosterIds) {
+          pushUser(fromDb.find((u) => u.id === id));
+        }
       }
     }
 
@@ -333,13 +520,29 @@ Spoken transcript:
   async buildPayloadFromTranscript(
     transcript: string,
     currentUser: User,
+    outputLanguage: VoiceTaskOutputLanguage = "ur",
+    knownUsersInput: VoiceKnownUserDto[] = [],
   ): Promise<VoiceTaskBuildResult> {
     const cleanedTranscript = String(transcript || "").trim();
     if (!cleanedTranscript) {
       throw new BadRequestException("Transcript is required");
     }
 
-    const extract = await this.extractFromTranscript(cleanedTranscript);
+    const knownUsers: VoiceRosterUser[] = (knownUsersInput || [])
+      .map((u) => ({
+        id: Number(u.id),
+        first_name: u.first_name || null,
+        last_name: u.last_name || null,
+        department: u.department || null,
+      }))
+      .filter((u) => Number.isInteger(u.id) && u.id > 0)
+      .slice(0, 300);
+
+    const extract = await this.extractFromTranscript(
+      cleanedTranscript,
+      outputLanguage,
+      knownUsers,
+    );
     const warnings: string[] = [];
 
     const department =
@@ -349,7 +552,9 @@ Spoken transcript:
 
     const title =
       extract.title?.trim() ||
-      this.truncateTitle(cleanedTranscript.split(/[.!?]/)[0] || cleanedTranscript);
+      this.truncateTitle(
+        cleanedTranscript.split(/[.!?۔،]/)[0] || cleanedTranscript,
+      );
 
     const description =
       extract.description?.trim() ||
@@ -363,7 +568,7 @@ Spoken transcript:
         : this.tomorrowIso();
 
     const { users: assignees, warnings: assigneeWarnings } =
-      await this.resolveAssignees(extract.assignee_names, currentUser);
+      await this.resolveAssignees(extract, currentUser, knownUsers);
     warnings.push(...assigneeWarnings);
 
     const assigned_users = assignees.map((u) => u.id);
@@ -409,6 +614,7 @@ Spoken transcript:
         assignee_labels: assignees.map(
           (u) => this.userDisplayName(u) || u.email || `User #${u.id}`,
         ),
+        output_language: outputLanguage,
       },
       payload,
       warnings,

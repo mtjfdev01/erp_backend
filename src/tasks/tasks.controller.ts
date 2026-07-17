@@ -58,9 +58,13 @@ export class TasksController {
   )
   async transcribeVoice(
     @UploadedFile() file: Express.Multer.File,
+    @Body("language") language: string,
     @Res() res: Response,
   ) {
-    const result = await this.taskVoiceAiService.transcribeAudio(file);
+    const result = await this.taskVoiceAiService.transcribeAudio(
+      file,
+      language === "en" ? "en" : "ur",
+    );
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
 
@@ -74,6 +78,8 @@ export class TasksController {
     const result = await this.taskVoiceAiService.buildPayloadFromTranscript(
       dto.transcript,
       user,
+      dto.output_language || "ur",
+      dto.known_users || [],
     );
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
