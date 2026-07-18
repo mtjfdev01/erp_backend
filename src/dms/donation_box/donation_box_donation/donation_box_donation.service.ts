@@ -529,7 +529,7 @@ export class DonationBoxDonationService {
         : "collection_date";
       query.orderBy(`donation_box_donation.${safeSortField}`, sortOrder);
 
-      query.distinct(true);
+      // query.distinct(true);
 
       // Apply pagination
       query.skip(skip).take(pageSize);
