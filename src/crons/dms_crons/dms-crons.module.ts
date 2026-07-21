@@ -6,12 +6,14 @@ import { DmsCronsController } from "./dms-crons.controller";
 import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsModule } from "../../donations/donations.module";
 import { PermissionsModule } from "src/permissions/permissions.module";
+import { ManualRecurringModule } from "../../dms/manual_recurring/manual-recurring.module";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Donation]),
     DonationsModule,
     PermissionsModule,
+    ManualRecurringModule,
   ],
   providers: [DmsCronsService],
   controllers: [DmsCronsController],

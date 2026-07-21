@@ -179,9 +179,17 @@ export class CreateDonationDto {
   donation_frequency?: string;
 
   /**
+   * Top-level consent for recurring (website may send this and/or recurring.consent).
+   * Either this or recurring.consent must be true for weekly/monthly/daily recurring.
+   */
+  @IsOptional()
+  @IsBoolean()
+  recurring_consent?: boolean;
+
+  /**
    * Stripe recurring billing (subscription). Used when donation_method is stripe or stripe_embed.
-   * Example: { "interval": "month", "interval_count": 1 }
-   * Legacy: donation_frequency "monthly" maps to month / 1 when recurring is omitted.
+   * Example: { "interval": "month", "interval_count": 1, "start_date_mode": "same_date", "consent": true }
+   * Legacy: donation_frequency "monthly" | "weekly" | "daily" maps to interval when recurring is omitted.
    */
   @IsOptional()
   @ValidateNested()

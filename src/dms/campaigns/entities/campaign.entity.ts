@@ -1,5 +1,9 @@
 import { Column, Entity, Index } from "typeorm";
 import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
+import { CampaignTargetFrequency } from "../utils/campaign-recurring.constants";
+import {
+  CampaignCommunicationTemplates,
+} from "../utils/campaign-communication.constants";
 
 export enum CampaignStatus {
   DRAFT = "draft",
@@ -49,4 +53,23 @@ export class Campaign extends BaseEntity {
 
   @Column({ type: "boolean", default: false })
   is_featured: boolean;
+
+  /** When true, goal_amount is the target for each target_frequency period */
+  @Column({ type: "boolean", default: false })
+  is_recurring: boolean;
+
+  @Column({
+    type: "varchar",
+    length: 20,
+    nullable: true,
+  })
+  target_frequency: CampaignTargetFrequency | null;
+
+  /** Run monthly donor check (2nd): thanks if donated, reminder if not */
+  @Column({ type: "boolean", default: false })
+  monthly_donor_automation_enabled: boolean;
+
+  /** Per-slot templates: marketing, thanks, reminder, payment_link */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  communication_templates: CampaignCommunicationTemplates | null;
 }

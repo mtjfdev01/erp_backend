@@ -143,6 +143,13 @@ export class Donor extends BaseEntity {
   @Column({ type: "boolean", default: false, nullable: true })
   recurring: boolean;
 
+  /** Donor consented to recurring charges (website / Stripe recurring checkout). */
+  @Column({ type: "boolean", default: false, nullable: true })
+  recurring_consent: boolean;
+
+  @Column({ type: "timestamp", nullable: true, default: null })
+  recurring_consent_at: Date | null;
+
   @Column({ type: "boolean", default: false, nullable: true })
   multi_time_donor: boolean;
 

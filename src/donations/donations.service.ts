@@ -46,7 +46,7 @@ import {
 import axios from "axios";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
 import { Donor } from "src/dms/donor/entities/donor.entity";
-import { RecurringDonationPlan } from "src/dms/recurring_donations/entities/recurring_donation.entity";
+import { RecurringDonationPlan } from "./recurring_donations/entities/recurring-donation-plan.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 import { ProgressTrackersService } from "../progress_tracking/progress_trackers/progress-trackers.service";
@@ -326,26 +326,155 @@ export class DonationsService {
     return { ...payload, donationId };
   }
 
-  /** Stripe subscription + internal recurring row when payload has recurring or legacy monthly. */
+  /** Stripe subscription + internal recurring row when payload has recurring or legacy frequency. */
   private isDonationRecurring(createDonationDto: CreateDonationDto): boolean {
     if (createDonationDto.recurring?.interval) return true;
-    return createDonationDto.donation_frequency === "monthly";
+    const freq = String(createDonationDto.donation_frequency || "")
+      .trim()
+      .toLowerCase();
+    return freq === "monthly" || freq === "weekly" || freq === "daily";
   }
 
-  /** Maps API `recurring` (or legacy monthly) to Stripe billing params. */
+  private hasRecurringConsent(createDonationDto: CreateDonationDto): boolean {
+    return (
+      createDonationDto.recurring_consent === true ||
+      createDonationDto.recurring?.consent === true
+    );
+  }
+
+  /** Validates consent + start_date rules for recurring donations. */
+  private assertRecurringDonationPayload(
+    createDonationDto: CreateDonationDto,
+  ): void {
+    if (!this.isDonationRecurring(createDonationDto)) return;
+
+    if (!this.hasRecurringConsent(createDonationDto)) {
+      throw new HttpException(
+        "Recurring donation requires consent (recurring_consent or recurring.consent must be true)",
+        400,
+      );
+    }
+
+    const mode = String(
+      createDonationDto.recurring?.start_date_mode || "same_date",
+    )
+      .trim()
+      .toLowerCase();
+    const startDate = createDonationDto.recurring?.start_date?.trim();
+
+    if (mode === "custom" && !startDate) {
+      throw new HttpException(
+        "recurring.start_date is required when start_date_mode is custom",
+        400,
+      );
+    }
+
+    if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+      throw new HttpException(
+        "recurring.start_date must be YYYY-MM-DD",
+        400,
+      );
+    }
+  }
+
+  /** Maps API `recurring` (or legacy frequency) to Stripe billing params. */
   private resolveStripeRecurring(
     createDonationDto: CreateDonationDto,
   ): StripeRecurringParams | undefined {
+    const consent = this.hasRecurringConsent(createDonationDto);
+    const start_date_mode = createDonationDto.recurring?.start_date_mode;
+    const start_date = createDonationDto.recurring?.start_date;
+
     if (createDonationDto.recurring?.interval) {
       return {
-        interval: createDonationDto.recurring.interval as StripeRecurringParams["interval"],
+        interval: createDonationDto.recurring
+          .interval as StripeRecurringParams["interval"],
         interval_count: createDonationDto.recurring.interval_count ?? 1,
+        start_date_mode,
+        start_date,
+        consent,
       };
     }
-    if (createDonationDto.donation_frequency === "monthly") {
-      return { interval: "month", interval_count: 1 };
+
+    const freq = String(createDonationDto.donation_frequency || "")
+      .trim()
+      .toLowerCase();
+    if (freq === "weekly") {
+      return {
+        interval: "week",
+        interval_count: 1,
+        start_date_mode,
+        start_date,
+        consent,
+      };
+    }
+    if (freq === "monthly") {
+      return {
+        interval: "month",
+        interval_count: 1,
+        start_date_mode,
+        start_date,
+        consent,
+      };
+    }
+    if (freq === "daily") {
+      return {
+        interval: "day",
+        interval_count: 1,
+        start_date_mode,
+        start_date,
+        consent,
+      };
     }
     return undefined;
+  }
+
+  private applyDonorRecurringConsent(donor: Donor): void {
+    donor.recurring = true;
+    if (donor.recurring_consent !== true) {
+      donor.recurring_consent = true;
+      donor.recurring_consent_at = new Date();
+    }
+  }
+
+  /** Legacy plan table is for bank/Meezan recurring — not Stripe subscriptions. */
+  private usesLegacyRecurringPlan(donationMethod?: string): boolean {
+    const method = String(donationMethod || "").trim().toLowerCase();
+    return method !== "stripe" && method !== "stripe_embed";
+  }
+
+  /** Create legacy plan row + link donation.recurrence_id (Meezan etc.). */
+  private async createLegacyRecurringPlanIfNeeded(
+    createDonationDto: CreateDonationDto,
+    donorId: number | null,
+    donationId?: number,
+  ): Promise<number> {
+    if (
+      !this.isDonationRecurring(createDonationDto) ||
+      !this.usesLegacyRecurringPlan(createDonationDto.donation_method)
+    ) {
+      return 0;
+    }
+
+    const recurringDonation = this.recurringDonationPlanRepository.create({
+      ...createDonationDto,
+      donor_id: donorId,
+    });
+    const savedRecurring =
+      await this.recurringDonationPlanRepository.save(recurringDonation);
+
+    if (donationId) {
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId },
+      });
+      if (donation && !donation.recurrence_id) {
+        await this.donationRepository.update(donationId, {
+          recurrence_id: savedRecurring.id,
+        });
+      }
+    }
+
+    return savedRecurring.id;
   }
 
   private async assertDonorNotArchivedByEmail(email: string): Promise<void> {
@@ -399,6 +528,8 @@ export class DonationsService {
         address: createDonationDto.address,
         notification_subscription:
           createDonationDto.notification_subscription,
+        recurring: this.isDonationRecurring(createDonationDto),
+        recurring_consent: this.hasRecurringConsent(createDonationDto),
       });
       if (!donor) {
         donor = await this.donorService.findByEmail(
@@ -415,22 +546,13 @@ export class DonationsService {
     await this.syncDonationGeoFromDonorIfNeeded(donationId, donor);
 
     if (this.isDonationRecurring(createDonationDto)) {
-      const donation = await this.donationRepository.findOne({
-        where: { id: donationId },
-      });
-      if (donation && !donation.recurrence_id) {
-        const recurringDonation = this.recurringDonationPlanRepository.create({
-          ...createDonationDto,
-          donor_id: donor.id,
-        });
-        const savedRecurring =
-          await this.recurringDonationPlanRepository.save(recurringDonation);
-        await this.donationRepository.update(donationId, {
-          recurrence_id: savedRecurring.id,
-        });
-        donor.recurring = true;
-        await this.donorRepository.save(donor);
-      }
+      await this.createLegacyRecurringPlanIfNeeded(
+        createDonationDto,
+        donor.id,
+        donationId,
+      );
+      this.applyDonorRecurringConsent(donor);
+      await this.donorRepository.save(donor);
     }
 
     return donor;
@@ -1844,6 +1966,8 @@ export class DonationsService {
       const deferPostCreate =
         this.shouldDeferDonorPostCreate(createDonationDto);
 
+      this.assertRecurringDonationPayload(createDonationDto);
+
       await this.applyQurbaniProgressTemplateFromPayload(createDonationDto);
 
       let donorId: number | null = createDonationDto.donor_id || null;
@@ -1901,6 +2025,8 @@ export class DonationsService {
               address: createDonationDto?.address,
               notification_subscription:
                 createDonationDto.notification_subscription,
+              recurring: this.isDonationRecurring(createDonationDto),
+              recurring_consent: this.hasRecurringConsent(createDonationDto),
             });
 
             if (donor) {
@@ -1928,15 +2054,12 @@ export class DonationsService {
         }
 
         if (!deferPostCreate && this.isDonationRecurring(createDonationDto)) {
-          const recurringDonation = this.recurringDonationPlanRepository.create({
-            ...createDonationDto,
-            donor_id: donorId,
-          });
-          const savedRecurring =
-            await this.recurringDonationPlanRepository.save(recurringDonation);
-          recurringRowId = savedRecurring.id;
+          recurringRowId = await this.createLegacyRecurringPlanIfNeeded(
+            createDonationDto,
+            donorId,
+          );
           if (donor) {
-            donor.recurring = true;
+            this.applyDonorRecurringConsent(donor);
             await this.donorRepository.save(donor);
           }
         }

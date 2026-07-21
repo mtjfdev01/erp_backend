@@ -19,6 +19,7 @@ import {
 } from "../../utils/filters/common-filter.util";
 import { Route } from "../geographic/routes/entities/route.entity";
 import { City } from "../geographic/cities/entities/city.entity";
+import { Region } from "../geographic/regions/entities/region.entity";
 import { User } from "../../users/user.entity";
 import { DonationBoxAuditService } from "./audit/donation-box-audit.service";
 import { DonationBoxAuditAction } from "./audit/donation-box-audit-action.enum";
@@ -68,6 +69,8 @@ export class DonationBoxService {
     private readonly routeRepository: Repository<Route>,
     @InjectRepository(City)
     private readonly cityRepository: Repository<City>,
+    @InjectRepository(Region)
+    private readonly regionRepository: Repository<Region>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(PermissionsEntity)
@@ -325,70 +328,138 @@ export class DonationBoxService {
   }
 
   /**
-   * Resolve route for CSV import — by route_id or route_name (+ optional city).
+   * Resolve region + city + route for CSV import.
+   * Finds existing entities by name; creates the route under the city if missing.
    */
-  async resolveRouteForImport(params: {
+  async resolveGeoForImport(params: {
     route_id?: number;
     route_name?: string;
     city_id?: number;
     city_name?: string;
-  }): Promise<{ route_id: number; city_id?: number }> {
+    region_id?: number;
+    region_name?: string;
+  }): Promise<{ route_id: number; city_id: number; region_id?: number }> {
+    let regionId = params.region_id;
+    if (!regionId && params.region_name?.trim()) {
+      const regions = await this.regionRepository.find({
+        where: { name: ILike(params.region_name.trim()) },
+      });
+      if (regions.length === 0) {
+        throw new NotFoundException(
+          `Region "${params.region_name}" not found`,
+        );
+      }
+      if (regions.length > 1) {
+        throw new NotFoundException(
+          `Multiple regions match "${params.region_name}" — use region_id`,
+        );
+      }
+      regionId = regions[0].id;
+    }
+
+    let city: City | null = null;
+    if (params.city_id) {
+      city = await this.cityRepository.findOne({
+        where: { id: params.city_id },
+        relations: ["region", "country"],
+      });
+      if (!city) {
+        throw new NotFoundException(`City with ID ${params.city_id} not found`);
+      }
+    } else if (params.city_name?.trim()) {
+      const cityQb = this.cityRepository
+        .createQueryBuilder("city")
+        .leftJoinAndSelect("city.region", "region")
+        .leftJoinAndSelect("city.country", "country")
+        .where("LOWER(city.name) = LOWER(:name)", {
+          name: params.city_name.trim(),
+        });
+      if (regionId) {
+        cityQb.andWhere("city.region_id = :regionId", { regionId });
+      }
+      const cities = await cityQb.getMany();
+      if (cities.length === 0) {
+        throw new NotFoundException(
+          `City "${params.city_name}" not found${
+            regionId ? ` in region_id ${regionId}` : ""
+          }`,
+        );
+      }
+      if (cities.length > 1) {
+        throw new NotFoundException(
+          `Multiple cities match "${params.city_name}" — provide Region`,
+        );
+      }
+      city = cities[0];
+    }
+
+    if (!city) {
+      throw new NotFoundException("city_id or City is required for import");
+    }
+
+    if (!regionId && city.region_id) {
+      regionId = city.region_id;
+    }
+
     if (params.route_id) {
       const route = await this.routeRepository.findOne({
         where: { id: params.route_id },
+        relations: ["cities"],
       });
       if (!route) {
         throw new NotFoundException(
           `Route with ID ${params.route_id} not found`,
         );
       }
-      return { route_id: route.id, city_id: params.city_id };
+      return { route_id: route.id, city_id: city.id, region_id: regionId };
     }
 
     const routeName = params.route_name?.trim();
     if (!routeName) {
-      throw new NotFoundException("route_id or route_name is required");
+      throw new NotFoundException("route_id or Route is required");
     }
 
-    let cityId = params.city_id;
-    if (!cityId && params.city_name?.trim()) {
-      const cities = await this.cityRepository.find({
-        where: { name: ILike(params.city_name.trim()) },
-      });
-      if (cities.length === 0) {
-        throw new NotFoundException(`City "${params.city_name}" not found`);
-      }
-      if (cities.length > 1) {
-        throw new NotFoundException(
-          `Multiple cities match "${params.city_name}" — use city_id`,
-        );
-      }
-      cityId = cities[0].id;
-    }
-
-    const qb = this.routeRepository
+    const existingRoutes = await this.routeRepository
       .createQueryBuilder("route")
-      .where("LOWER(route.name) = LOWER(:name)", { name: routeName });
+      .innerJoin("route.cities", "city")
+      .where("LOWER(route.name) = LOWER(:name)", { name: routeName })
+      .andWhere("city.id = :cityId", { cityId: city.id })
+      .getMany();
 
-    if (cityId) {
-      qb.innerJoin("route.cities", "city").andWhere("city.id = :cityId", {
-        cityId,
-      });
-    }
-
-    const routes = await qb.getMany();
-    if (routes.length === 0) {
+    if (existingRoutes.length > 1) {
       throw new NotFoundException(
-        `Route "${routeName}" not found${cityId ? ` for city_id ${cityId}` : ""}`,
-      );
-    }
-    if (routes.length > 1) {
-      throw new NotFoundException(
-        `Multiple routes named "${routeName}" — provide city_id or city_name`,
+        `Multiple routes named "${routeName}" for city "${city.name}"`,
       );
     }
 
-    return { route_id: routes[0].id, city_id: cityId };
+    if (existingRoutes.length === 1) {
+      return {
+        route_id: existingRoutes[0].id,
+        city_id: city.id,
+        region_id: regionId,
+      };
+    }
+
+    // Create route for this city when missing
+    const createRegionId = city.region_id ?? regionId;
+    if (!createRegionId || !city.country_id) {
+      throw new BadRequestException(
+        `City "${city.name}" is missing region/country — cannot create route "${routeName}"`,
+      );
+    }
+    const newRoute = this.routeRepository.create({
+      name: routeName,
+      region_id: createRegionId,
+      country_id: city.country_id,
+      cities: [city],
+    });
+    const savedRoute = await this.routeRepository.save(newRoute);
+
+    return {
+      route_id: savedRoute.id,
+      city_id: city.id,
+      region_id: regionId,
+    };
   }
 
   async resolveLocationDetails(
@@ -444,33 +515,100 @@ export class DonationBoxService {
   }
 
   /**
-   * CSV / data-import row — same persistence rules as create().
+   * Resolve FRD officer reference (person name) → user id(s) for assignment.
+   * Matches full name, first name, or first+last with light fuzzy tolerance.
    */
+  private async resolveUserIdsByOfficerName(
+    name: string | undefined,
+  ): Promise<number[]> {
+    const query = String(name || "").trim();
+    if (!query) return [];
+
+    const candidates = await this.userRepository.find({
+      where: { is_archived: false, isActive: true },
+      take: 500,
+    });
+
+    const normalize = (v: string) =>
+      String(v || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+
+    const q = normalize(query);
+    let best: User | null = null;
+    let bestScore = 0;
+
+    for (const user of candidates) {
+      const first = normalize(user.first_name || "");
+      const last = normalize(user.last_name || "");
+      const full = normalize([user.first_name, user.last_name].filter(Boolean).join(" "));
+      let score = 0;
+      if (full && full === q) score = 100;
+      else if (first && first === q) score = 90;
+      else if (full && full.includes(q)) score = 80;
+      else if (q.includes(full) && full) score = 75;
+      else if (first && q.includes(first) && first.length >= 3) score = 65;
+      if (score > bestScore) {
+        bestScore = score;
+        best = user;
+      }
+    }
+
+    if (best && bestScore >= 65) return [best.id];
+    throw new NotFoundException(
+      `FRD officer "${query}" not found among active users — check spelling or assign manually`,
+    );
+  }
+
   async importDonationBoxRow(
     row: Record<string, unknown>,
     user: any,
   ): Promise<DonationBox> {
-    const resolved = await this.resolveRouteForImport({
+    const resolved = await this.resolveGeoForImport({
       route_id: row.route_id as number | undefined,
       route_name: row.route_name as string | undefined,
       city_id: row.city_id as number | undefined,
       city_name: row.city_name as string | undefined,
+      region_id: row.region_id as number | undefined,
+      region_name: row.region_name as string | undefined,
     });
 
+    let assignedUserIds = Array.isArray(row.assigned_user_ids)
+      ? (row.assigned_user_ids as number[])
+      : [];
+
+    // FRD Officer Reference is a name lookup only → assignedUsers (not stored)
+    const frdRef = String(row.frd_officer_reference || "").trim();
+    if (assignedUserIds.length === 0 && frdRef) {
+      assignedUserIds = await this.resolveUserIdsByOfficerName(frdRef);
+    }
+
+    const hasGps =
+      row.registration_latitude != null && row.registration_longitude != null;
+
     const createDto = {
+      box_id_no: (row.box_id_no as string | undefined) || undefined,
       key_no: row.key_no as string | undefined,
       route_id: resolved.route_id,
-      city_id: resolved.city_id ?? (row.city_id as number | undefined),
+      city_id: resolved.city_id,
       shop_name: String(row.shop_name || "").trim(),
       shopkeeper: row.shopkeeper as string | undefined,
       cell_no: row.cell_no as string | undefined,
+      address: (row.address as string | undefined) || undefined,
       landmark_marketplace: row.landmark_marketplace as string | undefined,
       box_type: row.box_type,
       status: row.status,
       frequency: row.frequency,
       active_since: row.active_since,
       notes: row.notes as string | undefined,
-      assigned_user_ids: (row.assigned_user_ids as number[]) || [],
+      assigned_user_ids: assignedUserIds,
+      registration_latitude: row.registration_latitude as number | undefined,
+      registration_longitude: row.registration_longitude as number | undefined,
+      registration_location_name:
+        (row.registration_location_name as string | undefined) || undefined,
+      require_collection_location:
+        row.require_collection_location === true || hasGps,
     } as CreateDonationBoxDto;
 
     return this.create(createDto, user);
@@ -507,10 +645,12 @@ export class DonationBoxService {
       const skip = (page - 1) * pageSize;
 
       const searchFields = [
+        "box_id_no",
         "key_no",
         "shop_name",
         "shopkeeper",
         "cell_no",
+        "address",
         "landmark_marketplace",
         "route.name",
       ];

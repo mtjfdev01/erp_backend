@@ -1,10 +1,12 @@
 export const DONATION_BOX_AUDIT_PATCH_FIELDS = [
+  "box_id_no",
   "key_no",
   "route_id",
   "city_id",
   "shop_name",
   "shopkeeper",
   "cell_no",
+  "address",
   "landmark_marketplace",
   "box_type",
   "status",

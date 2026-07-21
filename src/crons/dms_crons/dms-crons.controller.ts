@@ -83,4 +83,39 @@ export class DmsCronsController {
       });
     }
   }
+
+  /**
+   * Manual trigger: send reminders to manual recurring donors who have not donated this month.
+   * POST /dms-crons/manual-recurring-reminders
+   * POST /dms-crons/manual-recurring-reminders?period_key=2026-07&dry_run=true
+   */
+  @Post("manual-recurring-reminders")
+  async manualRecurringReminders(
+    @Query("period_key") periodKey: string | undefined,
+    @Query("dry_run") dryRun: string | undefined,
+    @Query("force") force: string | undefined,
+    @Query("chunk_size") chunkSize: string | undefined,
+    @Query("include_details") includeDetails: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.dmsCronsService.runManualRecurringDonationReminders({
+        period_key: periodKey,
+        dry_run: dryRun === "true",
+        force: force === "true",
+        chunk_size: chunkSize ? Number(chunkSize) : undefined,
+        include_details: includeDetails === "true",
+      });
+      return res.status(200).json({
+        success: true,
+        message: `Recurring campaign job (${result.period_key}) — scanned: ${result.scanned}, reminders: ${result.reminders_sent}, thanks: ${result.thanks_sent}, dry_run: ${result.dry_run}`,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: `Manual recurring reminders failed: ${error.message}`,
+      });
+    }
+  }
 }

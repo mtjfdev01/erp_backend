@@ -44,6 +44,20 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "int", nullable: true, default: 1 })
   billing_interval_count: number | null;
 
+  /** Website / Stripe schedule: same_date | first_of_month | custom */
+  @Column({ type: "varchar", length: 32, nullable: true, default: null })
+  start_date_mode: string | null;
+
+  /** Intended first billing date (YYYY-MM-DD calendar date stored as date). */
+  @Column({ type: "date", nullable: true, default: null })
+  start_date: string | null;
+
+  @Column({ type: "boolean", nullable: true, default: null })
+  consent: boolean | null;
+
+  @Column({ type: "timestamp", nullable: true, default: null })
+  consent_at: Date | null;
+
   @Column({ type: "int", nullable: true, default: null })
   amount: number | null;
 

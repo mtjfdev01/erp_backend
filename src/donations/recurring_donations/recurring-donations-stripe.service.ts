@@ -127,6 +127,7 @@ export class RecurringDonationsStripeService {
 
     const donation = await this.loadInitialDonation(donationId);
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
+    const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
 
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
@@ -141,6 +142,10 @@ export class RecurringDonationsStripeService {
       stripe_event_id: event.id,
       billing_interval: billing?.interval ?? null,
       billing_interval_count: billing?.interval_count ?? 1,
+      start_date_mode: schedule.start_date_mode,
+      start_date: schedule.start_date,
+      consent: schedule.consent,
+      consent_at: schedule.consent === true ? new Date() : null,
       amount: donation?.amount ?? null,
       currency: donation?.currency ?? null,
       status: "active",
@@ -192,6 +197,7 @@ export class RecurringDonationsStripeService {
     }
 
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
+    const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
@@ -204,6 +210,10 @@ export class RecurringDonationsStripeService {
       stripe_event_id: event.id,
       billing_interval: billing?.interval ?? null,
       billing_interval_count: billing?.interval_count ?? 1,
+      start_date_mode: schedule.start_date_mode,
+      start_date: schedule.start_date,
+      consent: schedule.consent,
+      consent_at: schedule.consent === true ? new Date() : null,
       amount: donation.amount ?? null,
       currency: donation.currency ?? null,
       status: "active",
@@ -399,6 +409,7 @@ export class RecurringDonationsStripeService {
     const donation = await this.loadInitialDonation(donationId);
     if (!donation) return;
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
+    const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
@@ -412,6 +423,10 @@ export class RecurringDonationsStripeService {
       stripe_event_id: eventId,
       billing_interval: billing?.interval ?? null,
       billing_interval_count: billing?.interval_count ?? 1,
+      start_date_mode: schedule.start_date_mode,
+      start_date: schedule.start_date,
+      consent: schedule.consent,
+      consent_at: schedule.consent === true ? new Date() : null,
       amount: donation.amount ?? null,
       currency: donation.currency ?? null,
       status: "active",
@@ -421,6 +436,34 @@ export class RecurringDonationsStripeService {
       donation_type: donation.donation_type ?? null,
     });
     await this.recurringDonationRepo.save(row);
+  }
+
+  private async fetchSubscriptionScheduleMeta(
+    subscriptionId: string,
+  ): Promise<{
+    start_date_mode: string | null;
+    start_date: string | null;
+    consent: boolean | null;
+  }> {
+    const stripe = this.stripeService.getStripeClient();
+    if (!stripe) {
+      return { start_date_mode: null, start_date: null, consent: null };
+    }
+    try {
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      const meta = sub.metadata || {};
+      const consentRaw = meta.consent;
+      let consent: boolean | null = null;
+      if (consentRaw === "true") consent = true;
+      else if (consentRaw === "false") consent = false;
+      return {
+        start_date_mode: meta.start_date_mode || null,
+        start_date: meta.start_date || null,
+        consent,
+      };
+    } catch {
+      return { start_date_mode: null, start_date: null, consent: null };
+    }
   }
 
   private async fetchSubscriptionBilling(

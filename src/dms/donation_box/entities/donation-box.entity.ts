@@ -37,6 +37,10 @@ export enum CollectionFrequency {
 @Entity("donation_boxes")
 @Index("idx_donation_box_route", ["route_id"])
 export class DonationBox extends BaseEntity {
+  /** External box number from field sheets (e.g. FSD-L-141). Alias: Box ID No. / Box No. */
+  @Column({ name: "box_id_no", type: "varchar", nullable: true, unique: true })
+  box_id_no: string | null;
+
   @Column({ nullable: true })
   key_no: string;
 
@@ -56,6 +60,10 @@ export class DonationBox extends BaseEntity {
 
   @Column({ nullable: true })
   cell_no: string;
+
+  /** Free-text shop address from field sheets. */
+  @Column({ type: "text", nullable: true })
+  address: string | null;
 
   @Column({ nullable: true })
   landmark_marketplace: string;

@@ -23,6 +23,10 @@ export class CreateDonationBoxDto {
 
   @IsString()
   @IsOptional()
+  box_id_no?: string;
+
+  @IsString()
+  @IsOptional()
   key_no?: string;
 
   // Location Details (Required) - Geographic Reference
@@ -49,6 +53,10 @@ export class CreateDonationBoxDto {
 
   @IsString()
   @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
   landmark_marketplace?: string;
 
   // Box Details
@@ -70,11 +78,6 @@ export class CreateDonationBoxDto {
   })
   @IsOptional()
   frequency?: CollectionFrequency;
-
-  // Reference & Dates
-  @IsString()
-  @IsOptional()
-  frd_officer_reference?: string;
 
   @IsDateString()
   @IsNotEmpty({ message: "Active since date is required" })

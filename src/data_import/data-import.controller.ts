@@ -65,10 +65,16 @@ export class DataImportController {
     @Res() res: Response,
   ) {
     try {
+      const yearRaw = req?.body?.year;
+      const year =
+        yearRaw != null && String(yearRaw).trim() !== ""
+          ? Number(String(yearRaw).trim())
+          : undefined;
       const result = await this.dataImportService.importCsvFile(
         entityName,
         file,
         req?.user ?? null,
+        { year },
       );
       return res.status(HttpStatus.OK).json({
         success: true,

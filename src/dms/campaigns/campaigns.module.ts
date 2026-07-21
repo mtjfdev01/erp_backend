@@ -5,13 +5,14 @@ import { CampaignsService } from "./campaigns.service";
 import { CampaignsController } from "./campaigns.controller";
 import { PublicCampaignsController } from "./public-campaigns.controller";
 import { Campaign } from "./entities/campaign.entity";
+import { CampaignDonationItem } from "./entities/campaign-donation-item.entity";
 import { Donation } from "../../donations/entities/donation.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { User } from "../../users/user.entity";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Campaign, Donation, User]),
+    TypeOrmModule.forFeature([Campaign, CampaignDonationItem, Donation, User]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },

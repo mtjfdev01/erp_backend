@@ -197,6 +197,8 @@ export class DonorController {
     @Query("start_date") start_date?: string,
     @Query("end_date") end_date?: string,
     @Query("multi_time_donors") multi_time_donor?: string,
+    @Query("recurring") recurring?: string,
+    @Query("donation_type") donation_type?: string,
     @Query("is_mature_donor") is_mature_donor?: string,
     @Query("source") source?: string,
     @Query("assigned_to_user_id") assigned_to_user_id?: string,
@@ -248,6 +250,19 @@ export class DonorController {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
 
+      let recurringFilter: boolean | undefined =
+        recurring === "true"
+          ? true
+          : recurring === "false"
+            ? false
+            : undefined;
+      // Donation Type dropdown maps to the same recurring flag
+      if (recurringFilter === undefined && donation_type) {
+        const dt = donation_type.toLowerCase().trim();
+        if (dt === "recurring_donor") recurringFilter = true;
+        else if (dt === "one_time_donor") recurringFilter = false;
+      }
+
       const result = await this.donorService.findAll(
         {
           page: pageNum,
@@ -264,6 +279,7 @@ export class DonorController {
           multi_time_donor: multi_time_donor
             ? multi_time_donor === "true"
             : undefined,
+          recurring: recurringFilter,
           is_mature_donor:
             is_mature_donor === "true"
               ? true

@@ -5,6 +5,8 @@ import { Repository, In, Not, IsNull, FindOperator } from "typeorm";
 import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsService } from "../../donations/donations.service";
 import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
+import { ManualRecurringModule } from "../../dms/manual_recurring/manual-recurring.module";
+import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
 
 @Injectable()
 export class DmsCronsService {
@@ -15,6 +17,7 @@ export class DmsCronsService {
     private readonly donationRepository: Repository<Donation>,
     private readonly donationsService: DonationsService,
     private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
+    private readonly manualRecurringReminderService: ManualRecurringReminderService,
   ) {}
 
   /**
@@ -40,6 +43,31 @@ export class DmsCronsService {
     } catch (error: any) {
       this.logger.error(
         `Pending donation call-center follow-up cron failed: ${error?.message}`,
+        error?.stack,
+      );
+    }
+  }
+
+  /**
+   * Monthly — 9:00 AM on the 2nd (Asia/Karachi).
+   * Reminds manual recurring donors who have not donated yet this month.
+   */
+  @Cron("0 9 2 * *", {
+    name: "manual-recurring-donation-reminders",
+    timeZone: "Asia/Karachi",
+  })
+  async handleManualRecurringDonationReminders() {
+    try {
+      const result =
+        await this.manualRecurringReminderService.processMonthlyReminders();
+      if (result.reminders_sent > 0 || result.reminders_failed > 0) {
+        this.logger.log(
+          `Manual recurring reminders (${result.period_key}): sent ${result.reminders_sent}, failed ${result.reminders_failed}, skipped donated ${result.skipped_donated}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Manual recurring donation reminders cron failed: ${error?.message}`,
         error?.stack,
       );
     }
@@ -308,5 +336,17 @@ export class DmsCronsService {
     return this.donationPendingFollowUpService.processPendingDonationFollowUps({
       donationDate,
     });
+  }
+
+  async runManualRecurringDonationReminders(options?: {
+    period_key?: string;
+    dry_run?: boolean;
+    force?: boolean;
+    chunk_size?: number;
+    include_details?: boolean;
+  }) {
+    return this.manualRecurringReminderService.processMonthlyReminders(
+      options || {},
+    );
   }
 }

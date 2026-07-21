@@ -16,10 +16,14 @@ WEEKLY
 MONTHLY
 -------
   1st of month 09:00 AM  — Donations Monthly Report  (donations-report-cron.service.ts)
+  2nd of month 09:00 AM  — Manual Recurring Donation Reminders  (dms_crons/dms-crons.service.ts)
+    • Processes pledges in chunks (default 500, env MANUAL_RECURRING_CHUNK_SIZE)
+    • Optional pause between chunks: MANUAL_RECURRING_CHUNK_DELAY_MS (default 250ms)
 
 MANUAL (API endpoints)
 ----------------------
   POST /dms-crons/sync-meezan       — One-time Meezan status sync   (dms_crons/dms-crons.controller.ts)
+  POST /dms-crons/manual-recurring-reminders — Manual recurring reminder job (dms_crons/dms-crons.controller.ts)
   POST /donations-report/daily       — Manual daily report trigger   (donations_report/donations-report.controller.ts)
   POST /donations-report/weekly      — Manual weekly report trigger  (donations_report/donations-report.controller.ts)
   POST /donations-report/monthly     — Manual monthly report trigger (donations_report/donations-report.controller.ts)

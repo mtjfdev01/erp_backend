@@ -22,5 +22,6 @@ export interface EntityImportHandler {
   importRows(
     rows: Record<string, string>[],
     user: any,
+    options?: Record<string, unknown>,
   ): Promise<ImportBatchResult>;
 }

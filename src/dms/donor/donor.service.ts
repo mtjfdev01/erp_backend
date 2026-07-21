@@ -34,6 +34,7 @@ import { DataScopeService } from "../../permissions/data-scope/data-scope.servic
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
+import { PermissionsService } from "../../permissions/permissions.service";
 import { buildDonorGeoSearch } from "./utils/donor-geo.util";
 
 interface PaginationOptions {
@@ -68,7 +69,83 @@ export class DonorService {
     private readonly donorAuditService: DonorAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly permissionsService: PermissionsService,
   ) {}
+
+  async getDonorSourceAccess(
+    userId: number,
+    action: string,
+  ): Promise<{ online: boolean; offline: boolean }> {
+    if (userId === -1) return { online: true, offline: true };
+
+    const hasSuperAdmin = await this.permissionsService.hasPermission(
+      userId,
+      "super_admin",
+    );
+    if (hasSuperAdmin) return { online: true, offline: true };
+
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(
+      userId,
+      "fund_raising_manager",
+    );
+    if (hasFundRaisingManager) return { online: true, offline: true };
+
+    const hasUnifiedDonors = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.donors.${action}`,
+    );
+    if (hasUnifiedDonors) return { online: true, offline: true };
+
+    const hasOnline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.online_donors.${action}`,
+    );
+    const hasOffline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.offline_donors.${action}`,
+    );
+
+    return { online: hasOnline, offline: hasOffline };
+  }
+
+  async resolveGeoScopeForUser(user: {
+    id?: number;
+    role?: string;
+    department?: string;
+    assigned_countries?: number[] | null;
+    assigned_regions?: number[] | null;
+    assigned_districts?: number[] | null;
+    assigned_tehsils?: number[] | null;
+    assigned_cities?: number[] | null;
+    assigned_routes?: number[] | null;
+    geographic_off?: boolean;
+  } | null): Promise<ResolvedGeographicScope | null> {
+    if (!user?.id || user.id === -1) return null;
+    return this.geographicScopeService.resolveForUser(
+      user.id,
+      user.role,
+      user as any,
+    );
+  }
+
+  async resolveCommunicationAudience(
+    user: { id?: number; role?: string; department?: string } | null | undefined,
+    payload: {
+      selection_mode: "manual" | "filters";
+      donor_ids?: number[];
+      donor_filters?: Record<string, any>;
+    },
+  ) {
+    let sourceAccess = { online: true, offline: true };
+    if (user?.id) {
+      sourceAccess = await this.getDonorSourceAccess(user.id, "list_view");
+      if (!sourceAccess.online && !sourceAccess.offline) {
+        throw new ForbiddenException("Insufficient permissions to view donors");
+      }
+    }
+    const geoScope = await this.resolveGeoScopeForUser(user);
+    return this.resolveAudienceIds(payload, geoScope, sourceAccess, user ?? undefined);
+  }
 
   async resolveDonorScope(currentUser?: {
     id?: number;
@@ -195,6 +272,8 @@ export class DonorService {
       is_active: donor.is_active,
       is_archived: donor.is_archived,
       recurring: donor.recurring,
+      recurring_consent: donor.recurring_consent,
+      recurring_consent_at: donor.recurring_consent_at,
       multi_time_donor: donor.multi_time_donor,
       is_mature_donor: donor.is_mature_donor,
       notification_subscription: donor.notification_subscription,
@@ -372,6 +451,7 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
+        recurring,
         is_mature_donor,
         source,
         assigned_to_user_id,
@@ -408,6 +488,17 @@ export class DonorService {
       };
 
       applyCommonFilters(queryBuilder, filters, searchFields, "donor");
+
+      if (recurring === true) {
+        queryBuilder.andWhere("donor.recurring = :recurring", {
+          recurring: true,
+        });
+      } else if (recurring === false) {
+        queryBuilder.andWhere(
+          "(donor.recurring = :recurring OR donor.recurring IS NULL)",
+          { recurring: false },
+        );
+      }
 
       // Matured donors: at least one completed donation (live check, not flag-only)
       if (is_mature_donor === true) {
@@ -549,6 +640,84 @@ export class DonorService {
   }
 
   /**
+   * Resolve donor IDs for communication audience (filter-based or manual list).
+   */
+  async resolveAudienceIds(
+    options: {
+      selection_mode: "manual" | "filters";
+      donor_ids?: number[];
+      donor_filters?: Record<string, any>;
+    },
+    geoScope?: ResolvedGeographicScope | null,
+    sourceAccess?: { online: boolean; offline: boolean },
+    currentUser?: { id?: number; role?: string; department?: string },
+  ): Promise<{ ids: number[]; total: number; filters: Record<string, any> | null }> {
+    if (options.selection_mode === "manual") {
+      const ids = (options.donor_ids || [])
+        .map(Number)
+        .filter((id) => Number.isFinite(id) && id > 0);
+      return { ids, total: ids.length, filters: null };
+    }
+
+    const raw = options.donor_filters || {};
+    const filters = { ...raw };
+
+    let recurring: boolean | undefined =
+      filters.recurring === true || filters.recurring === "true"
+        ? true
+        : filters.recurring === false || filters.recurring === "false"
+          ? false
+          : undefined;
+
+    if (recurring === undefined && filters.donation_type) {
+      const dt = String(filters.donation_type).toLowerCase().trim();
+      if (dt === "recurring_donor") recurring = true;
+      else if (dt === "one_time_donor") recurring = false;
+    }
+
+    const listOptions = {
+      page: 1,
+      pageSize: 50000,
+      sortField: "id",
+      sortOrder: "ASC" as const,
+      search: filters.search || "",
+      donor_type: filters.donor_type || "",
+      city: filters.city || "",
+      country: filters.country || "",
+      start_date: filters.start_date || "",
+      end_date: filters.end_date || "",
+      multi_time_donor:
+        filters.multi_time_donors === true ||
+        filters.multi_time_donors === "true"
+          ? true
+          : filters.multi_time_donors === false ||
+              filters.multi_time_donors === "false"
+            ? false
+            : undefined,
+      recurring,
+      is_mature_donor:
+        filters.is_mature_donor === true || filters.is_mature_donor === "true"
+          ? true
+          : filters.is_mature_donor === false ||
+              filters.is_mature_donor === "false"
+            ? false
+            : undefined,
+      source: filters.source || "",
+      assigned_to_user_id: filters.assigned_to_user_id ?? "",
+    };
+
+    const result = await this.findAll(
+      listOptions,
+      geoScope,
+      sourceAccess,
+      currentUser,
+    );
+
+    const ids = (result.data || []).map((donor) => donor.id);
+    return { ids, total: result.pagination?.total ?? ids.length, filters: raw };
+  }
+
+  /**
    * Find one donor by ID
    */
   /**
@@ -633,6 +802,8 @@ export class DonorService {
     country?: string;
     address?: string;
     notification_subscription?: boolean;
+    recurring?: boolean;
+    recurring_consent?: boolean;
   }): Promise<Donor | null> {
     try {
       const {
@@ -643,6 +814,8 @@ export class DonorService {
         country,
         address,
         notification_subscription,
+        recurring,
+        recurring_consent,
       } = donationData;
 
       // Validate required fields
@@ -667,6 +840,10 @@ export class DonorService {
         is_active: true,
         notes: "Auto-registered from donation - Password not set",
         notification_subscription: notification_subscription !== false,
+        recurring: recurring === true,
+        recurring_consent: recurring_consent === true,
+        recurring_consent_at:
+          recurring_consent === true ? new Date() : null,
       });
 
       this.applyGeoSearchToDonor(donor);
