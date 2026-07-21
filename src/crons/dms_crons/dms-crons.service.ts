@@ -4,7 +4,6 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In, Not, IsNull, FindOperator } from "typeorm";
 import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsService } from "../../donations/donations.service";
-import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
 import { ManualRecurringModule } from "../../dms/manual_recurring/manual-recurring.module";
 import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
 
@@ -16,37 +15,36 @@ export class DmsCronsService {
     @InjectRepository(Donation)
     private readonly donationRepository: Repository<Donation>,
     private readonly donationsService: DonationsService,
-    private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
     private readonly manualRecurringReminderService: ManualRecurringReminderService,
   ) {}
 
-  /**
-   * Every minute — today's **website** donations (pending or failed, PKT), 3+ minutes old.
-   */
-  @Cron("* * * * *", {
-    name: "pending-donation-call-center-follow-up",
-    timeZone: "Asia/Karachi",
-  })
-  async handlePendingDonationCallCenterFollowUp() {
-    try {
-      const result =
-        await this.donationPendingFollowUpService.processPendingDonationFollowUps(
-          {
-            enforcePendingMinutes: true,
-          },
-        );
-      if (result.created > 0) {
-        this.logger.log(
-          `Pending donation follow-up: created ${result.created} task(s) — ids: ${result.taskIds.join(", ")}`,
-        );
-      }
-    } catch (error: any) {
-      this.logger.error(
-        `Pending donation call-center follow-up cron failed: ${error?.message}`,
-        error?.stack,
-      );
-    }
-  }
+  // /**
+  //  * Every minute — today's **website** donations (pending or failed, PKT), 3+ minutes old.
+  //  */
+  // @Cron("* * * * *", {
+  //   name: "pending-donation-call-center-follow-up",
+  //   timeZone: "Asia/Karachi",
+  // })
+  // async handlePendingDonationCallCenterFollowUp() {
+  //   try {
+  //     const result =
+  //       await this.donationPendingFollowUpService.processPendingDonationFollowUps(
+  //         {
+  //           enforcePendingMinutes: true,
+  //         },
+  //       );
+  //     if (result.created > 0) {
+  //       this.logger.log(
+  //         `Pending donation follow-up: created ${result.created} task(s) — ids: ${result.taskIds.join(", ")}`,
+  //       );
+  //     }
+  //   } catch (error: any) {
+  //     this.logger.error(
+  //       `Pending donation call-center follow-up cron failed: ${error?.message}`,
+  //       error?.stack,
+  //     );
+  //   }
+  // }
 
   /**
    * Monthly — 9:00 AM on the 2nd (Asia/Karachi).
@@ -88,7 +86,7 @@ export class DmsCronsService {
 
   /**
    * Nightly cron - Runs at 2:00 AM every day (Asia/Karachi)
-   * Cleans up duplicate pending/failed donations for donors on the same day.
+   * Cleans up multiple pending donations for donors on the same day.
    */
   @Cron("0 2 * * *", {
     name: "daily-pending-donations-cleanup",
@@ -207,13 +205,13 @@ export class DmsCronsService {
   }
 
   /**
-   * Cleans up pending + failed donations for donors on the current day.
+   * Cleans up multiple pending donations for donors on the same day.
    * Logic:
-   * 1. Find donors with at least one pending or failed donation today.
-   * 2. Pending:
-   *    a. If any completed that day → delete ALL pending.
-   *    b. Else (1+ pending) → keep OLDEST pending, delete the rest.
-   * 3. Failed (1+): keep NEWEST failed that day, delete the rest.
+   * 1. Find all donors who have multiple donations (pending or completed) on the current day.
+   * 2. For each such donor:
+   *    a. Check if they have any 'completed' donations for the current day.
+   *    b. If yes, delete ALL 'pending' donations for that donor on that day.
+   *    c. If no 'completed' donations, keep the OLDEST 'pending' donation and delete all other 'pending' donations for that donor on that day.
    */
   async cleanupPendingDonations(): Promise<{
     processedDonors: number;
@@ -221,35 +219,34 @@ export class DmsCronsService {
     results: any[];
   }> {
     const startTime = Date.now();
-    this.logger.log("Starting daily pending/failed donations cleanup...");
+    this.logger.log("Starting daily pending donations cleanup...");
 
     try {
-      const donorsWithCleanupCandidates = await this.donationRepository
+      // 1. Find all donors who have multiple donations (pending or completed) on the current day.
+      const donorsWithMultipleDonations = await this.donationRepository
         .createQueryBuilder("donation")
         .select("donation.donor_id", "donor_id")
-        .addSelect("COUNT(donation.id)", "candidate_count")
+        .addSelect("COUNT(donation.id)", "donation_count")
         .where("donation.date = CURRENT_DATE")
         .andWhere("donation.donor_id IS NOT NULL")
-        .andWhere("donation.status IN (:...statuses)", {
-          statuses: ["pending", "failed"],
-        })
         .groupBy("donation.donor_id")
-        .having("COUNT(donation.id) >= 1")
+        .having("COUNT(donation.id) > 1")
         .getRawMany();
 
       let processedDonors = 0;
       let deletedDonations = 0;
       const results: any[] = [];
 
-      for (const donorEntry of donorsWithCleanupCandidates) {
+      for (const donorEntry of donorsWithMultipleDonations) {
         processedDonors++;
         const donorId = donorEntry.donor_id;
 
+        // Get all donations for this donor on the current day
         const allDonationsForDonor = await this.donationRepository
           .createQueryBuilder("donation")
           .where("donation.donor_id = :donorId", { donorId })
           .andWhere("donation.date = CURRENT_DATE")
-          .orderBy("donation.id", "ASC")
+          .orderBy("donation.id", "ASC") // Order by ID to identify the 'first' pending
           .getMany();
 
         const completedDonations = allDonationsForDonor.filter(
@@ -258,11 +255,9 @@ export class DmsCronsService {
         const pendingDonations = allDonationsForDonor.filter(
           (d) => d.status === "pending",
         );
-        const failedDonations = allDonationsForDonor.filter(
-          (d) => d.status === "failed",
-        );
 
         if (completedDonations.length > 0) {
+          // Case 2a: Donor has completed donations, delete all pending
           for (const pending of pendingDonations) {
             await this.donationRepository.delete(pending.id);
             deletedDonations++;
@@ -276,7 +271,8 @@ export class DmsCronsService {
               `Deleted pending donation #${pending.id} for donor ${donorId} (completed donation exists)`,
             );
           }
-        } else if (pendingDonations.length >= 1) {
+        } else if (pendingDonations.length > 1) {
+          // Case 2b: No completed donations, keep the first pending, delete others
           const firstPending = pendingDonations[0];
           for (let i = 1; i < pendingDonations.length; i++) {
             const pendingToDelete = pendingDonations[i];
@@ -286,7 +282,7 @@ export class DmsCronsService {
               donorId,
               donationId: pendingToDelete.id,
               action: "deleted",
-              reason: "multiple pending, kept oldest",
+              reason: "multiple pending, kept first",
               keptDonationId: firstPending.id,
             });
             this.logger.log(
@@ -294,31 +290,11 @@ export class DmsCronsService {
             );
           }
         }
-
-        if (failedDonations.length >= 1) {
-          // Keep newest failed (last by id ASC); delete older faileds.
-          const newestFailed = failedDonations[failedDonations.length - 1];
-          for (let i = 0; i < failedDonations.length - 1; i++) {
-            const failedToDelete = failedDonations[i];
-            await this.donationRepository.delete(failedToDelete.id);
-            deletedDonations++;
-            results.push({
-              donorId,
-              donationId: failedToDelete.id,
-              action: "deleted",
-              reason: "multiple failed, kept newest",
-              keptDonationId: newestFailed.id,
-            });
-            this.logger.log(
-              `Deleted failed donation #${failedToDelete.id} for donor ${donorId} (kept newest #${newestFailed.id})`,
-            );
-          }
-        }
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.logger.log(
-        `Daily pending/failed donations cleanup complete in ${elapsed}s — Processed Donors: ${processedDonors}, Deleted Donations: ${deletedDonations}`,
+        `Daily pending donations cleanup complete in ${elapsed}s — Processed Donors: ${processedDonors}, Deleted Donations: ${deletedDonations}`,
       );
 
       return { processedDonors, deletedDonations, results };
@@ -329,13 +305,6 @@ export class DmsCronsService {
       );
       throw error;
     }
-  }
-
-  /** Manual trigger for pending donation → call-center task creation. */
-  async runPendingDonationCallCenterFollowUp(donationDate?: string) {
-    return this.donationPendingFollowUpService.processPendingDonationFollowUps({
-      donationDate,
-    });
   }
 
   async runManualRecurringDonationReminders(options?: {

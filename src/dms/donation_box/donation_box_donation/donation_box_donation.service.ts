@@ -13,9 +13,9 @@ import { UpdateDonationBoxDonationDto } from "./dto/update-donation_box_donation
 import { DonationBox } from "../entities/donation-box.entity";
 import {
   applyCommonFilters,
-  applyDateFilterOnColumn,
   FilterPayload,
-  RangeFilter,
+  applyHybridFilters,
+  HybridFilter,
 } from "../../../utils/filters/common-filter.util";
 import { User } from "../../../users/user.entity";
 import { DashboardAggregateService } from "../../../dashboard/dashboard-aggregate.service";
@@ -31,10 +31,6 @@ import { ResolvedDataScope } from "../../../permissions/data-scope/data-scope.ty
 import { GeographicScopeService } from "../../../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../../permissions/geographic-scope/geographic-scope.types";
-import { PermissionsService } from "../../../permissions/permissions.service";
-import { assertCollectorWithinBoxLocation } from "../utils/donation-box-location.util";
-import { DEFAULT_DONATION_BOX_COLLECTION_RADIUS_METERS } from "../../../utils/geo/geo-distance.util";
-import { reverseGeocodeLocationDetails } from "../../../utils/geo/reverse-geocode.util";
 
 interface PaginationOptions {
   page: number;
@@ -45,9 +41,6 @@ interface PaginationOptions {
   donation_box_id?: number;
   status?: string;
   payment_method?: string;
-  min_amount?: number | string;
-  max_amount?: number | string;
-  date?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -65,24 +58,7 @@ export class DonationBoxDonationService {
     private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
-    private readonly permissionsService: PermissionsService,
   ) {}
-
-  private async canBypassCollectionLocationCheck(
-    userId?: number,
-  ): Promise<boolean> {
-    if (!userId) return false;
-
-    const permissions = await this.permissionsService.getUserPermissions(userId);
-    if (permissions?.super_admin === true) {
-      return true;
-    }
-
-    return this.permissionsService.hasPermission(
-      userId,
-      "fund_raising.donation_box_donations.bypass_location",
-    );
-  }
 
   async resolveCollectionScope(currentUser?: {
     id?: number;
@@ -162,7 +138,6 @@ export class DonationBoxDonationService {
       query,
       "donation_box_donation",
       dataScope,
-      { assignedToColumn: "collected_by.id" },
     );
   }
 
@@ -219,7 +194,6 @@ export class DonationBoxDonationService {
   async create(
     createDonationBoxDonationDto: CreateDonationBoxDonationDto,
     currentUserId?: number,
-    options?: { skipLocationCheck?: boolean },
   ): Promise<DonationBoxDonation> {
     try {
       // Validate that donation box exists
@@ -231,36 +205,6 @@ export class DonationBoxDonationService {
         throw new NotFoundException(
           `Donation box with ID ${createDonationBoxDonationDto.donation_box_id} not found`,
         );
-      }
-
-      const bypassLocation =
-        options?.skipLocationCheck ||
-        donationBox.require_collection_location === false ||
-        (await this.canBypassCollectionLocationCheck(currentUserId));
-
-      if (!bypassLocation) {
-        assertCollectorWithinBoxLocation(
-          donationBox,
-          createDonationBoxDonationDto.collector_latitude,
-          createDonationBoxDonationDto.collector_longitude,
-        );
-      }
-
-      if (
-        createDonationBoxDonationDto.collector_latitude != null &&
-        createDonationBoxDonationDto.collector_longitude != null &&
-        !createDonationBoxDonationDto.collector_location_details
-      ) {
-        const details = await reverseGeocodeLocationDetails(
-          Number(createDonationBoxDonationDto.collector_latitude),
-          Number(createDonationBoxDonationDto.collector_longitude),
-        );
-        createDonationBoxDonationDto.collector_location_details =
-          details as Record<string, string> | undefined;
-        createDonationBoxDonationDto.collector_location_name =
-          createDonationBoxDonationDto.collector_location_name ||
-          details?.display_name ||
-          undefined;
       }
 
       // Validate collection amount
@@ -407,9 +351,7 @@ export class DonationBoxDonationService {
       receipt_number: row.receipt_number as string | undefined,
     } as CreateDonationBoxDonationDto;
 
-    return this.create(createDto, user?.id, {
-      skipLocationCheck: await this.canBypassCollectionLocationCheck(user?.id),
-    });
+    return this.create(createDto, user?.id);
   }
 
   /**
@@ -430,15 +372,13 @@ export class DonationBoxDonationService {
         donation_box_id,
         status = "",
         payment_method = "",
-        min_amount,
-        max_amount,
-        date,
         start_date,
         end_date,
       } = options;
 
       const skip = (page - 1) * pageSize;
 
+      // Define searchable fields
       const searchFields = [
         "collector_name",
         "notes",
@@ -446,60 +386,30 @@ export class DonationBoxDonationService {
         "receipt_number",
         "cheque_number",
         "bank_name",
-        "donation_box.shop_name",
-        "donation_box.key_no",
       ];
 
+      // Build query with relations
       const query = this.donationBoxDonationRepository
         .createQueryBuilder("donation_box_donation")
         .leftJoinAndSelect("donation_box_donation.donation_box", "donation_box")
         .leftJoinAndSelect("donation_box_donation.collected_by", "collected_by")
         .leftJoinAndSelect("donation_box_donation.verified_by", "verified_by")
-        .leftJoinAndSelect("donation_box.route", "route")
-        .where("donation_box_donation.is_archived = :archived", {
-          archived: false,
-        });
+        .leftJoinAndSelect("donation_box.route", "route");
 
-      const rangeFilters: RangeFilter[] = [];
-      if (min_amount !== undefined && min_amount !== "" && min_amount !== null) {
-        rangeFilters.push({
-          column: "collection_amount",
-          operator: "gte",
-          value: Number(min_amount),
-        });
-      }
-      if (max_amount !== undefined && max_amount !== "" && max_amount !== null) {
-        rangeFilters.push({
-          column: "collection_amount",
-          operator: "lte",
-          value: Number(max_amount),
-        });
-      }
-
+      // Apply common filters
       const filters: FilterPayload = {
         search,
         status,
         payment_method,
-        range_filters: rangeFilters,
+        start_date,
+        end_date,
       };
 
       if (donation_box_id) {
         filters.donation_box_id = donation_box_id;
       }
 
-      applyCommonFilters(
-        query,
-        filters,
-        searchFields,
-        "donation_box_donation",
-      );
-
-      applyDateFilterOnColumn(
-        query,
-        { date, start_date, end_date },
-        "donation_box_donation",
-        "collection_date",
-      );
+      applyCommonFilters(query, filters, searchFields, "donation_box_donation");
 
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -529,13 +439,11 @@ export class DonationBoxDonationService {
         : "collection_date";
       query.orderBy(`donation_box_donation.${safeSortField}`, sortOrder);
 
-      // query.distinct(true);
-
       // Apply pagination
       query.skip(skip).take(pageSize);
 
-      const total = await query.clone().skip(undefined).take(undefined).getCount();
-      const data = await query.getMany();
+      // Execute query
+      const [data, total] = await query.getManyAndCount();
       const totalPages = Math.ceil(total / pageSize);
 
       return {

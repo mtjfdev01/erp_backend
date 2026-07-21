@@ -240,10 +240,6 @@ export class GeographicScopeService {
       return emptyBypass("super_admin");
     }
 
-    if (permissions?.fund_raising_manager === true) {
-      return emptyBypass("fund_raising_manager");
-    }
-
     if (!this.hasAssignments(user)) {
       return emptyBypass("no_assignments");
     }
@@ -1027,18 +1023,6 @@ export class GeographicScopeService {
     });
   }
 
-  private appendAssignedDonationBoxUserCondition(
-    outer: { orWhere: WhereExpressionBuilder["orWhere"] },
-    alias: string,
-    userId: number,
-    paramKey: string,
-  ): void {
-    outer.orWhere(
-      `EXISTS (SELECT 1 FROM donation_box_users dbu WHERE dbu.donation_box_id = ${alias}.id AND dbu.user_id = :${paramKey}_assigned)`,
-      { [`${paramKey}_assigned`]: userId },
-    );
-  }
-
   private applyDonationBoxesQuery<T>(
     query: SelectQueryBuilder<T>,
     alias: string,
@@ -1050,12 +1034,6 @@ export class GeographicScopeService {
         outer.orWhere(`${alias}.created_by = :${paramKey}_own`, {
           [`${paramKey}_own`]: scope.userId,
         });
-        this.appendAssignedDonationBoxUserCondition(
-          outer,
-          alias,
-          scope.userId,
-          paramKey,
-        );
         outer.orWhere(
           new Brackets((qb) => {
             if (scope.cityIds.length) {
@@ -1101,15 +1079,6 @@ export class GeographicScopeService {
         outer.orWhere(`${alias}.created_by = :${paramKey}_own`, {
           [`${paramKey}_own`]: scope.userId,
         });
-        outer.orWhere(`${alias}.collected_by_id = :${paramKey}_collector`, {
-          [`${paramKey}_collector`]: scope.userId,
-        });
-        this.appendAssignedDonationBoxUserCondition(
-          outer,
-          boxAlias,
-          scope.userId,
-          paramKey,
-        );
         outer.orWhere(
           new Brackets((qb) => {
             if (scope.cityIds.length) {

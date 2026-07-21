@@ -18,10 +18,6 @@ export class UpdateUserDto {
 
   @IsString()
   @IsOptional()
-  user_code?: string;
-
-  @IsString()
-  @IsOptional()
   last_name?: string;
 
   @IsEmail()

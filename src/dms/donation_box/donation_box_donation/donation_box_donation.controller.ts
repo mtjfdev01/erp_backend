@@ -132,9 +132,6 @@ export class DonationBoxDonationController {
     @Query("donation_box_id") donation_box_id?: string,
     @Query("status") status?: string,
     @Query("payment_method") payment_method?: string,
-    @Query("min_amount") min_amount?: string,
-    @Query("max_amount") max_amount?: string,
-    @Query("date") date?: string,
     @Query("start_date") start_date?: string,
     @Query("end_date") end_date?: string,
     @Res() res?: Response,
@@ -164,9 +161,6 @@ export class DonationBoxDonationController {
             : undefined,
           status,
           payment_method,
-          min_amount: min_amount || undefined,
-          max_amount: max_amount || undefined,
-          date,
           start_date,
           end_date,
         },
@@ -199,21 +193,10 @@ export class DonationBoxDonationController {
   async findByDonationBox(
     @Param("boxId") boxId: string,
     @Res() res: Response,
-    @CurrentUser() currentUser: any,
-    @Query("page") page?: string,
-    @Query("pageSize") pageSize?: string,
-    @Query("sortField") sortField?: string,
-    @Query("sortOrder") sortOrder?: "ASC" | "DESC",
-    @Query("search") search?: string,
-    @Query("status") status?: string,
-    @Query("payment_method") payment_method?: string,
-    @Query("min_amount") min_amount?: string,
-    @Query("max_amount") max_amount?: string,
-    @Query("date") date?: string,
-    @Query("start_date") start_date?: string,
-    @Query("end_date") end_date?: string,
+    @CurrentUser() currentUser?: any,
   ) {
     try {
+      // Geographic access check on the parent donation box
       await this.checkGeographicAccessByBoxId(
         currentUser?.id,
         +boxId,
@@ -221,40 +204,12 @@ export class DonationBoxDonationController {
         currentUser,
       );
 
-      const pageNum = page ? parseInt(page) : 1;
-      const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
-
-      const geoScope = currentUser?.id
-        ? await this.geographicScopeService.resolveForUser(
-            currentUser.id,
-            currentUser.role,
-            currentUser,
-          )
-        : null;
-
-      const result = await this.donationBoxDonationService.findAll(
-        {
-          page: pageNum,
-          pageSize: pageSizeNum,
-          sortField,
-          sortOrder,
-          search,
-          donation_box_id: +boxId,
-          status,
-          payment_method,
-          min_amount: min_amount || undefined,
-          max_amount: max_amount || undefined,
-          date,
-          start_date,
-          end_date,
-        },
-        geoScope,
-        currentUser,
-      );
+      const result =
+        await this.donationBoxDonationService.findByDonationBox(+boxId);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Collections retrieved successfully",
-        ...result,
+        data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {

@@ -1,7 +1,6 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
 import { Column, Entity, ManyToOne, JoinColumn, Index } from "typeorm";
 import { Donor } from "../../dms/donor/entities/donor.entity";
-import { User } from "../../users/user.entity";
 
 //nullabe true to all column
 @Entity("donations")
@@ -51,8 +50,7 @@ export class Donation extends BaseEntity {
   @Column({ type: "varchar", nullable: true, default: null })
   donation_method: string;
 
-  /** Default applies to new inserts only; existing rows are not backfilled by sync. */
-  @Column({ type: "varchar", nullable: true, default: "website" })
+  @Column({ type: "varchar", nullable: true, default: null })
   donation_source: string;
 
   @Column({ type: "varchar", nullable: true, default: null })
@@ -136,12 +134,4 @@ export class Donation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   reference_no: string | null;
-
-  /** Approved fundraiser credit for performance analytics (nullable — existing rows unchanged). */
-  @Column({ type: "int", nullable: true, default: null })
-  credited_to_user_id: number | null;
-
-  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
-  @JoinColumn({ name: "credited_to_user_id" })
-  credited_to: User;
 }

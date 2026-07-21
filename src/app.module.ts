@@ -34,7 +34,6 @@ import { DonorAuthModule } from "./donor_auth/donor-auth.module";
 import { DonorPortalModule } from "./donor_portal/donor-portal.module";
 import { DataImportModule } from "./data_import/data-import.module";
 import { S3StorageModule } from "./utils/storage/s3-storage.module";
-import { EmailChecklistModule } from "./email_checklist/email-checklist.module";
 
 @Module({
   imports: [
@@ -92,7 +91,6 @@ import { EmailChecklistModule } from "./email_checklist/email-checklist.module";
     DonorAuthModule,
     DonorPortalModule,
     DataImportModule,
-    EmailChecklistModule,
   ],
   controllers: [AppController],
   providers: [AppService],

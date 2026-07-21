@@ -1307,57 +1307,6 @@ export class EmailService implements OnModuleInit {
     }
   }
 
-  async sendDonationBoxRelocationEmail(data: {
-    to: string | string[];
-    performerName: string;
-    boxLabel: string;
-    donationBoxId: number;
-    previousShop: Record<string, unknown>;
-    newShop: Record<string, unknown>;
-    relocationNote?: string | null;
-  }): Promise<boolean> {
-    const prev = data.previousShop || {};
-    const next = data.newShop || {};
-    const noteBlock = data.relocationNote
-      ? `<p><strong>Relocation note:</strong> ${data.relocationNote}</p>`
-      : "";
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
-        <h2 style="margin-bottom: 8px;">Donation box relocated</h2>
-        <p>${data.performerName} relocated <strong>${data.boxLabel}</strong> to a new shop placement.</p>
-        <table style="border-collapse: collapse; width: 100%; max-width: 640px; margin: 16px 0;">
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;"><strong>Previous shop</strong></td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.shop_name || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">Previous shopkeeper</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.shopkeeper || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">Previous route</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${prev.route_name || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;"><strong>New shop</strong></td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.shop_name || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New shopkeeper</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.shopkeeper || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New route</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.route_name || "—"}</td></tr>
-          <tr><td style="padding: 8px; border: 1px solid #e5e7eb; background:#f9fafb;">New city</td><td style="padding: 8px; border: 1px solid #e5e7eb;">${next.city_name || "—"}</td></tr>
-        </table>
-        ${noteBlock}
-        <p>View the donation box record in ERP for full audit history.</p>
-      </div>
-    `;
-
-    const text = [
-      "Donation box relocated",
-      `${data.performerName} relocated ${data.boxLabel} to a new shop.`,
-      `Previous: ${prev.shop_name || "—"} (${prev.route_name || "—"})`,
-      `New: ${next.shop_name || "—"} (${next.route_name || "—"})`,
-      data.relocationNote ? `Note: ${data.relocationNote}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    return this.sendReportEmail({
-      to: data.to,
-      subject: `Donation box relocated — ${data.boxLabel}`,
-      html,
-      text,
-    });
-  }
-
   //  Tasks Section
   async sendTaskAssignmentEmail(
     user: any,
@@ -1486,6 +1435,11 @@ export class EmailService implements OnModuleInit {
           <blockquote style="border-left:4px solid #ccc;margin:16px 0;padding:8px 16px;color:#333;">
             ${safeComment}
           </blockquote>
+          ${
+            taskLink
+              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this task.</p>"
+          }
         `,
       });
 
@@ -1549,22 +1503,23 @@ export class EmailService implements OnModuleInit {
         user.email;
 
       let duePhrase = `due in ${offsetDays} days`;
-      if (offsetDays < 0) duePhrase = "overdue";
-      else if (offsetDays === 0) duePhrase = "due today";
+      if (offsetDays === 0) duePhrase = "due today";
       else if (offsetDays === 1) duePhrase = "due tomorrow";
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to: [user.email],
-        subject:
-          offsetDays < 0
-            ? `Task reminder: "${taskTitle}" is overdue`
-            : `Task reminder: "${taskTitle}" is ${duePhrase}`,
+        subject: `Task reminder: "${taskTitle}" is ${duePhrase}`,
         html: `
           <h1>Task due date reminder</h1>
           <p>Hi ${recipientName},</p>
           <p>This is a reminder that your assigned task <strong>${taskTitle}</strong> is <strong>${duePhrase}</strong>.</p>
           <p><strong>Due date:</strong> ${dueDateLabel}</p>
+          ${
+            taskLink
+              ? `<p><a href="${taskLink}">View task in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this task.</p>"
+          }
         `,
       });
 
@@ -1582,13 +1537,11 @@ export class EmailService implements OnModuleInit {
   }
 
   async sendTaskOverdueNotification(
-    user: { email: string; first_name?: string; last_name?: string },
+    toEmail: string,
     task: any,
     escalationLevel: number,
   ): Promise<boolean> {
     try {
-      if (!user?.email) return false;
-
       const fromEmail = this.configService.get<string>(
         "RESEND_FROM_EMAIL",
         "info@mtjfoundation.com",
@@ -1603,22 +1556,19 @@ export class EmailService implements OnModuleInit {
         return false;
       }
 
-      const recipientName =
-        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
-        user.email;
-      const subject = `Urgent: Your task is overdue - ${task.title}`;
+      const subject = `Urgent: Task Overdue Escalation (Level ${escalationLevel}) - ${task.title}`;
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
-        to: [user.email],
+        to: [toEmail],
         subject,
-        html: generateTaskOverdueTemplate(task, escalationLevel, recipientName),
+        html: generateTaskOverdueTemplate(task, escalationLevel),
       });
 
       const success = !!result.data?.id;
       if (success) {
         this.logger.log(
-          `Sent task overdue notification via Resend to ${user.email} (id: ${result.data?.id})`,
+          `Sent task overdue notification via Resend to ${toEmail} (id: ${result.data?.id})`,
         );
       } else if (result.error) {
         this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
@@ -1626,69 +1576,6 @@ export class EmailService implements OnModuleInit {
       return success;
     } catch (error: any) {
       this.logger.error(`Task overdue email send failed: ${error?.message}`);
-      return false;
-    }
-  }
-
-  /**
-   * Send temporary password after forgot-password / admin reset.
-   */
-  async sendTemporaryPasswordEmail(params: {
-    to: string;
-    userName: string;
-    temporaryPassword: string;
-  }): Promise<boolean> {
-    try {
-      if (!this.resend) {
-        this.logger.error("Resend is not configured - cannot send email");
-        return false;
-      }
-
-      const fromEmail = this.configService.get<string>(
-        "RESEND_FROM_EMAIL",
-        "info@mtjfoundation.com",
-      );
-      const senderName = this.configService.get<string>(
-        "SENDER_NAME",
-        "MTJ Foundation",
-      );
-
-      const result = await this.resend.emails.send({
-        from: `${senderName} <${fromEmail}>`,
-        to: [params.to],
-        subject: "Your temporary password — MTJF ERP",
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; color: #0f2744;">
-            <h2 style="margin-bottom: 8px;">Password reset</h2>
-            <p>Hello ${params.userName},</p>
-            <p>A new temporary password was generated for your MTJF ERP account.</p>
-            <p style="font-size: 18px; font-weight: bold; letter-spacing: 1px; background: #f1f5f9; padding: 12px 16px; border-radius: 8px;">
-              ${params.temporaryPassword}
-            </p>
-            <p>Please sign in with this password and change it from your profile as soon as possible.</p>
-            <p style="color: #64748b; font-size: 13px;">If you did not request this, contact your administrator.</p>
-          </div>
-        `,
-        text: `Hello ${params.userName},\n\nYour temporary password is: ${params.temporaryPassword}\n\nPlease sign in and change it as soon as possible.`,
-        headers: {
-          "X-Mailer": "MTJ Foundation ERP",
-          "Reply-To": fromEmail,
-        },
-      });
-
-      if (result.error !== null) {
-        this.logger.warn(
-          `Resend error sending temp password: ${JSON.stringify(result.error)}`,
-        );
-        return false;
-      }
-
-      this.logger.log(`Temporary password email sent to ${params.to}`);
-      return true;
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to send temporary password email: ${error?.message}`,
-      );
       return false;
     }
   }

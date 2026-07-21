@@ -32,6 +32,12 @@ export enum UserRole {
   ASST_CRD_OFFICER = "asst_crd_officer",
   CRD_OFFICER = "crd_officer",
   INTERNEE = "internee",
+  // Fund raising department roles
+  FUNDRAISER = "fundraiser",
+  DONOR_RELATIONS_OFFICER = "donor_relations_officer",
+  CSR = "csr",
+  RECONCILE_AGENT = "reconcile_agent",
+  BACK_OFFICE_CLERK = "back_office_clerk",
   CALL_CENTER_AGENT = "call_center_agent",
 }
 
@@ -113,20 +119,9 @@ export class User {
   @Column({ nullable: true })
   resetTokenExpiry: Date;
 
-  /** Calendar day (YYYY-MM-DD) for forgot-password rate limiting. */
-  @Column({ name: "password_reset_day", type: "date", nullable: true })
-  password_reset_day: string | null;
-
-  @Column({ name: "password_reset_count", type: "int", default: 0 })
-  password_reset_count: number;
-
   // New fields in snake_case
   @Column({ name: "first_name", nullable: true })
   first_name: string;
-
-  /** Stable internal HR record id; unchanged across transfers / role updates. */
-  @Column({ name: "user_code", type: "varchar", nullable: true, unique: true })
-  user_code: string | null;
 
   @Column({ name: "last_name", nullable: true })
   last_name: string;

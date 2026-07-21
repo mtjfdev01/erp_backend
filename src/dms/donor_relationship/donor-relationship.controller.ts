@@ -91,49 +91,6 @@ export class DonorRelationshipController {
     }
   }
 
-  /** My interactions (default) or team interactions when scope=team */
-  @Get("my-interactions")
-  @RequiredPermissions([
-    "fund_raising.donor_relationship.view",
-    "fund_raising.donor_relationship.list_view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
-  async getMyInteractions(
-    @Query("scope") scope: string,
-    @Query("activity_type") activityType: string,
-    @Query("search") search: string,
-    @Query("limit") limit: string,
-    @CurrentUser() user: any,
-    @Res() res: Response,
-  ) {
-    try {
-      const data = await this.service.getInteractionsList(
-        {
-          scope: scope === "team" ? "team" : "mine",
-          activity_type: activityType,
-          search,
-          limit,
-        },
-        user,
-      );
-      return res.status(HttpStatus.OK).json({
-        success: true,
-        message: "Interactions retrieved",
-        data,
-      });
-    } catch (error: any) {
-      const status =
-        error?.status || error?.getStatus?.() || HttpStatus.BAD_REQUEST;
-      return res.status(status).json({
-        success: false,
-        message: error?.message || "Failed to load interactions",
-        data: { scope: "mine", total: 0, items: [] },
-      });
-    }
-  }
-
   @Patch("interactions/:id")
   @RequiredPermissions([
     "fund_raising.donor_relationship.update",
@@ -201,20 +158,16 @@ export class DonorRelationshipController {
   ])
   async getFollowups(
     @Query("bucket") bucket: string,
-    @Query("scope") scope: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
-    @Query("search") search: string,
     @CurrentUser() user: any,
     @Res() res: Response,
   ) {
     try {
       const result = await this.service.getMyFollowups(user, {
         bucket,
-        scope: scope === "team" ? "team" : "mine",
         page: page ? parseInt(page, 10) : 1,
         pageSize: pageSize ? parseInt(pageSize, 10) : 20,
-        search,
       });
       return res.status(HttpStatus.OK).json({
         success: true,

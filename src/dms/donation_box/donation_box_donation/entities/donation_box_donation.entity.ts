@@ -103,17 +103,4 @@ export class DonationBoxDonation extends BaseEntity {
 
   @Column({ nullable: true })
   receipt_number: string;
-
-  /** Device GPS at collection time (for location verification audit). */
-  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
-  collector_latitude: number;
-
-  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
-  collector_longitude: number;
-
-  @Column({ type: "text", nullable: true })
-  collector_location_name: string;
-
-  @Column({ type: "jsonb", nullable: true })
-  collector_location_details: Record<string, string> | null;
 }

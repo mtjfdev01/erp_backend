@@ -55,36 +55,6 @@ export class DmsCronsController {
   }
 
   /**
-   * Manual trigger: create call-center tasks for pending donations on a given day.
-   * POST /dms-crons/pending-donation-follow-up
-   * POST /dms-crons/pending-donation-follow-up?date=2026-06-02
-   *
-   * Defaults to today (PKT). Only **website** donations with status pending or failed,
-   * and donation.date matching that day, are considered.
-   */
-  @Post("pending-donation-follow-up")
-  async pendingDonationFollowUp(
-    @Query("date") date: string | undefined,
-    @Res() res: Response,
-  ) {
-    try {
-      const result =
-        await this.dmsCronsService.runPendingDonationCallCenterFollowUp(date);
-      return res.status(200).json({
-        success: true,
-        message: `Pending donation follow-up (${result.donationDate}) — scanned: ${result.scanned}, created: ${result.created}`,
-        data: result,
-      });
-    } catch (error) {
-      const status = error?.status === 400 ? 400 : 500;
-      return res.status(status).json({
-        success: false,
-        message: `Pending donation follow-up failed: ${error.message}`,
-      });
-    }
-  }
-
-  /**
    * Manual trigger: send reminders to manual recurring donors who have not donated this month.
    * POST /dms-crons/manual-recurring-reminders
    * POST /dms-crons/manual-recurring-reminders?period_key=2026-07&dry_run=true

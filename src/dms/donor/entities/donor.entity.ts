@@ -153,10 +153,6 @@ export class Donor extends BaseEntity {
   @Column({ type: "boolean", default: false, nullable: true })
   multi_time_donor: boolean;
 
-  /** At least one completed donation (mature donor). Updated on completion + backfill. */
-  @Column({ type: "boolean", default: false, nullable: true })
-  is_mature_donor: boolean;
-
   @Column({ type: "boolean", default: true, nullable: true })
   notification_subscription: boolean;
 }
