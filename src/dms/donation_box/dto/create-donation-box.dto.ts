@@ -7,10 +7,6 @@ import {
   IsPhoneNumber,
   IsNumber,
   IsArray,
-  IsBoolean,
-  Min,
-  Max,
-  ValidateIf,
 } from "class-validator";
 import {
   BoxType,
@@ -89,35 +85,4 @@ export class CreateDonationBoxDto {
   @IsNumber({}, { each: true })
   @IsOptional()
   assigned_user_ids?: number[];
-
-  @IsBoolean()
-  @IsOptional()
-  require_collection_location?: boolean;
-
-  @ValidateIf((dto) => dto.require_collection_location !== false)
-  @IsNumber()
-  @IsNotEmpty({ message: "Device GPS latitude is required when on-site collection is enabled" })
-  @Min(-90)
-  @Max(90)
-  registration_latitude?: number;
-
-  @ValidateIf((dto) => dto.require_collection_location !== false)
-  @IsNumber()
-  @IsNotEmpty({ message: "Device GPS longitude is required when on-site collection is enabled" })
-  @Min(-180)
-  @Max(180)
-  registration_longitude?: number;
-
-  @IsString()
-  @IsOptional()
-  registration_location_name?: string;
-
-  @IsOptional()
-  registration_location_details?: Record<string, string>;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(10)
-  @Max(10000)
-  location_radius_meters?: number;
 }

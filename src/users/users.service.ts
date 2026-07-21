@@ -2,9 +2,6 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
-  Logger,
-  HttpException,
-  HttpStatus,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -15,7 +12,6 @@ import {
   FilterPayload,
 } from "../utils/filters/common-filter.util";
 import * as bcrypt from "bcrypt";
-import * as crypto from "crypto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
 import { UpdateUserWithPermissionsDto } from "./dto/update-user-with-permissions.dto";
@@ -24,12 +20,10 @@ import {
   USER_GEOGRAPHIC_SELECT,
 } from "./user-geographic.types";
 import { GeographicAssignmentService } from "../dms/geographic/geographic-assignment/geographic-assignment.service";
-import { PermissionsService } from "../permissions/permissions.service";
 import {
   decryptDonorPassword,
   encryptDonorPassword,
 } from "../utils/crypto/donor-password-vault";
-import { EmailService } from "../email/email.service";
 
 interface PaginationOptions {
   page: number;
@@ -44,35 +38,8 @@ interface PaginationOptions {
 
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger(UsersService.name);
-
   // Define searchable columns for user search
-  private readonly searchableColumns = [
-    "first_name",
-    "last_name",
-    "email",
-    "user_code",
-  ];
-
-  private normalizeUserCode(code?: string | null): string | null {
-    if (code == null) return null;
-    const trimmed = String(code).trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-
-  private async assertUserCodeAvailable(
-    code: string | null,
-    excludeUserId?: number,
-  ): Promise<void> {
-    if (!code) return;
-    const existing = await this.userRepository.findOne({
-      where: { user_code: code },
-      select: ["id"],
-    });
-    if (existing && existing.id !== excludeUserId) {
-      throw new ConflictException("User code already exists");
-    }
-  }
+  private readonly searchableColumns = ["first_name", "last_name", "email"];
 
   constructor(
     @InjectRepository(User)
@@ -80,20 +47,7 @@ export class UsersService {
     @InjectRepository(PermissionsEntity)
     private readonly permissionsRepository: Repository<PermissionsEntity>,
     private readonly geographicAssignmentService: GeographicAssignmentService,
-    private readonly permissionsService: PermissionsService,
-    private readonly emailService: EmailService,
   ) {}
-
-  private isManagerRole(role?: string | null): boolean {
-    const normalized = String(role || "").toLowerCase();
-    return [
-      "manager",
-      "assistant_manager",
-      "team_lead",
-      "department_head",
-      "director",
-    ].includes(normalized);
-  }
 
   pickGeographicContext(
     user: Pick<
@@ -181,104 +135,6 @@ export class UsersService {
     return user;
   }
 
-  /**
-   * Forgot password: if email exists, generate a temporary password,
-   * save it, and email it. Always returns a generic message (no email enumeration).
-   */
-  private getLocalDateKey(date = new Date()): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, "0");
-    const d = String(date.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
-
-  async forgotPassword(email: string): Promise<{ message: string }> {
-    const genericMessage =
-      "If an account exists for this email, a new password has been sent.";
-    const maxPerDay = 5;
-
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    if (!normalizedEmail) {
-      return { message: genericMessage };
-    }
-
-    const user = await this.userRepository.findOne({
-      where: { email: normalizedEmail, is_archived: false },
-    });
-
-    if (!user || user.isActive === false) {
-      return { message: genericMessage };
-    }
-
-    const today = this.getLocalDateKey();
-    const resetDay =
-      user.password_reset_day != null
-        ? String(user.password_reset_day).slice(0, 10)
-        : null;
-    const count =
-      resetDay === today ? Number(user.password_reset_count || 0) : 0;
-
-    if (count >= maxPerDay) {
-      throw new HttpException(
-        "You have reached the maximum of 5 password reset requests for today. Please try again tomorrow.",
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-
-    const plainPassword = this.generateTemporaryPassword();
-    const passwordFields = await this.buildPasswordFields(plainPassword);
-    Object.assign(user, passwordFields, {
-      password_reset_day: today,
-      password_reset_count: count + 1,
-    });
-    await this.userRepository.save(user);
-
-    const sent = await this.emailService.sendTemporaryPasswordEmail({
-      to: user.email,
-      userName:
-        [user.first_name, user.last_name].filter(Boolean).join(" ") ||
-        user.email,
-      temporaryPassword: plainPassword,
-    });
-
-    if (!sent) {
-      this.logger.error(
-        `Password was reset for ${user.email} but email failed to send`,
-      );
-      throw new ConflictException(
-        "Could not send email. Please try again later or contact support.",
-      );
-    }
-
-    this.logger.log(
-      `Temporary password emailed to ${user.email} (reset ${count + 1}/${maxPerDay} today)`,
-    );
-    return { message: genericMessage };
-  }
-
-  private generateTemporaryPassword(): string {
-    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-    const lower = "abcdefghijkmnopqrstuvwxyz";
-    const digits = "23456789";
-    const special = "!@#$%&*";
-    const pick = (chars: string) =>
-      chars[crypto.randomInt(0, chars.length)];
-    const base = [
-      pick(upper),
-      pick(lower),
-      pick(digits),
-      pick(special),
-      ...Array.from({ length: 8 }, () =>
-        pick(upper + lower + digits + special),
-      ),
-    ];
-    for (let i = base.length - 1; i > 0; i -= 1) {
-      const j = crypto.randomInt(0, i + 1);
-      [base[i], base[j]] = [base[j], base[i]];
-    }
-    return base.join("");
-  }
-
   async seedUsers(): Promise<void> {
     const users = [
       {
@@ -347,178 +203,11 @@ export class UsersService {
     }
     const plainPassword = createUserDto.password || "defaultPassword123";
     const passwordFields = await this.buildPasswordFields(plainPassword);
-    const userCode = this.normalizeUserCode(createUserDto.user_code);
-    await this.assertUserCodeAvailable(userCode);
     const user = this.userRepository.create({
       ...createUserDto,
       ...passwordFields,
-      user_code: userCode,
     });
     return await this.userRepository.save(user);
-  }
-
-  /**
-   * CSV / data-import row — creates a user without the admin-role gate
-   * (permission is enforced by DataImportService).
-   */
-  async importUserRow(
-    row: Record<string, unknown>,
-    _user?: any,
-  ): Promise<User> {
-    const email = String(row.email || "")
-      .trim()
-      .toLowerCase();
-    if (!email) {
-      throw new ConflictException("email is required");
-    }
-
-    const existingUser = await this.userRepository.findOne({
-      where: { email },
-    });
-    if (existingUser) {
-      throw new ConflictException(`Email already exists: ${email}`);
-    }
-
-    const departmentRaw = String(row.department || "")
-      .trim()
-      .toLowerCase();
-    const roleRaw = String(row.role || "")
-      .trim()
-      .toLowerCase();
-
-    const departmentValues = Object.values(Department) as string[];
-    const roleValues = Object.values(UserRole) as string[];
-
-    if (!departmentValues.includes(departmentRaw)) {
-      throw new ConflictException(
-        `Invalid department "${departmentRaw}". Must be one of: ${departmentValues.join(", ")}`,
-      );
-    }
-    if (!roleValues.includes(roleRaw)) {
-      throw new ConflictException(
-        `Invalid role "${roleRaw}". Must be one of: ${roleValues.join(", ")}`,
-      );
-    }
-
-    const first_name = String(row.first_name || "").trim();
-    const last_name = String(row.last_name || "").trim();
-    if (!first_name || !last_name) {
-      throw new ConflictException("first_name and last_name are required");
-    }
-
-    const plainPassword =
-      String(row.password || "").trim() || "ChangeMe@123";
-    const passwordFields = await this.buildPasswordFields(plainPassword);
-    const userCode = this.normalizeUserCode(
-      row.user_code != null ? String(row.user_code) : null,
-    );
-    await this.assertUserCodeAvailable(userCode);
-
-    const isActiveRaw = row.isActive ?? row.is_active;
-    let isActive = true;
-    if (isActiveRaw !== undefined && isActiveRaw !== null && String(isActiveRaw).trim() !== "") {
-      const v = String(isActiveRaw).trim().toLowerCase();
-      isActive = ["true", "1", "yes", "y"].includes(v);
-    }
-
-    const managerIdRaw = row.manager_id;
-    let manager_id: number | null = null;
-    if (
-      managerIdRaw !== undefined &&
-      managerIdRaw !== null &&
-      String(managerIdRaw).trim() !== ""
-    ) {
-      const parsed = Number(managerIdRaw);
-      if (!Number.isInteger(parsed) || parsed <= 0) {
-        throw new ConflictException("Invalid manager_id");
-      }
-      manager_id = parsed;
-    }
-
-    const user = this.userRepository.create({
-      first_name,
-      last_name,
-      email,
-      phone: row.phone != null ? String(row.phone).trim() || null : null,
-      dob: row.dob != null ? String(row.dob).trim() || null : null,
-      address: row.address != null ? String(row.address).trim() || null : null,
-      cnic: row.cnic != null ? String(row.cnic).trim() || null : null,
-      gender: row.gender != null ? String(row.gender).trim().toLowerCase() || null : null,
-      joining_date:
-        row.joining_date != null
-          ? String(row.joining_date).trim() || null
-          : null,
-      emergency_contact:
-        row.emergency_contact != null
-          ? String(row.emergency_contact).trim() || null
-          : null,
-      blood_group:
-        row.blood_group != null
-          ? String(row.blood_group).trim() || null
-          : null,
-      department: departmentRaw as Department,
-      role: roleRaw as UserRole,
-      ...passwordFields,
-      user_code: userCode,
-      isActive,
-      manager_id,
-    });
-
-    return await this.userRepository.save(user);
-  }
-
-  async exportUsers(options: {
-    search?: string;
-    department?: string;
-    role?: string;
-    isActive?: boolean;
-  }) {
-    const {
-      search = "",
-      department = "",
-      role = "",
-      isActive,
-    } = options;
-
-    const queryBuilder = this.userRepository.createQueryBuilder("user");
-
-    const filters: FilterPayload = {
-      search,
-      department,
-      role,
-    };
-    applyCommonFilters(queryBuilder, filters, this.searchableColumns, "user");
-
-    if (isActive !== undefined) {
-      queryBuilder.andWhere("user.isActive = :isActive", { isActive });
-    }
-
-    queryBuilder.orderBy("user.id", "ASC");
-
-    const users = await queryBuilder.getMany();
-
-    return users.map((u) => ({
-      id: u.id,
-      user_code: u.user_code ?? "",
-      first_name: u.first_name ?? "",
-      last_name: u.last_name ?? "",
-      email: u.email ?? "",
-      phone: u.phone ?? "",
-      department: u.department ?? "",
-      role: u.role ?? "",
-      gender: u.gender ?? "",
-      dob: u.dob ?? "",
-      cnic: u.cnic ?? "",
-      address: u.address ?? "",
-      joining_date: u.joining_date ?? "",
-      emergency_contact: u.emergency_contact ?? "",
-      blood_group: u.blood_group ?? "",
-      isActive: u.isActive ? "true" : "false",
-      manager_id: u.manager_id ?? "",
-      created_at: u.created_at
-        ? new Date(u.created_at).toISOString().slice(0, 10)
-        : "",
-    }));
   }
 
   async findAll(options: PaginationOptions) {
@@ -560,7 +249,6 @@ export class UsersService {
       "first_name",
       "last_name",
       "email",
-      "user_code",
       "department",
       "role",
       "created_at",
@@ -629,8 +317,6 @@ export class UsersService {
       password_reveal_count: _passwordRevealCount,
       resetToken: _resetToken,
       resetTokenExpiry: _resetTokenExpiry,
-      password_reset_day: _passwordResetDay,
-      password_reset_count: _passwordResetCount,
       manager,
       ...safeUser
     } = user;
@@ -678,12 +364,6 @@ export class UsersService {
 
       // Extract user data and permissions
       const { permissions, ...userData } = updateDto;
-
-      if (Object.prototype.hasOwnProperty.call(userData, "user_code")) {
-        const userCode = this.normalizeUserCode(userData.user_code);
-        await this.assertUserCodeAvailable(userCode, id);
-        userData.user_code = userCode;
-      }
 
       // Update user data
       const user = await this.findOne(id);
@@ -944,7 +624,6 @@ export class UsersService {
         "user.department",
         "user.role",
         "user.isActive",
-        "user.user_code",
       ]);
 
     // // Filter by active status if specified
@@ -979,95 +658,17 @@ export class UsersService {
 
     console.log("querybuilder results", queryBuilder.getQueryAndParameters());
     // Transform to include full_name
-    return users.map((user) => this.toUserDropdownOption(user));
-  }
-
-  private toUserDropdownOption(user: User) {
-    return {
+    return users.map((user) => ({
       id: user.id,
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
       full_name:
         `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email,
-      user_code: user.user_code,
       department: user.department,
       role: user.role,
       isActive: user.isActive,
-    };
-  }
-
-  /**
-   * Users visible in donor "assigned to" list filter.
-   * Super admin: all users in department; managers: self + direct reports; others: self only.
-   */
-  async getUsersForDonorAssignedFilter(
-    currentUser: Pick<User, "id" | "role" | "department">,
-    options?: { search?: string; department?: string },
-  ) {
-    const permissions = await this.permissionsService.getUserPermissions(
-      currentUser.id,
-    );
-    const isSuperAdmin =
-      currentUser.role === UserRole.SUPER_ADMIN ||
-      permissions?.super_admin === true;
-    const isManager =
-      permissions?.fund_raising_manager === true ||
-      this.isManagerRole(currentUser.role);
-
-    let allowedIds: number[] | null = null;
-    if (!isSuperAdmin) {
-      if (isManager) {
-        const reports = await this.userRepository.find({
-          where: { manager_id: currentUser.id, is_archived: false },
-          select: ["id"],
-        });
-        allowedIds = Array.from(
-          new Set([currentUser.id, ...reports.map((r) => r.id)]),
-        );
-      } else {
-        allowedIds = [currentUser.id];
-      }
-    }
-
-    const queryBuilder = this.userRepository
-      .createQueryBuilder("user")
-      .select([
-        "user.id",
-        "user.email",
-        "user.first_name",
-        "user.last_name",
-        "user.department",
-        "user.role",
-        "user.isActive",
-        "user.user_code",
-      ])
-      .where("user.is_archived = :archived", { archived: false });
-
-    if (options?.department) {
-      queryBuilder.andWhere("user.department = :department", {
-        department: options.department,
-      });
-    }
-
-    if (allowedIds !== null) {
-      queryBuilder.andWhere("user.id IN (:...allowedIds)", { allowedIds });
-    }
-
-    if (options?.search && options.search.trim() !== "") {
-      const searchTerm = `%${options.search.trim()}%`;
-      queryBuilder.andWhere(
-        "(COALESCE(user.first_name, '') ILIKE :searchTerm OR COALESCE(user.last_name, '') ILIKE :searchTerm OR user.email ILIKE :searchTerm OR COALESCE(user.user_code, '') ILIKE :searchTerm)",
-        { searchTerm },
-      );
-    }
-
-    queryBuilder
-      .orderBy("user.first_name", "ASC")
-      .addOrderBy("user.last_name", "ASC");
-
-    const users = await queryBuilder.getMany();
-    return users.map((user) => this.toUserDropdownOption(user));
+    }));
   }
 
   async findByIds(ids: number[]): Promise<User[]> {

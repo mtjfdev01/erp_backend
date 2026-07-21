@@ -8,7 +8,7 @@ import {
 import { CreateDonationDto } from "./dto/create-donation.dto";
 import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, SelectQueryBuilder } from "typeorm";
+import { Brackets, Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "./entities/donation.entity";
 import {
   DonationInKind,
@@ -70,7 +70,6 @@ import {
   buildDonationGeoSnapshotForCreate,
   mergeDonationGeoForUpdate,
 } from "./utils/donation-geo.util";
-import { DonationAllotmentsService } from "./allotments/donation-allotments.service";
 
 @Injectable()
 export class DonationsService {
@@ -123,33 +122,7 @@ export class DonationsService {
     private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
-    private readonly donationAllotmentsService: DonationAllotmentsService,
   ) {}
-
-  /** Fire-and-forget pending allotment when a donation newly becomes completed. */
-  private afterDonationMarkedCompleted(
-    donationId: number,
-    source: string,
-    previousStatus?: string | null,
-  ): void {
-    if (String(previousStatus || "").toLowerCase() === "completed") {
-      return;
-    }
-    void this.donationAllotmentsService
-      .onDonationCompleted(donationId, source)
-      .catch((err) => {
-        this.logger.warn(
-          `Allotment hook failed for donation ${donationId}: ${err?.message}`,
-        );
-      });
-    void this.donorService
-      .markMatureDonorFromCompletedDonation(donationId)
-      .catch((err) => {
-        this.logger.warn(
-          `Mature donor hook failed for donation ${donationId}: ${err?.message}`,
-        );
-      });
-  }
 
   private async syncDonorLastDonationDate(
     donation?: Pick<Donation, "donor_id" | "date" | "created_at"> | null,
@@ -227,10 +200,10 @@ export class DonationsService {
     scope: ResolvedDataScope | null,
     record: Donation,
   ): void {
-    // Online (website): no staff owner; geographic scope governs access.
-    // Offline (non-website): offline permission sees all such rows; no created_by gate.
-    // Permission checks (online/offline module) and geo still apply at the controller.
-    return;
+    if (!scope) return;
+    // Website donations are system-created (no staff owner); geographic scope governs access.
+    if (record.donation_source === "website") return;
+    this.dataScopeService.assertRecordAccess(scope, record);
   }
 
   private resolveDonationListMode(
@@ -249,19 +222,45 @@ export class DonationsService {
   }
 
   /**
-   * Data scope on created_by — not applied for donations.
-   * Online list: donation_source = website (permission-gated).
-   * Offline list: donation_source != website — offline permission sees all such rows.
-   * Geographic territory filter (when active) still applies separately.
+   * Data scope on created_by. Skipped when geographic territory filter is active
+   * (website donations have no created_by; offline rows are gated by geo instead).
    */
   private applyDonationListDataScope(
-    _query: SelectQueryBuilder<Donation>,
-    _scope: ResolvedDataScope | null,
-    _listMode: "online" | "offline" | "both",
-    _geoScope?: ResolvedGeographicScope | null,
-    _paramSuffix = "",
+    query: SelectQueryBuilder<Donation>,
+    scope: ResolvedDataScope | null,
+    listMode: "online" | "offline" | "both",
+    geoScope?: ResolvedGeographicScope | null,
+    paramSuffix = "",
   ): void {
-    return;
+    if (!scope) return;
+    if (scope.bypass || scope.type === "org" || !scope.allowedUserIds?.length) {
+      return;
+    }
+
+    if (geoScope && this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+      return;
+    }
+
+    if (listMode === "online") {
+      return;
+    }
+
+    if (listMode === "offline") {
+      this.dataScopeService.applyToQuery(query, "donation", scope);
+      return;
+    }
+
+    const paramKey = `dataScopeMixed${paramSuffix}`;
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where(`donation.donation_source = :${paramKey}_website`, {
+          [`${paramKey}_website`]: "website",
+        });
+        qb.orWhere(`donation.created_by IN (:...${paramKey}_userIds)`, {
+          [`${paramKey}_userIds`]: scope.allowedUserIds,
+        });
+      }),
+    );
   }
 
   private logFinalQuery(
@@ -300,7 +299,7 @@ export class DonationsService {
     return Number(id);
   }
 
-  /** Website checkout: invoice first (201), then donor link fully awaited on the server. */
+  /** Website checkout: defer donor link, progress, and notifications until after HTTP response. */
   shouldDeferDonorPostCreate(createDonationDto: CreateDonationDto): boolean {
     if (createDonationDto.donor_id || createDonationDto.previous_donation_id) {
       return false;
@@ -478,7 +477,7 @@ export class DonationsService {
   }
 
   /**
-   * Donor link, progress, notifications — runs after 201 is sent; fully awaited on the server.
+   * Runs after the HTTP response for fast website checkout (donor link, progress, notifications).
    */
   async finalizeDonationPostCreate(
     donationId: number,
@@ -1514,14 +1513,6 @@ export class DonationsService {
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
 
-      if (donationStatus === "completed") {
-        this.afterDonationMarkedCompleted(
-          donationId,
-          "provider_status_sync",
-          previousStatus,
-        );
-      }
-
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
     }
 
@@ -1957,9 +1948,6 @@ export class DonationsService {
           campaign_id: campaignId,
           created_by: this.donationAuditUserId(user) as any,
           recurrence_id: recurringRowId,
-          // Manual add omits this field; do not write null (would override column default).
-          donation_source:
-            createDonationDto.donation_source?.trim() || "website",
         });
         savedDonation = await this.donationRepository.save(donation);
         console.log(
@@ -2520,7 +2508,6 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
         .leftJoinAndSelect("donation.created_by", "created_by")
-        .leftJoinAndSelect("donation.credited_to", "credited_to")
         .where("donation.id = :id", { id })
         .getOne();
 
@@ -2830,14 +2817,6 @@ export class DonationsService {
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
 
-      if (newStatus === "completed") {
-        this.afterDonationMarkedCompleted(
-          donationId,
-          "staff_status_action",
-          donation.status,
-        );
-      }
-
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       return {
@@ -3010,14 +2989,6 @@ export class DonationsService {
       // Update the donation
       await this.donationRepository.update(parseInt(donationId), updateData);
 
-      if (newStatus === "completed") {
-        this.afterDonationMarkedCompleted(
-          parseInt(donationId, 10),
-          `gateway_${paymentMethod}`,
-          donation.status,
-        );
-      }
-
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Get updated donation
@@ -3186,11 +3157,6 @@ export class DonationsService {
 
       let batching: any = null;
       if (newStatus === "completed") {
-        this.afterDonationMarkedCompleted(
-          parseInt(basket_id, 10),
-          "payfast_ipn",
-          donation.status,
-        );
         try {
           batching = await this.processDonationBatchingAfterPaymentSuccess({
             donationId: parseInt(basket_id),
@@ -3291,14 +3257,6 @@ export class DonationsService {
         status: status,
       });
 
-      if (String(status).toLowerCase() === "completed") {
-        this.afterDonationMarkedCompleted(
-          parseInt(id, 10),
-          "public_status_update",
-          donation.status,
-        );
-      }
-
       console.log(
         `Donation ${id} updated successfully with order_id: ${order_id} and status: ${status}`,
       );
@@ -3359,11 +3317,6 @@ export class DonationsService {
               status: "completed",
               orderId: orderIdForDonation,
             });
-            this.afterDonationMarkedCompleted(
-              parsedDonationId,
-              "stripe_webhook_checkout",
-              donation.status,
-            );
             console.log(
               `Stripe webhook: Donation ${parsedDonationId} marked completed (${session.mode === "subscription" ? "subscription" : "session"}: ${orderIdForDonation})`,
             );
@@ -3391,11 +3344,6 @@ export class DonationsService {
               status: "completed",
               orderId: paymentIntent.id || donation.orderId,
             });
-            this.afterDonationMarkedCompleted(
-              parsedDonationId,
-              "stripe_webhook_payment_intent",
-              donation.status,
-            );
             console.log(
               `Stripe webhook (embed): Donation ${parsedDonationId} marked completed (payment_intent: ${paymentIntent.id})`,
             );
@@ -3574,14 +3522,6 @@ export class DonationsService {
         message_sent,
         email_sent,
       });
-
-      if (status === "completed") {
-        this.afterDonationMarkedCompleted(
-          parseInt(invoice_number, 10),
-          "blinq_callback",
-          donation.status,
-        );
-      }
 
       if (status === "completed") {
         // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
@@ -3903,11 +3843,6 @@ export class DonationsService {
 
     let batching: any = null;
     if (newStatus === "completed") {
-      this.afterDonationMarkedCompleted(
-        donationId,
-        opts?.source || "alfalah_ipn",
-        donation.status,
-      );
       try {
         batching = await this.processDonationBatchingAfterPaymentSuccess({
           donationId,

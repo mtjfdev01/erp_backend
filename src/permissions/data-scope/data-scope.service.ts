@@ -107,16 +107,6 @@ export class DataScopeService {
       };
     }
 
-    if (permissions?.fund_raising_manager === true) {
-      return {
-        bypass: false,
-        type: "org",
-        allowedUserIds: null,
-        userId: numericUserId,
-        userDepartment,
-      };
-    }
-
     const scopeType = this.readModuleScope(
       permissions,
       permissionDepartment,

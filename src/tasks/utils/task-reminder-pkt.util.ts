@@ -25,28 +25,16 @@ export function dueDateToPktDateString(dueDate: Date | string): string {
   return formatDateOnlyPkt(dueDate);
 }
 
-export function normalizeRemindDateString(value: string): string {
-  return String(value || "").slice(0, 10);
-}
-
-/** Signed calendar-day difference: toDate minus fromDate (PKT date strings). */
-export function calendarDaysBetweenPkt(
-  fromDate: string,
-  toDate: string,
-): number {
-  const from = normalizeRemindDateString(fromDate);
-  const to = normalizeRemindDateString(toDate);
-  const [y1, m1, d1] = from.split("-").map(Number);
-  const [y2, m2, d2] = to.split("-").map(Number);
-  const start = Date.UTC(y1, m1 - 1, d1);
-  const end = Date.UTC(y2, m2 - 1, d2);
-  return Math.round((end - start) / (24 * 60 * 60 * 1000));
-}
-
-export function daysUntilDueFromTodayPkt(dueDate: Date | string): number {
-  const today = formatDateOnlyPkt(new Date());
+/** Calendar date offset_days before due date (PKT calendar days). */
+export function computeRemindOnDate(
+  dueDate: Date | string,
+  offsetDays: number,
+): string {
   const dueStr = dueDateToPktDateString(dueDate);
-  return calendarDaysBetweenPkt(today, dueStr);
+  const [y, m, d] = dueStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - offsetDays);
+  return dt.toISOString().slice(0, 10);
 }
 
 export function isReminderSlotInPast(
@@ -62,7 +50,6 @@ export function isReminderSlotInPast(
 }
 
 export function dueReminderLabel(offsetDays: number): string {
-  if (offsetDays < 0) return "overdue";
   if (offsetDays === 0) return "due today";
   if (offsetDays === 1) return "due tomorrow";
   return `due in ${offsetDays} days`;

@@ -40,12 +40,11 @@ import { TaskApproval } from "./entities/task-approval.entity";
 import { TaskDueReminder } from "./entities/task-due-reminder.entity";
 import { CreateTaskDueReminderDto } from "./dto/create-task-due-reminder.dto";
 import {
+  computeRemindOnDate,
   dueDateToPktDateString,
-  daysUntilDueFromTodayPkt,
   formatDateOnlyPkt,
   getPktHour,
   isReminderSlotInPast,
-  normalizeRemindDateString,
 } from "./utils/task-reminder-pkt.util";
 
 @Injectable()
@@ -391,19 +390,7 @@ export class TasksService {
     }));
   }
 
-  /** System/cron task creation — no permission checks; created_by is null. */
-  async createSystemTask(dto: CreateTaskDto): Promise<Task> {
-    return this.createInternal(dto, null);
-  }
-
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
-    return this.createInternal(dto, currentUser);
-  }
-
-  private async createInternal(
-    dto: CreateTaskDto,
-    currentUser: User | null,
-  ): Promise<Task> {
     try {
       const assignedUsersMeta = await this.getAssignedUsersMeta(
         dto.assigned_users,
@@ -413,10 +400,6 @@ export class TasksService {
       let movItemsFromDto: string[] = [];
       if (dto.mov_checklist && dto.mov_checklist.length > 0) {
         movItemsFromDto = dto.mov_checklist.map((item) => item.text);
-      } else if (Array.isArray((dto as any).mov_items)) {
-        movItemsFromDto = (dto as any).mov_items.filter(
-          (t: unknown) => typeof t === "string" && t.trim().length > 0,
-        );
       }
 
       const task = this.taskRepo.create({
@@ -1831,9 +1814,7 @@ export class TasksService {
       if (
         task.status === TaskStatus.COMPLETED &&
         dto.status !== TaskStatus.PENDING_APPROVAL &&
-        dto.status !== TaskStatus.CLOSED &&
-        dto.status !== TaskStatus.IN_PROGRESS &&
-        dto.status !== TaskStatus.OPEN
+        dto.status !== TaskStatus.CLOSED
       ) {
         if (
           currentUser.role !== UserRole.SUPER_ADMIN &&
@@ -1868,43 +1849,25 @@ export class TasksService {
           [TaskStatus.DRAFT]: [TaskStatus.OPEN],
           [TaskStatus.OPEN]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
           [TaskStatus.IN_PROGRESS]: [
-            TaskStatus.OPEN,
             TaskStatus.COMPLETED,
             TaskStatus.CANCELLED,
             TaskStatus.BLOCKED,
           ],
-          [TaskStatus.BLOCKED]: [
-            TaskStatus.OPEN,
-            TaskStatus.IN_PROGRESS,
-            TaskStatus.CANCELLED,
-          ],
+          [TaskStatus.BLOCKED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
           [TaskStatus.COMPLETED]:
             task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED
-              ? [
-                  TaskStatus.PENDING_APPROVAL,
-                  TaskStatus.IN_PROGRESS,
-                  TaskStatus.OPEN,
-                ]
-              : [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS, TaskStatus.OPEN],
+              ? [TaskStatus.PENDING_APPROVAL, TaskStatus.IN_PROGRESS]
+              : [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS],
           [TaskStatus.PENDING_APPROVAL]: [
-            TaskStatus.OPEN,
             TaskStatus.APPROVED,
             TaskStatus.REJECTED,
             TaskStatus.CLOSED,
             TaskStatus.IN_PROGRESS,
           ],
-          [TaskStatus.APPROVED]: [
-            TaskStatus.CLOSED,
-            TaskStatus.PENDING_APPROVAL,
-            TaskStatus.IN_PROGRESS,
-          ],
-          [TaskStatus.REJECTED]: [
-            TaskStatus.OPEN,
-            TaskStatus.IN_PROGRESS,
-            TaskStatus.CANCELLED,
-          ],
-          [TaskStatus.CLOSED]: [TaskStatus.OPEN, TaskStatus.IN_PROGRESS],
-          [TaskStatus.CANCELLED]: [TaskStatus.OPEN],
+          [TaskStatus.APPROVED]: [TaskStatus.CLOSED],
+          [TaskStatus.REJECTED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+          [TaskStatus.CLOSED]: [],
+          [TaskStatus.CANCELLED]: [],
         };
 
         const validNext = allowedTransitions[oldStatus] || [];
@@ -2949,19 +2912,7 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
-    let value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
-
-    // Donation pending follow-up: two mutually exclusive MOV items — one check = done.
-    if (
-      typeof task.project_id === "string" &&
-      task.project_id.startsWith("donation-pending:") &&
-      Array.isArray(task.mov_items) &&
-      task.mov_items.length === 2 &&
-      value >= 50 &&
-      value < 100
-    ) {
-      value = 100;
-    }
+    const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
     const oldProgress = task.progress;
     const oldStatus = task.status;
 
@@ -3016,55 +2967,25 @@ export class TasksService {
           ],
         });
       const tasks = await qb.getMany();
-      let processedCount = 0;
-
       for (const t of tasks) {
-        const assigneeIds = Array.isArray(t.assigned_user_ids)
-          ? t.assigned_user_ids
-              .map((v) => Number(v))
-              .filter((v) => !Number.isNaN(v))
-          : [];
-
-        if (assigneeIds.length === 0) {
-          this.logger.warn(
-            `Skipping overdue email for task ${t.id}: no assignees`,
-          );
-          continue;
-        }
-
         const escalationLevel = 1;
-        let sentAny = false;
-
-        for (const userId of assigneeIds) {
-          try {
-            const user = await this.userRepo.findOne({ where: { id: userId } });
-            if (!user?.email) continue;
-
-            const success = await this.emailService.sendTaskOverdueNotification(
-              user,
-              t,
-              escalationLevel,
-            );
-            if (success) sentAny = true;
-          } catch (emailErr: any) {
-            this.logger.warn(
-              `Failed overdue email to user ${userId} for task ${t.id}: ${emailErr?.message}`,
-            );
-          }
-        }
-
-        if (sentAny) {
+        const adminEmail =
+          process.env.NOTIFICATION_EMAIL || "dev@mtjfoundation.org";
+        const success = await this.emailService.sendTaskOverdueNotification(
+          adminEmail,
+          t,
+          escalationLevel,
+        );
+        if (success) {
           t.overdue_email_sent = true;
           await this.taskRepo.save(t);
           await this.logActivity(t, null as any, "overdue_escalated", {
             escalation_level: escalationLevel,
-            notes:
-              "Overdue notification sent to assignee(s). Duplicate daily emails suppressed.",
+            notes: "Initial overdue notification sent. Duplicate daily emails suppressed.",
           });
-          processedCount++;
         }
       }
-      return processedCount;
+      return tasks.length;
     } catch (e) {
       throw e;
     }
@@ -3153,10 +3074,7 @@ export class TasksService {
       );
     }
 
-    const remindOnDate = normalizeRemindDateString(dto.remind_on_date);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(remindOnDate)) {
-      throw new BadRequestException("Invalid reminder date");
-    }
+    const remindOnDate = computeRemindOnDate(task.due_date, dto.offset_days);
     if (isReminderSlotInPast(remindOnDate, dto.remind_at_hour)) {
       throw new BadRequestException(
         "Reminder date and time must be in the future (Pakistan time)",
@@ -3166,7 +3084,7 @@ export class TasksService {
     const reminder = this.dueReminderRepo.create({
       task_id: task.id,
       user_id: Number(currentUser.id),
-      offset_days: null,
+      offset_days: dto.offset_days,
       remind_on_date: remindOnDate,
       remind_at_hour: dto.remind_at_hour,
       created_by: currentUser,
@@ -3246,14 +3164,10 @@ export class TasksService {
           this.isUserAssignedToTask(task, user.id);
 
         if (canEmail) {
-          const daysUntilDue =
-            reminder.offset_days != null
-              ? reminder.offset_days
-              : daysUntilDueFromTodayPkt(task.due_date);
           await this.emailService.sendTaskDueReminderEmail(
             user,
             task,
-            daysUntilDue,
+            reminder.offset_days,
             dueDateToPktDateString(task.due_date),
           );
         }

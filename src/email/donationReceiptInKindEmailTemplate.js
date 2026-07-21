@@ -26,24 +26,18 @@ const renderProductsRows = (products = []) => {
           <td style="padding: 8px 10px; border-bottom: 1px solid #ddd; text-align: right;">${formatNumber(item.qty)}</td>
           <td style="padding: 8px 10px; border-bottom: 1px solid #ddd; text-align: right;">${formatNumber(item.amount)}</td>
         </tr>
-      `,
+      `
     )
     .join("");
 };
 
 const donationReceiptInKindEmailTemplate = ({
   logoUrl,
-  data,
+  data = {},
   products = [],
 }) => {
-  const totalQty = products.reduce(
-    (sum, item) => sum + Number(item.qty || 0),
-    0,
-  );
-  const totalAmount = products.reduce(
-    (sum, item) => sum + Number(item.amount || 0),
-    0,
-  );
+  const totalQty = products.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+  const totalAmount = products.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
   return `
   <!DOCTYPE html>
@@ -153,4 +147,5 @@ const donationReceiptInKindEmailTemplate = ({
   `;
 };
 
-export default donationReceiptInKindEmailTemplate;
+module.exports = donationReceiptInKindEmailTemplate;
+

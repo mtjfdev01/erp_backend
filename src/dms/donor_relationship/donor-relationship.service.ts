@@ -115,59 +115,6 @@ export class DonorRelationshipService {
     }));
   }
 
-  /**
-   * List interactions across donors.
-   * scope=mine (default): created by current user
-   * scope=team: all team interactions (manage_overview / managers / super_admin)
-   */
-  async getInteractionsList(
-    query: {
-      scope?: "mine" | "team";
-      activity_type?: string;
-      search?: string;
-      limit?: string;
-    },
-    user: CurrentUser,
-  ) {
-    const scope = query.scope === "team" ? "team" : "mine";
-    if (scope === "team") {
-      await this.assertManagementAccess(user);
-    }
-
-    const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 300);
-
-    const qb = this.interactionRepository
-      .createQueryBuilder("i")
-      .leftJoinAndSelect("i.donor", "donor")
-      .leftJoinAndSelect("i.created_by", "created_by")
-      .leftJoinAndSelect("i.assigned_to", "assigned_to")
-      .where("i.is_archived = false")
-      .orderBy("i.activity_datetime", "DESC")
-      .addOrderBy("i.id", "DESC")
-      .take(limit);
-
-    if (scope === "mine") {
-      qb.andWhere("created_by.id = :uid", { uid: user.id });
-    }
-
-    if (query.activity_type) {
-      qb.andWhere("i.activity_type = :atype", {
-        atype: query.activity_type,
-      });
-    }
-
-    if (query.search?.trim()) {
-      const s = `%${query.search.trim()}%`;
-      qb.andWhere(
-        "(donor.name ILIKE :s OR donor.phone ILIKE :s OR i.user_action_text ILIKE :s OR i.next_action_text ILIKE :s OR i.donor_response_text ILIKE :s)",
-        { s },
-      );
-    }
-
-    const items = await qb.getMany();
-    return { scope, total: items.length, items };
-  }
-
   async updateInteraction(
     id: number,
     dto: UpdateDonorInteractionDto,
@@ -278,22 +225,12 @@ export class DonorRelationshipService {
 
   async getMyFollowups(
     user: CurrentUser,
-    filters?: {
-      bucket?: string;
-      page?: number;
-      pageSize?: number;
-      search?: string;
-      scope?: "mine" | "team";
-    },
+    filters?: { bucket?: string; page?: number; pageSize?: number },
   ) {
     const page = Math.max(1, filters?.page || 1);
     const pageSize = Math.min(50, Math.max(1, filters?.pageSize || 20));
     const skip = (page - 1) * pageSize;
     const bucket = (filters?.bucket || "today").toLowerCase();
-    const scope = filters?.scope === "team" ? "team" : "mine";
-    if (scope === "team") {
-      await this.assertManagementAccess(user);
-    }
     const now = new Date();
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
@@ -305,12 +242,8 @@ export class DonorRelationshipService {
       .leftJoinAndSelect("followup.donor", "donor")
       .leftJoinAndSelect("donor.assigned_to", "donor_assigned")
       .leftJoinAndSelect("followup.interaction", "interaction")
-      .leftJoinAndSelect("followup.assigned_to", "assigned_to")
-      .where("followup.is_archived = :archived", { archived: false });
-
-    if (scope === "mine") {
-      qb.andWhere("followup.assigned_to_user_id = :userId", { userId: user.id });
-    }
+      .where("followup.assigned_to_user_id = :userId", { userId: user.id })
+      .andWhere("followup.is_archived = :archived", { archived: false });
 
     if (bucket === "completed") {
       qb.andWhere("followup.status = :status", { status: "completed" });
@@ -329,14 +262,6 @@ export class DonorRelationshipService {
       })
         .andWhere("followup.due_datetime >= :startOfToday", { startOfToday })
         .andWhere("followup.due_datetime <= :endOfToday", { endOfToday });
-    }
-
-    if (filters?.search?.trim()) {
-      const s = `%${filters.search.trim()}%`;
-      qb.andWhere(
-        "(donor.name ILIKE :s OR donor.phone ILIKE :s OR followup.followup_title ILIKE :s OR followup.followup_reason ILIKE :s OR interaction.user_action_text ILIKE :s)",
-        { s },
-      );
     }
 
     qb.orderBy("followup.due_datetime", "ASC");

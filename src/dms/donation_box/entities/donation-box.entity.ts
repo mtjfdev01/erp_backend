@@ -64,32 +64,6 @@ export class DonationBox extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   geo_search: string;
 
-  /** GPS coordinates captured when the box was registered at the shop. */
-  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
-  registration_latitude: number;
-
-  @Column({ type: "decimal", precision: 10, scale: 7, nullable: true })
-  registration_longitude: number;
-
-  /** Human-readable place name from reverse geocoding at registration. */
-  @Column({ type: "text", nullable: true })
-  registration_location_name: string;
-
-  /** Structured address from reverse geocoding (shop/point, road, city, etc.). */
-  @Column({ type: "jsonb", nullable: true })
-  registration_location_details: Record<string, string> | null;
-
-  /** Allowed distance (meters) from registration point for collections. */
-  @Column({ type: "int", default: 100 })
-  location_radius_meters: number;
-
-  /**
-   * When true, collectors must be at the box's device GPS point (unless user has bypass permission).
-   * When false, this box can be collected from anywhere with no GPS check.
-   */
-  @Column({ default: true })
-  require_collection_location: boolean;
-
   // Box Details
   @Column({
     type: "enum",

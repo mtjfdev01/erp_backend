@@ -12,22 +12,17 @@ import { User } from "../../users/user.entity";
 import { DonationBoxAuditModule } from "./audit/donation-box-audit.module";
 import { DonationBoxGeoBackfillService } from "./donation-box-geo-backfill.service";
 import { DonationBoxGeoBackfillRunner } from "./donation-box-geo-backfill.runner";
-import { NotificationsModule } from "../../notifications/notifications.module";
-import { EmailModule } from "../../email/email.module";
-import { PermissionsEntity } from "../../permissions/entities/permissions.entity";
 
 @Module({
   imports: [
     DonationBoxAuditModule,
-    TypeOrmModule.forFeature([DonationBox, Route, City, User, PermissionsEntity]),
+    TypeOrmModule.forFeature([DonationBox, Route, City, User]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
     DonationBoxDonationModule,
-    NotificationsModule,
-    EmailModule,
   ],
   controllers: [DonationBoxController],
   providers: [

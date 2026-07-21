@@ -17,10 +17,6 @@ export class CreateUserDto {
   @IsString()
   first_name: string;
 
-  @IsOptional()
-  @IsString()
-  user_code?: string;
-
   @IsString()
   last_name: string;
 

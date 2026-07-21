@@ -29,29 +29,17 @@ import { DonationAuditModule } from "./audit/donation-audit.module";
 import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-donations-stripe.module";
 import { DonationGeoBackfillService } from "./donation-geo-backfill.service";
 import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
-import { DonationPendingFollowUpService } from "./donation-pending-follow-up.service";
-import { Task } from "../tasks/entities/task.entity";
-import { TasksModule } from "../tasks/tasks.module";
-import { DonationAllotment } from "./allotments/entities/donation-allotment.entity";
-import { DonationAllotmentsService } from "./allotments/donation-allotments.service";
-import { Donor } from "../dms/donor/entities/donor.entity";
-import { PermissionsEntity } from "../permissions/entities/permissions.entity";
 
 @Module({
   imports: [
     DonationAuditModule,
     RecurringDonationsStripeModule,
-    TasksModule,
     TypeOrmModule.forFeature([
       Donation,
       DonationInKind,
       User,
       RecurringDonationPlan,
       ProgressWorkflowTemplate,
-      Task,
-      DonationAllotment,
-      Donor,
-      PermissionsEntity,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -82,13 +70,7 @@ import { PermissionsEntity } from "../permissions/entities/permissions.entity";
     WhatsAppService,
     DonationGeoBackfillService,
     DonationGeoBackfillRunner,
-    DonationPendingFollowUpService,
-    DonationAllotmentsService,
   ],
-  exports: [
-    DonationsService,
-    DonationPendingFollowUpService,
-    DonationAllotmentsService,
-  ],
+  exports: [DonationsService],
 })
 export class DonationsModule {}

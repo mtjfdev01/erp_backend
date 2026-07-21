@@ -197,9 +197,7 @@ export class DonorController {
     @Query("start_date") start_date?: string,
     @Query("end_date") end_date?: string,
     @Query("multi_time_donors") multi_time_donor?: string,
-    @Query("is_mature_donor") is_mature_donor?: string,
     @Query("source") source?: string,
-    @Query("assigned_to_user_id") assigned_to_user_id?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -264,14 +262,7 @@ export class DonorController {
           multi_time_donor: multi_time_donor
             ? multi_time_donor === "true"
             : undefined,
-          is_mature_donor:
-            is_mature_donor === "true"
-              ? true
-              : is_mature_donor === "false"
-                ? false
-                : undefined,
           source: requestedSource,
-          assigned_to_user_id: assigned_to_user_id?.trim() || undefined,
         },
         geoScope,
         sourceAccess,
@@ -388,15 +379,10 @@ export class DonorController {
         this.donorService.assertDonorViewAccess(scope, result, geoScope);
         await this.checkDonorPermission(user.id, result.source, "view");
       }
-      const donation_stats =
-        await this.donorService.getCompletedDonationStats(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Donor retrieved successfully",
-        data: {
-          ...result,
-          donation_stats,
-        },
+        data: result,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {

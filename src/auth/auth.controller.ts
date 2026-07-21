@@ -12,9 +12,6 @@ import {
 import { Response, Request } from "express";
 import { AuthService } from "./auth.service";
 import { JwtGuard } from "./jwt.guard";
-import { UsersService } from "../users/users.service";
-import { ResetPasswordDto } from "../users/dto/reset-password.dto";
-import { ChangePasswordDto } from "../users/dto/change-password.dto";
 
 interface LoginDto {
   email: string;
@@ -23,10 +20,7 @@ interface LoginDto {
 
 @Controller("auth")
 export class AuthController {
-  constructor(
-    private authService: AuthService,
-    private usersService: UsersService,
-  ) {}
+  constructor(private authService: AuthService) {}
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
@@ -44,14 +38,16 @@ export class AuthController {
     const result = await this.authService.login(user);
     console.log("Login successful, setting cookies...");
 
+    // Set JWT in HTTP-only cookie (no domain sharing - separate cookies per domain)
     const jwtCookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production", // true for HTTPS, false for HTTP
       sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as
         | "none"
-        | "lax",
-      maxAge: 24 * 60 * 60 * 1000,
+        | "lax", // 'none' for cross-origin HTTPS
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
       path: "/",
+      // No domain set = cookie only works for the exact domain that set it
     };
 
     console.log("Setting JWT cookie with options:", jwtCookieOptions);
@@ -60,34 +56,10 @@ export class AuthController {
     console.log("Returning response with user data and permissions");
     return {
       message: "Login successful",
-      token: result.token,
-      user: result.user,
-      permissions: result.permissions,
+      token: result.token, // Include token for WebSocket connection
+      user: result.user, // Include user data in response
+      permissions: result.permissions, // Include permissions in response
     };
-  }
-
-  /** Public: email a temporary password if the account exists. */
-  @Post("forgot-password")
-  @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body() body: ResetPasswordDto) {
-    return this.usersService.forgotPassword(body.email);
-  }
-
-  /** Authenticated user changes their own password. */
-  @Post("change-password")
-  @UseGuards(JwtGuard)
-  @HttpCode(HttpStatus.OK)
-  async changePassword(
-    @Body() body: ChangePasswordDto,
-    @Req() request: Request,
-  ) {
-    const token = request.cookies?.jwt;
-    const user = await this.authService.validateToken(token);
-    return this.usersService.changePassword(
-      user.id,
-      body.currentPassword,
-      body.newPassword,
-    );
   }
 
   @Post("logout")
@@ -95,13 +67,15 @@ export class AuthController {
   async logout(@Res({ passthrough: true }) response: Response) {
     console.log("Logout request received, clearing cookies...");
 
+    // Clear JWT cookie (no domain sharing - separate cookies per domain)
     const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production", // true for HTTPS, false for HTTP
       sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as
         | "none"
-        | "lax",
+        | "lax", // 'none' for cross-origin HTTPS
       path: "/",
+      // No domain set = cookie only works for the exact domain that set it
     };
     response.clearCookie("jwt", cookieOptions);
 
@@ -116,6 +90,7 @@ export class AuthController {
     const token = request.cookies?.jwt;
     const user = await this.authService.validateToken(token);
 
+    // Extract permissions from the user relation
     const permissions = user.permissions?.permissions || {};
 
     const geographic = this.authService.getGeographicContextForUser(user);

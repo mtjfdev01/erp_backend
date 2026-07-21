@@ -8,7 +8,6 @@ export type GeographicBypassReason =
   | "not_applicable"
   | "geographic_off"
   | "super_admin"
-  | "fund_raising_manager"
   | "no_assignments";
 
 export interface ResolvedGeographicScope {

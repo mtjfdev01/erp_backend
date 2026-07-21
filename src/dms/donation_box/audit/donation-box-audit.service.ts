@@ -31,7 +31,7 @@ export class DonationBoxAuditService {
   ) {}
 
   async log(params: LogDonationBoxAuditParams): Promise<void> {
-    if (!params.changes?.length && !params.metadata) return;
+    if (!params.changes?.length) return;
     try {
       await this.auditRepo.save(
         this.auditRepo.create({

@@ -34,7 +34,6 @@ import { DonorAuthModule } from "./donor_auth/donor-auth.module";
 import { DonorPortalModule } from "./donor_portal/donor-portal.module";
 import { DataImportModule } from "./data_import/data-import.module";
 import { S3StorageModule } from "./utils/storage/s3-storage.module";
-import { EmailChecklistModule } from "./email_checklist/email-checklist.module";
 
 @Module({
   imports: [
@@ -44,15 +43,15 @@ import { EmailChecklistModule } from "./email_checklist/email-checklist.module";
     S3StorageModule,
     TypeOrmModule.forRoot({
       type: "postgres",
-      // host: process.env.DB_HOST,
-      // port: parseInt(process.env.DB_PORT),
-      // username: process.env.DB_USERNAME,
-      // password: process.env.DB_PASSWORD,
-      // database: process.env.DB_NAME,
-      url: process.env.DATABASE_URL,
-      ssl: process.env.SSL === "true"
-      ? { rejectUnauthorized: false }
-      : false,     
+      host: process.env.DB_HOST,
+      port: parseInt(process.env.DB_PORT),
+      username: process.env.DB_USERNAME,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      // url: process.env.DATABASE_URL,
+      // ssl: process.env.SSL === "true"
+      // ? { rejectUnauthorized: false }
+      // : false,     
       autoLoadEntities: true,
       synchronize: true,
       extra: {
@@ -92,7 +91,6 @@ import { EmailChecklistModule } from "./email_checklist/email-checklist.module";
     DonorAuthModule,
     DonorPortalModule,
     DataImportModule,
-    EmailChecklistModule,
   ],
   controllers: [AppController],
   providers: [AppService],
