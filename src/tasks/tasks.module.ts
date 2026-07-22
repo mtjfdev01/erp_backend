@@ -16,6 +16,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { EmailModule } from "../email/email.module";
 import { ScheduleModule } from "@nestjs/schedule";
 import { TasksCronsService } from "./crons/tasks-crons.service";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { TasksCronsService } from "./crons/tasks-crons.service";
     PermissionsModule,
     EmailModule,
     ScheduleModule,
+    NotificationsModule,
   ],
   controllers: [TasksController],
   providers: [TasksService, TasksCronsService],
