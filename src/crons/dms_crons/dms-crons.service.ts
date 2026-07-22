@@ -4,7 +4,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In, Not, IsNull, FindOperator } from "typeorm";
 import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsService } from "../../donations/donations.service";
-import { ManualRecurringModule } from "../../dms/manual_recurring/manual-recurring.module";
+import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
 import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
 
 @Injectable()
@@ -15,36 +15,37 @@ export class DmsCronsService {
     @InjectRepository(Donation)
     private readonly donationRepository: Repository<Donation>,
     private readonly donationsService: DonationsService,
+    private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
     private readonly manualRecurringReminderService: ManualRecurringReminderService,
   ) {}
 
-  // /**
-  //  * Every minute — today's **website** donations (pending or failed, PKT), 3+ minutes old.
-  //  */
-  // @Cron("* * * * *", {
-  //   name: "pending-donation-call-center-follow-up",
-  //   timeZone: "Asia/Karachi",
-  // })
-  // async handlePendingDonationCallCenterFollowUp() {
-  //   try {
-  //     const result =
-  //       await this.donationPendingFollowUpService.processPendingDonationFollowUps(
-  //         {
-  //           enforcePendingMinutes: true,
-  //         },
-  //       );
-  //     if (result.created > 0) {
-  //       this.logger.log(
-  //         `Pending donation follow-up: created ${result.created} task(s) — ids: ${result.taskIds.join(", ")}`,
-  //       );
-  //     }
-  //   } catch (error: any) {
-  //     this.logger.error(
-  //       `Pending donation call-center follow-up cron failed: ${error?.message}`,
-  //       error?.stack,
-  //     );
-  //   }
-  // }
+  /**
+   * Every minute — today's **website** donations (pending or failed, PKT), 3+ minutes old.
+   */
+  @Cron("* * * * *", {
+    name: "pending-donation-call-center-follow-up",
+    timeZone: "Asia/Karachi",
+  })
+  async handlePendingDonationCallCenterFollowUp() {
+    try {
+      const result =
+        await this.donationPendingFollowUpService.processPendingDonationFollowUps(
+          {
+            enforcePendingMinutes: true,
+          },
+        );
+      if (result.created > 0) {
+        this.logger.log(
+          `Pending donation follow-up: created ${result.created} task(s) — ids: ${result.taskIds.join(", ")}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Pending donation call-center follow-up cron failed: ${error?.message}`,
+        error?.stack,
+      );
+    }
+  }
 
   /**
    * Monthly — 9:00 AM on the 2nd (Asia/Karachi).

@@ -40,5 +40,6 @@ import { TasksCronsService } from "./crons/tasks-crons.service";
   ],
   controllers: [TasksController],
   providers: [TasksService, TasksCronsService],
+  exports: [TasksService],
 })
 export class TasksModule {}

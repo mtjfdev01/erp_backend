@@ -2413,7 +2413,7 @@ export class DonationsService {
       );
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
-      // applyHybridFilters(query, hybridFilters, 'donation');
+      applyHybridFilters(query, hybridFilters, "donation");
 
       // 1b) Progress tracking filter: only donations whose tracker uses this template
       if (
@@ -2534,7 +2534,7 @@ export class DonationsService {
         "Sum",
       );
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
-      // applyHybridFilters(sumQuery, hybridFilters, 'donation');
+      applyHybridFilters(sumQuery, hybridFilters, "donation");
       applyRelationsSearch(
         sumQuery,
         filters.search as any,

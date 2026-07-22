@@ -201,6 +201,8 @@ export class DonorController {
     @Query("donation_type") donation_type?: string,
     @Query("is_mature_donor") is_mature_donor?: string,
     @Query("source") source?: string,
+    @Query("donated_amount") donated_amount?: string,
+    @Query("donated_amount_operator") donated_amount_operator?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -286,6 +288,8 @@ export class DonorController {
                 ? false
                 : undefined,
           source: requestedSource,
+          donated_amount,
+          donated_amount_operator,
         },
         geoScope,
         sourceAccess,

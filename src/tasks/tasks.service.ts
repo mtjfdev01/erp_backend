@@ -390,7 +390,19 @@ export class TasksService {
     }));
   }
 
+  /** System/cron task creation — no permission checks; created_by is null. */
+  async createSystemTask(dto: CreateTaskDto): Promise<Task> {
+    return this.createInternal(dto, null);
+  }
+
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
+    return this.createInternal(dto, currentUser);
+  }
+
+  private async createInternal(
+    dto: CreateTaskDto,
+    currentUser: User | null,
+  ): Promise<Task> {
     try {
       const assignedUsersMeta = await this.getAssignedUsersMeta(
         dto.assigned_users,
@@ -2912,7 +2924,20 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
-    const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+    let value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+
+    // Donation pending follow-up: two mutually exclusive MOV items — one check = done.
+    if (
+      typeof task.project_id === "string" &&
+      task.project_id.startsWith("donation-pending:") &&
+      Array.isArray(task.mov_items) &&
+      task.mov_items.length === 2 &&
+      value >= 50 &&
+      value < 100
+    ) {
+      value = 100;
+    }
+
     const oldProgress = task.progress;
     const oldStatus = task.status;
 

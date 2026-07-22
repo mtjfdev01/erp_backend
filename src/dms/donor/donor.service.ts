@@ -11,6 +11,7 @@ import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
 import {
   applyCommonFilters,
+  applyHybridFilters,
   FilterPayload,
 } from "../../utils/filters/common-filter.util";
 import * as bcrypt from "bcrypt";
@@ -432,6 +433,8 @@ export class DonorService {
         recurring,
         is_mature_donor,
         source,
+        donated_amount,
+        donated_amount_operator,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -542,6 +545,29 @@ export class DonorService {
       if (currentUser?.id) {
         const scope = await this.resolveDonorScope(currentUser);
         this.applyDonorListDataScope(queryBuilder, scope, geoScope);
+      }
+
+      const parsedDonatedAmount = Number(
+        String(donated_amount ?? "").replace(/,/g, ""),
+      );
+      if (
+        donated_amount !== undefined &&
+        donated_amount !== null &&
+        donated_amount !== "" &&
+        donated_amount_operator &&
+        Number.isFinite(parsedDonatedAmount)
+      ) {
+        applyHybridFilters(
+          queryBuilder,
+          [
+            {
+              column: "total_donated",
+              operator: donated_amount_operator,
+              value: parsedDonatedAmount,
+            },
+          ],
+          "donor",
+        );
       }
 
       // Apply sorting
@@ -656,6 +682,8 @@ export class DonorService {
             : undefined,
       source: filters.source || "",
       assigned_to_user_id: filters.assigned_to_user_id ?? "",
+      donated_amount: filters.donated_amount || "",
+      donated_amount_operator: filters.donated_amount_operator || "",
     };
 
     const result = await this.findAll(
