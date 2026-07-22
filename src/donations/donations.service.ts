@@ -1192,41 +1192,34 @@ export class DonationsService {
   // Get users who should receive donation notifications
   private async getDonationUsers(): Promise<number[]> {
     try {
-      const userIds: number[] = [];
-
-      // Always include user ID 5 (validate it exists first)
-      const user5 = await this.userRepository.findOne({
-        where: { id: 5, isActive: true, is_archived: false },
-        select: ["id"],
-      });
-      if (user5) {
-        userIds.push(5);
-      }
-
-      // Also get users from FUND_RAISING department or ADMIN role (including user ID 5 if they match)
-      const additionalUsers = await this.userRepository
+      const users = await this.userRepository
         .createQueryBuilder("user")
         .select("user.id", "id")
         .where("user.isActive = :isActive", { isActive: true })
         .andWhere("user.is_archived = :is_archived", { is_archived: false })
-        .orWhere({
-          department: Department.FUND_RAISING,
-        })
-        .orWhere({
-          id: 5,
-        })
+        .andWhere(
+          "(user.department = :dept OR user.role IN (:...roles) OR user.id = :fixedId)",
+          {
+            dept: Department.FUND_RAISING,
+            roles: [
+              UserRole.ADMIN,
+              UserRole.SUPER_ADMIN,
+              UserRole.SYSTEM_ADMIN,
+            ],
+            fixedId: 5,
+          },
+        )
         .getRawMany();
 
-      additionalUsers.forEach((user) => {
-        if (!userIds.includes(user.id)) {
-          userIds.push(user.id);
-        }
-      });
-
-      return userIds;
+      return [
+        ...new Set(
+          users
+            .map((row) => Number(row.id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+      ];
     } catch (error) {
       console.error("Error getting donation users:", error.message);
-      // Return empty array if query fails (don't create notifications for invalid users)
       return [];
     }
   }
