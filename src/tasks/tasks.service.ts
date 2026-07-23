@@ -781,6 +781,17 @@ export class TasksService {
         delete safeFilters.department;
       }
 
+      // Explicit project / program filter (exact match)
+      let projectNameFilter: string | undefined = undefined;
+      if (
+        safeFilters.project_name !== undefined &&
+        safeFilters.project_name !== null &&
+        String(safeFilters.project_name).trim() !== ""
+      ) {
+        projectNameFilter = String(safeFilters.project_name).trim();
+        delete safeFilters.project_name;
+      }
+
       let viewTypeFilter: string | undefined = undefined;
       if (safeFilters.view_type) {
         viewTypeFilter = safeFilters.view_type;
@@ -888,6 +899,12 @@ export class TasksService {
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
+      if (projectNameFilter) {
+        qb.andWhere("task.project_name = :projectNameFilter", {
+          projectNameFilter,
+        });
+      }
+
       if (viewTypeFilter === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -932,35 +949,42 @@ export class TasksService {
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
-        qb.andWhere(
-          new Brackets((deptQb) => {
-            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
-            if (currentUser) {
-              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
-              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
-            }
-            
-            // Then apply the department filter
-            if (strictDepartment === true || strictDepartment === "true") {
-              deptQb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            } else {
+        const isStrict =
+          strictDepartment === true || strictDepartment === "true";
+
+        // Dropdown / sidebar department filter: only that department
+        if (isStrict) {
+          qb.andWhere("LOWER(task.department) = :filterDept", {
+            filterDept: lowerDept,
+          });
+        } else {
+          qb.andWhere(
+            new Brackets((deptQb) => {
+              if (currentUser) {
+                deptQb.where(
+                  "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere(
+                  "task.assigned_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere("task.created_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+                deptQb.orWhere("task.reported_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+              }
               deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
                 deptMeta: JSON.stringify([{ department: lowerDept }]),
               });
-              deptQb.orWhere("task.department = :department", {
+              deptQb.orWhere("LOWER(task.department) = :department", {
                 department: lowerDept,
               });
-            }
-          }),
-        );
+            }),
+          );
+        }
       }
 
       const validSort = [
@@ -1059,6 +1083,12 @@ export class TasksService {
       // Apply common filters
       applyCommonFilters(countQb, countSafeFilters, this.searchableColumns, "task");
 
+      if (projectNameFilter) {
+        countQb.andWhere("task.project_name = :projectNameFilter", {
+          projectNameFilter,
+        });
+      }
+
       if (viewTypeFilter === "created" && currentUser) {
         countQb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -1103,35 +1133,41 @@ export class TasksService {
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
-        countQb.andWhere(
-          new Brackets((deptQb) => {
-            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
-            if (currentUser) {
-              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
-              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
-            }
-            
-            // Then apply the department filter
-            if (strictDepartment === true || strictDepartment === "true") {
-              deptQb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            } else {
+        const isStrict =
+          strictDepartment === true || strictDepartment === "true";
+
+        if (isStrict) {
+          countQb.andWhere("LOWER(task.department) = :filterDept", {
+            filterDept: lowerDept,
+          });
+        } else {
+          countQb.andWhere(
+            new Brackets((deptQb) => {
+              if (currentUser) {
+                deptQb.where(
+                  "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere(
+                  "task.assigned_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere("task.created_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+                deptQb.orWhere("task.reported_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+              }
               deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
                 deptMeta: JSON.stringify([{ department: lowerDept }]),
               });
-              deptQb.orWhere("task.department = :department", {
+              deptQb.orWhere("LOWER(task.department) = :department", {
                 department: lowerDept,
               });
-            }
-          }),
-        );
+            }),
+          );
+        }
       }
 
       // Calculate assigned_to_me count

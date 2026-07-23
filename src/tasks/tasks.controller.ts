@@ -95,9 +95,11 @@ export class TasksController {
       filters: {
         search: query.search || "",
         department: query.department || "",
+        project_name: query.project_name || "",
         status: query.status || "",
         priority: query.priority || "",
         user_name: query.user_name || "",
+        assignee_id: query.assignee_id || "",
       },
       strictDepartment: query.strictDepartment === "true" || false,
     };

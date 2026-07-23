@@ -136,6 +136,15 @@ export class DonationsService {
     await this.donorService.updateLastDonationDate(donorId, donationDate);
   }
 
+  private async refreshDonorDonationStats(donorId?: number | null): Promise<void> {
+    if (!donorId) return;
+    try {
+      await this.donorService.recalculateDonorDonationStats(donorId);
+    } catch (error) {
+      console.error("Failed to refresh donor donation stats:", error);
+    }
+  }
+
   private async syncDonationGeoFromDonorIfNeeded(
     donationId: number,
     donor?: Donor | null,
@@ -1627,6 +1636,7 @@ export class DonationsService {
       console.log("Update data:", updateData);
       await this.donationRepository.update(donationId, updateData);
       dbUpdated = true;
+      await this.refreshDonorDonationStats(donation.donor_id);
 
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
     }
@@ -2929,6 +2939,10 @@ export class DonationsService {
         relations: ["donor"],
       });
 
+      if (updatedDonation?.donor_id) {
+        await this.refreshDonorDonationStats(updatedDonation.donor_id);
+      }
+
       console.log(
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
@@ -3290,6 +3304,7 @@ export class DonationsService {
           };
         }
       }
+      await this.refreshDonorDonationStats(donation.donor_id);
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
       console.log(
         `Donation ${basket_id} updated successfully with status: ${newStatus}`,
@@ -3487,6 +3502,13 @@ export class DonationsService {
         "Recurring donations Stripe handler error:",
         recurringErr?.message || recurringErr,
       );
+    }
+
+    if (resolvedDonationId) {
+      const stripeDonation = await this.donationRepository.findOne({
+        where: { id: resolvedDonationId },
+      });
+      await this.refreshDonorDonationStats(stripeDonation?.donor_id);
     }
 
     return {
@@ -3969,6 +3991,8 @@ export class DonationsService {
         batching = { processed: false, reason: e?.message };
       }
     }
+
+    await this.refreshDonorDonationStats(donation.donor_id);
 
     return { status: newStatus, batching };
   }

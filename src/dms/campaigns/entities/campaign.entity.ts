@@ -16,6 +16,8 @@ export enum CampaignStatus {
 @Entity("campaigns")
 @Index("idx_campaigns_status_dates", ["status", "start_at", "end_at"])
 @Index("idx_campaigns_project_id", ["project_id"])
+@Index("idx_campaigns_program_id", ["program_id"])
+@Index("idx_campaigns_sub_program_id", ["sub_program_id"])
 export class Campaign extends BaseEntity {
   @Column({ type: "varchar", length: 200 })
   title: string;
@@ -47,6 +49,14 @@ export class Campaign extends BaseEntity {
 
   @Column({ type: "bigint", nullable: true })
   project_id: number | null;
+
+  /** Optional link to ERP program (`programs.id`) */
+  @Column({ type: "bigint", nullable: true })
+  program_id: number | null;
+
+  /** Optional link to program subprogram (`program_subprograms.id`) */
+  @Column({ type: "bigint", nullable: true })
+  sub_program_id: number | null;
 
   @Column({ type: "text", nullable: true })
   cover_image_url: string | null;

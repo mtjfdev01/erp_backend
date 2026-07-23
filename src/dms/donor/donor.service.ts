@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donor, DonorType } from "./entities/donor.entity";
+import { Donation } from "../../donations/entities/donation.entity";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
 import {
@@ -53,11 +54,29 @@ interface PaginationOptions {
   source?: "online" | "offline";
 }
 
+export interface DonorDonationStats {
+  total_donations: number;
+  total_donated: number;
+  currency: string;
+  first_donation: {
+    date: Date | string;
+    amount: number;
+    currency: string;
+  } | null;
+  last_donation: {
+    date: Date | string;
+    amount: number;
+    currency: string;
+  } | null;
+}
+
 @Injectable()
 export class DonorService {
   constructor(
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(Donation)
+    private readonly donationRepository: Repository<Donation>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly usersService: UsersService,
@@ -844,28 +863,123 @@ export class DonorService {
     }
   }
 
-  async findOne(id: number): Promise<Donor> {
+  async findOne(id: number): Promise<Donor & { donation_stats: DonorDonationStats }> {
     try {
-      // i want donations also here
       const donor = await this.donorRepository.findOne({
         where: { id, is_archived: false },
-        relations: ["donations", "created_by", "updated_by", "assigned_to", "referred_by"],
+        relations: ["created_by", "updated_by", "assigned_to", "referred_by"],
       });
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
 
+      const donation_stats = await this.buildDonorDonationStats(id);
+      await this.applyDonorDonationStatsIfStale(donor, donation_stats);
+
       // Remove password from response
       delete donor.password;
 
-      return donor;
+      return Object.assign(donor, { donation_stats });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new NotFoundException(`Failed to retrieve donor: ${error.message}`);
     }
+  }
+
+  /**
+   * Aggregate completed donations for donor profile / stats cards.
+   */
+  async buildDonorDonationStats(donorId: number): Promise<DonorDonationStats> {
+    const completedQb = () =>
+      this.donationRepository
+        .createQueryBuilder("donation")
+        .where("donation.donor_id = :donorId", { donorId })
+        .andWhere("LOWER(donation.status) = :status", { status: "completed" });
+
+    const aggregates = await completedQb()
+      .select("COUNT(donation.id)", "total_donations")
+      .addSelect(
+        "COALESCE(SUM(COALESCE(donation.paid_amount, donation.amount, 0)), 0)",
+        "total_donated",
+      )
+      .getRawOne<{ total_donations: string; total_donated: string }>();
+
+    const first = await completedQb()
+      .orderBy("donation.date", "ASC")
+      .addOrderBy("donation.created_at", "ASC")
+      .limit(1)
+      .getOne();
+
+    const last = await completedQb()
+      .orderBy("donation.date", "DESC")
+      .addOrderBy("donation.created_at", "DESC")
+      .limit(1)
+      .getOne();
+
+    const currency =
+      last?.currency || first?.currency || "PKR";
+
+    const toDonationRef = (row: Donation | null) => {
+      if (!row) return null;
+      return {
+        date: row.date || row.created_at,
+        amount: Number(row.paid_amount ?? row.amount ?? 0),
+        currency: row.currency || currency,
+      };
+    };
+
+    return {
+      total_donations: Number(aggregates?.total_donations || 0),
+      total_donated: Number(aggregates?.total_donated || 0),
+      currency,
+      first_donation: toDonationRef(first),
+      last_donation: toDonationRef(last),
+    };
+  }
+
+  /**
+   * Recompute donor denormalized donation fields from completed donations.
+   */
+  async recalculateDonorDonationStats(donorId: number): Promise<DonorDonationStats> {
+    const stats = await this.buildDonorDonationStats(donorId);
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+    });
+    if (donor) {
+      donor.donation_count = stats.total_donations;
+      donor.total_donated = stats.total_donated;
+      if (stats.last_donation?.date) {
+        donor.last_donation_date = new Date(stats.last_donation.date);
+      } else {
+        donor.last_donation_date = null;
+      }
+      await this.donorRepository.save(donor);
+    }
+    return stats;
+  }
+
+  private async applyDonorDonationStatsIfStale(
+    donor: Donor,
+    stats: DonorDonationStats,
+  ): Promise<void> {
+    const currentCount = Number(donor.donation_count || 0);
+    const currentTotal = Number(donor.total_donated || 0);
+    if (
+      currentCount === stats.total_donations &&
+      currentTotal === stats.total_donated
+    ) {
+      return;
+    }
+
+    donor.donation_count = stats.total_donations;
+    donor.total_donated = stats.total_donated;
+    if (stats.last_donation?.date) {
+      donor.last_donation_date = new Date(stats.last_donation.date);
+    }
+    await this.donorRepository.save(donor);
   }
 
   /**
@@ -1180,20 +1294,11 @@ export class DonorService {
   }
 
   /**
-   * Update donation statistics
+   * Update donation statistics (recomputed from completed donations).
    */
-  async updateDonationStats(donorId: number, amount: number): Promise<void> {
+  async updateDonationStats(donorId: number, _amount?: number): Promise<void> {
     try {
-      const donor = await this.donorRepository.findOne({
-        where: { id: donorId, is_archived: false },
-      });
-
-      if (donor) {
-        donor.total_donated = Number(donor.total_donated) + amount;
-        donor.donation_count += 1;
-        donor.last_donation_date = new Date();
-        await this.donorRepository.save(donor);
-      }
+      await this.recalculateDonorDonationStats(donorId);
     } catch (error) {
       console.error("Failed to update donation stats:", error);
     }

@@ -61,6 +61,16 @@ export class CreateCampaignDto {
   project_id?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  program_id?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  sub_program_id?: number | null;
+
+  @IsOptional()
   @IsString()
   cover_image_url?: string;
 

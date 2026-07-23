@@ -22,6 +22,21 @@ import {
 import {
   getPeriodBounds,
 } from "./utils/campaign-recurring.util";
+import { ProgramEntity } from "../../program/programs/entities/program.entity";
+import { ProgramSubprogram } from "../../program/subprograms/entities/subprogram.entity";
+
+type ProgramSummary = { id: number; key: string; label: string };
+type SubProgramSummary = {
+  id: number;
+  key: string;
+  label: string;
+  program_id: number;
+};
+
+export type CampaignWithProgram = Campaign & {
+  program?: ProgramSummary | null;
+  sub_program?: SubProgramSummary | null;
+};
 
 /** Allow new donations to ended campaigns by default */
 const ALLOW_DONATIONS_AFTER_ENDED =
@@ -36,7 +51,130 @@ export class CampaignsService {
     private donationItemRepo: Repository<CampaignDonationItem>,
     @InjectRepository(Donation)
     private donationRepo: Repository<Donation>,
+    @InjectRepository(ProgramEntity)
+    private programRepo: Repository<ProgramEntity>,
+    @InjectRepository(ProgramSubprogram)
+    private subprogramRepo: Repository<ProgramSubprogram>,
   ) {}
+
+  private toProgramSummary(program: ProgramEntity | null | undefined): ProgramSummary | null {
+    if (!program) return null;
+    return { id: program.id, key: program.key, label: program.label };
+  }
+
+  private toSubProgramSummary(
+    subprogram: ProgramSubprogram | null | undefined,
+  ): SubProgramSummary | null {
+    if (!subprogram) return null;
+    return {
+      id: subprogram.id,
+      key: subprogram.key,
+      label: subprogram.label,
+      program_id: subprogram.program_id,
+    };
+  }
+
+  private async resolveProgramFields(input: {
+    program_id?: number | null;
+    sub_program_id?: number | null;
+  }): Promise<{ program_id: number | null; sub_program_id: number | null }> {
+    let program_id =
+      input.program_id === undefined || input.program_id === null
+        ? null
+        : Number(input.program_id);
+    let sub_program_id =
+      input.sub_program_id === undefined || input.sub_program_id === null
+        ? null
+        : Number(input.sub_program_id);
+
+    if (program_id != null && (!Number.isFinite(program_id) || program_id <= 0)) {
+      throw new BadRequestException("Invalid program_id");
+    }
+    if (
+      sub_program_id != null &&
+      (!Number.isFinite(sub_program_id) || sub_program_id <= 0)
+    ) {
+      throw new BadRequestException("Invalid sub_program_id");
+    }
+
+    if (sub_program_id != null) {
+      const subprogram = await this.subprogramRepo.findOne({
+        where: { id: sub_program_id },
+      });
+      if (!subprogram) {
+        throw new NotFoundException(`Subprogram #${sub_program_id} not found`);
+      }
+      if (program_id != null && Number(program_id) !== Number(subprogram.program_id)) {
+        throw new BadRequestException(
+          "Selected subprogram does not belong to the selected program",
+        );
+      }
+      program_id = subprogram.program_id;
+    } else if (program_id != null) {
+      const program = await this.programRepo.findOne({
+        where: { id: program_id },
+      });
+      if (!program) {
+        throw new NotFoundException(`Program #${program_id} not found`);
+      }
+    }
+
+    return { program_id, sub_program_id };
+  }
+
+  private async enrichCampaigns(
+    campaigns: Campaign[],
+  ): Promise<CampaignWithProgram[]> {
+    if (!campaigns.length) return [];
+
+    const programIds = [
+      ...new Set(
+        campaigns
+          .map((c) => (c.program_id != null ? Number(c.program_id) : null))
+          .filter((id): id is number => id != null && id > 0),
+      ),
+    ];
+    const subProgramIds = [
+      ...new Set(
+        campaigns
+          .map((c) =>
+            c.sub_program_id != null ? Number(c.sub_program_id) : null,
+          )
+          .filter((id): id is number => id != null && id > 0),
+      ),
+    ];
+
+    const [programs, subprograms] = await Promise.all([
+      programIds.length
+        ? this.programRepo.find({ where: { id: In(programIds) } })
+        : Promise.resolve([]),
+      subProgramIds.length
+        ? this.subprogramRepo.find({ where: { id: In(subProgramIds) } })
+        : Promise.resolve([]),
+    ]);
+
+    const programMap = new Map(programs.map((p) => [Number(p.id), p]));
+    const subMap = new Map(subprograms.map((s) => [Number(s.id), s]));
+
+    return campaigns.map((campaign) => ({
+      ...campaign,
+      program: this.toProgramSummary(
+        campaign.program_id != null
+          ? programMap.get(Number(campaign.program_id))
+          : null,
+      ),
+      sub_program: this.toSubProgramSummary(
+        campaign.sub_program_id != null
+          ? subMap.get(Number(campaign.sub_program_id))
+          : null,
+      ),
+    }));
+  }
+
+  private async enrichCampaign(campaign: Campaign): Promise<CampaignWithProgram> {
+    const [enriched] = await this.enrichCampaigns([campaign]);
+    return enriched;
+  }
 
   private generateSlug(title: string): string {
     return title
@@ -149,6 +287,10 @@ export class CampaignsService {
 
     let slug = dto.slug?.trim() || this.generateSlug(dto.title);
     slug = await this.ensureUniqueSlug(slug);
+    const programFields = await this.resolveProgramFields({
+      program_id: dto.program_id ?? null,
+      sub_program_id: dto.sub_program_id ?? null,
+    });
 
     const campaign = this.campaignRepo.create({
       title: dto.title,
@@ -160,6 +302,8 @@ export class CampaignsService {
       start_at: dto.start_at ? new Date(dto.start_at) : null,
       end_at: dto.end_at ? new Date(dto.end_at) : null,
       project_id: dto.project_id ?? null,
+      program_id: programFields.program_id,
+      sub_program_id: programFields.sub_program_id,
       cover_image_url: dto.cover_image_url ?? null,
       is_featured: dto.is_featured ?? false,
       is_recurring: recurring.is_recurring,
@@ -182,10 +326,10 @@ export class CampaignsService {
       );
     }
 
-    return saved;
+    return this.enrichCampaign(saved);
   }
 
-  async findAll(filters?: CampaignFiltersDto): Promise<Campaign[]> {
+  async findAll(filters?: CampaignFiltersDto): Promise<CampaignWithProgram[]> {
     const qb = this.campaignRepo
       .createQueryBuilder("c")
       .orderBy("c.created_at", "DESC");
@@ -196,6 +340,16 @@ export class CampaignsService {
     if (filters?.project_id != null) {
       qb.andWhere("c.project_id = :projectId", {
         projectId: filters.project_id,
+      });
+    }
+    if (filters?.program_id != null) {
+      qb.andWhere("c.program_id = :programId", {
+        programId: filters.program_id,
+      });
+    }
+    if (filters?.sub_program_id != null) {
+      qb.andWhere("c.sub_program_id = :subProgramId", {
+        subProgramId: filters.sub_program_id,
       });
     }
     if (filters?.search?.trim()) {
@@ -220,23 +374,23 @@ export class CampaignsService {
       });
     }
 
-    return qb.getMany();
+    return this.enrichCampaigns(await qb.getMany());
   }
 
-  async findOne(id: number): Promise<Campaign> {
+  async findOne(id: number): Promise<CampaignWithProgram> {
     const campaign = await this.campaignRepo.findOne({ where: { id } });
     if (!campaign) throw new NotFoundException(`Campaign #${id} not found`);
-    return campaign;
+    return this.enrichCampaign(campaign);
   }
 
-  async findBySlug(slug: string): Promise<Campaign> {
+  async findBySlug(slug: string): Promise<CampaignWithProgram> {
     const campaign = await this.campaignRepo.findOne({ where: { slug } });
     if (!campaign)
       throw new NotFoundException(`Campaign with slug '${slug}' not found`);
-    return campaign;
+    return this.enrichCampaign(campaign);
   }
 
-  async findByIdOrSlug(identifier: string | number): Promise<Campaign> {
+  async findByIdOrSlug(identifier: string | number): Promise<CampaignWithProgram> {
     const id = Number(identifier);
     if (!Number.isNaN(id)) {
       return this.findOne(id);
@@ -248,8 +402,9 @@ export class CampaignsService {
     id: number,
     dto: UpdateCampaignDto,
     updatedBy: number | null,
-  ): Promise<Campaign> {
-    const campaign = await this.findOne(id);
+  ): Promise<CampaignWithProgram> {
+    const campaign = await this.campaignRepo.findOne({ where: { id } });
+    if (!campaign) throw new NotFoundException(`Campaign #${id} not found`);
 
     if (dto.start_at !== undefined)
       campaign.start_at = dto.start_at ? new Date(dto.start_at) : null;
@@ -263,6 +418,18 @@ export class CampaignsService {
     if (dto.goal_amount !== undefined) campaign.goal_amount = dto.goal_amount;
     if (dto.currency !== undefined) campaign.currency = dto.currency;
     if (dto.project_id !== undefined) campaign.project_id = dto.project_id;
+    if (dto.program_id !== undefined || dto.sub_program_id !== undefined) {
+      const programFields = await this.resolveProgramFields({
+        program_id:
+          dto.program_id !== undefined ? dto.program_id : campaign.program_id,
+        sub_program_id:
+          dto.sub_program_id !== undefined
+            ? dto.sub_program_id
+            : campaign.sub_program_id,
+      });
+      campaign.program_id = programFields.program_id;
+      campaign.sub_program_id = programFields.sub_program_id;
+    }
     if (dto.cover_image_url !== undefined)
       campaign.cover_image_url = dto.cover_image_url;
     if (dto.is_featured !== undefined) campaign.is_featured = dto.is_featured;
@@ -305,23 +472,27 @@ export class CampaignsService {
 
     campaign.updated_by =
       updatedBy != null ? ({ id: updatedBy } as any) : undefined;
-    return this.campaignRepo.save(campaign);
+    const saved = await this.campaignRepo.save(campaign);
+    return this.enrichCampaign(saved);
   }
 
   async setStatus(
     id: number,
     status: CampaignStatus,
     updatedBy: number | null,
-  ): Promise<Campaign> {
-    const campaign = await this.findOne(id);
+  ): Promise<CampaignWithProgram> {
+    const campaign = await this.campaignRepo.findOne({ where: { id } });
+    if (!campaign) throw new NotFoundException(`Campaign #${id} not found`);
     campaign.status = status;
     campaign.updated_by =
       updatedBy != null ? ({ id: updatedBy } as any) : undefined;
-    return this.campaignRepo.save(campaign);
+    const saved = await this.campaignRepo.save(campaign);
+    return this.enrichCampaign(saved);
   }
 
   async remove(id: number): Promise<void> {
-    const campaign = await this.findOne(id);
+    const campaign = await this.campaignRepo.findOne({ where: { id } });
+    if (!campaign) throw new NotFoundException(`Campaign #${id} not found`);
     campaign.status = CampaignStatus.ARCHIVED;
     campaign.is_archived = true;
     await this.campaignRepo.save(campaign);
@@ -334,23 +505,24 @@ export class CampaignsService {
     });
   }
 
-  async getPublicActive(): Promise<Campaign[]> {
-    return this.campaignRepo.find({
+  async getPublicActive(): Promise<CampaignWithProgram[]> {
+    const campaigns = await this.campaignRepo.find({
       where: { status: CampaignStatus.ACTIVE },
       order: { is_featured: "DESC", created_at: "DESC" },
     });
+    return this.enrichCampaigns(campaigns);
   }
 
-  async getPublicBySlug(slug: string): Promise<Campaign> {
+  async getPublicBySlug(slug: string): Promise<CampaignWithProgram> {
     const campaign = await this.campaignRepo.findOne({
       where: { slug, status: CampaignStatus.ACTIVE },
     });
     if (!campaign)
       throw new NotFoundException(`Campaign with slug '${slug}' not found`);
-    return campaign;
+    return this.enrichCampaign(campaign);
   }
 
-  async getPublicByIdOrSlug(identifier: string): Promise<Campaign> {
+  async getPublicByIdOrSlug(identifier: string): Promise<CampaignWithProgram> {
     const id = Number(identifier);
     const campaign = !Number.isNaN(id)
       ? await this.campaignRepo.findOne({
@@ -362,11 +534,11 @@ export class CampaignsService {
     if (!campaign) {
       throw new NotFoundException(`Campaign '${identifier}' not found`);
     }
-    return campaign;
+    return this.enrichCampaign(campaign);
   }
 
   async getPublicCampaignWithItems(identifier: string): Promise<
-    Campaign & { donation_items: CampaignDonationItem[] }
+    CampaignWithProgram & { donation_items: CampaignDonationItem[] }
   > {
     const campaign = await this.getPublicByIdOrSlug(identifier);
     const donation_items = await this.listDonationItems(campaign.id, true);
