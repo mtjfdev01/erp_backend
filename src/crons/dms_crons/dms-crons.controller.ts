@@ -4,6 +4,7 @@ import { DmsCronsService } from "./dms-crons.service";
 import { JwtGuard } from "../../auth/jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions";
+import { CampaignTargetFrequency } from "../../dms/campaigns/utils/campaign-recurring.constants";
 
 @Controller("dms-crons")
 // @UseGuards(JwtGuard, PermissionsGuard)
@@ -55,13 +56,16 @@ export class DmsCronsController {
   }
 
   /**
-   * Manual trigger: send reminders to manual recurring donors who have not donated this month.
-   * POST /dms-crons/manual-recurring-reminders
-   * POST /dms-crons/manual-recurring-reminders?period_key=2026-07&dry_run=true
+   * Manual trigger for recurring-campaign donor automation.
+   * POST /dms-crons/manual-recurring-reminders?run_due=true&dry_run=true
+   * POST /dms-crons/manual-recurring-reminders?frequency=daily&dry_run=true
+   * POST /dms-crons/manual-recurring-reminders?frequency=weekly&period_key=2026-07-20_2026-07-26
    */
   @Post("manual-recurring-reminders")
   async manualRecurringReminders(
     @Query("period_key") periodKey: string | undefined,
+    @Query("frequency") frequency: string | undefined,
+    @Query("run_due") runDue: string | undefined,
     @Query("dry_run") dryRun: string | undefined,
     @Query("force") force: string | undefined,
     @Query("chunk_size") chunkSize: string | undefined,
@@ -71,6 +75,8 @@ export class DmsCronsController {
     try {
       const result = await this.dmsCronsService.runManualRecurringDonationReminders({
         period_key: periodKey,
+        frequency: frequency as CampaignTargetFrequency | undefined,
+        run_due: runDue === undefined ? undefined : runDue === "true",
         dry_run: dryRun === "true",
         force: force === "true",
         chunk_size: chunkSize ? Number(chunkSize) : undefined,
@@ -85,6 +91,32 @@ export class DmsCronsController {
       return res.status(500).json({
         success: false,
         message: `Manual recurring reminders failed: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * Activate manual recurring pledges for completed donations with pending intent.
+   * POST /dms-crons/activate-manual-recurring-intents?limit=100
+   */
+  @Post("activate-manual-recurring-intents")
+  async activateManualRecurringIntents(
+    @Query("limit") limit: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.dmsCronsService.runActivateManualRecurringIntents(
+        limit ? Number(limit) : 100,
+      );
+      return res.status(200).json({
+        success: true,
+        message: `Manual recurring intents — scanned: ${result.scanned}, activated: ${result.activated}, skipped: ${result.skipped}`,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: `Activate manual recurring intents failed: ${error.message}`,
       });
     }
   }

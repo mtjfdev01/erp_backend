@@ -8,11 +8,13 @@ import {
   IsEnum,
   IsBoolean,
   IsInt,
+  IsArray,
   ValidateNested,
 } from "class-validator";
 import { Type } from "class-transformer";
 import { DonationMethod } from "src/utils/enums";
 import { DonationRecurringDto } from "./donation-recurring.dto";
+import { CampaignPledgeLineDto } from "./campaign-pledge-line.dto";
 
 export class CreateDonationDto {
   @IsOptional()
@@ -218,4 +220,29 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   on_behalf_names?: string;
+
+  /**
+   * Non-Stripe recurring: enroll donor on manual_recurring_pledges at create (including pending).
+   * Stripe auto-subscriptions use `recurring` instead — do not set this for Stripe.
+   */
+  @IsOptional()
+  @IsBoolean()
+  enroll_manual_recurring?: boolean;
+
+  /** Campaign item quantities for manual recurring enrollment. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CampaignPledgeLineDto)
+  campaign_pledge_lines?: CampaignPledgeLineDto[];
+
+  /** recurring_monthly | prepaid_months */
+  @IsOptional()
+  @IsString()
+  pledge_mode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  prepaid_months?: number;
 }

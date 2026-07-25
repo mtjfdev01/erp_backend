@@ -6,6 +6,7 @@ import { Donation } from "../../donations/entities/donation.entity";
 import { DonationsService } from "../../donations/donations.service";
 import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
 import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
+import { ProcessManualRecurringRemindersDto } from "../../dms/manual_recurring/dto/manual-recurring-filters.dto";
 
 @Injectable()
 export class DmsCronsService {
@@ -48,28 +49,40 @@ export class DmsCronsService {
   }
 
   /**
-   * Monthly — 9:00 AM on the 2nd (Asia/Karachi).
-   * Reminds manual recurring donors who have not donated yet this month.
+   * Every day 9:00 AM (Asia/Karachi).
+   * Runs due recurring-campaign automations:
+   * - daily campaigns every day
+   * - weekly campaigns on Saturday & Sunday (remind if no donation that week)
+   * - monthly (+ bi/quarter/year) on the 2nd
    */
-  @Cron("0 9 2 * *", {
-    name: "manual-recurring-donation-reminders",
+  @Cron("0 9 * * *", {
+    name: "recurring-campaign-donor-reminders",
     timeZone: "Asia/Karachi",
   })
-  async handleManualRecurringDonationReminders() {
+  async handleRecurringCampaignDonorReminders() {
     try {
       const result =
-        await this.manualRecurringReminderService.processMonthlyReminders();
-      if (result.reminders_sent > 0 || result.reminders_failed > 0) {
+        await this.manualRecurringReminderService.processDueReminders();
+      if (
+        result.reminders_sent > 0 ||
+        result.thanks_sent > 0 ||
+        result.reminders_failed > 0
+      ) {
         this.logger.log(
-          `Manual recurring reminders (${result.period_key}): sent ${result.reminders_sent}, failed ${result.reminders_failed}, skipped donated ${result.skipped_donated}`,
+          `Recurring campaign reminders [${result.frequencies.join(",")}]: sent ${result.reminders_sent}, thanks ${result.thanks_sent}, failed ${result.reminders_failed}, skipped donated ${result.skipped_donated}`,
         );
       }
     } catch (error: any) {
       this.logger.error(
-        `Manual recurring donation reminders cron failed: ${error?.message}`,
+        `Recurring campaign donor reminders cron failed: ${error?.message}`,
         error?.stack,
       );
     }
+  }
+
+  /** @deprecated alias kept for older references */
+  async handleManualRecurringDonationReminders() {
+    return this.handleRecurringCampaignDonorReminders();
   }
 
   /**
@@ -308,15 +321,45 @@ export class DmsCronsService {
     }
   }
 
-  async runManualRecurringDonationReminders(options?: {
-    period_key?: string;
-    dry_run?: boolean;
-    force?: boolean;
-    chunk_size?: number;
-    include_details?: boolean;
-  }) {
-    return this.manualRecurringReminderService.processMonthlyReminders(
-      options || {},
+  async runManualRecurringDonationReminders(
+    options?: ProcessManualRecurringRemindersDto,
+  ) {
+    return this.manualRecurringReminderService.processMonthlyReminders({
+      ...(options || {}),
+      run_due: options?.run_due ?? !options?.frequency,
+    });
+  }
+
+  /**
+   * Safety net: activate manual recurring for completed donations whose intent
+   * was never applied (missed IPN / status race). Every 15 minutes.
+   */
+  @Cron("*/15 * * * *", {
+    name: "activate-manual-recurring-intents",
+    timeZone: "Asia/Karachi",
+  })
+  async handleActivateManualRecurringIntents() {
+    try {
+      const result =
+        await this.donationsService.activatePendingManualRecurringIntents(100);
+      if (result.activated > 0 || result.scanned > 0) {
+        this.logger.log(
+          `Manual recurring intent activation — scanned: ${result.scanned}, activated: ${result.activated}, skipped: ${result.skipped}`,
+        );
+      }
+      return result;
+    } catch (error: any) {
+      this.logger.error(
+        `Manual recurring intent activation cron failed: ${error?.message}`,
+        error?.stack,
+      );
+      throw error;
+    }
+  }
+
+  async runActivateManualRecurringIntents(limit?: number) {
+    return this.donationsService.activatePendingManualRecurringIntents(
+      limit ?? 100,
     );
   }
 }

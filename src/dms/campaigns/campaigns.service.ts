@@ -310,6 +310,8 @@ export class CampaignsService {
       target_frequency: recurring.target_frequency,
       monthly_donor_automation_enabled:
         dto.monthly_donor_automation_enabled === true && recurring.is_recurring,
+      use_default_thanks_and_reminders:
+        dto.use_default_thanks_and_reminders === true && recurring.is_recurring,
       communication_templates: normalizeCommunicationTemplates(
         dto.communication_templates,
       ),
@@ -458,6 +460,13 @@ export class CampaignsService {
         dto.monthly_donor_automation_enabled === true && campaign.is_recurring;
     } else if (!campaign.is_recurring) {
       campaign.monthly_donor_automation_enabled = false;
+    }
+
+    if (dto.use_default_thanks_and_reminders !== undefined) {
+      campaign.use_default_thanks_and_reminders =
+        dto.use_default_thanks_and_reminders === true && campaign.is_recurring;
+    } else if (!campaign.is_recurring) {
+      campaign.use_default_thanks_and_reminders = false;
     }
 
     if (dto.communication_templates !== undefined) {

@@ -55,6 +55,7 @@ import { ProgressBatchesService } from "../progress_tracking/progress_batches/pr
 import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow_templates/progress_workflow_template.entity";
 import { DonationAuditService } from "./audit/donation-audit.service";
 import { RecurringDonationsStripeService } from "./recurring_donations/recurring-donations-stripe.service";
+import { RecurringDonationsLedgerService } from "./recurring_donations/recurring-donations-ledger.service";
 import { DonationAuditAction } from "./audit/donation-audit-action.enum";
 import { DonationAuditSource } from "./audit/donation-audit-source.enum";
 import {
@@ -70,6 +71,11 @@ import {
   buildDonationGeoSnapshotForCreate,
   mergeDonationGeoForUpdate,
 } from "./utils/donation-geo.util";
+import { ManualRecurringService } from "../dms/manual_recurring/manual-recurring.service";
+import {
+  ManualRecurringFrequency,
+  PledgeMode,
+} from "../dms/manual_recurring/utils/manual-recurring.constants";
 
 @Injectable()
 export class DonationsService {
@@ -120,8 +126,10 @@ export class DonationsService {
     private readonly workflowTemplatesRepo: Repository<ProgressWorkflowTemplate>,
     private readonly donationAuditService: DonationAuditService,
     private readonly recurringDonationsStripeService: RecurringDonationsStripeService,
+    private readonly recurringDonationsLedgerService: RecurringDonationsLedgerService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly manualRecurringService: ManualRecurringService,
   ) {}
 
   private async syncDonorLastDonationDate(
@@ -308,16 +316,12 @@ export class DonationsService {
     return Number(id);
   }
 
-  /** Website checkout: defer donor link, progress, and notifications until after HTTP response. */
-  shouldDeferDonorPostCreate(createDonationDto: CreateDonationDto): boolean {
-    if (createDonationDto.donor_id || createDonationDto.previous_donation_id) {
-      return false;
-    }
-    const method = createDonationDto.donation_method;
-    if (!method) return false;
-    return (
-      DonationsService.ONLINE_DONATION_METHODS as readonly string[]
-    ).includes(method);
+  /**
+   * Previously deferred donor linking for online gateways (invoice first, link later).
+   * That caused donor_id gaps on pending donations — always link donor at create time.
+   */
+  shouldDeferDonorPostCreate(_createDonationDto: CreateDonationDto): boolean {
+    return false;
   }
 
   private donorDisplayName(
@@ -354,6 +358,33 @@ export class DonationsService {
   private assertRecurringDonationPayload(
     createDonationDto: CreateDonationDto,
   ): void {
+    if (this.wantsManualRecurringEnrollment(createDonationDto)) {
+      const pledgeMode = String(createDonationDto.pledge_mode || "").trim();
+      if (pledgeMode === PledgeMode.PREPAID_MONTHS) {
+        const months = Number(createDonationDto.prepaid_months);
+        if (!Number.isFinite(months) || months < 1) {
+          throw new HttpException(
+            "prepaid_months is required for prepaid_months pledge mode",
+            400,
+          );
+        }
+        if (!createDonationDto.campaign_id) {
+          throw new HttpException(
+            "Prepaid pledge requires campaign_id",
+            400,
+          );
+        }
+        return;
+      }
+      if (!this.hasRecurringConsent(createDonationDto)) {
+        throw new HttpException(
+          "Manual recurring enrollment requires recurring_consent",
+          400,
+        );
+      }
+      return;
+    }
+
     if (!this.isDonationRecurring(createDonationDto)) return;
 
     if (!this.hasRecurringConsent(createDonationDto)) {
@@ -383,6 +414,435 @@ export class DonationsService {
         400,
       );
     }
+  }
+
+  /** Prepaid campaign pledges only — regular recurring uses recurring_donations ledger. */
+  private wantsManualRecurringEnrollment(
+    createDonationDto: CreateDonationDto,
+  ): boolean {
+    if (!this.usesLegacyRecurringPlan(createDonationDto.donation_method)) {
+      return false;
+    }
+    const pledgeMode = String(createDonationDto.pledge_mode || "").trim();
+    if (pledgeMode !== PledgeMode.PREPAID_MONTHS) {
+      return false;
+    }
+    if (createDonationDto.enroll_manual_recurring === true) {
+      return true;
+    }
+    const hasLines =
+      Array.isArray(createDonationDto.campaign_pledge_lines) &&
+      createDonationDto.campaign_pledge_lines.length > 0;
+    return Boolean(createDonationDto.campaign_id && hasLines);
+  }
+
+  private mapManualRecurringFrequency(
+    createDonationDto: CreateDonationDto,
+  ): ManualRecurringFrequency {
+    const freq = String(createDonationDto.donation_frequency || "")
+      .trim()
+      .toLowerCase();
+    if (freq === "daily") return ManualRecurringFrequency.DAILY;
+    if (freq === "weekly") return ManualRecurringFrequency.WEEKLY;
+    return ManualRecurringFrequency.MONTHLY;
+  }
+
+  private mapLedgerBillingInterval(
+    createDonationDto: CreateDonationDto,
+  ): "day" | "week" | "month" {
+    const fromRecurring = String(createDonationDto.recurring?.interval || "")
+      .trim()
+      .toLowerCase();
+    if (fromRecurring === "day" || fromRecurring === "daily") return "day";
+    if (fromRecurring === "week" || fromRecurring === "weekly") return "week";
+    if (fromRecurring === "month" || fromRecurring === "monthly") return "month";
+
+    const freq = String(createDonationDto.donation_frequency || "")
+      .trim()
+      .toLowerCase();
+    if (freq === "daily") return "day";
+    if (freq === "weekly") return "week";
+    return "month";
+  }
+
+  /** Non-Stripe recurring → same Recurring Donations list as Stripe (cron reminders). */
+  private async ensureNonStripeRecurringLedgerSubscription(
+    createDonationDto: CreateDonationDto,
+    savedDonation: {
+      id: number;
+      amount?: number;
+      currency?: string;
+      donation_method?: string;
+      project_id?: string;
+      campaign_id?: number;
+      donation_type?: string;
+    },
+    donorId: number | null,
+  ): Promise<void> {
+    if (!this.isDonationRecurring(createDonationDto)) return;
+    if (!this.usesLegacyRecurringPlan(createDonationDto.donation_method)) return;
+
+    await this.recurringDonationsLedgerService.ensureNonStripeSubscriptionFromDonation(
+      {
+        donationId: savedDonation.id,
+        donorId,
+        amount: savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
+        currency: savedDonation.currency || createDonationDto.currency || "PKR",
+        donationMethod:
+          savedDonation.donation_method || createDonationDto.donation_method,
+        projectId: savedDonation.project_id || createDonationDto.project_id,
+        campaignId:
+          savedDonation.campaign_id ??
+          (createDonationDto.campaign_id
+            ? Number(createDonationDto.campaign_id)
+            : null),
+        donationType:
+          savedDonation.donation_type || createDonationDto.donation_type,
+        billingInterval: this.mapLedgerBillingInterval(createDonationDto),
+        billingIntervalCount: createDonationDto.recurring?.interval_count ?? 1,
+        startDateMode:
+          createDonationDto.recurring?.start_date_mode || "same_date",
+        startDate: createDonationDto.recurring?.start_date || null,
+        consent: this.hasRecurringConsent(createDonationDto),
+      },
+    );
+
+    if (donorId) {
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId },
+      });
+      if (donor) {
+        this.applyDonorRecurringConsent(donor);
+        await this.donorRepository.save(donor);
+      }
+    }
+  }
+
+  private buildManualRecurringIntent(
+    createDonationDto: CreateDonationDto,
+  ): Record<string, unknown> | null {
+    if (!this.wantsManualRecurringEnrollment(createDonationDto)) {
+      return null;
+    }
+    const lines = (createDonationDto.campaign_pledge_lines || [])
+      .map((line) => ({
+        campaign_item_id: Number(line.campaign_item_id),
+        quantity: Number(line.quantity),
+      }))
+      .filter(
+        (line) =>
+          Number.isFinite(line.campaign_item_id) &&
+          line.campaign_item_id > 0 &&
+          Number.isFinite(line.quantity) &&
+          line.quantity > 0,
+      );
+    if (!lines.length) return null;
+
+    return {
+      enroll: true,
+      pledge_mode: PledgeMode.PREPAID_MONTHS,
+      prepaid_months: Number(createDonationDto.prepaid_months) || null,
+      frequency: this.mapManualRecurringFrequency(createDonationDto),
+      lines,
+      pledged_amount: Number(createDonationDto.amount) || null,
+      campaign_id: createDonationDto.campaign_id
+        ? Number(createDonationDto.campaign_id)
+        : null,
+    };
+  }
+
+  private isSuccessfulDonationStatus(status?: string | null): boolean {
+    const s = String(status || "")
+      .trim()
+      .toLowerCase();
+    return s === "completed" || s === "paid" || s === "success";
+  }
+
+  /** Pending allowed for now — enroll pledge at checkout, not only after payment. */
+  private canActivateManualRecurringFromDonationStatus(
+    status?: string | null,
+  ): boolean {
+    const s = String(status || "")
+      .trim()
+      .toLowerCase();
+    return (
+      !s ||
+      s === "pending" ||
+      this.isSuccessfulDonationStatus(status)
+    );
+  }
+
+  /**
+   * Recurring donations bypass the generic PKR 5000 auto thanks/reminder threshold.
+   * Generic (one-time) donations still require amount >= 5000.
+   */
+  private async isRecurringRelatedDonation(donation: {
+    id?: number | null;
+    donor_id?: number | null;
+    donation_type?: string | null;
+    donation_source?: string | null;
+    manual_recurring_intent?: Record<string, unknown> | null;
+    donor?: { recurring?: boolean | null } | null;
+  } | null | undefined): Promise<boolean> {
+    if (!donation) return false;
+    if (donation.donor?.recurring === true) return true;
+    if (
+      donation.manual_recurring_intent &&
+      typeof donation.manual_recurring_intent === "object"
+    ) {
+      return true;
+    }
+    const source = String(donation.donation_source || "").toLowerCase();
+    if (source.includes("recurring")) return true;
+    const type = String(donation.donation_type || "").toLowerCase();
+    if (type.includes("recurring")) return true;
+
+    // Linked to recurring_donations ledger (subscription or installment)
+    try {
+      const qb = this.donationRepository.manager
+        .createQueryBuilder()
+        .select("1")
+        .from("recurring_donations", "rd")
+        .where("rd.is_archived = false")
+        .andWhere(
+          `(
+            rd.initial_donation_id = :donationId
+            OR (
+              rd.record_type = 'subscription'
+              AND rd.donor_id = :donorId
+              AND rd.status IN ('active', 'past_due', 'trialing')
+            )
+          )`,
+          {
+            donationId: donation.id ?? 0,
+            donorId: donation.donor_id ?? donation.donor?.["id"] ?? 0,
+          },
+        )
+        .limit(1);
+      const row = await qb.getRawOne();
+      if (row) return true;
+    } catch {
+      // ignore lookup failures — fall through to amount threshold
+    }
+    return false;
+  }
+
+  /** Auto WhatsApp: unsent + (recurring OR amount >= 5000). */
+  private async canAutoSendDonationMessage(donation: {
+    id?: number | null;
+    donor_id?: number | null;
+    message_sent?: boolean | null;
+    amount?: number | null;
+    donation_type?: string | null;
+    donation_source?: string | null;
+    manual_recurring_intent?: Record<string, unknown> | null;
+    donor?: { id?: number | null; recurring?: boolean | null } | null;
+  } | null | undefined): Promise<boolean> {
+    if (donation?.message_sent != false) return false;
+    if (await this.isRecurringRelatedDonation(donation)) return true;
+    return Number(donation?.amount) >= 5000;
+  }
+
+  /** Auto email: unsent + (recurring OR amount >= 5000). */
+  private async canAutoSendDonationEmail(donation: {
+    id?: number | null;
+    donor_id?: number | null;
+    email_sent?: boolean | null;
+    amount?: number | null;
+    donation_type?: string | null;
+    donation_source?: string | null;
+    manual_recurring_intent?: Record<string, unknown> | null;
+    donor?: { id?: number | null; recurring?: boolean | null } | null;
+  } | null | undefined): Promise<boolean> {
+    if (donation?.email_sent != false) return false;
+    if (await this.isRecurringRelatedDonation(donation)) return true;
+    return Number(donation?.amount) >= 5000;
+  }
+
+  /**
+   * Side-effects when a donation becomes paid/completed:
+   * prepaid pledge activation + non-Stripe recurring installment.
+   */
+  private async afterSuccessfulDonationPayment(
+    donationId: number,
+  ): Promise<void> {
+    await this.activateManualRecurringAfterSuccessfulPayment(donationId);
+    try {
+      await this.recurringDonationsLedgerService.recordNonStripeInstallmentFromDonation(
+        donationId,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `recordNonStripeInstallmentFromDonation failed for ${donationId}: ${err?.message || err}`,
+      );
+    }
+  }
+
+  /**
+   * Activate manual recurring from stored intent (pending or paid).
+   * Safe to call repeatedly (idempotent). Never throws — must not break IPN/status flows.
+   */
+  async activateManualRecurringAfterSuccessfulPayment(
+    donationId: number,
+  ): Promise<{ activated: boolean; reason?: string }> {
+    try {
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId },
+        relations: ["donor"],
+      });
+      if (!donation) {
+        return { activated: false, reason: "Donation not found" };
+      }
+      if (!this.canActivateManualRecurringFromDonationStatus(donation.status)) {
+        return {
+          activated: false,
+          reason: `Donation status not eligible: ${donation.status}`,
+        };
+      }
+
+      const intent = donation.manual_recurring_intent as Record<
+        string,
+        unknown
+      > | null;
+      if (!intent || intent.enroll !== true) {
+        return { activated: false, reason: "No pending manual recurring intent" };
+      }
+      if (intent.activated_at) {
+        return { activated: false, reason: "Already activated" };
+      }
+
+      const donorId = donation.donor_id;
+      if (!donorId) {
+        return { activated: false, reason: "Missing donor" };
+      }
+
+      const intentCampaignId = Number(intent.campaign_id);
+      const donationCampaignId = Number(donation.campaign_id);
+      const campaignId =
+        Number.isFinite(intentCampaignId) && intentCampaignId > 0
+          ? intentCampaignId
+          : Number.isFinite(donationCampaignId) && donationCampaignId > 0
+            ? donationCampaignId
+            : null;
+
+      const lines = Array.isArray(intent.lines)
+        ? (intent.lines as Array<{ campaign_item_id: number; quantity: number }>)
+            .map((line) => ({
+              campaign_item_id: Number(line.campaign_item_id),
+              quantity: Number(line.quantity),
+            }))
+            .filter(
+              (line) =>
+                Number.isFinite(line.campaign_item_id) &&
+                line.campaign_item_id > 0 &&
+                Number.isFinite(line.quantity) &&
+                line.quantity > 0,
+            )
+        : [];
+
+      const pledgedFromIntent = Number(intent.pledged_amount);
+      const pledgedFromDonation = Number(donation.amount);
+      const pledgedAmount =
+        Number.isFinite(pledgedFromIntent) && pledgedFromIntent > 0
+          ? pledgedFromIntent
+          : Number.isFinite(pledgedFromDonation) && pledgedFromDonation > 0
+            ? pledgedFromDonation
+            : null;
+
+      if (!lines.length && !pledgedAmount) {
+        return { activated: false, reason: "Intent has no lines or amount" };
+      }
+      if (lines.length && !campaignId) {
+        return {
+          activated: false,
+          reason: "Campaign required when pledge lines are present",
+        };
+      }
+
+      const pledgeMode =
+        String(intent.pledge_mode || "").trim() === PledgeMode.PREPAID_MONTHS
+          ? PledgeMode.PREPAID_MONTHS
+          : PledgeMode.RECURRING_MONTHLY;
+
+      const freqRaw = String(intent.frequency || "").toLowerCase();
+      const frequency =
+        freqRaw === "daily"
+          ? ManualRecurringFrequency.DAILY
+          : freqRaw === "weekly"
+            ? ManualRecurringFrequency.WEEKLY
+            : ManualRecurringFrequency.MONTHLY;
+
+      await this.manualRecurringService.createFromWebsiteCheckout({
+        donor_id: donorId,
+        campaign_id: campaignId,
+        ...(lines.length ? { lines } : {}),
+        ...(pledgedAmount != null ? { pledged_amount: pledgedAmount } : {}),
+        pledge_mode: pledgeMode,
+        prepaid_months:
+          pledgeMode === PledgeMode.PREPAID_MONTHS
+            ? Number(intent.prepaid_months) || null
+            : null,
+        frequency,
+        currency: donation.currency || "PKR",
+        remind_via_email: true,
+        remind_via_whatsapp: true,
+        notes: `Enrolled from donation #${donation.id} (status=${donation.status || "pending"}, ${donation.donation_method || "online"})`,
+      });
+
+      await this.donationRepository.update(donationId, {
+        manual_recurring_intent: {
+          ...intent,
+          enroll: false,
+          activated_at: new Date().toISOString(),
+          activated_donation_id: donation.id,
+        },
+      } as any);
+
+      if (donation.donor) {
+        this.applyDonorRecurringConsent(donation.donor);
+        await this.donorRepository.save(donation.donor);
+      }
+
+      this.logger.log(
+        `Manual recurring activated for donation ${donationId} (donor ${donorId}, campaign ${campaignId})`,
+      );
+      return { activated: true };
+    } catch (err: any) {
+      this.logger.error(
+        `Manual recurring activation failed for donation ${donationId}: ${err?.message || err}`,
+      );
+      return { activated: false, reason: err?.message || "Activation failed" };
+    }
+  }
+
+  /** Cron/safety net: activate intents for pending/paid donations that never enrolled. */
+  async activatePendingManualRecurringIntents(limit = 100): Promise<{
+    scanned: number;
+    activated: number;
+    skipped: number;
+  }> {
+    const rows = await this.donationRepository
+      .createQueryBuilder("d")
+      .where("LOWER(COALESCE(d.status, 'pending')) IN (:...statuses)", {
+        statuses: ["pending", "completed", "paid", "success"],
+      })
+      .andWhere("d.manual_recurring_intent IS NOT NULL")
+      .andWhere(`d.manual_recurring_intent->>'enroll' = 'true'`)
+      .andWhere(`(d.manual_recurring_intent->>'activated_at') IS NULL`)
+      .orderBy("d.id", "ASC")
+      .take(Math.min(Math.max(Number(limit) || 100, 1), 500))
+      .getMany();
+
+    let activated = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      const result = await this.activateManualRecurringAfterSuccessfulPayment(
+        row.id,
+      );
+      if (result.activated) activated += 1;
+      else skipped += 1;
+    }
+    return { scanned: rows.length, activated, skipped };
   }
 
   /** Maps API `recurring` (or legacy frequency) to Stripe billing params. */
@@ -457,6 +917,9 @@ export class DonationsService {
     donorId: number | null,
     donationId?: number,
   ): Promise<number> {
+    if (this.wantsManualRecurringEnrollment(createDonationDto)) {
+      return 0;
+    }
     if (
       !this.isDonationRecurring(createDonationDto) ||
       !this.usesLegacyRecurringPlan(createDonationDto.donation_method)
@@ -553,12 +1016,8 @@ export class DonationsService {
     await this.donationRepository.update(donationId, { donor_id: donor.id });
     await this.syncDonationGeoFromDonorIfNeeded(donationId, donor);
 
+    // Non-Stripe recurring ledger is created at donation create; Stripe via webhook.
     if (this.isDonationRecurring(createDonationDto)) {
-      await this.createLegacyRecurringPlanIfNeeded(
-        createDonationDto,
-        donor.id,
-        donationId,
-      );
       this.applyDonorRecurringConsent(donor);
       await this.donorRepository.save(donor);
     }
@@ -1638,6 +2097,10 @@ export class DonationsService {
       dbUpdated = true;
       await this.refreshDonorDonationStats(donation.donor_id);
 
+      if (this.isSuccessfulDonationStatus(donationStatus)) {
+        await this.afterSuccessfulDonationPayment(donationId);
+      }
+
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
     }
 
@@ -1902,6 +2365,10 @@ export class DonationsService {
       relations: ["donor"],
     });
 
+    if (this.isSuccessfulDonationStatus(nextStatus)) {
+      await this.afterSuccessfulDonationPayment(donationId);
+    }
+
     return {
       donation: updatedDonation,
       updated: true,
@@ -2047,16 +2514,8 @@ export class DonationsService {
           }
         }
 
-        if (!deferPostCreate && this.isDonationRecurring(createDonationDto)) {
-          recurringRowId = await this.createLegacyRecurringPlanIfNeeded(
-            createDonationDto,
-            donorId,
-          );
-          if (donor) {
-            this.applyDonorRecurringConsent(donor);
-            await this.donorRepository.save(donor);
-          }
-        }
+        // Non-Stripe recurring uses recurring_donations ledger (created after save).
+        // Stripe subscriptions are created by webhook. Skip legacy plan table.
 
         const geoSnapshot = buildDonationGeoSnapshotForCreate(
           {
@@ -2067,19 +2526,51 @@ export class DonationsService {
           donor,
         );
 
+        const manualRecurringIntent =
+          this.buildManualRecurringIntent(createDonationDto);
+
+        // Do not spread website-only / nested DTO fields onto the donation row
+        const {
+          enroll_manual_recurring: _enrollManual,
+          campaign_pledge_lines: _pledgeLines,
+          pledge_mode: _pledgeMode,
+          prepaid_months: _prepaidMonths,
+          recurring: _recurring,
+          recurring_consent: _recurringConsent,
+          donation_items: _donationItems,
+          in_kind_items: _inKindItems,
+          ...donationColumns
+        } = createDonationDto as CreateDonationDto & Record<string, unknown>;
+
         const donation = this.donationRepository.create({
-          ...createDonationDto,
+          ...donationColumns,
           ...geoSnapshot,
           donor_id: donorId,
           campaign_id: campaignId,
           created_by: this.donationAuditUserId(user) as any,
           recurrence_id: recurringRowId,
+          // Intent stored + activated while pending (for now)
+          manual_recurring_intent: manualRecurringIntent,
         });
         savedDonation = await this.donationRepository.save(donation);
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
         await this.syncDonorLastDonationDate(savedDonation);
+
+        // Prepaid campaign pledge (manual_recurring_pledges) — optional
+        if (manualRecurringIntent && donorId) {
+          await this.activateManualRecurringAfterSuccessfulPayment(
+            savedDonation.id,
+          );
+        }
+
+        // Non-Stripe recurring → Recurring Donations list (cron reminders; Stripe auto-charges)
+        await this.ensureNonStripeRecurringLedgerSubscription(
+          createDonationDto,
+          savedDonation,
+          donorId,
+        );
 
         if (!deferPostCreate) {
           await this.maybeCreateProgressTrackerForNewDonation(
@@ -2623,7 +3114,7 @@ export class DonationsService {
         totalDonationAmount, // 👈 extra key added here
       };
     } catch (error) {
-      throw new Error(`Failed to retrieve donations: ${error.message}`);
+      throw new Error(`Failed to retrieve donations: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -2654,7 +3145,7 @@ export class DonationsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new Error(`Failed to retrieve donation: ${error.message}`);
+      throw new Error(`Failed to retrieve donation: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -2943,6 +3434,10 @@ export class DonationsService {
         await this.refreshDonorDonationStats(updatedDonation.donor_id);
       }
 
+      if (this.isSuccessfulDonationStatus(newStatus)) {
+        await this.afterSuccessfulDonationPayment(donationId);
+      }
+
       console.log(
         `Donation ${donationId} status updated from "${donation.status}" to "${newStatus}"`,
       );
@@ -3139,7 +3634,7 @@ export class DonationsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new Error(`Failed to update donation status: ${error.message}`);
+      throw new Error(`Failed to update donation status: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -3234,14 +3729,8 @@ export class DonationsService {
 
       let message_sent: boolean = false;
       let email_sent: boolean = false;
-      const send_message =
-        donation?.message_sent == false && donation?.amount >= 5000
-          ? true
-          : false;
-      const send_email =
-        donation?.email_sent == false && donation?.amount >= 5000
-          ? true
-          : false;
+      const send_message = await this.canAutoSendDonationMessage(donation);
+      const send_email = await this.canAutoSendDonationEmail(donation);
       if (err_code === "000" || err_code === "00") {
         if (send_message) {
           message_sent = true;
@@ -3303,6 +3792,9 @@ export class DonationsService {
             reason: e?.message || "Batching failed",
           };
         }
+        await this.afterSuccessfulDonationPayment(
+          parseInt(basket_id, 10),
+        );
       }
       await this.refreshDonorDonationStats(donation.donor_id);
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
@@ -3321,10 +3813,10 @@ export class DonationsService {
       };
     } catch (error) {
       console.error("=== IPN PROCESSING ERROR ===");
-      console.error("Error:", error.message);
-      console.error("Stack:", error.stack);
+      console.error("Error:", error instanceof Error ? error.message : String(error));
+      console.error("Stack:", error instanceof Error ? error.stack : undefined);
 
-      throw error;
+      throw new Error(`Failed to process PayFast IPN: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -3509,6 +4001,11 @@ export class DonationsService {
         where: { id: resolvedDonationId },
       });
       await this.refreshDonorDonationStats(stripeDonation?.donor_id);
+      if (this.isSuccessfulDonationStatus(stripeDonation?.status)) {
+        await this.afterSuccessfulDonationPayment(
+          resolvedDonationId,
+        );
+      }
     }
 
     return {
@@ -3605,15 +4102,9 @@ export class DonationsService {
       }
       let status: any;
       let message_sent = false;
-      const send_message =
-        donation?.message_sent == false && donation?.amount >= 5000
-          ? true
-          : false;
+      const send_message = await this.canAutoSendDonationMessage(donation);
       let email_sent = false;
-      const send_email =
-        donation?.email_sent == false && donation?.amount >= 5000
-          ? true
-          : false;
+      const send_email = await this.canAutoSendDonationEmail(donation);
       if (invoice_status == "PAID" && send_message && send_email) {
         status = "completed";
         // send success message
@@ -3662,7 +4153,9 @@ export class DonationsService {
       });
 
       if (status === "completed") {
-        // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
+        await this.afterSuccessfulDonationPayment(
+          parseInt(invoice_number, 10),
+        );
       }
 
       console.log(
@@ -3932,10 +4425,8 @@ export class DonationsService {
 
     let message_sent = donation.message_sent;
     let email_sent = donation.email_sent;
-    const send_message =
-      donation.message_sent === false && donation.amount >= 5000;
-    const send_email =
-      donation.email_sent === false && donation.amount >= 5000;
+    const send_message = await this.canAutoSendDonationMessage(donation);
+    const send_email = await this.canAutoSendDonationEmail(donation);
 
     if (newStatus === "completed" && donation.donor) {
       if (send_message) {
@@ -3990,6 +4481,7 @@ export class DonationsService {
       } catch (e: any) {
         batching = { processed: false, reason: e?.message };
       }
+      await this.afterSuccessfulDonationPayment(donationId);
     }
 
     await this.refreshDonorDonationStats(donation.donor_id);

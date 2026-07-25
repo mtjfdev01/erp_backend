@@ -84,4 +84,11 @@ export class RecurringDonation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   stripe_billing_reason: string | null;
+
+  /** Non-Stripe (manual remind): last reminder period key (e.g. 2026-07 or week range). */
+  @Column({ type: "varchar", length: 40, nullable: true, default: null })
+  last_reminder_period_key: string | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  last_reminder_sent_at: Date | null;
 }

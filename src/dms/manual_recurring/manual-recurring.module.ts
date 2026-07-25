@@ -13,11 +13,16 @@ import { Donation } from "../../donations/entities/donation.entity";
 import { RecurringDonation } from "../../donations/recurring_donations/entities/recurring-donation.entity";
 import { Campaign } from "../campaigns/entities/campaign.entity";
 import { EmailTemplateModule } from "../email_template/email_template.module";
+import { EmailModule } from "../../email/email.module";
+import { WhatsAppService } from "../../utils/services/whatsapp.service";
+import { RecurringDonationsStripeModule } from "../../donations/recurring_donations/recurring-donations-stripe.module";
 
 @Module({
   imports: [
     ConfigModule,
     EmailTemplateModule,
+    EmailModule,
+    RecurringDonationsStripeModule,
     TypeOrmModule.forFeature([
       ManualRecurringPledge,
       ManualRecurringPledgeLine,
@@ -33,7 +38,11 @@ import { EmailTemplateModule } from "../email_template/email_template.module";
     }),
   ],
   controllers: [ManualRecurringController],
-  providers: [ManualRecurringService, ManualRecurringReminderService],
+  providers: [
+    ManualRecurringService,
+    ManualRecurringReminderService,
+    WhatsAppService,
+  ],
   exports: [ManualRecurringService, ManualRecurringReminderService],
 })
 export class ManualRecurringModule {}

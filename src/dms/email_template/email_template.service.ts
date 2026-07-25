@@ -112,13 +112,26 @@ export class EmailTemplateService {
     purposes?: string;
     statuses?: string;
   }) {
-    const { page = 1, pageSize = 10, search, category } = params;
+    const page = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 10));
+    const search = params.search?.trim() || "";
+    const category = params.category;
     const query = this.repository.createQueryBuilder("template");
 
     if (search) {
+      // Match name/subject/description/category, and purpose keywords (e.g. "campaign")
       query.andWhere(
-        "(template.name ILIKE :search OR template.subject ILIKE :search)",
-        { search: `%${search}%` },
+        `(
+          template.name ILIKE :search
+          OR template.subject ILIKE :search
+          OR COALESCE(template.description, '') ILIKE :search
+          OR COALESCE(template.category, '') ILIKE :search
+          OR (',' || COALESCE(template.purposes, '') || ',') ILIKE :purposeSearch
+        )`,
+        {
+          search: `%${search}%`,
+          purposeSearch: `%,${search},%`,
+        },
       );
     }
 
@@ -138,12 +151,22 @@ export class EmailTemplateService {
 
     if (params.purposes) {
       const purposes = params.purposes.split(",").filter(Boolean);
-      purposes.forEach((purpose, index) => {
+      // OR across requested purposes (any match), not AND
+      if (purposes.length === 1) {
         query.andWhere(
-          `(',' || COALESCE(template.purposes, '') || ',') LIKE :purposePattern${index}`,
-          { [`purposePattern${index}`]: `%,${purpose},%` },
+          `(',' || COALESCE(template.purposes, '') || ',') LIKE :purposePattern0`,
+          { purposePattern0: `%,${purposes[0]},%` },
         );
-      });
+      } else if (purposes.length > 1) {
+        const parts = purposes.map((_, index) => {
+          return `(',' || COALESCE(template.purposes, '') || ',') LIKE :purposeFilter${index}`;
+        });
+        const purposeParams: Record<string, string> = {};
+        purposes.forEach((purpose, index) => {
+          purposeParams[`purposeFilter${index}`] = `%,${purpose},%`;
+        });
+        query.andWhere(`(${parts.join(" OR ")})`, purposeParams);
+      }
     }
 
     if (params.statuses) {
@@ -167,7 +190,7 @@ export class EmailTemplateService {
         total,
         page,
         pageSize,
-        totalPages: Math.ceil(total / pageSize),
+        totalPages: Math.ceil(total / pageSize) || 1,
       },
     };
   }

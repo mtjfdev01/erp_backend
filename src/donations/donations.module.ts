@@ -32,12 +32,14 @@ import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
 import { DonationPendingFollowUpService } from "./donation-pending-follow-up.service";
 import { Task } from "../tasks/entities/task.entity";
 import { TasksModule } from "../tasks/tasks.module";
+import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.module";
 
 @Module({
   imports: [
     DonationAuditModule,
     RecurringDonationsStripeModule,
     TasksModule,
+    ManualRecurringModule,
     TypeOrmModule.forFeature([
       Donation,
       DonationInKind,

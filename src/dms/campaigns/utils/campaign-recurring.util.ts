@@ -23,6 +23,11 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/** Local calendar date key (avoids UTC shift from toISOString). */
+export function formatLocalDateKey(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function formatMonthYear(d: Date): string {
   return d.toLocaleString("en-US", { month: "short", year: "numeric" });
 }
@@ -36,7 +41,7 @@ export function getPeriodBounds(
   if (frequency === CampaignTargetFrequency.DAILY) {
     const start = startOfDay(d);
     const end = endOfDay(d);
-    const key = start.toISOString().slice(0, 10);
+    const key = formatLocalDateKey(start);
     return { start, end, key, label: key };
   }
 
@@ -47,7 +52,7 @@ export function getPeriodBounds(
     start.setDate(start.getDate() + diffToMonday);
     const end = endOfDay(new Date(start));
     end.setDate(end.getDate() + 6);
-    const key = `${start.toISOString().slice(0, 10)}_${end.toISOString().slice(0, 10)}`;
+    const key = `${formatLocalDateKey(start)}_${formatLocalDateKey(end)}`;
     return {
       start,
       end,
@@ -63,7 +68,7 @@ export function getPeriodBounds(
     const index = Math.floor(ms / fortnightMs);
     const start = new Date(anchor.getTime() + index * fortnightMs);
     const end = endOfDay(new Date(start.getTime() + fortnightMs - 1));
-    const key = `bi_${start.toISOString().slice(0, 10)}`;
+    const key = `bi_${formatLocalDateKey(start)}`;
     return {
       start,
       end,

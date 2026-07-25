@@ -5,6 +5,8 @@ export enum ManualRecurringStatus {
 }
 
 export enum ManualRecurringFrequency {
+  DAILY = "daily",
+  WEEKLY = "weekly",
   MONTHLY = "monthly",
 }
 

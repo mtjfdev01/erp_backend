@@ -22,12 +22,13 @@ export class ManualRecurringPledge extends BaseEntity {
   @Column({ type: "int" })
   donor_id: number;
 
-  @ManyToOne(() => Campaign, { nullable: false, onDelete: "CASCADE" })
+  @ManyToOne(() => Campaign, { nullable: true, onDelete: "CASCADE" })
   @JoinColumn({ name: "campaign_id" })
-  campaign: Campaign;
+  campaign: Campaign | null;
 
-  @Column({ type: "bigint" })
-  campaign_id: number;
+  /** Null = general / project recurring (not tied to a campaign). */
+  @Column({ type: "bigint", nullable: true, default: null })
+  campaign_id: number | null;
 
   @Column({ type: "decimal", precision: 14, scale: 2, nullable: true })
   pledged_amount: number | null;

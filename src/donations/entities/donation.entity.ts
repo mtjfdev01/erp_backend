@@ -134,4 +134,11 @@ export class Donation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   reference_no: string | null;
+
+  /**
+   * Website non-Stripe recurring intent. Enrolled at create (including pending).
+   * Shape: { enroll, pledge_mode?, prepaid_months?, frequency?, lines[], activated_at? }
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  manual_recurring_intent: Record<string, unknown> | null;
 }

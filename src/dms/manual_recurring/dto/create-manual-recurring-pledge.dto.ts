@@ -24,9 +24,10 @@ export class CreateManualRecurringPledgeDto {
   @Type(() => Number)
   donor_id: number;
 
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
-  campaign_id: number;
+  campaign_id?: number | null;
 
   @IsOptional()
   @IsNumber()

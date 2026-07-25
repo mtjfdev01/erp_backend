@@ -75,9 +75,17 @@ export class Campaign extends BaseEntity {
   })
   target_frequency: CampaignTargetFrequency | null;
 
-  /** Run monthly donor check (2nd): thanks if donated, reminder if not */
+  /** Run donor check automation (schedule depends on target_frequency). */
   @Column({ type: "boolean", default: false })
   monthly_donor_automation_enabled: boolean;
+
+  /**
+   * When true, recurring thanks/reminders use the existing donation thanks
+   * (email + WhatsApp) and payment-link (email + WhatsApp) flows instead of
+   * manual DMS communication_templates for those two slots.
+   */
+  @Column({ type: "boolean", default: false })
+  use_default_thanks_and_reminders: boolean;
 
   /** Per-slot templates: marketing, thanks, reminder, payment_link */
   @Column({ type: "jsonb", nullable: true, default: null })

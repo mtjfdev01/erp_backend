@@ -4,10 +4,10 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  Matches,
 } from "class-validator";
 import { Type } from "class-transformer";
 import { ManualRecurringStatus } from "../utils/manual-recurring.constants";
+import { CampaignTargetFrequency } from "../../campaigns/utils/campaign-recurring.constants";
 
 export class ManualRecurringPledgeFiltersDto {
   @IsOptional()
@@ -27,14 +27,34 @@ export class ManualRecurringPledgeFiltersDto {
   @IsInt()
   @Type(() => Number)
   campaign_id?: number;
+
+  /** pending = no thanks yet; completed = has thanks/payment period */
+  @IsOptional()
+  @IsString()
+  installment_status?: string;
 }
 
 export class ProcessManualRecurringRemindersDto {
-  /** YYYY-MM — defaults to current month in PKT */
+  /**
+   * Period override:
+   * - monthly: YYYY-MM
+   * - daily: YYYY-MM-DD
+   * - weekly: YYYY-MM-DD_YYYY-MM-DD
+   */
   @IsOptional()
   @IsString()
-  @Matches(/^\d{4}-\d{2}$/)
   period_key?: string;
+
+  /** Limit job to one target_frequency (daily|weekly|monthly|…). */
+  @IsOptional()
+  @IsEnum(CampaignTargetFrequency)
+  frequency?: CampaignTargetFrequency;
+
+  /** When true (and frequency omitted), run all frequencies due today in PKT. */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  run_due?: boolean;
 
   @IsOptional()
   @IsBoolean()

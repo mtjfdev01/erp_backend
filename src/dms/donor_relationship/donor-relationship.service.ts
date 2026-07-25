@@ -115,6 +115,54 @@ export class DonorRelationshipService {
     }));
   }
 
+  async getInteractionsList(
+    query: {
+      scope?: "mine" | "team";
+      activity_type?: string;
+      search?: string;
+      limit?: string;
+    },
+    user: CurrentUser,
+  ) {
+    const scope = query.scope === "team" ? "team" : "mine";
+    if (scope === "team") {
+      await this.assertManagementAccess(user);
+    }
+
+    const limit = Math.min(Math.max(Number(query.limit) || 100, 1), 300);
+
+    const qb = this.interactionRepository
+      .createQueryBuilder("i")
+      .leftJoinAndSelect("i.donor", "donor")
+      .leftJoinAndSelect("i.created_by", "created_by")
+      .leftJoinAndSelect("i.assigned_to", "assigned_to")
+      .where("i.is_archived = false")
+      .orderBy("i.activity_datetime", "DESC")
+      .addOrderBy("i.id", "DESC")
+      .take(limit);
+
+    if (scope === "mine") {
+      qb.andWhere("created_by.id = :uid", { uid: user.id });
+    }
+
+    if (query.activity_type) {
+      qb.andWhere("i.activity_type = :atype", {
+        atype: query.activity_type,
+      });
+    }
+
+    if (query.search?.trim()) {
+      const s = `%${query.search.trim()}%`;
+      qb.andWhere(
+        "(donor.name ILIKE :s OR donor.phone ILIKE :s OR i.user_action_text ILIKE :s OR i.next_action_text ILIKE :s OR i.donor_response_text ILIKE :s)",
+        { s },
+      );
+    }
+
+    const items = await qb.getMany();
+    return { scope, total: items.length, items };
+  }
+
   async updateInteraction(
     id: number,
     dto: UpdateDonorInteractionDto,

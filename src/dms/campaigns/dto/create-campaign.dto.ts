@@ -93,6 +93,12 @@ export class CreateCampaignDto {
   @Type(() => Boolean)
   monthly_donor_automation_enabled?: boolean;
 
+  /** Use built-in donation thanks + payment-link messages for thanks/reminders. */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  use_default_thanks_and_reminders?: boolean;
+
   @IsOptional()
   @ValidateNested()
   @Type(() => CampaignCommunicationTemplatesDto)

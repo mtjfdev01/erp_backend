@@ -146,27 +146,69 @@ export class ManualRecurringService {
       throw new NotFoundException(`Donor ${dto.donor_id} not found`);
     }
 
-    const campaign = await this.assertRecurringCampaign(dto.campaign_id);
+    const campaignId =
+      dto.campaign_id != null && Number(dto.campaign_id) > 0
+        ? Number(dto.campaign_id)
+        : null;
 
-    const existingActive = await this.pledgeRepo.findOne({
-      where: {
-        donor_id: dto.donor_id,
-        campaign_id: dto.campaign_id,
-        status: ManualRecurringStatus.ACTIVE,
-        is_archived: false,
-      },
-    });
+    let campaign: Campaign | null = null;
+    if (campaignId) {
+      campaign = await this.assertRecurringCampaign(campaignId);
+    }
+
+    const existingActive = campaignId
+      ? await this.pledgeRepo.findOne({
+          where: {
+            donor_id: dto.donor_id,
+            campaign_id: campaignId,
+            status: ManualRecurringStatus.ACTIVE,
+            is_archived: false,
+          },
+        })
+      : await this.pledgeRepo
+          .createQueryBuilder("p")
+          .where("p.donor_id = :donorId", { donorId: dto.donor_id })
+          .andWhere("p.campaign_id IS NULL")
+          .andWhere("p.status = :status", {
+            status: ManualRecurringStatus.ACTIVE,
+          })
+          .andWhere("p.is_archived = false")
+          .getOne();
+
     if (existingActive) {
       throw new BadRequestException(
-        "This donor is already enrolled on this recurring campaign",
+        campaignId
+          ? "This donor is already enrolled on this recurring campaign"
+          : "This donor already has an active general recurring pledge",
       );
     }
 
     const pledgeMode = dto.pledge_mode || PledgeMode.RECURRING_MONTHLY;
     this.validatePledgeMode(pledgeMode, dto.prepaid_months);
 
-    const resolvedLines = await this.resolveLines(dto.campaign_id, dto.lines);
-    const periodAmount = computePeriodAmountFromLines(resolvedLines);
+    const hasLines = Array.isArray(dto.lines) && dto.lines.length > 0;
+    if (campaignId && !hasLines && dto.pledged_amount == null) {
+      throw new BadRequestException(
+        "Campaign enrollment requires lines or pledged_amount",
+      );
+    }
+    if (!campaignId && (dto.pledged_amount == null || Number(dto.pledged_amount) <= 0)) {
+      throw new BadRequestException(
+        "General recurring enrollment requires pledged_amount",
+      );
+    }
+    if (hasLines && !campaignId) {
+      throw new BadRequestException(
+        "campaign_id is required when pledge lines are provided",
+      );
+    }
+
+    const resolvedLines = hasLines
+      ? await this.resolveLines(campaignId as number, dto.lines)
+      : [];
+    const periodAmount = resolvedLines.length
+      ? computePeriodAmountFromLines(resolvedLines)
+      : Number(dto.pledged_amount) || 0;
     const pledgedAmount =
       dto.pledged_amount != null
         ? dto.pledged_amount
@@ -184,9 +226,9 @@ export class ManualRecurringService {
 
     const pledge = this.pledgeRepo.create({
       donor_id: dto.donor_id,
-      campaign_id: dto.campaign_id,
+      campaign_id: campaignId,
       pledged_amount: pledgedAmount,
-      currency: dto.currency || campaign.currency || "PKR",
+      currency: dto.currency || campaign?.currency || "PKR",
       frequency: dto.frequency || ManualRecurringFrequency.MONTHLY,
       status: dto.status || ManualRecurringStatus.ACTIVE,
       remind_via_email: dto.remind_via_email !== false,
@@ -216,6 +258,43 @@ export class ManualRecurringService {
     return this.findOne(saved.id);
   }
 
+  /**
+   * Website checkout enrollment. Returns existing active pledge if already enrolled
+   * (does not fail the donation).
+   */
+  async createFromWebsiteCheckout(
+    dto: CreateManualRecurringPledgeDto,
+  ): Promise<ManualRecurringPledge | null> {
+    const campaignId =
+      dto.campaign_id != null && Number(dto.campaign_id) > 0
+        ? Number(dto.campaign_id)
+        : null;
+
+    const existingActive = campaignId
+      ? await this.pledgeRepo.findOne({
+          where: {
+            donor_id: dto.donor_id,
+            campaign_id: campaignId,
+            status: ManualRecurringStatus.ACTIVE,
+            is_archived: false,
+          },
+        })
+      : await this.pledgeRepo
+          .createQueryBuilder("p")
+          .where("p.donor_id = :donorId", { donorId: dto.donor_id })
+          .andWhere("p.campaign_id IS NULL")
+          .andWhere("p.status = :status", {
+            status: ManualRecurringStatus.ACTIVE,
+          })
+          .andWhere("p.is_archived = false")
+          .getOne();
+
+    if (existingActive) {
+      return this.findOne(existingActive.id);
+    }
+    return this.create({ ...dto, campaign_id: campaignId });
+  }
+
   async findAll(filters: ManualRecurringPledgeFiltersDto = {}) {
     const qb = this.pledgeRepo
       .createQueryBuilder("pledge")
@@ -242,6 +321,15 @@ export class ManualRecurringService {
         "(donor.name ILIKE :term OR donor.email ILIKE :term OR donor.phone ILIKE :term OR campaign.title ILIKE :term)",
         { term },
       );
+    }
+
+    const installmentStatus = String(filters.installment_status || "")
+      .trim()
+      .toLowerCase();
+    if (installmentStatus === "pending") {
+      qb.andWhere("pledge.last_thanks_period_key IS NULL");
+    } else if (installmentStatus === "completed") {
+      qb.andWhere("pledge.last_thanks_period_key IS NOT NULL");
     }
 
     const items = await qb.orderBy("pledge.created_at", "DESC").getMany();
@@ -279,17 +367,30 @@ export class ManualRecurringService {
     }
 
     if (dto.status === ManualRecurringStatus.ACTIVE && pledge.status !== ManualRecurringStatus.ACTIVE) {
-      const conflict = await this.pledgeRepo.findOne({
-        where: {
-          donor_id: pledge.donor_id,
-          campaign_id: pledge.campaign_id,
-          status: ManualRecurringStatus.ACTIVE,
-          is_archived: false,
-        },
-      });
+      const conflict = pledge.campaign_id
+        ? await this.pledgeRepo.findOne({
+            where: {
+              donor_id: pledge.donor_id,
+              campaign_id: pledge.campaign_id,
+              status: ManualRecurringStatus.ACTIVE,
+              is_archived: false,
+            },
+          })
+        : await this.pledgeRepo
+            .createQueryBuilder("p")
+            .where("p.donor_id = :donorId", { donorId: pledge.donor_id })
+            .andWhere("p.campaign_id IS NULL")
+            .andWhere("p.status = :status", {
+              status: ManualRecurringStatus.ACTIVE,
+            })
+            .andWhere("p.is_archived = false")
+            .andWhere("p.id != :id", { id })
+            .getOne();
       if (conflict && conflict.id !== id) {
         throw new BadRequestException(
-          "Donor already has an active enrollment on this campaign",
+          pledge.campaign_id
+            ? "Donor already has an active enrollment on this campaign"
+            : "Donor already has an active general recurring pledge",
         );
       }
     }

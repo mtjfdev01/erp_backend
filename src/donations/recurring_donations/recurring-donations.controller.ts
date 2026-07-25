@@ -66,4 +66,26 @@ export class RecurringDonationsController {
       });
     }
   }
+
+  /** Same installment payment link the cron sends (email + WhatsApp). */
+  @Post(":id/send-installment-link")
+  @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
+  async sendInstallmentLink(@Param("id") id: string, @Res() res: Response) {
+    try {
+      const data = await this.ledgerService.sendInstallmentPaymentLink(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Installment payment link sent",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to send installment payment link",
+        data: null,
+      });
+    }
+  }
 }

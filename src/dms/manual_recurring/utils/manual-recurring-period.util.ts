@@ -3,22 +3,81 @@ import { CampaignTargetFrequency } from "../../campaigns/utils/campaign-recurrin
 
 const PKT_TIMEZONE = "Asia/Karachi";
 
-/** Current instant interpreted in PKT (for month boundaries). */
+/** Current instant interpreted in PKT (for period boundaries). */
 export function getPktNow(reference = new Date()): Date {
   return new Date(reference.toLocaleString("en-US", { timeZone: PKT_TIMEZONE }));
 }
 
+export function getPktWeekday(reference = new Date()): number {
+  return getPktNow(reference).getDay(); // 0=Sun … 6=Sat
+}
+
+export function getPktDayOfMonth(reference = new Date()): number {
+  return getPktNow(reference).getDate();
+}
+
 export function getMonthlyPeriodKey(reference = new Date()): string {
-  const pkt = getPktNow(reference);
-  return getPeriodBounds(pkt, CampaignTargetFrequency.MONTHLY).key;
+  return getPeriodKeyForFrequency(CampaignTargetFrequency.MONTHLY, reference);
 }
 
 export function getMonthlyPeriodBounds(reference = new Date()) {
+  return getPeriodBoundsForFrequency(CampaignTargetFrequency.MONTHLY, reference);
+}
+
+export function getPeriodKeyForFrequency(
+  frequency: CampaignTargetFrequency,
+  reference = new Date(),
+): string {
+  return getPeriodBoundsForFrequency(frequency, reference).key;
+}
+
+export function getPeriodBoundsForFrequency(
+  frequency: CampaignTargetFrequency,
+  reference = new Date(),
+) {
   const pkt = getPktNow(reference);
-  return getPeriodBounds(pkt, CampaignTargetFrequency.MONTHLY);
+  return getPeriodBounds(pkt, frequency);
+}
+
+/**
+ * Reminder dedupe key.
+ * Weekly: allow both Saturday and Sunday reminders in the same week.
+ */
+export function getReminderDedupeKey(
+  frequency: CampaignTargetFrequency,
+  periodKey: string,
+  reference = new Date(),
+): string {
+  if (frequency === CampaignTargetFrequency.WEEKLY) {
+    const day = getPktWeekday(reference);
+    const tag = day === 0 ? "sun" : day === 6 ? "sat" : `d${day}`;
+    return `${periodKey}:${tag}`;
+  }
+  return periodKey;
 }
 
 export function formatPeriodKeyLabel(periodKey: string): string {
+  // Daily: YYYY-MM-DD
+  const daily = /^(\d{4})-(\d{2})-(\d{2})$/.exec(periodKey);
+  if (daily) {
+    return new Date(
+      Number(daily[1]),
+      Number(daily[2]) - 1,
+      Number(daily[3]),
+    ).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  // Weekly: YYYY-MM-DD_YYYY-MM-DD
+  const weekly = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(periodKey);
+  if (weekly) {
+    return `Week ${weekly[1]} → ${weekly[2]}`;
+  }
+
+  // Monthly: YYYY-MM
   const match = /^(\d{4})-(\d{2})$/.exec(periodKey);
   if (!match) return periodKey;
   const year = Number(match[1]);
@@ -61,4 +120,24 @@ export function isPeriodKeyInRange(
 ): boolean {
   if (!startKey || !endKey) return false;
   return periodKey >= startKey && periodKey <= endKey;
+}
+
+/** Frequencies that should run on this PKT calendar day. */
+export function getDueReminderFrequencies(
+  reference = new Date(),
+): CampaignTargetFrequency[] {
+  const due: CampaignTargetFrequency[] = [CampaignTargetFrequency.DAILY];
+  const weekday = getPktWeekday(reference);
+  if (weekday === 0 || weekday === 6) {
+    due.push(CampaignTargetFrequency.WEEKLY);
+  }
+  if (getPktDayOfMonth(reference) === 2) {
+    due.push(
+      CampaignTargetFrequency.MONTHLY,
+      CampaignTargetFrequency.BI_WEEKLY,
+      CampaignTargetFrequency.QUARTERLY,
+      CampaignTargetFrequency.YEARLY,
+    );
+  }
+  return due;
 }
