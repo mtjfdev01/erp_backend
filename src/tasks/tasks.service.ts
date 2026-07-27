@@ -1033,10 +1033,31 @@ export class TasksService {
     try {
       const qb = this.taskRepo.createQueryBuilder("task");
       
-      // For dashboard stats, show all tasks to Super Admin/Admin
-      const isSuperAdminOrAdmin = 
-        currentUser && 
-        (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
+      // Org-wide visibility is granted to:
+      // 1. Role-based SUPER_ADMIN / ADMIN
+      // 2. Any user with explicit super_admin permission
+      // 3. Any user whose task reports permission has view_all === true
+      const perms = currentUser
+        ? await this.permissionsService.getUserPermissions(Number(currentUser.id))
+        : null;
+      const deptKey =
+        currentUser?.department &&
+        perms?.[currentUser.department]?.tasks
+          ? currentUser.department
+          : null;
+      const modulePermissions =
+        (deptKey ? perms?.[deptKey]?.tasks : null) ||
+        perms?.admin?.tasks ||
+        perms?.tasking?.tasks ||
+        perms?.tasks ||
+        {};
+      const reports = modulePermissions?.reports || {};
+      const isSuperAdminOrAdmin =
+        currentUser &&
+        (currentUser.role === UserRole.SUPER_ADMIN ||
+          currentUser.role === UserRole.ADMIN ||
+          (perms && (perms as any).super_admin === true) ||
+          reports.view_all === true);
 
       if (filters.start_date) {
         qb.andWhere("task.created_at >= :start_date", {
@@ -1294,9 +1315,28 @@ export class TasksService {
           : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
       
-      const isSuperAdminOrAdmin = 
-        currentUser && 
-        (currentUser.role === UserRole.SUPER_ADMIN || currentUser.role === UserRole.ADMIN);
+      // Org-wide visibility mirrors getDashboardStats logic above (role + perms)
+      const perms = currentUser
+        ? await this.permissionsService.getUserPermissions(Number(currentUser.id))
+        : null;
+      const deptKey =
+        currentUser?.department &&
+        perms?.[currentUser.department]?.tasks
+          ? currentUser.department
+          : null;
+      const modulePermissions =
+        (deptKey ? perms?.[deptKey]?.tasks : null) ||
+        perms?.admin?.tasks ||
+        perms?.tasking?.tasks ||
+        perms?.tasks ||
+        {};
+      const reportsPerm = modulePermissions?.reports || {};
+      const isSuperAdminOrAdmin =
+        currentUser &&
+        (currentUser.role === UserRole.SUPER_ADMIN ||
+          currentUser.role === UserRole.ADMIN ||
+          (perms && (perms as any).super_admin === true) ||
+          reportsPerm.view_all === true);
 
       if (query.start_date) {
         qb.andWhere(`${dateField} >= :start_date`, {
