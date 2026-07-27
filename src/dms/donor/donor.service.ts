@@ -7,10 +7,12 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donor, DonorType } from "./entities/donor.entity";
+import { Donation } from "../../donations/entities/donation.entity";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
 import {
   applyCommonFilters,
+  applyHybridFilters,
   FilterPayload,
 } from "../../utils/filters/common-filter.util";
 import * as bcrypt from "bcrypt";
@@ -33,6 +35,7 @@ import { DataScopeService } from "../../permissions/data-scope/data-scope.servic
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
+import { PermissionsService } from "../../permissions/permissions.service";
 import { buildDonorGeoSearch } from "./utils/donor-geo.util";
 
 interface PaginationOptions {
@@ -51,11 +54,29 @@ interface PaginationOptions {
   source?: "online" | "offline";
 }
 
+export interface DonorDonationStats {
+  total_donations: number;
+  total_donated: number;
+  currency: string;
+  first_donation: {
+    date: Date | string;
+    amount: number;
+    currency: string;
+  } | null;
+  last_donation: {
+    date: Date | string;
+    amount: number;
+    currency: string;
+  } | null;
+}
+
 @Injectable()
 export class DonorService {
   constructor(
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(Donation)
+    private readonly donationRepository: Repository<Donation>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly usersService: UsersService,
@@ -63,7 +84,83 @@ export class DonorService {
     private readonly donorAuditService: DonorAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly permissionsService: PermissionsService,
   ) {}
+
+  async getDonorSourceAccess(
+    userId: number,
+    action: string,
+  ): Promise<{ online: boolean; offline: boolean }> {
+    if (userId === -1) return { online: true, offline: true };
+
+    const hasSuperAdmin = await this.permissionsService.hasPermission(
+      userId,
+      "super_admin",
+    );
+    if (hasSuperAdmin) return { online: true, offline: true };
+
+    const hasFundRaisingManager = await this.permissionsService.hasPermission(
+      userId,
+      "fund_raising_manager",
+    );
+    if (hasFundRaisingManager) return { online: true, offline: true };
+
+    const hasUnifiedDonors = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.donors.${action}`,
+    );
+    if (hasUnifiedDonors) return { online: true, offline: true };
+
+    const hasOnline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.online_donors.${action}`,
+    );
+    const hasOffline = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.offline_donors.${action}`,
+    );
+
+    return { online: hasOnline, offline: hasOffline };
+  }
+
+  async resolveGeoScopeForUser(user: {
+    id?: number;
+    role?: string;
+    department?: string;
+    assigned_countries?: number[] | null;
+    assigned_regions?: number[] | null;
+    assigned_districts?: number[] | null;
+    assigned_tehsils?: number[] | null;
+    assigned_cities?: number[] | null;
+    assigned_routes?: number[] | null;
+    geographic_off?: boolean;
+  } | null): Promise<ResolvedGeographicScope | null> {
+    if (!user?.id || user.id === -1) return null;
+    return this.geographicScopeService.resolveForUser(
+      user.id,
+      user.role,
+      user as any,
+    );
+  }
+
+  async resolveCommunicationAudience(
+    user: { id?: number; role?: string; department?: string } | null | undefined,
+    payload: {
+      selection_mode: "manual" | "filters";
+      donor_ids?: number[];
+      donor_filters?: Record<string, any>;
+    },
+  ) {
+    let sourceAccess = { online: true, offline: true };
+    if (user?.id) {
+      sourceAccess = await this.getDonorSourceAccess(user.id, "list_view");
+      if (!sourceAccess.online && !sourceAccess.offline) {
+        throw new ForbiddenException("Insufficient permissions to view donors");
+      }
+    }
+    const geoScope = await this.resolveGeoScopeForUser(user);
+    return this.resolveAudienceIds(payload, geoScope, sourceAccess, user ?? undefined);
+  }
 
   async resolveDonorScope(currentUser?: {
     id?: number;
@@ -174,6 +271,8 @@ export class DonorService {
       is_active: donor.is_active,
       is_archived: donor.is_archived,
       recurring: donor.recurring,
+      recurring_consent: donor.recurring_consent,
+      recurring_consent_at: donor.recurring_consent_at,
       multi_time_donor: donor.multi_time_donor,
       notification_subscription: donor.notification_subscription,
       assigned_to_user_id: donor.assigned_to?.id ?? null,
@@ -350,7 +449,11 @@ export class DonorService {
         start_date,
         end_date,
         multi_time_donor,
+        recurring,
+        is_mature_donor,
         source,
+        donated_amount,
+        donated_amount_operator,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -384,6 +487,38 @@ export class DonorService {
       };
 
       applyCommonFilters(queryBuilder, filters, searchFields, "donor");
+
+      if (recurring === true) {
+        queryBuilder.andWhere("donor.recurring = :recurring", {
+          recurring: true,
+        });
+      } else if (recurring === false) {
+        queryBuilder.andWhere(
+          "(donor.recurring = :recurring OR donor.recurring IS NULL)",
+          { recurring: false },
+        );
+      }
+
+      // Matured donors: at least one completed donation (live check, not flag-only)
+      if (is_mature_donor === true) {
+        queryBuilder.andWhere(
+          `EXISTS (
+            SELECT 1 FROM donations d
+            WHERE d.donor_id = donor.id
+              AND d.is_archived = false
+              AND LOWER(COALESCE(d.status, '')) = 'completed'
+          )`,
+        );
+      } else if (is_mature_donor === false) {
+        queryBuilder.andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM donations d
+            WHERE d.donor_id = donor.id
+              AND d.is_archived = false
+              AND LOWER(COALESCE(d.status, '')) = 'completed'
+          )`,
+        );
+      }
 
       queryBuilder.andWhere("donor.is_archived = :is_archived", {
         is_archived: false,
@@ -431,6 +566,29 @@ export class DonorService {
         this.applyDonorListDataScope(queryBuilder, scope, geoScope);
       }
 
+      const parsedDonatedAmount = Number(
+        String(donated_amount ?? "").replace(/,/g, ""),
+      );
+      if (
+        donated_amount !== undefined &&
+        donated_amount !== null &&
+        donated_amount !== "" &&
+        donated_amount_operator &&
+        Number.isFinite(parsedDonatedAmount)
+      ) {
+        applyHybridFilters(
+          queryBuilder,
+          [
+            {
+              column: "total_donated",
+              operator: donated_amount_operator,
+              value: parsedDonatedAmount,
+            },
+          ],
+          "donor",
+        );
+      }
+
       // Apply sorting
       const validSortFields = [
         "name",
@@ -476,6 +634,86 @@ export class DonorService {
         `Failed to retrieve donors: ${error.message}`,
       );
     }
+  }
+
+  /**
+   * Resolve donor IDs for communication audience (filter-based or manual list).
+   */
+  async resolveAudienceIds(
+    options: {
+      selection_mode: "manual" | "filters";
+      donor_ids?: number[];
+      donor_filters?: Record<string, any>;
+    },
+    geoScope?: ResolvedGeographicScope | null,
+    sourceAccess?: { online: boolean; offline: boolean },
+    currentUser?: { id?: number; role?: string; department?: string },
+  ): Promise<{ ids: number[]; total: number; filters: Record<string, any> | null }> {
+    if (options.selection_mode === "manual") {
+      const ids = (options.donor_ids || [])
+        .map(Number)
+        .filter((id) => Number.isFinite(id) && id > 0);
+      return { ids, total: ids.length, filters: null };
+    }
+
+    const raw = options.donor_filters || {};
+    const filters = { ...raw };
+
+    let recurring: boolean | undefined =
+      filters.recurring === true || filters.recurring === "true"
+        ? true
+        : filters.recurring === false || filters.recurring === "false"
+          ? false
+          : undefined;
+
+    if (recurring === undefined && filters.donation_type) {
+      const dt = String(filters.donation_type).toLowerCase().trim();
+      if (dt === "recurring_donor") recurring = true;
+      else if (dt === "one_time_donor") recurring = false;
+    }
+
+    const listOptions = {
+      page: 1,
+      pageSize: 50000,
+      sortField: "id",
+      sortOrder: "ASC" as const,
+      search: filters.search || "",
+      donor_type: filters.donor_type || "",
+      city: filters.city || "",
+      country: filters.country || "",
+      start_date: filters.start_date || "",
+      end_date: filters.end_date || "",
+      multi_time_donor:
+        filters.multi_time_donors === true ||
+        filters.multi_time_donors === "true"
+          ? true
+          : filters.multi_time_donors === false ||
+              filters.multi_time_donors === "false"
+            ? false
+            : undefined,
+      recurring,
+      is_mature_donor:
+        filters.is_mature_donor === true || filters.is_mature_donor === "true"
+          ? true
+          : filters.is_mature_donor === false ||
+              filters.is_mature_donor === "false"
+            ? false
+            : undefined,
+      source: filters.source || "",
+      assigned_to_user_id: filters.assigned_to_user_id ?? "",
+      donated_amount: filters.donated_amount || "",
+      donated_amount_operator: filters.donated_amount_operator || "",
+    };
+
+    const result = await this.findAll(
+      listOptions,
+      geoScope,
+      sourceAccess,
+      currentUser,
+    );
+
+    const ids = (result.data || []).map((donor) => donor.id);
+    return { ids, total: result.pagination?.total ?? ids.length, filters: raw };
   }
 
   /**
@@ -563,6 +801,8 @@ export class DonorService {
     country?: string;
     address?: string;
     notification_subscription?: boolean;
+    recurring?: boolean;
+    recurring_consent?: boolean;
   }): Promise<Donor | null> {
     try {
       const {
@@ -573,6 +813,8 @@ export class DonorService {
         country,
         address,
         notification_subscription,
+        recurring,
+        recurring_consent,
       } = donationData;
 
       // Validate required fields
@@ -597,6 +839,10 @@ export class DonorService {
         is_active: true,
         notes: "Auto-registered from donation - Password not set",
         notification_subscription: notification_subscription !== false,
+        recurring: recurring === true,
+        recurring_consent: recurring_consent === true,
+        recurring_consent_at:
+          recurring_consent === true ? new Date() : null,
       });
 
       this.applyGeoSearchToDonor(donor);
@@ -617,28 +863,123 @@ export class DonorService {
     }
   }
 
-  async findOne(id: number): Promise<Donor> {
+  async findOne(id: number): Promise<Donor & { donation_stats: DonorDonationStats }> {
     try {
-      // i want donations also here
       const donor = await this.donorRepository.findOne({
         where: { id, is_archived: false },
-        relations: ["donations", "created_by", "updated_by", "assigned_to", "referred_by"],
+        relations: ["created_by", "updated_by", "assigned_to", "referred_by"],
       });
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
       }
 
+      const donation_stats = await this.buildDonorDonationStats(id);
+      await this.applyDonorDonationStatsIfStale(donor, donation_stats);
+
       // Remove password from response
       delete donor.password;
 
-      return donor;
+      return Object.assign(donor, { donation_stats });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new NotFoundException(`Failed to retrieve donor: ${error.message}`);
     }
+  }
+
+  /**
+   * Aggregate completed donations for donor profile / stats cards.
+   */
+  async buildDonorDonationStats(donorId: number): Promise<DonorDonationStats> {
+    const completedQb = () =>
+      this.donationRepository
+        .createQueryBuilder("donation")
+        .where("donation.donor_id = :donorId", { donorId })
+        .andWhere("LOWER(donation.status) = :status", { status: "completed" });
+
+    const aggregates = await completedQb()
+      .select("COUNT(donation.id)", "total_donations")
+      .addSelect(
+        "COALESCE(SUM(COALESCE(donation.paid_amount, donation.amount, 0)), 0)",
+        "total_donated",
+      )
+      .getRawOne<{ total_donations: string; total_donated: string }>();
+
+    const first = await completedQb()
+      .orderBy("donation.date", "ASC")
+      .addOrderBy("donation.created_at", "ASC")
+      .limit(1)
+      .getOne();
+
+    const last = await completedQb()
+      .orderBy("donation.date", "DESC")
+      .addOrderBy("donation.created_at", "DESC")
+      .limit(1)
+      .getOne();
+
+    const currency =
+      last?.currency || first?.currency || "PKR";
+
+    const toDonationRef = (row: Donation | null) => {
+      if (!row) return null;
+      return {
+        date: row.date || row.created_at,
+        amount: Number(row.paid_amount ?? row.amount ?? 0),
+        currency: row.currency || currency,
+      };
+    };
+
+    return {
+      total_donations: Number(aggregates?.total_donations || 0),
+      total_donated: Number(aggregates?.total_donated || 0),
+      currency,
+      first_donation: toDonationRef(first),
+      last_donation: toDonationRef(last),
+    };
+  }
+
+  /**
+   * Recompute donor denormalized donation fields from completed donations.
+   */
+  async recalculateDonorDonationStats(donorId: number): Promise<DonorDonationStats> {
+    const stats = await this.buildDonorDonationStats(donorId);
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+    });
+    if (donor) {
+      donor.donation_count = stats.total_donations;
+      donor.total_donated = stats.total_donated;
+      if (stats.last_donation?.date) {
+        donor.last_donation_date = new Date(stats.last_donation.date);
+      } else {
+        donor.last_donation_date = null;
+      }
+      await this.donorRepository.save(donor);
+    }
+    return stats;
+  }
+
+  private async applyDonorDonationStatsIfStale(
+    donor: Donor,
+    stats: DonorDonationStats,
+  ): Promise<void> {
+    const currentCount = Number(donor.donation_count || 0);
+    const currentTotal = Number(donor.total_donated || 0);
+    if (
+      currentCount === stats.total_donations &&
+      currentTotal === stats.total_donated
+    ) {
+      return;
+    }
+
+    donor.donation_count = stats.total_donations;
+    donor.total_donated = stats.total_donated;
+    if (stats.last_donation?.date) {
+      donor.last_donation_date = new Date(stats.last_donation.date);
+    }
+    await this.donorRepository.save(donor);
   }
 
   /**
@@ -953,20 +1294,11 @@ export class DonorService {
   }
 
   /**
-   * Update donation statistics
+   * Update donation statistics (recomputed from completed donations).
    */
-  async updateDonationStats(donorId: number, amount: number): Promise<void> {
+  async updateDonationStats(donorId: number, _amount?: number): Promise<void> {
     try {
-      const donor = await this.donorRepository.findOne({
-        where: { id: donorId, is_archived: false },
-      });
-
-      if (donor) {
-        donor.total_donated = Number(donor.total_donated) + amount;
-        donor.donation_count += 1;
-        donor.last_donation_date = new Date();
-        await this.donorRepository.save(donor);
-      }
+      await this.recalculateDonorDonationStats(donorId);
     } catch (error) {
       console.error("Failed to update donation stats:", error);
     }

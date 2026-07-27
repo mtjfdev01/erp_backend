@@ -132,9 +132,11 @@ export class CommunicationController {
       // Update donation flags if messages sent successfully
       if (results.email.sent || results.whatsapp.sent) {
         try {
-          // You might want to update donation.message_sent and email_sent flags here
-          // This would require injecting the donation repository or adding a method to DonationsService
-        } catch (updateError) {
+          await this.donationsService.markDonationThanksSent(id, {
+            email: results.email.sent,
+            whatsapp: results.whatsapp.sent,
+          });
+        } catch (updateError: any) {
           this.logger.warn(
             `Failed to update donation flags: ${updateError.message}`,
           );

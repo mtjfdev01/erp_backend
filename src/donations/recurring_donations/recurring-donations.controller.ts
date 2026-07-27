@@ -13,6 +13,10 @@ import { JwtGuard } from "src/auth/jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { RecurringDonationsLedgerService } from "./recurring-donations-ledger.service";
+import {
+  RECURRING_DONATION_LIST_VIEW_GUARD,
+  RECURRING_DONATION_VIEW_GUARD,
+} from "../../permissions/recurring-donations-permissions.constants";
 
 @Controller("recurring-donations")
 @UseGuards(JwtGuard, PermissionsGuard)
@@ -22,12 +26,7 @@ export class RecurringDonationsController {
   ) {}
 
   @Post("search")
-  @RequiredPermissions([
-    "fund_raising.recurring_donations.list_view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...RECURRING_DONATION_LIST_VIEW_GUARD])
   async search(@Body() payload: Record<string, any>, @Res() res: Response) {
     try {
       const result = await this.ledgerService.search(payload);
@@ -48,12 +47,7 @@ export class RecurringDonationsController {
   }
 
   @Get(":id")
-  @RequiredPermissions([
-    "fund_raising.recurring_donations.view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
   async findOne(@Param("id") id: string, @Res() res: Response) {
     try {
       const data = await this.ledgerService.findOne(+id);
@@ -68,6 +62,28 @@ export class RecurringDonationsController {
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to fetch recurring donation",
+        data: null,
+      });
+    }
+  }
+
+  /** Same installment payment link the cron sends (email + WhatsApp). */
+  @Post(":id/send-installment-link")
+  @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
+  async sendInstallmentLink(@Param("id") id: string, @Res() res: Response) {
+    try {
+      const data = await this.ledgerService.sendInstallmentPaymentLink(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Installment payment link sent",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to send installment payment link",
         data: null,
       });
     }

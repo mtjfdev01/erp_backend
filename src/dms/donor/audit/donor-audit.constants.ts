@@ -22,6 +22,8 @@ export const DONOR_AUDIT_PATCH_FIELDS = [
   "is_active",
   "is_archived",
   "recurring",
+  "recurring_consent",
+  "recurring_consent_at",
   "multi_time_donor",
   "notification_subscription",
   "assigned_to_user_id",

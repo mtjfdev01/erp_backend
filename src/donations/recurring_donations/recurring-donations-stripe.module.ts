@@ -9,6 +9,8 @@ import { Donor } from "src/dms/donor/entities/donor.entity";
 import { StripeService } from "../stripe.service";
 import { PermissionsModule } from "src/permissions";
 import { JwtModule } from "@nestjs/jwt";
+import { EmailModule } from "../../email/email.module";
+import { WhatsAppService } from "../../utils/services/whatsapp.service";
 
 @Module({
   imports: [
@@ -18,12 +20,14 @@ import { JwtModule } from "@nestjs/jwt";
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
+    EmailModule,
   ],
   controllers: [RecurringDonationsController],
   providers: [
     RecurringDonationsStripeService,
     RecurringDonationsLedgerService,
     StripeService,
+    WhatsAppService,
   ],
   exports: [RecurringDonationsStripeService, RecurringDonationsLedgerService],
 })

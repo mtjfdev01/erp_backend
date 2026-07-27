@@ -32,6 +32,13 @@ export enum UserRole {
   ASST_CRD_OFFICER = "asst_crd_officer",
   CRD_OFFICER = "crd_officer",
   INTERNEE = "internee",
+  // Fund raising department roles
+  FUNDRAISER = "fundraiser",
+  DONOR_RELATIONS_OFFICER = "donor_relations_officer",
+  CSR = "csr",
+  RECONCILE_AGENT = "reconcile_agent",
+  BACK_OFFICE_CLERK = "back_office_clerk",
+  CALL_CENTER_AGENT = "call_center_agent",
 }
 
 export enum Department {

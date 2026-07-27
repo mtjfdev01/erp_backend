@@ -44,6 +44,20 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "int", nullable: true, default: 1 })
   billing_interval_count: number | null;
 
+  /** Website / Stripe schedule: same_date | first_of_month | custom */
+  @Column({ type: "varchar", length: 32, nullable: true, default: null })
+  start_date_mode: string | null;
+
+  /** Intended first billing date (YYYY-MM-DD calendar date stored as date). */
+  @Column({ type: "date", nullable: true, default: null })
+  start_date: string | null;
+
+  @Column({ type: "boolean", nullable: true, default: null })
+  consent: boolean | null;
+
+  @Column({ type: "timestamp", nullable: true, default: null })
+  consent_at: Date | null;
+
   @Column({ type: "int", nullable: true, default: null })
   amount: number | null;
 
@@ -70,4 +84,11 @@ export class RecurringDonation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   stripe_billing_reason: string | null;
+
+  /** Non-Stripe (manual remind): last reminder period key (e.g. 2026-07 or week range). */
+  @Column({ type: "varchar", length: 40, nullable: true, default: null })
+  last_reminder_period_key: string | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  last_reminder_sent_at: Date | null;
 }

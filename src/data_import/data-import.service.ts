@@ -234,6 +234,7 @@ export class DataImportService {
     entityName: string,
     file: Express.Multer.File,
     user: any,
+    options?: { year?: number },
   ): Promise<ImportBatchResult> {
     if (!file?.buffer?.length) {
       throw new BadRequestException("CSV file is required");
@@ -272,6 +273,6 @@ export class DataImportService {
       await this.assertImportPermission(user.id, entityName);
     }
 
-    return handler.importRows(rows, user);
+    return handler.importRows(rows, user, options);
   }
 }

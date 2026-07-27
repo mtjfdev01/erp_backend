@@ -18,7 +18,7 @@ import { AlfalahService } from "./alfalah/alfalah.service";
 import { DonorModule } from "../dms/donor/donor.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
-import { RecurringDonationPlan } from "src/dms/recurring_donations/entities/recurring_donation.entity";
+import { RecurringDonationPlan } from "./recurring_donations/entities/recurring-donation-plan.entity";
 import { CampaignsModule } from "../dms/campaigns/campaigns.module";
 import { DashboardModule } from "../dashboard/dashboard.module";
 import { DonationsReceiptsService } from "./receipts.service";
@@ -29,17 +29,24 @@ import { DonationAuditModule } from "./audit/donation-audit.module";
 import { RecurringDonationsStripeModule } from "./recurring_donations/recurring-donations-stripe.module";
 import { DonationGeoBackfillService } from "./donation-geo-backfill.service";
 import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
+import { DonationPendingFollowUpService } from "./donation-pending-follow-up.service";
+import { Task } from "../tasks/entities/task.entity";
+import { TasksModule } from "../tasks/tasks.module";
+import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.module";
 
 @Module({
   imports: [
     DonationAuditModule,
     RecurringDonationsStripeModule,
+    TasksModule,
+    ManualRecurringModule,
     TypeOrmModule.forFeature([
       Donation,
       DonationInKind,
       User,
       RecurringDonationPlan,
       ProgressWorkflowTemplate,
+      Task,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -70,7 +77,8 @@ import { DonationGeoBackfillRunner } from "./donation-geo-backfill.runner";
     WhatsAppService,
     DonationGeoBackfillService,
     DonationGeoBackfillRunner,
+    DonationPendingFollowUpService,
   ],
-  exports: [DonationsService],
+  exports: [DonationsService, DonationPendingFollowUpService],
 })
 export class DonationsModule {}

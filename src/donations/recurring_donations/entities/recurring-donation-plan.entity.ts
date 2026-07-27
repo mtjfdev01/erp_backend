@@ -2,11 +2,13 @@ import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
 import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 
-//nullabe true to all column
-/** Legacy plan row linked from donations.recurrence_id (pre-Stripe subscription ledger). */
+/**
+ * Legacy recurring plan (Meezan / bank gateways).
+ * Stripe subscriptions use `recurring_donations` ledger instead.
+ * Linked from donations.recurrence_id when a legacy plan row is created.
+ */
 @Entity("recurring_donation_plans")
 export class RecurringDonationPlan extends BaseEntity {
-  // Foreign key relationship to Donor
   @ManyToOne(() => Donor, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "donor_id" })
   donor: Donor;
@@ -25,11 +27,10 @@ export class RecurringDonationPlan extends BaseEntity {
 
   @Column({ type: "int", nullable: true, default: null })
   paid_amount: number;
-  //default current date and time
+
   @Column({ type: "date", default: () => "CURRENT_DATE", nullable: true })
   date: Date;
 
-  //  currency
   @Column({ type: "varchar", nullable: true, default: null })
   currency: string;
 
@@ -54,11 +55,11 @@ export class RecurringDonationPlan extends BaseEntity {
   @Column({ type: "varchar", nullable: true, default: null })
   err_msg: string;
 
-  // Order ID returned by the bank
+  /** Order ID returned by the bank */
   @Column({ type: "varchar", nullable: true, default: null })
   orderId: string;
 
-  //   recurrence id in case of recurring donation and is returned by meezan bank
+  /** Recurrence id returned by Meezan bank */
   @Column({ type: "varchar", nullable: true, default: null })
   recurrence_id: string;
 
@@ -68,6 +69,3 @@ export class RecurringDonationPlan extends BaseEntity {
   @Column({ type: "boolean", nullable: true, default: false })
   email_sent: boolean;
 }
-
-/** @deprecated Use RecurringDonationPlan — table is recurring_donation_plans */
-export { RecurringDonationPlan as RecurringDonation };

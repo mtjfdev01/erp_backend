@@ -34,6 +34,8 @@ import { User, UserRole, Department } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
 import { applyCommonFilters } from "../utils/filters/common-filter.util";
 import { PermissionsService } from "../permissions/permissions.service";
+import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationType } from "../notifications/entities/notification.entity";
 import * as fs from "fs";
 import * as path from "path";
 import { TaskApproval } from "./entities/task-approval.entity";
@@ -73,7 +75,186 @@ export class TasksService {
     private readonly dueReminderRepo: Repository<TaskDueReminder>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  private normalizeUserIds(ids?: number[] | null): number[] {
+    return [
+      ...new Set(
+        (ids || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    ];
+  }
+
+  private getNewlyAssignedUserIds(
+    previousIds?: number[] | null,
+    nextIds?: number[] | null,
+  ): number[] {
+    const previous = new Set(this.normalizeUserIds(previousIds));
+    return this.normalizeUserIds(nextIds).filter((id) => !previous.has(id));
+  }
+
+  private async sendTaskAppNotification(params: {
+    task: Task;
+    userIds: number[];
+    title: string;
+    message: string;
+    event: string;
+    actor?: User | null;
+    excludeUserIds?: number[];
+    extraMetadata?: Record<string, any>;
+  }): Promise<void> {
+    const exclude = new Set(
+      this.normalizeUserIds(params.excludeUserIds).concat(
+        params.actor?.id ? [Number(params.actor.id)] : [],
+      ),
+    );
+    const recipients = this.normalizeUserIds(params.userIds).filter(
+      (id) => !exclude.has(id),
+    );
+    if (!recipients.length) return;
+
+    try {
+      await this.notificationsService.create(
+        {
+          title: params.title,
+          message: params.message,
+          type: NotificationType.TASK,
+          link: `/tasks/view/${params.task.id}`,
+          metadata: {
+            task_id: params.task.id,
+            title: params.task.title,
+            event: params.event,
+            actor_id: params.actor?.id ?? null,
+            ...(params.extraMetadata || {}),
+          },
+        },
+        recipients,
+        params.actor || undefined,
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to send task notification (${params.event}): ${err?.message}`,
+      );
+    }
+  }
+
+  private getTaskStakeholderIds(task: Task): number[] {
+    return this.normalizeUserIds([
+      ...(Array.isArray(task.assigned_user_ids) ? task.assigned_user_ids : []),
+      task.created_by_id != null ? Number(task.created_by_id) : 0,
+    ]);
+  }
+
+  private async sendAssignmentNotifications(
+    task: Task,
+    userIds: number[],
+    actor?: User | null,
+  ): Promise<void> {
+    const assignerName = this.userDisplayName(actor);
+    await this.sendTaskAppNotification({
+      task,
+      userIds,
+      actor,
+      event: "assignment",
+      title: "New Task Assigned",
+      message: assignerName
+        ? `${assignerName} assigned you to task: ${task.title}`
+        : `You have been assigned to task: ${task.title}`,
+      extraMetadata: { assigned_by_id: actor?.id ?? null },
+    });
+  }
+
+  private async sendApproverNotifications(
+    task: Task,
+    userIds: number[],
+    actor?: User | null,
+  ): Promise<void> {
+    const actorName = this.userDisplayName(actor);
+    await this.sendTaskAppNotification({
+      task,
+      userIds,
+      actor,
+      event: "approver",
+      title: "Task Approval Required",
+      message: actorName
+        ? `${actorName} added you as an approver on task: ${task.title}`
+        : `You were added as an approver on task: ${task.title}`,
+    });
+  }
+
+  private async sendStatusUpdateNotifications(
+    task: Task,
+    oldStatus: string,
+    newStatus: string,
+    actor?: User | null,
+  ): Promise<void> {
+    if (!oldStatus || !newStatus || oldStatus === newStatus) return;
+
+    const actorName = this.userDisplayName(actor) || "Someone";
+    const stakeholderIds = this.getTaskStakeholderIds(task);
+
+    await this.sendTaskAppNotification({
+      task,
+      userIds: stakeholderIds,
+      actor,
+      event: "status",
+      title: "Task Status Updated",
+      message: `${actorName} changed status of "${task.title}" from ${oldStatus} to ${newStatus}`,
+      extraMetadata: { from_status: oldStatus, to_status: newStatus },
+    });
+
+    // When submitted for approval, also notify configured approvers
+    if (newStatus === TaskStatus.PENDING_APPROVAL) {
+      await this.sendTaskAppNotification({
+        task,
+        userIds: task.approval_required_user_ids || [],
+        actor,
+        event: "status_pending_approval",
+        title: "Task Pending Your Approval",
+        message: `"${task.title}" is pending your approval`,
+        extraMetadata: { from_status: oldStatus, to_status: newStatus },
+        excludeUserIds: stakeholderIds, // already notified above if also stakeholder
+      });
+    }
+  }
+
+  private async sendCommentNotifications(
+    task: Task,
+    commentContent: string,
+    mentionedUserIds: number[],
+    author: User,
+  ): Promise<void> {
+    const authorName = this.userDisplayName(author) || "A colleague";
+    const preview = (commentContent || "").trim().slice(0, 120);
+
+    if (mentionedUserIds.length > 0) {
+      await this.sendTaskAppNotification({
+        task,
+        userIds: mentionedUserIds,
+        actor: author,
+        event: "mention",
+        title: "Mentioned in Task Comment",
+        message: `${authorName} mentioned you on "${task.title}"${preview ? `: ${preview}` : ""}`,
+      });
+    }
+
+    const mentionedSet = new Set(this.normalizeUserIds(mentionedUserIds));
+    const stakeholderIds = this.getTaskStakeholderIds(task).filter(
+      (id) => !mentionedSet.has(id),
+    );
+
+    await this.sendTaskAppNotification({
+      task,
+      userIds: stakeholderIds,
+      actor: author,
+      event: "comment",
+      title: "New Comment on Task",
+      message: `${authorName} commented on "${task.title}"${preview ? `: ${preview}` : ""}`,
+    });
+  }
 
   private async sendAssignmentEmailsToAssignees(
     task: Task,
@@ -390,7 +571,19 @@ export class TasksService {
     }));
   }
 
+  /** System/cron task creation — no permission checks; created_by is null. */
+  async createSystemTask(dto: CreateTaskDto): Promise<Task> {
+    return this.createInternal(dto, null);
+  }
+
   async create(dto: CreateTaskDto, currentUser: User): Promise<Task> {
+    return this.createInternal(dto, currentUser);
+  }
+
+  private async createInternal(
+    dto: CreateTaskDto,
+    currentUser: User | null,
+  ): Promise<Task> {
     try {
       const assignedUsersMeta = await this.getAssignedUsersMeta(
         dto.assigned_users,
@@ -451,6 +644,16 @@ export class TasksService {
       });
 
       await this.sendAssignmentEmailsToAssignees(saved);
+      await this.sendAssignmentNotifications(
+        saved,
+        saved.assigned_user_ids || [],
+        currentUser,
+      );
+      await this.sendApproverNotifications(
+        saved,
+        saved.approval_required_user_ids || [],
+        currentUser,
+      );
 
       return saved;
     } catch (e) {
@@ -578,6 +781,17 @@ export class TasksService {
         delete safeFilters.department;
       }
 
+      // Explicit project / program filter (exact match)
+      let projectNameFilter: string | undefined = undefined;
+      if (
+        safeFilters.project_name !== undefined &&
+        safeFilters.project_name !== null &&
+        String(safeFilters.project_name).trim() !== ""
+      ) {
+        projectNameFilter = String(safeFilters.project_name).trim();
+        delete safeFilters.project_name;
+      }
+
       let viewTypeFilter: string | undefined = undefined;
       if (safeFilters.view_type) {
         viewTypeFilter = safeFilters.view_type;
@@ -685,6 +899,12 @@ export class TasksService {
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
 
+      if (projectNameFilter) {
+        qb.andWhere("task.project_name = :projectNameFilter", {
+          projectNameFilter,
+        });
+      }
+
       if (viewTypeFilter === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -729,35 +949,42 @@ export class TasksService {
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
-        qb.andWhere(
-          new Brackets((deptQb) => {
-            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
-            if (currentUser) {
-              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
-              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
-            }
-            
-            // Then apply the department filter
-            if (strictDepartment === true || strictDepartment === "true") {
-              deptQb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            } else {
+        const isStrict =
+          strictDepartment === true || strictDepartment === "true";
+
+        // Dropdown / sidebar department filter: only that department
+        if (isStrict) {
+          qb.andWhere("LOWER(task.department) = :filterDept", {
+            filterDept: lowerDept,
+          });
+        } else {
+          qb.andWhere(
+            new Brackets((deptQb) => {
+              if (currentUser) {
+                deptQb.where(
+                  "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere(
+                  "task.assigned_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere("task.created_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+                deptQb.orWhere("task.reported_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+              }
               deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
                 deptMeta: JSON.stringify([{ department: lowerDept }]),
               });
-              deptQb.orWhere("task.department = :department", {
+              deptQb.orWhere("LOWER(task.department) = :department", {
                 department: lowerDept,
               });
-            }
-          }),
-        );
+            }),
+          );
+        }
       }
 
       const validSort = [
@@ -856,6 +1083,12 @@ export class TasksService {
       // Apply common filters
       applyCommonFilters(countQb, countSafeFilters, this.searchableColumns, "task");
 
+      if (projectNameFilter) {
+        countQb.andWhere("task.project_name = :projectNameFilter", {
+          projectNameFilter,
+        });
+      }
+
       if (viewTypeFilter === "created" && currentUser) {
         countQb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -900,35 +1133,41 @@ export class TasksService {
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
-        countQb.andWhere(
-          new Brackets((deptQb) => {
-            // Always allow tasks user is directly involved in (assigned, created, reported, approval required)
-            if (currentUser) {
-              deptQb.where("task.approval_required_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.assigned_user_ids @> ARRAY[:userId]::int[]", {
-                userId: currentUser.id,
-              });
-              deptQb.orWhere("task.created_by_id = :userId", { userId: currentUser.id });
-              deptQb.orWhere("task.reported_by_id = :userId", { userId: currentUser.id });
-            }
-            
-            // Then apply the department filter
-            if (strictDepartment === true || strictDepartment === "true") {
-              deptQb.orWhere("task.department = :filterDept", {
-                filterDept: lowerDept,
-              });
-            } else {
+        const isStrict =
+          strictDepartment === true || strictDepartment === "true";
+
+        if (isStrict) {
+          countQb.andWhere("LOWER(task.department) = :filterDept", {
+            filterDept: lowerDept,
+          });
+        } else {
+          countQb.andWhere(
+            new Brackets((deptQb) => {
+              if (currentUser) {
+                deptQb.where(
+                  "task.approval_required_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere(
+                  "task.assigned_user_ids @> ARRAY[:userId]::int[]",
+                  { userId: currentUser.id },
+                );
+                deptQb.orWhere("task.created_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+                deptQb.orWhere("task.reported_by_id = :userId", {
+                  userId: currentUser.id,
+                });
+              }
               deptQb.orWhere("task.assigned_users_meta @> :deptMeta::jsonb", {
                 deptMeta: JSON.stringify([{ department: lowerDept }]),
               });
-              deptQb.orWhere("task.department = :department", {
+              deptQb.orWhere("LOWER(task.department) = :department", {
                 department: lowerDept,
               });
-            }
-          }),
-        );
+            }),
+          );
+        }
       }
 
       // Calculate assigned_to_me count
@@ -1932,6 +2171,13 @@ export class TasksService {
       const nextStatus = dto.status ?? oldStatus;
 
       let assignedUsersMeta = task.assigned_users_meta;
+      const previousAssignedUserIds = Array.isArray(task.assigned_user_ids)
+        ? [...task.assigned_user_ids]
+        : [];
+      const previousApproverIds = Array.isArray(task.approval_required_user_ids)
+        ? [...task.approval_required_user_ids]
+        : [];
+      const previousStatus = task.status;
       if (Array.isArray(dto.assigned_users)) {
         assignedUsersMeta = await this.getAssignedUsersMeta(dto.assigned_users);
       }
@@ -2138,7 +2384,7 @@ export class TasksService {
 
       if (Array.isArray(dto.assigned_users)) {
         const oldIds = new Set(
-          (task.assigned_user_ids || []).map((v) => Number(v)),
+          previousAssignedUserIds.map((v) => Number(v)),
         );
         const newIds = new Set(
           (saved.assigned_user_ids || []).map((v) => Number(v)),
@@ -2148,6 +2394,35 @@ export class TasksService {
             await this.deleteDueRemindersForTaskUser(saved.id, uid);
           }
         }
+
+        await this.sendAssignmentNotifications(
+          saved,
+          this.getNewlyAssignedUserIds(
+            previousAssignedUserIds,
+            saved.assigned_user_ids,
+          ),
+          currentUser,
+        );
+      }
+
+      if (Array.isArray(dto.approval_required_user_ids)) {
+        await this.sendApproverNotifications(
+          saved,
+          this.getNewlyAssignedUserIds(
+            previousApproverIds,
+            saved.approval_required_user_ids,
+          ),
+          currentUser,
+        );
+      }
+
+      if (dto.status !== undefined && previousStatus !== saved.status) {
+        await this.sendStatusUpdateNotifications(
+          saved,
+          previousStatus,
+          saved.status,
+          currentUser,
+        );
       }
 
       return this.findOne(saved.id, currentUser);
@@ -2320,6 +2595,11 @@ export class TasksService {
       });
 
       await this.sendAssignmentEmailsToAssignees(saved);
+      await this.sendAssignmentNotifications(
+        saved,
+        this.getNewlyAssignedUserIds(oldAssignedUserIds, saved.assigned_user_ids),
+        currentUser,
+      );
 
       return saved;
     } catch (e) {
@@ -2440,6 +2720,14 @@ export class TasksService {
       await this.logActivity(saved, currentUser, "reassigned", details);
 
       await this.sendAssignmentEmailsToAssignees(saved);
+      await this.sendAssignmentNotifications(
+        saved,
+        this.getNewlyAssignedUserIds(
+          oldAssignedUserIds,
+          saved.assigned_user_ids,
+        ),
+        currentUser,
+      );
 
       if (
         Array.isArray(saved.assigned_user_ids) &&
@@ -2558,6 +2846,7 @@ export class TasksService {
         newStatus = TaskStatus.REJECTED;
       }
 
+      const oldStatus = task.status;
       task.status = newStatus;
       const normalizedMetaForSave = updatedMeta.length > 0 ? updatedMeta : null;
       if (newStatus === TaskStatus.APPROVED) {
@@ -2616,6 +2905,12 @@ export class TasksService {
         dto.approve ? "approved" : "rejected",
         { note: dto.note },
       );
+      await this.sendStatusUpdateNotifications(
+        saved,
+        oldStatus,
+        saved.status,
+        currentUser,
+      );
       return saved;
     } catch (e) {
       throw e;
@@ -2625,6 +2920,7 @@ export class TasksService {
   async complete(id: number, currentUser: User): Promise<Task> {
     try {
       const task = await this.findOne(id, currentUser);
+      const oldStatus = task.status;
       task.status = TaskStatus.COMPLETED;
       if (task.workflow_type === TaskWorkflowType.STANDARD) {
         task.completed_date = task.completed_date ?? new Date();
@@ -2632,6 +2928,12 @@ export class TasksService {
       const saved = await this.taskRepo.save(task);
       await this.deleteDueRemindersForTask(saved.id);
       await this.logActivity(saved, currentUser, "completed", {});
+      await this.sendStatusUpdateNotifications(
+        saved,
+        oldStatus,
+        saved.status,
+        currentUser,
+      );
       return saved;
     } catch (e) {
       throw e;
@@ -2771,6 +3073,13 @@ export class TasksService {
           currentUser,
         );
       }
+
+      await this.sendCommentNotifications(
+        task,
+        dto.content,
+        mentionedUserIds,
+        currentUser,
+      );
 
       return withAuthor || saved;
     } catch (e) {
@@ -2952,7 +3261,20 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser);
-    const value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+    let value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+
+    // Donation pending follow-up: two mutually exclusive MOV items — one check = done.
+    if (
+      typeof task.project_id === "string" &&
+      task.project_id.startsWith("donation-pending:") &&
+      Array.isArray(task.mov_items) &&
+      task.mov_items.length === 2 &&
+      value >= 50 &&
+      value < 100
+    ) {
+      value = 100;
+    }
+
     const oldProgress = task.progress;
     const oldStatus = task.status;
 

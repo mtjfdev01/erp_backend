@@ -8,11 +8,13 @@ import {
   IsEnum,
   IsBoolean,
   IsInt,
+  IsArray,
   ValidateNested,
 } from "class-validator";
 import { Type } from "class-transformer";
 import { DonationMethod } from "src/utils/enums";
 import { DonationRecurringDto } from "./donation-recurring.dto";
+import { CampaignPledgeLineDto } from "./campaign-pledge-line.dto";
 
 export class CreateDonationDto {
   @IsOptional()
@@ -179,9 +181,17 @@ export class CreateDonationDto {
   donation_frequency?: string;
 
   /**
+   * Top-level consent for recurring (website may send this and/or recurring.consent).
+   * Either this or recurring.consent must be true for weekly/monthly/daily recurring.
+   */
+  @IsOptional()
+  @IsBoolean()
+  recurring_consent?: boolean;
+
+  /**
    * Stripe recurring billing (subscription). Used when donation_method is stripe or stripe_embed.
-   * Example: { "interval": "month", "interval_count": 1 }
-   * Legacy: donation_frequency "monthly" maps to month / 1 when recurring is omitted.
+   * Example: { "interval": "month", "interval_count": 1, "start_date_mode": "same_date", "consent": true }
+   * Legacy: donation_frequency "monthly" | "weekly" | "daily" maps to interval when recurring is omitted.
    */
   @IsOptional()
   @ValidateNested()
@@ -210,4 +220,29 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   on_behalf_names?: string;
+
+  /**
+   * Non-Stripe recurring: enroll donor on manual_recurring_pledges at create (including pending).
+   * Stripe auto-subscriptions use `recurring` instead — do not set this for Stripe.
+   */
+  @IsOptional()
+  @IsBoolean()
+  enroll_manual_recurring?: boolean;
+
+  /** Campaign item quantities for manual recurring enrollment. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CampaignPledgeLineDto)
+  campaign_pledge_lines?: CampaignPledgeLineDto[];
+
+  /** recurring_monthly | prepaid_months */
+  @IsOptional()
+  @IsString()
+  pledge_mode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  prepaid_months?: number;
 }

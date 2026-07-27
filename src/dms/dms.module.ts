@@ -25,6 +25,8 @@ import { OfflineSyncModule } from './offline-sync/offline-sync.module';
 import { ReceiptTemplatesModule } from './receipt_templates/receipt_templates.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { DonorRelationshipModule } from './donor_relationship/donor-relationship.module';
+import { CommunicationModule } from './communication/communication.module';
+import { ManualRecurringModule } from './manual_recurring/manual-recurring.module';
 
 @Module({
   controllers: [DmsController],
@@ -57,6 +59,8 @@ import { DonorRelationshipModule } from './donor_relationship/donor-relationship
     ReceiptTemplatesModule,
     ReconciliationModule,
     DonorRelationshipModule,
+    CommunicationModule,
+    ManualRecurringModule,
   ],
 })
 export class DmsModule {}
