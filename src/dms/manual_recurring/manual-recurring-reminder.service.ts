@@ -863,13 +863,21 @@ export class ManualRecurringReminderService {
             failed += 1;
             continue;
           }
+          // Already thanked on payment — do not send again
+          if (donation.email_sent === true) {
+            sent += 1;
+            continue;
+          }
           const ok = await this.emailService.sendDonationSuccessEmail(
             donation,
             donor,
             donor.email,
           );
-          if (ok) sent += 1;
-          else {
+          if (ok) {
+            sent += 1;
+            await this.donationRepo.update(donation.id, { email_sent: true });
+            donation.email_sent = true;
+          } else {
             failed += 1;
             errors.push("Thanks email failed");
           }
@@ -879,13 +887,20 @@ export class ManualRecurringReminderService {
             failed += 1;
             continue;
           }
+          if (donation.message_sent === true) {
+            sent += 1;
+            continue;
+          }
           const ok = await this.whatsAppService.sendPaymentConfirmation({
             phoneNumber: donor.phone,
             userName: donorName,
             amount: String(amount),
           });
-          if (ok) sent += 1;
-          else {
+          if (ok) {
+            sent += 1;
+            await this.donationRepo.update(donation.id, { message_sent: true });
+            donation.message_sent = true;
+          } else {
             failed += 1;
             errors.push("Thanks WhatsApp failed");
           }
@@ -1341,29 +1356,52 @@ export class ManualRecurringReminderService {
 
           let sentOk = false;
           if (paidDonation) {
-            // Donation-view thanks actions (no amount threshold)
-            if (donor?.email) {
-              sentOk =
-                (await this.emailService.sendDonationSuccessEmail(
-                  paidDonation,
-                  donor,
-                  donor.email,
-                )) || sentOk;
-            }
-            if (donor?.phone) {
-              const wa = await this.whatsAppService.sendPaymentConfirmation({
-                phoneNumber: donor.phone,
-                userName: donorName,
-                amount: String(amount),
-              });
-              sentOk = wa || sentOk;
-            }
-            if (sentOk) {
+            // Skip channels already thanked on payment (avoid double email/WhatsApp)
+            const alreadyEmailed = paidDonation.email_sent === true;
+            const alreadyMessaged = paidDonation.message_sent === true;
+            if (alreadyEmailed && alreadyMessaged) {
               await this.stripeRecurringRepo.update(row.id, {
                 last_reminder_period_key: reminderDedupeKey,
                 last_reminder_sent_at: new Date(),
               });
-              thanks_sent += 1;
+              skipped += 1;
+              continue;
+            }
+
+            let emailJustSent = false;
+            let messageJustSent = false;
+            if (donor?.email && !alreadyEmailed) {
+              emailJustSent =
+                !!(await this.emailService.sendDonationSuccessEmail(
+                  paidDonation,
+                  donor,
+                  donor.email,
+                ));
+              sentOk = emailJustSent || sentOk;
+            }
+            if (donor?.phone && !alreadyMessaged) {
+              messageJustSent = !!(await this.whatsAppService.sendPaymentConfirmation({
+                phoneNumber: donor.phone,
+                userName: donorName,
+                amount: String(amount),
+              }));
+              sentOk = messageJustSent || sentOk;
+            }
+
+            if (emailJustSent || messageJustSent) {
+              await this.donationRepo.update(paidDonation.id, {
+                ...(emailJustSent ? { email_sent: true } : {}),
+                ...(messageJustSent ? { message_sent: true } : {}),
+              });
+            }
+
+            if (sentOk || (alreadyEmailed && !donor?.phone) || (alreadyMessaged && !donor?.email)) {
+              await this.stripeRecurringRepo.update(row.id, {
+                last_reminder_period_key: reminderDedupeKey,
+                last_reminder_sent_at: new Date(),
+              });
+              if (sentOk) thanks_sent += 1;
+              else skipped += 1;
             } else {
               failed += 1;
             }

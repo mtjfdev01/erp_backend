@@ -75,28 +75,29 @@ export class RecurringDonationsLedgerService {
       );
     }
 
+    // Payment / installment collection filters (subscription list):
+    // - pending: no completed installment yet (same meaning as dashboard pending)
+    // - pending_initial: initial donation still pending/failed
+    // - completed: at least one completed installment
     const installmentStatus = String(filters.installment_status || "")
       .trim()
       .toLowerCase();
+    const hasCompletedInstallmentSql = `EXISTS (
+      SELECT 1 FROM recurring_donations inst
+      WHERE inst.parent_id = rd.id
+        AND inst.record_type = 'installment'
+        AND inst.is_archived = false
+        AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
+    )`;
     if (installmentStatus === "pending") {
-      qb.andWhere(
-        `NOT EXISTS (
-          SELECT 1 FROM recurring_donations inst
-          WHERE inst.parent_id = rd.id
-            AND inst.record_type = 'installment'
-            AND inst.is_archived = false
-        )`,
-      );
+      qb.andWhere(`NOT ${hasCompletedInstallmentSql}`);
+    } else if (installmentStatus === "pending_initial") {
+      qb.andWhere("rd.initial_donation_id IS NOT NULL");
+      qb.andWhere("LOWER(COALESCE(d.status, '')) IN (:...pendingDonationStatuses)", {
+        pendingDonationStatuses: ["pending", "failed"],
+      });
     } else if (installmentStatus === "completed") {
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM recurring_donations inst
-          WHERE inst.parent_id = rd.id
-            AND inst.record_type = 'installment'
-            AND inst.is_archived = false
-            AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
-        )`,
-      );
+      qb.andWhere(hasCompletedInstallmentSql);
     }
 
     const total = await qb.clone().getCount();
@@ -124,12 +125,17 @@ export class RecurringDonationsLedgerService {
       "rd.created_at AS created_at",
       "rd.updated_at AS updated_at",
       'd."orderId" AS initial_order_id',
+      "d.status AS initial_donation_status",
       "donor.name AS donor_name",
       "donor.email AS donor_email",
     ])
       .addSelect(
         `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false)`,
         "installment_count",
+      )
+      .addSelect(
+        `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success'))`,
+        "completed_installment_count",
       )
       .orderBy(`rd.${sortField}`, sortOrder);
 

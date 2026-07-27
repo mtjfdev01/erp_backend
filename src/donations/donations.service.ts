@@ -596,6 +596,10 @@ export class DonationsService {
     if (source.includes("recurring")) return true;
     const type = String(donation.donation_type || "").toLowerCase();
     if (type.includes("recurring")) return true;
+    const note = String((donation as any).note || "").toLowerCase();
+    if (note.includes("subscription #") || note.includes("installment")) {
+      return true;
+    }
 
     // Linked to recurring_donations ledger (subscription or installment)
     try {
@@ -635,12 +639,12 @@ export class DonationsService {
     amount?: number | null;
     donation_type?: string | null;
     donation_source?: string | null;
+    note?: string | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
-    if (donation?.message_sent != false) return false;
-    if (await this.isRecurringRelatedDonation(donation)) return true;
-    return Number(donation?.amount) >= 5000;
+    if (donation?.message_sent === true) return false;
+    return this.isThanksEligibleDonation(donation);
   }
 
   /** Auto email: unsent + (recurring OR amount >= 5000). */
@@ -651,17 +655,145 @@ export class DonationsService {
     amount?: number | null;
     donation_type?: string | null;
     donation_source?: string | null;
+    note?: string | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
-    if (donation?.email_sent != false) return false;
+    if (donation?.email_sent === true) return false;
+    return this.isThanksEligibleDonation(donation);
+  }
+
+  /** Whether this donation qualifies for auto thanks (ignores sent flags). */
+  private async isThanksEligibleDonation(donation: {
+    id?: number | null;
+    donor_id?: number | null;
+    amount?: number | null;
+    donation_type?: string | null;
+    donation_source?: string | null;
+    note?: string | null;
+    manual_recurring_intent?: Record<string, unknown> | null;
+    donor?: { id?: number | null; recurring?: boolean | null } | null;
+  } | null | undefined): Promise<boolean> {
+    if (!donation) return false;
     if (await this.isRecurringRelatedDonation(donation)) return true;
     return Number(donation?.amount) >= 5000;
   }
 
+  /** Claim a thanks channel flag so concurrent paths cannot double-send. */
+  private async claimDonationThanksFlag(
+    donationId: number,
+    flag: "message_sent" | "email_sent",
+  ): Promise<boolean> {
+    const result = await this.donationRepository
+      .createQueryBuilder()
+      .update(Donation)
+      .set({ [flag]: true })
+      .where("id = :id", { id: donationId })
+      .andWhere(`(${flag} IS NULL OR ${flag} = false)`)
+      .execute();
+    return (result.affected ?? 0) > 0;
+  }
+
+  private async releaseDonationThanksFlag(
+    donationId: number,
+    flag: "message_sent" | "email_sent",
+  ): Promise<void> {
+    await this.donationRepository.update(donationId, { [flag]: false });
+  }
+
+  /** Mark thanks channels as sent (manual donation-view actions). */
+  async markDonationThanksSent(
+    donationId: number,
+    opts: { email?: boolean; whatsapp?: boolean },
+  ): Promise<void> {
+    const patch: Partial<Donation> = {};
+    if (opts.email) patch.email_sent = true;
+    if (opts.whatsapp) patch.message_sent = true;
+    if (Object.keys(patch).length) {
+      await this.donationRepository.update(donationId, patch);
+    }
+  }
+
+  /**
+   * Single thanks path for a completed donation (email + WhatsApp).
+   * Idempotent via message_sent / email_sent claim — never double-sends a channel.
+   */
+  private async sendDonationThanksOnce(donationId: number): Promise<void> {
+    if (!donationId) return;
+
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+      relations: ["donor"],
+    });
+    if (!donation?.donor) return;
+
+    const status = String(donation.status || "")
+      .trim()
+      .toLowerCase();
+    if (!["completed", "paid", "success"].includes(status)) return;
+
+    if (!(await this.isThanksEligibleDonation(donation))) return;
+
+    const donor = donation.donor;
+    const donorName =
+      donor.name ||
+      donor.first_name ||
+      donor.company_name ||
+      donor.email ||
+      "Valued Donor";
+
+    if (donor.phone && donation.message_sent !== true) {
+      const claimed = await this.claimDonationThanksFlag(
+        donationId,
+        "message_sent",
+      );
+      if (claimed) {
+        try {
+          const ok = await this.whatsAppService.sendPaymentConfirmation({
+            phoneNumber: donor.phone,
+            userName: donorName,
+            amount: donation.amount,
+          });
+          if (!ok) {
+            await this.releaseDonationThanksFlag(donationId, "message_sent");
+          }
+        } catch (err: any) {
+          await this.releaseDonationThanksFlag(donationId, "message_sent");
+          this.logger.warn(
+            `Thanks WhatsApp failed for donation ${donationId}: ${err?.message || err}`,
+          );
+        }
+      }
+    }
+
+    if (donor.email && donation.email_sent !== true) {
+      const claimed = await this.claimDonationThanksFlag(
+        donationId,
+        "email_sent",
+      );
+      if (claimed) {
+        try {
+          const ok = await this.emailService.sendDonationSuccessEmail(
+            donation,
+            donor,
+            donor.email,
+          );
+          if (!ok) {
+            await this.releaseDonationThanksFlag(donationId, "email_sent");
+          }
+        } catch (err: any) {
+          await this.releaseDonationThanksFlag(donationId, "email_sent");
+          this.logger.warn(
+            `Thanks email failed for donation ${donationId}: ${err?.message || err}`,
+          );
+        }
+      }
+    }
+  }
+
   /**
    * Side-effects when a donation becomes paid/completed:
-   * prepaid pledge activation + non-Stripe recurring installment.
+   * prepaid pledge activation + non-Stripe recurring installment + thanks (once).
    */
   private async afterSuccessfulDonationPayment(
     donationId: number,
@@ -674,6 +806,14 @@ export class DonationsService {
     } catch (err: any) {
       this.logger.error(
         `recordNonStripeInstallmentFromDonation failed for ${donationId}: ${err?.message || err}`,
+      );
+    }
+
+    try {
+      await this.sendDonationThanksOnce(donationId);
+    } catch (err: any) {
+      this.logger.error(
+        `sendDonationThanksOnce failed for ${donationId}: ${err?.message || err}`,
       );
     }
   }
@@ -3727,52 +3867,51 @@ export class DonationsService {
         // }});
       }
 
-      let message_sent: boolean = false;
-      let email_sent: boolean = false;
+      let message_sent: boolean = donation.message_sent === true;
+      let email_sent: boolean = donation.email_sent === true;
       const send_message = await this.canAutoSendDonationMessage(donation);
       const send_email = await this.canAutoSendDonationEmail(donation);
+      // Success thanks are sent once in afterSuccessfulDonationPayment (no double-send).
       if (err_code === "000" || err_code === "00") {
-        if (send_message) {
-          message_sent = true;
-          await this.whatsAppService.sendPaymentConfirmation({
-            phoneNumber: donation.donor.phone,
-            userName: donation.donor.name,
-            amount: donation.amount,
-          });
-          if (send_email) {
-            email_sent = true;
-            await this.emailService.sendDonationSuccessEmail(
-              donation,
-              donation.donor,
-              donation.donor.email,
+        // no-op for thanks here
+      } else {
+        if (send_message && donation.donor?.phone) {
+          try {
+            await this.whatsAppService.sendAbandonMessage({
+              phoneNumber: donation.donor.phone,
+              userName: donation.donor.name,
+              amount: donation.amount,
+              donationId: basket_id,
+            });
+            message_sent = true;
+          } catch (err: any) {
+            this.logger.warn(
+              `PayFast abandon WhatsApp failed for ${basket_id}: ${err?.message || err}`,
             );
           }
         }
-      } else {
-        if (send_message) {
-          message_sent = true;
-          // send abandon message
-          // need to finalize the  flow for this
-          await this.whatsAppService.sendAbandonMessage({
-            phoneNumber: donation.donor.phone,
-            userName: donation.donor.name,
-            amount: donation.amount,
-            donationId: basket_id,
-          });
-          if (send_email) {
-            email_sent = true;
+        if (send_email && donation.donor?.email) {
+          try {
             await this.emailService.sendDonationFailureEmail(donation);
+            email_sent = true;
+          } catch (err: any) {
+            this.logger.warn(
+              `PayFast failure email failed for ${basket_id}: ${err?.message || err}`,
+            );
           }
         }
       }
-      // Update donation
-      await this.donationRepository.update(parseInt(basket_id), {
+      // Update donation (do not set thanks flags on success — sendDonationThanksOnce owns those)
+      const updatePayload: Record<string, any> = {
         orderId: transaction_id,
         status: newStatus,
         err_msg,
-        message_sent,
-        email_sent,
-      });
+      };
+      if (newStatus !== "completed") {
+        updatePayload.message_sent = message_sent;
+        updatePayload.email_sent = email_sent;
+      }
+      await this.donationRepository.update(parseInt(basket_id), updatePayload);
 
       let batching: any = null;
       if (newStatus === "completed") {
@@ -4101,39 +4240,39 @@ export class DonationsService {
         };
       }
       let status: any;
-      let message_sent = false;
+      let message_sent = donation.message_sent === true;
       const send_message = await this.canAutoSendDonationMessage(donation);
-      let email_sent = false;
+      let email_sent = donation.email_sent === true;
       const send_email = await this.canAutoSendDonationEmail(donation);
-      if (invoice_status == "PAID" && send_message && send_email) {
+      // Success thanks are sent once in afterSuccessfulDonationPayment (no double-send).
+      if (invoice_status == "PAID") {
         status = "completed";
-        // send success message
-        await this.whatsAppService.sendPaymentConfirmation({
-          phoneNumber: donation.donor.phone,
-          userName: donation.donor.name,
-          amount: donation.amount,
-        });
-        message_sent = true;
-        email_sent = true;
-        await this.emailService.sendDonationSuccessEmail(
-          donation,
-          donation.donor,
-          donation.donor.email,
-        );
       } else {
         status = "failed";
-        if (send_message) {
-          await this.whatsAppService.sendAbandonMessage({
-            phoneNumber: donation.donor.phone,
-            userName: donation.donor.name,
-            amount: donation.amount,
-            donationId: invoice_number,
-          });
+        if (send_message && donation.donor?.phone) {
+          try {
+            await this.whatsAppService.sendAbandonMessage({
+              phoneNumber: donation.donor.phone,
+              userName: donation.donor.name,
+              amount: donation.amount,
+              donationId: invoice_number,
+            });
+            message_sent = true;
+          } catch (err: any) {
+            this.logger.warn(
+              `Blinq abandon WhatsApp failed for ${invoice_number}: ${err?.message || err}`,
+            );
+          }
         }
-        message_sent = true;
-        if (send_email) {
-          email_sent = true;
-          await this.emailService.sendDonationFailureEmail(donation);
+        if (send_email && donation.donor?.email) {
+          try {
+            await this.emailService.sendDonationFailureEmail(donation);
+            email_sent = true;
+          } catch (err: any) {
+            this.logger.warn(
+              `Blinq failure email failed for ${invoice_number}: ${err?.message || err}`,
+            );
+          }
         }
       }
 
@@ -4144,13 +4283,16 @@ export class DonationsService {
       });
 
       // Update donation status
-      await this.donationRepository.update(parseInt(invoice_number), {
+      const blinqUpdate: Record<string, any> = {
         orderId: payment_code,
         status: status,
         err_msg: `Paid via ${paid_via} - Bank: ${paid_bank}`,
-        message_sent,
-        email_sent,
-      });
+      };
+      if (status !== "completed") {
+        blinqUpdate.message_sent = message_sent;
+        blinqUpdate.email_sent = email_sent;
+      }
+      await this.donationRepository.update(parseInt(invoice_number), blinqUpdate);
 
       if (status === "completed") {
         await this.afterSuccessfulDonationPayment(
@@ -4423,52 +4565,53 @@ export class DonationsService {
       ipn?.transaction_id ||
       donation.orderId;
 
-    let message_sent = donation.message_sent;
-    let email_sent = donation.email_sent;
+    let message_sent = donation.message_sent === true;
+    let email_sent = donation.email_sent === true;
     const send_message = await this.canAutoSendDonationMessage(donation);
     const send_email = await this.canAutoSendDonationEmail(donation);
 
-    if (newStatus === "completed" && donation.donor) {
-      if (send_message) {
-        message_sent = true;
-        await this.whatsAppService.sendPaymentConfirmation({
-          phoneNumber: donation.donor.phone,
-          userName: donation.donor.name,
-          amount: donation.amount,
-        });
+    // Success thanks are sent once in afterSuccessfulDonationPayment (no double-send).
+    if (newStatus === "failed" && donation.donor) {
+      if (send_message && donation.donor.phone) {
+        try {
+          await this.whatsAppService.sendAbandonMessage({
+            phoneNumber: donation.donor.phone,
+            userName: donation.donor.name,
+            amount: donation.amount,
+            donationId: orderRef,
+          });
+          message_sent = true;
+        } catch (err: any) {
+          this.logger.warn(
+            `Alfalah abandon WhatsApp failed for ${donationId}: ${err?.message || err}`,
+          );
+        }
       }
-      if (send_email) {
-        email_sent = true;
-        await this.emailService.sendDonationSuccessEmail(
-          donation,
-          donation.donor,
-          donation.donor.email,
-        );
-      }
-    } else if (newStatus === "failed" && donation.donor && send_message) {
-      message_sent = true;
-      await this.whatsAppService.sendAbandonMessage({
-        phoneNumber: donation.donor.phone,
-        userName: donation.donor.name,
-        amount: donation.amount,
-        donationId: orderRef,
-      });
-      if (send_email) {
-        email_sent = true;
-        await this.emailService.sendDonationFailureEmail(donation);
+      if (send_email && donation.donor.email) {
+        try {
+          await this.emailService.sendDonationFailureEmail(donation);
+          email_sent = true;
+        } catch (err: any) {
+          this.logger.warn(
+            `Alfalah failure email failed for ${donationId}: ${err?.message || err}`,
+          );
+        }
       }
     }
 
-    await this.donationRepository.update(donationId, {
+    const alfalahUpdate: Record<string, any> = {
       status: newStatus,
       orderId: String(transactionId || orderRef),
       err_msg: paid
         ? ipn?.Description || null
         : ipn?.Description || ipn?.description || "Payment not completed",
-      message_sent,
-      email_sent,
       ...(newStatus === "completed" ? { paid_amount: donation.amount } : {}),
-    });
+    };
+    if (newStatus !== "completed") {
+      alfalahUpdate.message_sent = message_sent;
+      alfalahUpdate.email_sent = email_sent;
+    }
+    await this.donationRepository.update(donationId, alfalahUpdate);
 
     let batching: any = null;
     if (newStatus === "completed") {
