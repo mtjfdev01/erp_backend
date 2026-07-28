@@ -128,6 +128,23 @@ export class PublicDonationsController {
     }
   }
 
+  // Public JazzCash IPN endpoint - NO GUARDS
+  @Post("jazzcash/ipn")
+  async handleJazzCashIpn(@Body() payload: any, @Res() res: Response) {
+    try {
+      await this.donationsService.handleJazzCashIpn(payload);
+      const ack = this.donationsService.buildJazzCashIpnAcknowledgement();
+      return res.status(HttpStatus.OK).json(ack);
+    } catch (error) {
+      console.error("JazzCash IPN error:", error.message);
+      return res.status(HttpStatus.OK).json({
+        pp_ResponseCode: "999",
+        pp_ResponseMessage: error.message || "IPN processing error",
+        pp_SecureHash: "",
+      });
+    }
+  }
+
   // Public PayFast IPN endpoint - NO GUARDS
   @Post("payfast/ipn")
   async handlePayfastIpn(@Body() payload: any, @Res() res: Response) {

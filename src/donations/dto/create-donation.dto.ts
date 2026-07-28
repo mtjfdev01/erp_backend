@@ -66,9 +66,14 @@ export class CreateDonationDto {
   @IsOptional()
   @IsEnum(DonationMethod, {
     message:
-      "donation_method must be one of: meezan, blinq, payfast, alfalah, stripe, stripe_embed",
+      "donation_method must be one of: meezan, blinq, payfast, alfalah, jazzcash, stripe, stripe_embed",
   })
   donation_method?: DonationMethod;
+
+  /** Last 6 digits of CNIC — required when donation_method is jazzcash */
+  @IsOptional()
+  @IsString()
+  jazzcash_cnic?: string;
 
   @IsOptional()
   @IsString()

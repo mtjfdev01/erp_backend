@@ -23,6 +23,8 @@ import {
   StripeService,
 } from "./stripe.service";
 import { AlfalahService } from "./alfalah/alfalah.service";
+import { JazzCashService } from "./jazzcash/jazzcash.service";
+import { verifyJazzCashSecureHash } from "./jazzcash/jazzcash-hash.util";
 import { DonorService } from "../dms/donor/donor.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
@@ -96,6 +98,7 @@ export class DonationsService {
     "blinq",
     "payfast",
     "alfalah",
+    "jazzcash",
     "stripe",
     "stripe_embed",
   ] as const;
@@ -111,6 +114,7 @@ export class DonationsService {
     private payfastService: PayfastService,
     private stripeService: StripeService,
     private alfalahService: AlfalahService,
+    private jazzcashService: JazzCashService,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonationPlan)
@@ -2171,6 +2175,36 @@ export class DonationsService {
               "Blinq status is updated via callback. Showing current DB status.",
           },
         };
+      } else if (method === "jazzcash") {
+        if (!donation.orderId) {
+          return {
+            donationId,
+            provider,
+            providerStatus: "no_order_id",
+            donationStatus: donation.status,
+            dbUpdated: false,
+            details: {
+              message:
+                "No JazzCash txn ref on this donation. Cannot query provider.",
+            },
+          };
+        }
+        const inquiry = await this.jazzcashService.inquireTransactionStatus(
+          donation.orderId,
+        );
+        providerStatus =
+          inquiry.pp_PaymentResponseCode || inquiry.pp_Status || "";
+        donationStatus = inquiry.paymentCompleted
+          ? "completed"
+          : inquiry.pp_ResponseCode === "000"
+            ? donation.status
+            : "failed";
+        details = {
+          pp_ResponseCode: inquiry.pp_ResponseCode,
+          pp_PaymentResponseCode: inquiry.pp_PaymentResponseCode,
+          pp_Status: inquiry.pp_Status,
+          hashVerified: inquiry.hashVerified,
+        };
       } else if (method === "alfalah") {
         const orderRef = String(donation.id);
         const ipn = await this.alfalahService.getOrderStatus(orderRef);
@@ -2850,6 +2884,16 @@ export class DonationsService {
             },
             donationId,
           );
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
+      } else if (createDonationDto.donation_method === "jazzcash") {
+        try {
+          data = await this.startJazzCashPayment(savedDonation, createDonationDto);
         } catch (e) {
           await this.persistGatewayInvoiceError(
             savedDonation.id,
@@ -4367,6 +4411,141 @@ export class DonationsService {
   }
 
   // ─── Bank Alfalah APG — credit/debit card only (page redirection) ───────────
+
+  /**
+   * JazzCash MWallet v2 — synchronous charge; IPN is backup confirmation.
+   */
+  private async startJazzCashPayment(
+    savedDonation: Donation,
+    createDonationDto: CreateDonationDto,
+  ) {
+    const phone = createDonationDto.donor_phone;
+    const cnic = createDonationDto.jazzcash_cnic;
+    if (!phone?.trim()) {
+      throw new BadRequestException(
+        "JazzCash requires a mobile number linked to the JazzCash wallet",
+      );
+    }
+    if (!cnic?.trim()) {
+      throw new BadRequestException(
+        "JazzCash requires the last 6 digits of CNIC",
+      );
+    }
+
+    const result = await this.jazzcashService.initiateMWalletPayment({
+      donationId: savedDonation.id,
+      amount: Number(savedDonation.amount),
+      mobileNumber: phone,
+      cnicLast6: cnic,
+      description:
+        createDonationDto.item_description ||
+        createDonationDto.project_name ||
+        "MTJ Foundation Donation",
+    });
+
+    const newStatus = result.success ? "completed" : "failed";
+    await this.donationRepository.update(savedDonation.id, {
+      orderId: result.pp_TxnRefNo,
+      status: newStatus,
+      transaction_id:
+        result.pp_RetreivalReferenceNo ||
+        result.pp_AuthCode ||
+        null,
+      err_msg: result.success ? null : result.pp_ResponseMessage,
+    });
+
+    if (result.success) {
+      await this.afterSuccessfulDonationPayment(savedDonation.id);
+    }
+
+    return this.withDonationId(
+      {
+        status: newStatus,
+        pp_ResponseCode: result.pp_ResponseCode,
+        pp_ResponseMessage: result.pp_ResponseMessage,
+        pp_TxnRefNo: result.pp_TxnRefNo,
+        paymentCompleted: result.success,
+      },
+      savedDonation.id,
+    );
+  }
+
+  async handleJazzCashIpn(payload: Record<string, unknown>) {
+    const creds = this.jazzcashService.getCredentials();
+    const hashValid = verifyJazzCashSecureHash(payload, creds.integritySalt);
+    if (!hashValid) {
+      throw new BadRequestException("Invalid JazzCash secure hash");
+    }
+
+    const txnRef = String(payload.pp_TxnRefNo || "").trim();
+    if (!txnRef) {
+      throw new BadRequestException("Missing pp_TxnRefNo in JazzCash IPN");
+    }
+
+    let donation = await this.donationRepository.findOne({
+      where: { orderId: txnRef },
+      relations: ["donor"],
+    });
+
+    if (!donation) {
+      const idMatch = /^T(\d+)/.exec(txnRef);
+      const donationId = idMatch ? Number(idMatch[1]) : NaN;
+      if (Number.isFinite(donationId)) {
+        donation = await this.donationRepository.findOne({
+          where: { id: donationId },
+          relations: ["donor"],
+        });
+      }
+    }
+
+    if (!donation) {
+      throw new NotFoundException(
+        `Donation not found for JazzCash txn ${txnRef}`,
+      );
+    }
+
+    const responseCode = String(payload.pp_ResponseCode || "");
+    let newStatus = donation.status;
+    // IPN: 121 = successful transaction (per JazzCash IPN guide)
+    if (responseCode === "121") {
+      newStatus = "completed";
+    } else if (["199", "999"].includes(responseCode)) {
+      newStatus = "failed";
+    }
+
+    if (newStatus !== donation.status) {
+      await this.donationRepository.update(donation.id, {
+        status: newStatus,
+        orderId: txnRef,
+        transaction_id: String(
+          payload.pp_RetreivalReferenceNo ||
+            payload.pp_RetrievalReferenceNo ||
+            payload.pp_AuthCode ||
+            donation.transaction_id ||
+            "",
+        ),
+        err_msg:
+          newStatus === "failed"
+            ? String(payload.pp_ResponseMessage || "")
+            : null,
+      });
+      await this.refreshDonorDonationStats(donation.donor_id);
+
+      if (this.isSuccessfulDonationStatus(newStatus)) {
+        await this.afterSuccessfulDonationPayment(donation.id);
+      }
+    }
+
+    return {
+      donationId: donation.id,
+      status: newStatus,
+      txnRef,
+    };
+  }
+
+  buildJazzCashIpnAcknowledgement(): Record<string, string> {
+    return this.jazzcashService.buildIpnAcknowledgement();
+  }
 
   /**
    * APG card — server handshake (HS/HS/HS) then SSO form for browser POST.

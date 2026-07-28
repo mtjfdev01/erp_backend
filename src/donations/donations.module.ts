@@ -15,6 +15,7 @@ import { EmailModule } from "../email/email.module";
 import { PayfastService } from "./payfast.service";
 import { StripeService } from "./stripe.service";
 import { AlfalahService } from "./alfalah/alfalah.service";
+import { JazzCashService } from "./jazzcash/jazzcash.service";
 import { DonorModule } from "../dms/donor/donor.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
@@ -74,6 +75,7 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
     PayfastService,
     StripeService,
     AlfalahService,
+    JazzCashService,
     WhatsAppService,
     DonationGeoBackfillService,
     DonationGeoBackfillRunner,

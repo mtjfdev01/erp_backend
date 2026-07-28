@@ -3291,19 +3291,56 @@ export class TasksService {
       const tasks = await qb.getMany();
       for (const t of tasks) {
         const escalationLevel = 1;
-        const adminEmail =
-          process.env.NOTIFICATION_EMAIL || "dev@mtjfoundation.org";
-        const success = await this.emailService.sendTaskOverdueNotification(
-          adminEmail,
-          t,
-          escalationLevel,
-        );
-        if (success) {
+        const recipientIds = this.normalizeUserIds([
+          ...(Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : []),
+          t.created_by_id,
+        ]);
+
+        if (recipientIds.length === 0) {
+          this.logger.warn(
+            `Overdue task #${t.id} has no assignee or creator to notify`,
+          );
+          continue;
+        }
+
+        const users = await this.userRepo.find({
+          where: { id: In(recipientIds) },
+          select: ["id", "email"],
+        });
+
+        const emails = [
+          ...new Set(
+            users
+              .map((u) => String(u.email || "").trim().toLowerCase())
+              .filter(Boolean),
+          ),
+        ];
+
+        if (emails.length === 0) {
+          this.logger.warn(
+            `Overdue task #${t.id}: assignee(s)/creator have no email`,
+          );
+          continue;
+        }
+
+        let anySuccess = false;
+        for (const email of emails) {
+          const success = await this.emailService.sendTaskOverdueNotification(
+            email,
+            t,
+            escalationLevel,
+          );
+          if (success) anySuccess = true;
+        }
+
+        if (anySuccess) {
           t.overdue_email_sent = true;
           await this.taskRepo.save(t);
           await this.logActivity(t, null as any, "overdue_escalated", {
             escalation_level: escalationLevel,
-            notes: "Initial overdue notification sent. Duplicate daily emails suppressed.",
+            notified_emails: emails,
+            notes:
+              "Overdue notification sent to assignee(s) and creator. Duplicate daily emails suppressed.",
           });
         }
       }

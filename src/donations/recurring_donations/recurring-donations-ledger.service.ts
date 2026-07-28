@@ -75,6 +75,23 @@ export class RecurringDonationsLedgerService {
       );
     }
 
+    // Created-at date filters (same keys as donations listing)
+    const exactDate = String(filters.date || "").trim();
+    const rangeStart = String(filters.start_date || "").trim();
+    const rangeEnd = String(filters.end_date || "").trim();
+    if (rangeStart && rangeEnd) {
+      qb.andWhere(`DATE(rd.created_at) BETWEEN :rangeStart AND :rangeEnd`, {
+        rangeStart,
+        rangeEnd,
+      });
+    } else if (rangeStart) {
+      qb.andWhere(`DATE(rd.created_at) >= :rangeStart`, { rangeStart });
+    } else if (rangeEnd) {
+      qb.andWhere(`DATE(rd.created_at) <= :rangeEnd`, { rangeEnd });
+    } else if (exactDate) {
+      qb.andWhere(`DATE(rd.created_at) = :exactDate`, { exactDate });
+    }
+
     // Payment / installment collection filters (subscription list):
     // - pending: no completed installment yet (same meaning as dashboard pending)
     // - pending_initial: initial donation still pending/failed
