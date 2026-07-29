@@ -7,6 +7,7 @@ import { DonationsService } from "../../donations/donations.service";
 import { DonationPendingFollowUpService } from "../../donations/donation-pending-follow-up.service";
 import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
 import { ProcessManualRecurringRemindersDto } from "../../dms/manual_recurring/dto/manual-recurring-filters.dto";
+import { DmsTodosService } from "../../dms/todos/dms-todos.service";
 
 @Injectable()
 export class DmsCronsService {
@@ -18,6 +19,7 @@ export class DmsCronsService {
     private readonly donationsService: DonationsService,
     private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
     private readonly manualRecurringReminderService: ManualRecurringReminderService,
+    private readonly dmsTodosService: DmsTodosService,
   ) {}
 
   /**
@@ -361,5 +363,36 @@ export class DmsCronsService {
     return this.donationsService.activatePendingManualRecurringIntents(
       limit ?? 100,
     );
+  }
+
+  /**
+   * Daily 00:10 Asia/Karachi — for recurring DMS todos whose due date has
+   * arrived (due_date <= today), create the next occurrence even if the
+   * previous one is still pending / not marked done.
+   */
+  @Cron("10 0 * * *", {
+    name: "dms-todos-spawn-due-recurring",
+    timeZone: "Asia/Karachi",
+  })
+  async handleDmsTodosDueRecurringSpawn() {
+    try {
+      const result = await this.dmsTodosService.processDueRecurringTodos();
+      if (result.scanned > 0 || result.spawned > 0) {
+        this.logger.log(
+          `DMS todos recurring spawn — scanned: ${result.scanned}, spawned: ${result.spawned}, skipped: ${result.skipped}`,
+        );
+      }
+      return result;
+    } catch (error: any) {
+      this.logger.error(
+        `DMS todos recurring spawn cron failed: ${error?.message}`,
+        error?.stack,
+      );
+      throw error;
+    }
+  }
+
+  async runDmsTodosDueRecurringSpawn(asOfDate?: string) {
+    return this.dmsTodosService.processDueRecurringTodos(asOfDate);
   }
 }
