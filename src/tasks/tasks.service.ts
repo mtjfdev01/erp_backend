@@ -543,6 +543,95 @@ export class TasksService {
     }
   }
 
+  private applyViewTypeFilter(
+    qb: SelectQueryBuilder<Task>,
+    viewType: string | undefined,
+    currentUser?: User,
+  ): void {
+    if (!viewType || !currentUser) return;
+
+    if (viewType === "created") {
+      qb.andWhere("task.created_by_id = :currentUserId", {
+        currentUserId: currentUser.id,
+      });
+      return;
+    }
+
+    if (viewType === "assigned") {
+      qb.andWhere(
+        new Brackets((dqb) => {
+          dqb.where(
+            "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
+            { currentUserId: currentUser.id },
+          );
+          dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
+            metaObj: JSON.stringify([{ user_id: currentUser.id }]),
+          });
+        }),
+      );
+      return;
+    }
+
+    if (viewType === "assigned_to_team") {
+      qb.andWhere(
+        new Brackets((dqb) => {
+          dqb.where(
+            "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+            { currentUserId: currentUser.id },
+          );
+          dqb.orWhere(
+            "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+            { currentUserId: currentUser.id },
+          );
+        }),
+      );
+      qb.andWhere(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+        { dept: currentUser.department, currentUserId: currentUser.id },
+      );
+      return;
+    }
+
+    if (viewType === "approval_tasks") {
+      qb.andWhere(
+        "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
+        { currentUserId: currentUser.id },
+      );
+      return;
+    }
+
+    if (viewType === "other_tasks") {
+      qb.andWhere(
+        new Brackets((dqb) => {
+          dqb.where(
+            "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
+            { currentUserId: currentUser.id },
+          );
+          dqb.orWhere(
+            "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
+            { currentUserId: currentUser.id },
+          );
+        }),
+      );
+
+      const roleStr = String(currentUser.role || "").toLowerCase();
+      const isManager = [
+        "dept_head",
+        "manager",
+        "assistant_manager",
+        "team_lead",
+        "coordinator",
+      ].includes(roleStr);
+
+      if (currentUser.department && isManager) {
+        qb.andWhere(
+          "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
+          { dept: currentUser.department, currentUserId: currentUser.id },
+        );
+      }
+    }
+  }
+
   private async getAssignedUsersMeta(
     userIds?: number[],
   ): Promise<
@@ -756,8 +845,10 @@ export class TasksService {
         payload?.pageSize ||
         10
       );
-      const sortField = payload?.sortField || "updated_at";
-      const sortOrder = payload?.sortOrder || "DESC";
+      const sortField =
+        payload?.pagination?.sortField || payload?.sortField || "updated_at";
+      const sortOrder =
+        payload?.pagination?.sortOrder || payload?.sortOrder || "DESC";
 
       const qb = this.taskRepo.createQueryBuilder("task");
       await this.applyRoleFilters(qb, currentUser);
@@ -905,47 +996,7 @@ export class TasksService {
         });
       }
 
-      if (viewTypeFilter === "created" && currentUser) {
-        qb.andWhere("task.created_by_id = :currentUserId", {
-          currentUserId: currentUser.id,
-        });
-      } else if (viewTypeFilter === "assigned" && currentUser) {
-        qb.andWhere(
-          new Brackets((dqb) => {
-            dqb.where(
-              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
-              { currentUserId: currentUser.id },
-            );
-            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
-              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
-            });
-          }),
-        );
-      } else if (viewTypeFilter === "assigned_to_team" && currentUser) {
-        // Tasks assigned to team members (not current user) from same department
-        qb.andWhere(
-          new Brackets((dqb) => {
-            dqb.where(
-              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
-              { currentUserId: currentUser.id },
-            );
-            dqb.orWhere(
-              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
-              { currentUserId: currentUser.id },
-            );
-          }),
-        );
-        qb.andWhere(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
-          { dept: currentUser.department, currentUserId: currentUser.id },
-        );
-      } else if (viewTypeFilter === "approval_tasks" && currentUser) {
-        // Tasks where current user is an approver
-        qb.andWhere(
-          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-          { currentUserId: currentUser.id },
-        );
-      }
+      this.applyViewTypeFilter(qb, viewTypeFilter, currentUser);
 
       if (departmentFilter) {
         const lowerDept = String(departmentFilter).toLowerCase();
@@ -1087,48 +1138,6 @@ export class TasksService {
         countQb.andWhere("task.project_name = :projectNameFilter", {
           projectNameFilter,
         });
-      }
-
-      if (viewTypeFilter === "created" && currentUser) {
-        countQb.andWhere("task.created_by_id = :currentUserId", {
-          currentUserId: currentUser.id,
-        });
-      } else if (viewTypeFilter === "assigned" && currentUser) {
-        countQb.andWhere(
-          new Brackets((dqb) => {
-            dqb.where(
-              "task.assigned_user_ids @> ARRAY[:currentUserId]::int[]",
-              { currentUserId: currentUser.id },
-            );
-            dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
-              metaObj: JSON.stringify([{ user_id: currentUser.id }]),
-            });
-          }),
-        );
-      } else if (viewTypeFilter === "assigned_to_team" && currentUser) {
-        // Tasks assigned to team members (not current user) from same department
-        countQb.andWhere(
-          new Brackets((dqb) => {
-            dqb.where(
-              "NOT (task.assigned_user_ids @> ARRAY[:currentUserId]::int[]) OR task.assigned_user_ids IS NULL",
-              { currentUserId: currentUser.id },
-            );
-            dqb.orWhere(
-              "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId) OR task.assigned_users_meta IS NULL",
-              { currentUserId: currentUser.id },
-            );
-          }),
-        );
-        countQb.andWhere(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE assignee->>'department' = :dept AND (assignee->>'user_id')::int != :currentUserId)",
-          { dept: currentUser.department, currentUserId: currentUser.id },
-        );
-      } else if (viewTypeFilter === "approval_tasks" && currentUser) {
-        // Tasks where current user is an approver
-        countQb.andWhere(
-          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-          { currentUserId: currentUser.id },
-        );
       }
 
       if (departmentFilter) {

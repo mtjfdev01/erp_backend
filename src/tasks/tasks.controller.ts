@@ -100,6 +100,7 @@ export class TasksController {
         priority: query.priority || "",
         user_name: query.user_name || "",
         assignee_id: query.assignee_id || "",
+        view_type: query.view_type || "",
       },
       strictDepartment: query.strictDepartment === "true" || false,
     };
