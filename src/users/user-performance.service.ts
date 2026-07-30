@@ -208,39 +208,6 @@ export class UserPerformanceService {
       .orderBy("month", "ASC")
       .getRawMany();
 
-    const recentTasks = await baseQb
-      .clone()
-      .select([
-        "task.id",
-        "task.title",
-        "task.priority",
-        "task.status",
-        "task.due_date",
-        "task.created_at",
-        "task.last_progress_notes",
-      ])
-      .orderBy("task.updated_at", "DESC")
-      .take(10)
-      .getMany();
-
-    const overdueTasks = await baseQb
-      .clone()
-      .andWhere("task.due_date < CURRENT_DATE")
-      .andWhere("task.status NOT IN (:...statuses)", {
-        statuses: TERMINAL_TASK_STATUSES,
-      })
-      .select([
-        "task.id",
-        "task.title",
-        "task.priority",
-        "task.status",
-        "task.due_date",
-        "task.last_progress_notes",
-      ])
-      .orderBy("task.due_date", "ASC")
-      .take(10)
-      .getMany();
-
     const completionRate =
       totalAssigned > 0 ? Math.round((completed / totalAssigned) * 100) : 0;
 
@@ -280,23 +247,6 @@ export class UserPerformanceService {
         completed: Number(row.completed || 0),
         pending: Number(row.pending || 0),
         overdue: Number(row.overdue || 0),
-      })),
-      recent_tasks: recentTasks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        priority: t.priority,
-        status: t.status,
-        due_date: t.due_date,
-        assigned_date: t.created_at,
-        remarks: t.last_progress_notes,
-      })),
-      overdue_task_list: overdueTasks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        priority: t.priority,
-        status: t.status,
-        due_date: t.due_date,
-        remarks: t.last_progress_notes,
       })),
     };
   }
