@@ -95,6 +95,33 @@ export class UserPerformanceService {
     );
   }
 
+  private getLastMonthRange() {
+    const now = new Date();
+    const startOfThisMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    const startOfLastMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+
+    return {
+      startOfLastMonth,
+      startOfThisMonth,
+    };
+  }
+
   private async getTaskPerformance(userId: number) {
     const baseQb = this.taskRepository.createQueryBuilder("task");
     this.applyAssignedToUser(baseQb, userId);
@@ -285,6 +312,8 @@ export class UserPerformanceService {
       };
     }
 
+    const { startOfLastMonth, startOfThisMonth } = this.getLastMonthRange();
+
     const donorsAdded = await this.donorRepository
       .createQueryBuilder("donor")
       .where("donor.created_by = :userId", { userId })
@@ -336,10 +365,68 @@ export class UserPerformanceService {
       .andWhere("box.is_archived = :archived", { archived: false })
       .getCount();
 
+    const donationBoxesAssignedLastMonth = await this.donationBoxRepository
+      .createQueryBuilder("box")
+      .innerJoin("box.assignedUsers", "user", "user.id = :userId", { userId })
+      .andWhere("box.is_archived = :archived", { archived: false })
+      .andWhere("box.created_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("box.created_at < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
     const boxCollections = await this.boxDonationRepository
       .createQueryBuilder("collection")
       .where("collection.created_by = :userId", { userId })
       .andWhere("collection.is_archived = :archived", { archived: false })
+      .getCount();
+
+    const boxCollectionAmountRow = await this.boxDonationRepository
+      .createQueryBuilder("collection")
+      .select("COALESCE(SUM(collection.collection_amount), 0)", "total")
+      .where("collection.created_by = :userId", { userId })
+      .andWhere("collection.is_archived = :archived", { archived: false })
+      .getRawOne();
+
+    const lastMonthBoxCollectionAmountRow = await this.boxDonationRepository
+      .createQueryBuilder("collection")
+      .select("COALESCE(SUM(collection.collection_amount), 0)", "total")
+      .where("collection.created_by = :userId", { userId })
+      .andWhere("collection.is_archived = :archived", { archived: false })
+      .andWhere("collection.collection_date >= :startOfLastMonth", {
+        startOfLastMonth,
+      })
+      .andWhere("collection.collection_date < :startOfThisMonth", {
+        startOfThisMonth,
+      })
+      .getRawOne();
+
+    const donorsRegisteredLastMonth = await this.donorRepository
+      .createQueryBuilder("donor")
+      .where("donor.created_by = :userId", { userId })
+      .andWhere("donor.is_archived = :archived", { archived: false })
+      .andWhere("donor.created_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("donor.created_at < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
+    const donationsAddedLastMonth = await this.donationRepository
+      .createQueryBuilder("donation")
+      .where("donation.created_by = :userId", { userId })
+      .andWhere("donation.is_archived = :archived", { archived: false })
+      .andWhere("donation.created_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("donation.created_at < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
+    const donationBoxesRegistered = await this.donationBoxRepository
+      .createQueryBuilder("box")
+      .where("box.created_by = :userId", { userId })
+      .andWhere("box.is_archived = :archived", { archived: false })
+      .getCount();
+
+    const donationBoxesRegisteredLastMonth = await this.donationBoxRepository
+      .createQueryBuilder("box")
+      .where("box.created_by = :userId", { userId })
+      .andWhere("box.is_archived = :archived", { archived: false })
+      .andWhere("box.created_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("box.created_at < :startOfThisMonth", { startOfThisMonth })
       .getCount();
 
     const followupsCompleted = await this.followupRepository.count({
@@ -355,11 +442,79 @@ export class UserPerformanceService {
       .andWhere("f.is_archived = :archived", { archived: false })
       .getCount();
 
+    const totalFollowups = await this.followupRepository
+      .createQueryBuilder("f")
+      .where("f.assigned_to_user_id = :userId", { userId })
+      .andWhere("f.is_archived = :archived", { archived: false })
+      .getCount();
+
+    const overdueFollowups = await this.followupRepository
+      .createQueryBuilder("f")
+      .where("f.assigned_to_user_id = :userId", { userId })
+      .andWhere("f.is_archived = :archived", { archived: false })
+      .andWhere("f.status IN (:...statuses)", {
+        statuses: ["pending", "rescheduled", "need_followup"],
+      })
+      .andWhere("f.due_datetime < NOW()")
+      .getCount();
+
+    const lastMonthFollowups = await this.followupRepository
+      .createQueryBuilder("f")
+      .where("f.assigned_to_user_id = :userId", { userId })
+      .andWhere("f.is_archived = :archived", { archived: false })
+      .andWhere("f.created_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("f.created_at < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
+    const lastMonthCompletedFollowups = await this.followupRepository
+      .createQueryBuilder("f")
+      .where("f.completed_by_user_id = :userId", { userId })
+      .andWhere("f.is_archived = :archived", { archived: false })
+      .andWhere("f.status = :status", { status: "completed" })
+      .andWhere("f.completed_at >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("f.completed_at < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
+    const lastMonthOverdueFollowups = await this.followupRepository
+      .createQueryBuilder("f")
+      .where("f.assigned_to_user_id = :userId", { userId })
+      .andWhere("f.is_archived = :archived", { archived: false })
+      .andWhere("f.status IN (:...statuses)", {
+        statuses: ["pending", "rescheduled", "need_followup"],
+      })
+      .andWhere("f.due_datetime >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("f.due_datetime < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
     const interactionsLogged = await this.interactionRepository
       .createQueryBuilder("i")
       .where("i.created_by = :userId", { userId })
       .andWhere("i.is_archived = :archived", { archived: false })
       .getCount();
+
+    const uniqueInteractionDonorsRow = await this.interactionRepository
+      .createQueryBuilder("i")
+      .select("COUNT(DISTINCT i.donor_id)", "count")
+      .where("i.created_by = :userId", { userId })
+      .andWhere("i.is_archived = :archived", { archived: false })
+      .getRawOne();
+
+    const lastMonthInteractionsLogged = await this.interactionRepository
+      .createQueryBuilder("i")
+      .where("i.created_by = :userId", { userId })
+      .andWhere("i.is_archived = :archived", { archived: false })
+      .andWhere("i.activity_datetime >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("i.activity_datetime < :startOfThisMonth", { startOfThisMonth })
+      .getCount();
+
+    const lastMonthUniqueInteractionDonorsRow = await this.interactionRepository
+      .createQueryBuilder("i")
+      .select("COUNT(DISTINCT i.donor_id)", "count")
+      .where("i.created_by = :userId", { userId })
+      .andWhere("i.is_archived = :archived", { archived: false })
+      .andWhere("i.activity_datetime >= :startOfLastMonth", { startOfLastMonth })
+      .andWhere("i.activity_datetime < :startOfThisMonth", { startOfThisMonth })
+      .getRawOne();
 
     return {
       available: true,
@@ -376,6 +531,36 @@ export class UserPerformanceService {
       donor_interactions_logged: interactionsLogged,
       approved_donation_allotments: 0,
       pending_allotment_approvals: 0,
+      period_summary: {
+        total: {
+          donation_boxes_assigned: donationBoxesManaged,
+          donations_box_collection: Number(boxCollectionAmountRow?.total || 0),
+          donations_added: donationsEntered,
+          donor_registered: donorsAdded,
+          donation_boxes_registered: donationBoxesRegistered,
+          followups: totalFollowups,
+          followups_completed: followupsCompleted,
+          followups_overdue: overdueFollowups,
+          interactions: interactionsLogged,
+          interaction_donors: Number(uniqueInteractionDonorsRow?.count || 0),
+        },
+        last_month: {
+          donation_boxes_assigned: donationBoxesAssignedLastMonth,
+          donations_box_collection: Number(
+            lastMonthBoxCollectionAmountRow?.total || 0,
+          ),
+          donations_added: donationsAddedLastMonth,
+          donor_registered: donorsRegisteredLastMonth,
+          donation_boxes_registered: donationBoxesRegisteredLastMonth,
+          followups: lastMonthFollowups,
+          followups_completed: lastMonthCompletedFollowups,
+          followups_overdue: lastMonthOverdueFollowups,
+          interactions: lastMonthInteractionsLogged,
+          interaction_donors: Number(
+            lastMonthUniqueInteractionDonorsRow?.count || 0,
+          ),
+        },
+      },
     };
   }
 

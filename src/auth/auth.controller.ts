@@ -12,6 +12,8 @@ import {
 import { Response, Request } from "express";
 import { AuthService } from "./auth.service";
 import { JwtGuard } from "./jwt.guard";
+import { UsersService } from "../users/users.service";
+import { ResetPasswordDto } from "../users/dto/reset-password.dto";
 
 interface LoginDto {
   email: string;
@@ -20,7 +22,10 @@ interface LoginDto {
 
 @Controller("auth")
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private usersService: UsersService,
+  ) {}
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
@@ -60,6 +65,13 @@ export class AuthController {
       user: result.user, // Include user data in response
       permissions: result.permissions, // Include permissions in response
     };
+  }
+
+  /** Public: email a temporary password if the account exists. */
+  @Post("forgot-password")
+  @HttpCode(HttpStatus.OK)
+  async forgotPassword(@Body() body: ResetPasswordDto) {
+    return this.usersService.forgotPassword(body.email);
   }
 
   @Post("logout")
