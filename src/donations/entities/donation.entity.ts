@@ -1,6 +1,7 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
-import { Column, Entity, ManyToOne, JoinColumn, Index } from "typeorm";
+import { Column, Entity, ManyToOne, JoinColumn, Index, OneToMany } from "typeorm";
 import { Donor } from "../../dms/donor/entities/donor.entity";
+import { DonationAttachment } from "./donation-attachment.entity";
 
 //nullabe true to all column
 @Entity("donations")
@@ -141,4 +142,7 @@ export class Donation extends BaseEntity {
    */
   @Column({ type: "jsonb", nullable: true, default: null })
   manual_recurring_intent: Record<string, unknown> | null;
+
+  @OneToMany(() => DonationAttachment, (attachment) => attachment.donation)
+  attachments: DonationAttachment[];
 }

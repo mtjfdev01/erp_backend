@@ -10,6 +10,8 @@ import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Brackets, Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "./entities/donation.entity";
+import { DonationAttachment } from "./entities/donation-attachment.entity";
+import { AddDonationAttachmentDto } from "./dto/add-donation-attachment.dto";
 import {
   DonationInKind,
   DonationInKindCategory,
@@ -106,6 +108,8 @@ export class DonationsService {
   constructor(
     @InjectRepository(Donation)
     private donationRepository: Repository<Donation>,
+    @InjectRepository(DonationAttachment)
+    private donationAttachmentRepository: Repository<DonationAttachment>,
     @InjectRepository(DonationInKind)
     private donationInKindRepository: Repository<DonationInKind>,
     @InjectRepository(User)
@@ -3026,7 +3030,7 @@ export class DonationsService {
   async findAll(
     page = 1,
     pageSize = 10,
-    sortField = "created_at",
+    sortField = "id",
     sortOrder: "ASC" | "DESC" = "DESC",
     filters: FilterPayload = {},
     hybridFilters: HybridFilter[] = [],
@@ -3068,6 +3072,8 @@ export class DonationsService {
         donationSourceNot as string | null | undefined,
       );
 
+      // One tracker max per donation — a plain join multiplies rows and breaks
+      // OFFSET/LIMIT so the first page looks like a random set of IDs.
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
@@ -3075,7 +3081,14 @@ export class DonationsService {
           "donation.progress_tracker",
           ProgressTracker,
           "progress_tracker",
-          "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
+          `progress_tracker.id = (
+            SELECT pt.id
+            FROM progress_trackers pt
+            WHERE pt.donation_id = donation.id
+              AND pt.is_archived = false
+            ORDER BY pt.id DESC
+            LIMIT 1
+          )`,
         )
         .addSelect("donor.name", "donor_name")
         .addSelect("donor.id", "donor_id");
@@ -3083,7 +3096,6 @@ export class DonationsService {
         query.addSelect("donor.email", "donor_email");
         query.addSelect("donor.phone", "donor_phone");
       }
-      query.getRawMany();
       // Apply filters
       this.applyDonationSourceNotFilter(
         query,
@@ -3093,15 +3105,22 @@ export class DonationsService {
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       applyHybridFilters(query, hybridFilters, "donation");
 
-      // 1b) Progress tracking filter: only donations whose tracker uses this template
+      // 1b) Progress tracking filter: any non-archived tracker for this template
       if (
         progressTemplateId &&
         Number.isFinite(progressTemplateId) &&
         progressTemplateId > 0
       ) {
-        query.andWhere("progress_tracker.template_id = :ptid", {
-          ptid: progressTemplateId,
-        });
+        query.andWhere(
+          `EXISTS (
+            SELECT 1
+            FROM progress_trackers pt_filter
+            WHERE pt_filter.donation_id = donation.id
+              AND pt_filter.is_archived = false
+              AND pt_filter.template_id = :ptid
+          )`,
+          { ptid: progressTemplateId },
+        );
       }
 
       // 2) Relation search (const config) using top-level search
@@ -3178,15 +3197,38 @@ export class DonationsService {
         geoScope,
       );
 
+      const allowedSortFields = new Set([
+        "id",
+        "created_at",
+        "updated_at",
+        "date",
+        "amount",
+        "donation_type",
+        "donation_method",
+        "donation_source",
+        "status",
+      ]);
+      const safeSortField = allowedSortFields.has(String(sortField))
+        ? String(sortField)
+        : "id";
+      const safeSortOrder =
+        String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+      // Sorting before pagination for stable pages
+      if (safeSortField === "id") {
+        query.orderBy("donation.id", safeSortOrder);
+      } else {
+        query
+          .orderBy(`donation.${safeSortField}`, safeSortOrder)
+          .addOrderBy("donation.id", "DESC");
+      }
+
       // Pagination — pageSize -1 (or 0) means view all
       const viewAll = pageSize === -1 || pageSize === 0;
       if (!viewAll) {
         const skip = (page - 1) * pageSize;
         query.skip(skip).take(pageSize);
       }
-
-      // Sorting
-      query.orderBy(`donation.${sortField}`, sortOrder);
 
       this.logFinalQuery("list", query);
 
@@ -3260,9 +3302,16 @@ export class DonationsService {
         Number.isFinite(progressTemplateId) &&
         progressTemplateId > 0
       ) {
-        sumQuery.andWhere("progress_tracker.template_id = :ptidSum", {
-          ptidSum: progressTemplateId,
-        });
+        sumQuery.andWhere(
+          `EXISTS (
+            SELECT 1
+            FROM progress_trackers pt_filter
+            WHERE pt_filter.donation_id = donation.id
+              AND pt_filter.is_archived = false
+              AND pt_filter.template_id = :ptidSum
+          )`,
+          { ptidSum: progressTemplateId },
+        );
       }
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -3309,6 +3358,7 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
         .leftJoinAndSelect("donation.created_by", "created_by")
+        .leftJoinAndSelect("donation.attachments", "attachments")
         .where("donation.id = :id", { id })
         .getOne();
 
@@ -3375,6 +3425,50 @@ export class DonationsService {
         `Failed to retrieve donation in kind records: ${error.message}`,
       );
     }
+  }
+
+  async addAttachment(
+    donationId: number,
+    dto: AddDonationAttachmentDto,
+    currentUser?: User | null,
+  ): Promise<DonationAttachment> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+    });
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    const attachment = this.donationAttachmentRepository.create({
+      donation,
+      file_name: dto.file_name,
+      file_url: dto.file_url,
+      file_type: dto.file_type,
+      description: dto.description || null,
+      uploaded_by: currentUser || null,
+    });
+    return this.donationAttachmentRepository.save(attachment);
+  }
+
+  async removeAttachment(
+    donationId: number,
+    attachmentId: number,
+  ): Promise<{ deleted: boolean }> {
+    const attachment = await this.donationAttachmentRepository.findOne({
+      where: { id: attachmentId },
+      relations: ["donation"],
+    });
+
+    if (
+      !attachment ||
+      !attachment.donation ||
+      Number(attachment.donation.id) !== Number(donationId)
+    ) {
+      throw new NotFoundException("Attachment not found for this donation");
+    }
+
+    await this.donationAttachmentRepository.remove(attachment);
+    return { deleted: true };
   }
 
   async getDonationAuditHistory(donationId: number) {

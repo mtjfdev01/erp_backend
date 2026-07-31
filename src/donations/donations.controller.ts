@@ -233,6 +233,80 @@ export class DonationsController {
     }
   }
 
+  @Post(":id/attachments/upload")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([...DONATION_UPDATE_GUARD])
+  @UseInterceptors(FileInterceptor("file", donationFileUploadOptions))
+  async uploadDonationAttachment(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body("description") description: string,
+    @Body("name") name: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      if (!file) {
+        throw new BadRequestException("File is required");
+      }
+      const uploaded = await this.s3Storage.uploadDonationAttachment(file);
+      const attachmentName =
+        String(description || name || "").trim() || undefined;
+      const result = await this.donationsService.addAttachment(
+        +id,
+        {
+          file_name: file.originalname,
+          file_url: uploaded.url,
+          file_type: file.mimetype,
+          description: attachmentName,
+        },
+        user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Attachment uploaded successfully",
+        data: result,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Delete(":id/attachments/:attachmentId")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([...DONATION_UPDATE_GUARD])
+  async removeDonationAttachment(
+    @Param("id") id: string,
+    @Param("attachmentId") attachmentId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.donationsService.removeAttachment(
+        +id,
+        +attachmentId,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Attachment removed",
+        data: result,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Post()
   async create(
     @Body() createDonationDto: CreateDonationDto,
@@ -347,7 +421,7 @@ export class DonationsController {
         pageSize = -1;
       }
 
-      const sortField = pagination.sortField || "created_at";
+      const sortField = pagination.sortField || "id";
       const sortOrder = pagination.sortOrder || "DESC";
 
       // Extract filters
