@@ -17,6 +17,7 @@ import { Response } from "express";
 import { DonorService } from "./donor.service";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
+import { ChangePipelineStageDto } from "./dto/change-pipeline-stage.dto";
 // import { ChangePasswordDto } from './dto/change-password.dto';
 import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
@@ -24,6 +25,7 @@ import { RequiredPermissions } from "../../permissions/decorators/require-permis
 import { PermissionsService } from "../../permissions/permissions.service";
 import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
 import { JwtGuard } from "src/auth/jwt.guard";
+import { DONOR_PIPELINE_STAGES } from "./pipeline/donor-pipeline.constants";
 
 @Controller("donors")
 @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -203,6 +205,7 @@ export class DonorController {
     @Query("source") source?: string,
     @Query("donated_amount") donated_amount?: string,
     @Query("donated_amount_operator") donated_amount_operator?: string,
+    @Query("pipeline_stage") pipeline_stage?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -290,6 +293,11 @@ export class DonorController {
           source: requestedSource,
           donated_amount,
           donated_amount_operator,
+          pipeline_stage:
+            pipeline_stage &&
+            DONOR_PIPELINE_STAGES.includes(pipeline_stage as any)
+              ? pipeline_stage
+              : undefined,
         },
         geoScope,
         sourceAccess,
@@ -315,6 +323,46 @@ export class DonorController {
         message: error.message,
         data: [],
         pagination: null,
+      });
+    }
+  }
+
+  @Get("pipeline/summary")
+  async getPipelineSummary(@Req() req: any, @Res() res: Response) {
+    try {
+      const user = req?.user ?? null;
+      let sourceAccess = { online: true, offline: true };
+      if (user?.id) {
+        sourceAccess = await this.getDonorSourceAccess(user.id, "list_view");
+        if (!sourceAccess.online && !sourceAccess.offline) {
+          return res.status(HttpStatus.FORBIDDEN).json({
+            success: false,
+            message: "Insufficient permissions to view donors",
+            data: null,
+          });
+        }
+      }
+      const geoScope = await this.resolveGeoScope(user);
+      const data = await this.donorService.getPipelineSummary(
+        geoScope,
+        sourceAccess,
+        user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Pipeline summary retrieved successfully",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
       });
     }
   }
@@ -346,6 +394,83 @@ export class DonorController {
           .json({ success: false, message: error.message, data: null });
       }
       return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Get(":id/pipeline-history")
+  async getPipelineHistory(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const existing = await this.donorService.findOne(+id);
+      const user = req?.user ?? null;
+      if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
+        await this.checkDonorPermission(user.id, existing.source, "view");
+      }
+      const history = await this.donorService.getPipelineHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donor pipeline history retrieved successfully",
+        data: history,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Post(":id/pipeline-stage")
+  async changePipelineStage(
+    @Param("id") id: string,
+    @Body() dto: ChangePipelineStageDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const existing = await this.donorService.findOne(+id);
+      const user = req?.user ?? null;
+      if (user?.id) {
+        const geoScope = await this.resolveGeoScope(user);
+        const scope = await this.donorService.resolveDonorScope(user);
+        this.donorService.assertDonorViewAccess(scope, existing, geoScope);
+        await this.checkDonorPermission(user.id, existing.source, "update");
+      }
+      const data = await this.donorService.changePipelineStage(+id, dto, user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Pipeline stage updated successfully",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
         success: false,
         message: error.message,
         data: null,

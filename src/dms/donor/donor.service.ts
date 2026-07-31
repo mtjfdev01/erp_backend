@@ -1,15 +1,11 @@
-import {
-  Injectable,
-  ConflictException,
-  NotFoundException,
-  ForbiddenException,
-} from "@nestjs/common";
+import { Injectable, ConflictException, NotFoundException, ForbiddenException, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donor, DonorType } from "./entities/donor.entity";
 import { Donation } from "../../donations/entities/donation.entity";
 import { CreateDonorDto } from "./dto/create-donor.dto";
 import { UpdateDonorDto } from "./dto/update-donor.dto";
+import { ChangePipelineStageDto } from "./dto/change-pipeline-stage.dto";
 import {
   applyCommonFilters,
   applyHybridFilters,
@@ -37,6 +33,12 @@ import { GeographicScopeService } from "../../permissions/geographic-scope/geogr
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { buildDonorGeoSearch } from "./utils/donor-geo.util";
+import { DonorPipelineStageHistory } from "./pipeline/entities/donor-pipeline-stage-history.entity";
+import {
+  DonorPipelineStage,
+  isValidDonorPipelineStage,
+  resolveDonorPipelineStage,
+} from "./pipeline/donor-pipeline.constants";
 
 interface PaginationOptions {
   page: number;
@@ -79,6 +81,8 @@ export class DonorService {
     private readonly donationRepository: Repository<Donation>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(DonorPipelineStageHistory)
+    private readonly pipelineHistoryRepository: Repository<DonorPipelineStageHistory>,
     private readonly usersService: UsersService,
     private readonly dashboardAggregateService: DashboardAggregateService,
     private readonly donorAuditService: DonorAuditService,
@@ -275,9 +279,21 @@ export class DonorService {
       recurring_consent_at: donor.recurring_consent_at,
       multi_time_donor: donor.multi_time_donor,
       notification_subscription: donor.notification_subscription,
+      pipeline_stage: donor.pipeline_stage,
+      pipeline_ask_amount: donor.pipeline_ask_amount,
+      pipeline_pledge_amount: donor.pipeline_pledge_amount,
+      pipeline_amount_currency: donor.pipeline_amount_currency,
       assigned_to_user_id: donor.assigned_to?.id ?? null,
       referrer_user_id: donor.referred_by?.id ?? null,
     };
+  }
+
+  private withEffectivePipelineStage<T extends Donor>(
+    donor: T,
+  ): T & { effective_pipeline_stage: DonorPipelineStage } {
+    return Object.assign(donor, {
+      effective_pipeline_stage: resolveDonorPipelineStage(donor.pipeline_stage),
+    });
   }
 
   private buildDonorPatch(dto: UpdateDonorDto): Record<string, unknown> {
@@ -339,13 +355,32 @@ export class DonorService {
 
       // Create donor entity
       const auditUserId = this.donorAuditUserId(user?.id);
+      const {
+        assigned_to_user_id: _assigned,
+        referrer_user_id: _referrer,
+        pipeline_stage: requestedStage,
+        ...donorFields
+      } = createDonorDto as CreateDonorDto & {
+        assigned_to_user_id?: number;
+        referrer_user_id?: number;
+        pipeline_stage?: DonorPipelineStage;
+      };
+
+      const initialStage =
+        requestedStage && isValidDonorPipelineStage(requestedStage)
+          ? requestedStage
+          : null;
+
       const donor = this.donorRepository.create({
-        ...createDonorDto,
+        ...donorFields,
         password: hashedPassword,
         password_enc: enc.payload,
         password_enc_version: enc.version,
         assigned_to,
         referred_by,
+        pipeline_stage: initialStage,
+        pipeline_stage_changed_at: initialStage ? new Date() : null,
+        pipeline_stage_changed_by_id: initialStage ? auditUserId : null,
         ...(auditUserId != null
           ? { created_by: { id: auditUserId } as any }
           : {}),
@@ -356,13 +391,26 @@ export class DonorService {
       // Save and return
       const savedDonor = await this.donorRepository.save(donor);
 
+      if (initialStage) {
+        await this.pipelineHistoryRepository.save(
+          this.pipelineHistoryRepository.create({
+            donor_id: savedDonor.id,
+            from_stage: null,
+            to_stage: initialStage,
+            reason: "Initial pipeline stage on registration",
+            transition_type: "advanced",
+            changed_by_id: auditUserId,
+          }),
+        );
+      }
+
       // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
 
       // Remove password from response
       delete savedDonor.password;
       delete (savedDonor as any).password_enc;
 
-      return savedDonor;
+      return this.withEffectivePipelineStage(savedDonor);
     } catch (error) {
       if (error instanceof ConflictException) {
         throw error;
@@ -454,6 +502,7 @@ export class DonorService {
         source,
         donated_amount,
         donated_amount_operator,
+        pipeline_stage,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -552,6 +601,21 @@ export class DonorService {
         });
       }
 
+      // NULL pipeline_stage = legacy donor (treated as "donor")
+      if (pipeline_stage && isValidDonorPipelineStage(String(pipeline_stage))) {
+        const stage = String(pipeline_stage);
+        if (stage === DonorPipelineStage.DONOR) {
+          queryBuilder.andWhere(
+            "(donor.pipeline_stage = :pipelineStage OR donor.pipeline_stage IS NULL)",
+            { pipelineStage: stage },
+          );
+        } else {
+          queryBuilder.andWhere("donor.pipeline_stage = :pipelineStage", {
+            pipelineStage: stage,
+          });
+        }
+      }
+
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
           queryBuilder,
@@ -601,6 +665,7 @@ export class DonorService {
         "total_donated",
         "donation_count",
         "last_donation_date",
+        "pipeline_stage",
       ];
       const sortFieldName = validSortFields.includes(sortField)
         ? sortField
@@ -616,7 +681,10 @@ export class DonorService {
       const [data, total] = await queryBuilder.getManyAndCount();
 
       // Remove passwords from response
-      data.forEach((donor) => delete donor.password);
+      data.forEach((donor) => {
+        delete donor.password;
+        this.withEffectivePipelineStage(donor);
+      });
 
       return {
         data,
@@ -880,13 +948,239 @@ export class DonorService {
       // Remove password from response
       delete donor.password;
 
-      return Object.assign(donor, { donation_stats });
+      return Object.assign(this.withEffectivePipelineStage(donor), {
+        donation_stats,
+      });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new NotFoundException(`Failed to retrieve donor: ${error.message}`);
     }
+  }
+
+  async getPipelineHistory(donorId: number) {
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+      select: ["id"],
+    });
+    if (!donor) {
+      throw new NotFoundException(`Donor with ID ${donorId} not found`);
+    }
+
+    return this.pipelineHistoryRepository.find({
+      where: { donor_id: donorId },
+      relations: ["changed_by"],
+      order: { created_at: "DESC", id: "DESC" },
+    });
+  }
+
+  async getPipelineSummary(
+    geoScope?: ResolvedGeographicScope | null,
+    sourceAccess?: { online: boolean; offline: boolean },
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
+    const queryBuilder = this.donorRepository
+      .createQueryBuilder("donor")
+      .select("COALESCE(donor.pipeline_stage, 'donor')", "pipeline_stage")
+      .addSelect("COUNT(donor.id)", "count")
+      .where("donor.is_archived = :is_archived", { is_archived: false })
+      .groupBy("COALESCE(donor.pipeline_stage, 'donor')");
+
+    if (sourceAccess) {
+      if (!sourceAccess.online && sourceAccess.offline) {
+        queryBuilder.andWhere("COALESCE(donor.source, '') != 'website'");
+      } else if (sourceAccess.online && !sourceAccess.offline) {
+        queryBuilder.andWhere("donor.source = 'website'");
+      }
+    }
+
+    if (geoScope) {
+      this.geographicScopeService.applyToQuery(
+        queryBuilder,
+        "donors",
+        "donor",
+        geoScope,
+      );
+    }
+
+    if (currentUser?.id) {
+      const scope = await this.resolveDonorScope(currentUser);
+      this.applyDonorListDataScope(queryBuilder, scope, geoScope);
+    }
+
+    const rows = await queryBuilder.getRawMany<{
+      pipeline_stage: string;
+      count: string;
+    }>();
+
+    const counts: Record<string, number> = {};
+    for (const stage of Object.values(DonorPipelineStage)) {
+      counts[stage] = 0;
+    }
+    for (const row of rows) {
+      const key = resolveDonorPipelineStage(row.pipeline_stage);
+      counts[key] = Number(row.count || 0);
+    }
+
+    return {
+      counts,
+      total: Object.values(counts).reduce((sum, n) => sum + n, 0),
+    };
+  }
+
+  /**
+   * Change CRM pipeline stage with a required reason (history preserved).
+   * Does not touch donations.
+   */
+  async changePipelineStage(
+    id: number,
+    dto: ChangePipelineStageDto,
+    user?: any,
+  ) {
+    if (!isValidDonorPipelineStage(dto.stage)) {
+      throw new BadRequestException("Invalid pipeline stage");
+    }
+
+    const reason = String(dto.reason || "").trim();
+    if (reason.length < 3) {
+      throw new BadRequestException("Reason must be at least 3 characters");
+    }
+
+    const donor = await this.donorRepository.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!donor) {
+      throw new NotFoundException(`Donor with ID ${id} not found`);
+    }
+
+    const fromStage = resolveDonorPipelineStage(donor.pipeline_stage);
+    const toStage = dto.stage;
+    const isSame = fromStage === toStage;
+    const transitionType =
+      dto.transition_type || (isSame ? "noted" : "advanced");
+
+    if (transitionType === "advanced" && isSame) {
+      throw new BadRequestException(
+        "Stage is unchanged. Use transition_type=noted to log why the contact did not progress.",
+      );
+    }
+
+    const needsAmount =
+      (toStage === DonorPipelineStage.ASK ||
+        toStage === DonorPipelineStage.PLEDGE) &&
+      transitionType === "advanced";
+
+    const amountRaw = dto.amount;
+    const amountNum =
+      amountRaw === undefined || amountRaw === null || amountRaw === ("" as any)
+        ? null
+        : Number(amountRaw);
+
+    if (needsAmount) {
+      if (amountNum == null || !Number.isFinite(amountNum) || amountNum <= 0) {
+        throw new BadRequestException(
+          toStage === DonorPipelineStage.ASK
+            ? "Ask amount is required when moving to Ask"
+            : "Pledge amount is required when moving to Pledge",
+        );
+      }
+    }
+
+    const currency = String(dto.currency || donor.pipeline_amount_currency || "PKR")
+      .trim()
+      .toUpperCase()
+      .slice(0, 8) || "PKR";
+
+    const auditUserId = this.donorAuditUserId(user?.id);
+    const before = this.donorAuditSnapshot(donor);
+    const patchForAudit: Record<string, unknown> = {};
+
+    if (transitionType === "advanced" || !donor.pipeline_stage) {
+      donor.pipeline_stage = toStage;
+      donor.pipeline_stage_changed_at = new Date();
+      donor.pipeline_stage_changed_by_id = auditUserId;
+      patchForAudit.pipeline_stage = toStage;
+
+      if (amountNum != null && Number.isFinite(amountNum) && amountNum > 0) {
+        donor.pipeline_amount_currency = currency;
+        patchForAudit.pipeline_amount_currency = currency;
+        if (toStage === DonorPipelineStage.ASK) {
+          donor.pipeline_ask_amount = amountNum as any;
+          patchForAudit.pipeline_ask_amount = amountNum;
+        }
+        if (toStage === DonorPipelineStage.PLEDGE) {
+          donor.pipeline_pledge_amount = amountNum as any;
+          patchForAudit.pipeline_pledge_amount = amountNum;
+        }
+      }
+
+      if (auditUserId != null) {
+        donor.updated_by = { id: auditUserId } as any;
+      }
+      await this.donorRepository.save(donor);
+
+      const auditChanges = buildDonorFieldChanges(before, patchForAudit);
+      if (auditChanges.length > 0) {
+        await this.donorAuditService.log({
+          donorId: id,
+          action: DonorAuditAction.UPDATED,
+          source: DonorAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+          metadata: {
+            pipeline_reason: reason,
+            transition_type: transitionType,
+            amount: amountNum,
+            currency,
+          },
+        });
+      }
+    } else if (
+      amountNum != null &&
+      Number.isFinite(amountNum) &&
+      amountNum > 0 &&
+      (toStage === DonorPipelineStage.ASK ||
+        toStage === DonorPipelineStage.PLEDGE)
+    ) {
+      // noted transition can still update amount for ask/pledge
+      donor.pipeline_amount_currency = currency;
+      if (toStage === DonorPipelineStage.ASK) {
+        donor.pipeline_ask_amount = amountNum as any;
+      }
+      if (toStage === DonorPipelineStage.PLEDGE) {
+        donor.pipeline_pledge_amount = amountNum as any;
+      }
+      if (auditUserId != null) {
+        donor.updated_by = { id: auditUserId } as any;
+      }
+      await this.donorRepository.save(donor);
+    }
+
+    const history = await this.pipelineHistoryRepository.save(
+      this.pipelineHistoryRepository.create({
+        donor_id: id,
+        from_stage: fromStage,
+        to_stage: toStage,
+        reason,
+        transition_type: transitionType,
+        amount:
+          amountNum != null && Number.isFinite(amountNum) && amountNum > 0
+            ? (amountNum as any)
+            : null,
+        currency:
+          amountNum != null && Number.isFinite(amountNum) && amountNum > 0
+            ? currency
+            : null,
+        changed_by_id: auditUserId,
+      }),
+    );
+
+    const refreshed = await this.findOne(id);
+    return {
+      donor: refreshed,
+      history_entry: history,
+    };
   }
 
   /**
@@ -1058,7 +1352,17 @@ export class DonorService {
       const auditUserId = this.donorAuditUserId(user?.id);
       const before = this.donorAuditSnapshot(donor);
       const dto = { ...updateDonorDto } as Record<string, unknown>;
-      const patch = this.buildDonorPatch(updateDonorDto);
+
+      // Pipeline stage changes must go through changePipelineStage (reason required)
+      delete dto.pipeline_stage;
+      delete dto.pipeline_stage_changed_at;
+      delete dto.pipeline_stage_changed_by_id;
+      delete dto.effective_pipeline_stage;
+      delete dto.pipeline_ask_amount;
+      delete dto.pipeline_pledge_amount;
+      delete dto.pipeline_amount_currency;
+
+      const patch = this.buildDonorPatch(dto as UpdateDonorDto);
 
       if (dto.assigned_to_user_id !== undefined) {
         const assignedId =

@@ -10,6 +10,7 @@ import {
   IsNumber,
 } from "class-validator";
 import { DonorType } from "../entities/donor.entity";
+import { DonorPipelineStage } from "../pipeline/donor-pipeline.constants";
 
 export class CreateDonorDto {
   // Common fields for all donors
@@ -112,4 +113,9 @@ export class CreateDonorDto {
 
   @IsNumber()
   assigned_to_user_id?: number;
+
+  /** Optional CRM stage on create. Omit/null keeps legacy behavior (treated as donor). */
+  @IsOptional()
+  @IsEnum(DonorPipelineStage)
+  pipeline_stage?: DonorPipelineStage;
 }

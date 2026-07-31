@@ -155,4 +155,36 @@ export class Donor extends BaseEntity {
 
   @Column({ type: "boolean", default: true, nullable: true })
   notification_subscription: boolean;
+
+  /**
+   * CRM pipeline stage. NULL = existing/legacy donors treated as "donor"
+   * (no rewrite of historical rows; additive only).
+   */
+  @Column({ type: "varchar", length: 32, nullable: true, default: null })
+  pipeline_stage: string | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  pipeline_stage_changed_at: Date | null;
+
+  @Column({ type: "int", nullable: true, default: null })
+  pipeline_stage_changed_by_id: number | null;
+
+  @ManyToOne(() => User, {
+    nullable: true,
+    eager: false,
+    onDelete: "SET NULL",
+  })
+  @JoinColumn({ name: "pipeline_stage_changed_by_id" })
+  pipeline_stage_changed_by: User | null;
+
+  /** Latest asked amount while in Ask (or last ask before later stages). */
+  @Column({ type: "decimal", precision: 14, scale: 2, nullable: true, default: null })
+  pipeline_ask_amount: number | null;
+
+  /** Latest pledged amount while in Pledge (or last pledge before later stages). */
+  @Column({ type: "decimal", precision: 14, scale: 2, nullable: true, default: null })
+  pipeline_pledge_amount: number | null;
+
+  @Column({ type: "varchar", length: 8, nullable: true, default: "PKR" })
+  pipeline_amount_currency: string | null;
 }
