@@ -56,7 +56,6 @@ export interface DonationGeoRecord extends GeoOwnedRecord {
   donor?: {
     city?: string | null;
     address?: string | null;
-    company_address?: string | null;
     country?: string | null;
   } | null;
 }
@@ -64,7 +63,6 @@ export interface DonationGeoRecord extends GeoOwnedRecord {
 export interface DonorGeoRecord extends GeoOwnedRecord {
   city?: string | null;
   address?: string | null;
-  company_address?: string | null;
   country?: string | null;
   geo_search?: string | null;
 }

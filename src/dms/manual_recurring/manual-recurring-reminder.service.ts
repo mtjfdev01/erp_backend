@@ -801,7 +801,6 @@ export class ManualRecurringReminderService {
     return (
       donor?.name ||
       (donor as any)?.first_name ||
-      (donor as any)?.company_name ||
       "Valued Donor"
     );
   }

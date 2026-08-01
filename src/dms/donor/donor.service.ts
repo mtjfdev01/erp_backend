@@ -39,6 +39,8 @@ import {
   isValidDonorPipelineStage,
   resolveDonorPipelineStage,
 } from "./pipeline/donor-pipeline.constants";
+import { OrganizationsService } from "../organizations/organizations.service";
+import { OrganizationAffiliationRole } from "../organizations/entities/donor-organization-affiliation.entity";
 
 interface PaginationOptions {
   page: number;
@@ -89,6 +91,7 @@ export class DonorService {
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
     private readonly permissionsService: PermissionsService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   async getDonorSourceAccess(
@@ -191,7 +194,6 @@ export class DonorService {
       city: donor.city,
       country: donor.country,
       address: donor.address,
-      company_address: donor.company_address,
       geo_search: donor.geo_search,
       created_by: donor.created_by,
     };
@@ -265,13 +267,7 @@ export class DonorService {
       name: donor.name,
       first_name: donor.first_name,
       last_name: donor.last_name,
-      company_name: donor.company_name,
-      company_registration: donor.company_registration,
-      contact_person: donor.contact_person,
-      designation: donor.designation,
-      company_address: donor.company_address,
-      company_phone: donor.company_phone,
-      company_email: donor.company_email,
+      date_of_birth: donor.date_of_birth,
       is_active: donor.is_active,
       is_archived: donor.is_archived,
       recurring: donor.recurring,
@@ -313,10 +309,60 @@ export class DonorService {
   }
 
   /**
+   * Resolve org for affiliation. Never deletes/overwrites other donors.
+   */
+  private async resolveOrganizationForDonorLink(opts: {
+    organization_id?: number | null;
+  }) {
+    if (opts.organization_id) {
+      return this.organizationsService.findOne(Number(opts.organization_id));
+    }
+    return null;
+  }
+
+  private async linkDonorToOrganization(
+    donor: Donor,
+    opts: {
+      organization_id?: number | null;
+      organization_branch_id?: number | null;
+      affiliation_role?: OrganizationAffiliationRole | string;
+      affiliation_is_primary?: boolean;
+    },
+  ): Promise<Donor> {
+    const org = await this.resolveOrganizationForDonorLink({
+      organization_id: opts.organization_id,
+    });
+    if (!org) return donor;
+
+    await this.organizationsService.createAffiliation({
+      donor_id: donor.id,
+      organization_id: org.id,
+      branch_id: opts.organization_branch_id
+        ? Number(opts.organization_branch_id)
+        : undefined,
+      role:
+        (opts.affiliation_role as OrganizationAffiliationRole) ||
+        OrganizationAffiliationRole.CONTACT,
+      is_primary: opts.affiliation_is_primary !== false,
+    });
+
+    return donor;
+  }
+
+  /**
    * Create a new donor (individual or CSR)
    */
   async register(createDonorDto: CreateDonorDto, user: any): Promise<Donor> {
     try {
+      if (
+        createDonorDto.donor_type === DonorType.CSR &&
+        !createDonorDto.organization_id
+      ) {
+        throw new BadRequestException(
+          "Organization is required for CSR donors",
+        );
+      }
+
       // Check if email already exists
       const existingDonor = await this.donorRepository.findOne({
         where: { email: createDonorDto.email },
@@ -359,11 +405,19 @@ export class DonorService {
         assigned_to_user_id: _assigned,
         referrer_user_id: _referrer,
         pipeline_stage: requestedStage,
+        organization_id,
+        organization_branch_id,
+        affiliation_role,
+        affiliation_is_primary,
         ...donorFields
       } = createDonorDto as CreateDonorDto & {
         assigned_to_user_id?: number;
         referrer_user_id?: number;
         pipeline_stage?: DonorPipelineStage;
+        organization_id?: number;
+        organization_branch_id?: number;
+        affiliation_role?: OrganizationAffiliationRole;
+        affiliation_is_primary?: boolean;
       };
 
       const initialStage =
@@ -389,7 +443,17 @@ export class DonorService {
       this.applyGeoSearchToDonor(donor);
 
       // Save and return
-      const savedDonor = await this.donorRepository.save(donor);
+      let savedDonor = await this.donorRepository.save(donor);
+
+      // Org link: required for CSR; optional for individual.
+      if (organization_id) {
+        savedDonor = await this.linkDonorToOrganization(savedDonor, {
+          organization_id,
+          organization_branch_id,
+          affiliation_role,
+          affiliation_is_primary,
+        });
+      }
 
       if (initialStage) {
         await this.pipelineHistoryRepository.save(
@@ -412,7 +476,11 @@ export class DonorService {
 
       return this.withEffectivePipelineStage(savedDonor);
     } catch (error) {
-      if (error instanceof ConflictException) {
+      if (
+        error instanceof ConflictException ||
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       throw new ConflictException(`Failed to create donor: ${error.message}`);
@@ -443,13 +511,9 @@ export class DonorService {
       first_name: row.first_name,
       last_name: row.last_name,
       cnic: row.cnic,
-      company_name: row.company_name,
-      company_registration: row.company_registration,
-      contact_person: row.contact_person,
-      designation: row.designation,
-      company_address: row.company_address,
-      company_phone: row.company_phone,
-      company_email: row.company_email,
+      organization_id: row.organization_id,
+      organization_branch_id: row.organization_branch_id,
+      affiliation_role: row.affiliation_role,
       assigned_to_user_id: row.assigned_to_user_id,
       referrer_user_id: row.referrer_user_id,
     } as CreateDonorDto;
@@ -514,8 +578,6 @@ export class DonorService {
         "last_name",
         "email",
         "phone",
-        "company_name",
-        "contact_person",
         "city",
         "country",
         "geo_search",
@@ -656,7 +718,6 @@ export class DonorService {
       // Apply sorting
       const validSortFields = [
         "name",
-        "company_name",
         "email",
         "city",
         "country",
@@ -945,11 +1006,15 @@ export class DonorService {
       const donation_stats = await this.buildDonorDonationStats(id);
       await this.applyDonorDonationStatsIfStale(donor, donation_stats);
 
+      const organization_affiliations =
+        await this.organizationsService.listAffiliationsForDonor(id);
+
       // Remove password from response
       delete donor.password;
 
       return Object.assign(this.withEffectivePipelineStage(donor), {
         donation_stats,
+        organization_affiliations,
       });
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -1362,6 +1427,17 @@ export class DonorService {
       delete dto.pipeline_pledge_amount;
       delete dto.pipeline_amount_currency;
 
+      const organizationId =
+        dto.organization_id !== undefined ? dto.organization_id : undefined;
+      const organizationBranchId = dto.organization_branch_id;
+      const affiliationRole = dto.affiliation_role;
+      const affiliationIsPrimary = dto.affiliation_is_primary;
+      delete dto.organization_id;
+      delete dto.organization_branch_id;
+      delete dto.affiliation_role;
+      delete dto.affiliation_is_primary;
+      delete dto.organization_affiliations;
+
       const patch = this.buildDonorPatch(dto as UpdateDonorDto);
 
       if (dto.assigned_to_user_id !== undefined) {
@@ -1409,7 +1485,23 @@ export class DonorService {
         patch;
       Object.assign(donor, scalarPatch);
       this.applyGeoSearchToDonor(donor);
-      const updatedDonor = await this.donorRepository.save(donor);
+      let updatedDonor = await this.donorRepository.save(donor);
+
+      // Optional org link on update (additive). Does not clear affiliations when omitted.
+      if (organizationId != null && organizationId !== "") {
+        updatedDonor = await this.linkDonorToOrganization(updatedDonor, {
+          organization_id: Number(organizationId),
+          organization_branch_id:
+            organizationBranchId != null && organizationBranchId !== ""
+              ? Number(organizationBranchId)
+              : null,
+          affiliation_role: affiliationRole as OrganizationAffiliationRole,
+          affiliation_is_primary:
+            affiliationIsPrimary === undefined
+              ? true
+              : !!affiliationIsPrimary,
+        });
+      }
 
       if (auditChanges.length > 0) {
         await this.donorAuditService.log({
@@ -1426,7 +1518,10 @@ export class DonorService {
 
       return updatedDonor;
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       throw new ConflictException(`Failed to update donor: ${error.message}`);

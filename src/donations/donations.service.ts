@@ -746,7 +746,6 @@ export class DonationsService {
     const donorName =
       donor.name ||
       donor.first_name ||
-      donor.company_name ||
       donor.email ||
       "Valued Donor";
 

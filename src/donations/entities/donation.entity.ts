@@ -2,6 +2,7 @@ import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
 import { Column, Entity, ManyToOne, JoinColumn, Index, OneToMany } from "typeorm";
 import { Donor } from "../../dms/donor/entities/donor.entity";
 import { DonationAttachment } from "./donation-attachment.entity";
+import { Organization } from "../../dms/organizations/entities/organization.entity";
 
 //nullabe true to all column
 @Entity("donations")
@@ -13,6 +14,17 @@ export class Donation extends BaseEntity {
 
   @Column({ nullable: true, default: null })
   donor_id: number;
+
+  /**
+   * Soft / org credit for corporate gifts. Additive nullable — existing donations
+   * keep donor_id only; never required. Does not replace hard credit on donor_id.
+   */
+  @Column({ type: "int", nullable: true, default: null })
+  organization_id: number | null;
+
+  @ManyToOne(() => Organization, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "organization_id" })
+  organization: Organization | null;
 
   @Column({ type: "bigint", nullable: true, default: null })
   campaign_id: number | null;

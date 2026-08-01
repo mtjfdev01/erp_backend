@@ -39,6 +39,14 @@ export {
   DONATION_DELETE_GUARD,
 } from "./donation-permissions.constants";
 
+export {
+  ORGANIZATION_LIST_GUARD,
+  ORGANIZATION_VIEW_GUARD,
+  ORGANIZATION_CREATE_GUARD,
+  ORGANIZATION_UPDATE_GUARD,
+  ORGANIZATION_DELETE_GUARD,
+} from "./organization-permissions.constants";
+
 // Export entities
 export { PermissionsEntity } from "./entities/permissions.entity";
 

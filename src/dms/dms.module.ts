@@ -28,6 +28,7 @@ import { DonorRelationshipModule } from './donor_relationship/donor-relationship
 import { CommunicationModule } from './communication/communication.module';
 import { ManualRecurringModule } from './manual_recurring/manual-recurring.module';
 import { DmsTodosModule } from './todos/dms-todos.module';
+import { OrganizationsModule } from './organizations/organizations.module';
 
 @Module({
   controllers: [DmsController],
@@ -39,6 +40,7 @@ import { DmsTodosModule } from './todos/dms-todos.module';
     }),
     PermissionsModule,
     DonorModule,
+    OrganizationsModule,
     UserDonorsModule,
     DonationBoxModule,
     DonationInKindModule,

@@ -453,7 +453,6 @@ export class RecurringDonationsLedgerService {
     const donorName =
       donor.name ||
       donor.first_name ||
-      donor.company_name ||
       donor.email ||
       `Donor #${donor.id}`;
     const amount =

@@ -167,7 +167,6 @@ export class DonationsController {
       donor?: {
         city?: string | null;
         address?: string | null;
-        company_address?: string | null;
         country?: string | null;
       } | null;
     },
@@ -187,7 +186,6 @@ export class DonationsController {
         record.donor = {
           city: donor.city,
           address: donor.address,
-          company_address: donor.company_address,
           country: donor.country,
         };
       } catch {

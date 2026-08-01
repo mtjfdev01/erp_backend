@@ -7,6 +7,7 @@ import { DonationBoxImportHandler } from "./handlers/donation-box-import.handler
 import { DonationBoxDonationsImportHandler } from "./handlers/donation-box-donations-import.handler";
 import { VolunteersImportHandler } from "./handlers/volunteers-import.handler";
 import { DonorModule } from "../dms/donor/donor.module";
+import { OrganizationsModule } from "../dms/organizations/organizations.module";
 import { VolunteerModule } from "../volunteer/volunteer.module";
 import { DonationBoxModule } from "../dms/donation_box/donation-box.module";
 import { DonationBoxDonationModule } from "../dms/donation_box/donation_box_donation/donation_box_donation.module";
@@ -15,6 +16,7 @@ import { PermissionsModule } from "../permissions/permissions.module";
 @Module({
   imports: [
     DonorModule,
+    OrganizationsModule,
     DonationBoxModule,
     DonationBoxDonationModule,
     VolunteerModule,

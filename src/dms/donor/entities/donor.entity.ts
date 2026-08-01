@@ -75,7 +75,7 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true })
   country: string;
 
-  /** Normalized lowercase search blob from country, city, address, and company_address. */
+  /** Normalized lowercase search blob from country, city, and address. */
   @Column({ type: "text", nullable: true, default: null })
   geo_search: string;
 
@@ -98,27 +98,9 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true })
   last_name: string;
 
-  // CSR/Corporate Donor fields
-  @Column({ nullable: true })
-  company_name: string;
-
-  @Column({ nullable: true })
-  company_registration: string;
-
-  @Column({ nullable: true })
-  contact_person: string;
-
-  @Column({ nullable: true })
-  designation: string;
-
-  @Column({ nullable: true })
-  company_address: string;
-
-  @Column({ nullable: true })
-  company_phone: string;
-
-  @Column({ nullable: true })
-  company_email: string;
+  /** Optional date of birth (individual / contact). Additive — null for legacy rows. */
+  @Column({ type: "date", nullable: true, default: null })
+  date_of_birth: Date | string | null;
 
   // Password reset fields
   @Column({ nullable: true })

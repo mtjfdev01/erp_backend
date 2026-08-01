@@ -150,6 +150,11 @@ export class CreateDonationDto {
   @IsNumber()
   donor_id?: number;
 
+  /** Optional soft/org credit — additive; donations still require/use donor_id as today. */
+  @IsOptional()
+  @IsNumber()
+  organization_id?: number;
+
   @IsOptional()
   @IsNumber()
   campaign_id?: number;

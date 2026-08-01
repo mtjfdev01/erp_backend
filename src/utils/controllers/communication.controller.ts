@@ -63,7 +63,7 @@ export class CommunicationController {
       }
 
       const donorName =
-        donor.name || donor.first_name || donor.company_name || "Valued Donor";
+        donor.name || donor.first_name || donor.email || "Valued Donor";
       const donorEmail = donor.email;
       const donorPhone = donor.phone;
       const amount = donation.amount || donation.paid_amount || 0;
@@ -216,7 +216,7 @@ export class CommunicationController {
       }
 
       const donorName =
-        donor.name || donor.first_name || donor.company_name || "Valued Donor";
+        donor.name || donor.first_name || donor.email || "Valued Donor";
       const donorEmail = donor.email;
       const donorPhone = donor.phone;
       const amount = donation.amount || donation.paid_amount || 0;
