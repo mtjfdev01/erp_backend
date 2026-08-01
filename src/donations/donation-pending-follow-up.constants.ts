@@ -4,6 +4,9 @@ export const DONATION_PENDING_TASK_PROJECT_PREFIX = "donation-pending:";
 /** Minutes after creation before a pending donation triggers a call-center task. */
 export const PENDING_DONATION_FOLLOW_UP_MINUTES = 3;
 
+/** Only create follow-up tasks when donation amount is at least this (PKR / currency units). */
+export const MIN_DONATION_FOLLOW_UP_AMOUNT = 1000;
+
 export const DONATION_PENDING_MOV_ITEMS = [
   "Contacted Donor",
   "Not Contacted Donor",

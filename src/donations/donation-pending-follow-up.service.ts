@@ -13,6 +13,7 @@ import {
 import { CreateTaskDto } from "../tasks/dto/create-task.dto";
 import {
   DONATION_PENDING_MOV_ITEMS,
+  MIN_DONATION_FOLLOW_UP_AMOUNT,
   PENDING_DONATION_FOLLOW_UP_MINUTES,
   WEBSITE_DONATION_FOLLOW_UP_STATUSES,
   donationPendingTaskProjectId,
@@ -91,6 +92,9 @@ export class DonationPendingFollowUpService {
       })
       .andWhere("donation.is_archived = :archived", { archived: false })
       .andWhere("donation.date = :donationDate", { donationDate })
+      .andWhere("donation.amount >= :minAmount", {
+        minAmount: MIN_DONATION_FOLLOW_UP_AMOUNT,
+      })
       .orderBy("donation.created_at", "ASC")
       .take(100);
 
