@@ -391,4 +391,19 @@ export class S3StorageService {
     );
     return { url: result.url, key: result.key, bucket: result.bucket };
   }
+
+  /** Aid case/person files — donations profile, keys under donations/aid/{context}/... */
+  async uploadAidAttachment(
+    file: Express.Multer.File,
+    context = "profile",
+  ): Promise<{ url: string; key: string; bucket: string }> {
+    const safeContext = String(context || "profile")
+      .replace(/[^a-z0-9_-]/gi, "")
+      .toLowerCase() || "profile";
+    const result = await this.uploadFile(S3_BUCKET_PROFILE.DONATIONS, file, [
+      "aid",
+      safeContext,
+    ]);
+    return { url: result.url, key: result.key, bucket: result.bucket };
+  }
 }

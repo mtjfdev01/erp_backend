@@ -29,6 +29,7 @@ import { CommunicationModule } from './communication/communication.module';
 import { ManualRecurringModule } from './manual_recurring/manual-recurring.module';
 import { DmsTodosModule } from './todos/dms-todos.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { AidModule } from './aid/aid.module';
 
 @Module({
   controllers: [DmsController],
@@ -41,6 +42,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
     PermissionsModule,
     DonorModule,
     OrganizationsModule,
+    AidModule,
     UserDonorsModule,
     DonationBoxModule,
     DonationInKindModule,

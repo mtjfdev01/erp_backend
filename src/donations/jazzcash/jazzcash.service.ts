@@ -96,11 +96,15 @@ export class JazzCashService {
     return digits;
   }
 
+  /**
+   * pp_TxnRefNo — unique; 2026 guide recommends T + YmdHis (PKT).
+   * Append donation id so concurrent charges stay unique.
+   */
   buildTxnRefNo(donationId: number): string {
-    const pkt = this.formatPktDateTime();
-    return `T${donationId}${pkt.slice(-10)}`;
+    return `T${this.formatPktDateTime()}${donationId}`;
   }
 
+  /** pp_BillReference — mandatory alphanumeric only (A–Z, a–z, 0–9). */
   buildBillReference(donationId: number): string {
     return `D${donationId}`.replace(/[^A-Za-z0-9]/g, "").slice(0, 20);
   }
@@ -158,7 +162,7 @@ export class JazzCashService {
     payload.pp_SecureHash = buildJazzCashSecureHash(payload, creds.integritySalt);
 
     this.logger.log(
-      `JazzCash MWallet request donation #${params.donationId} txn ${pp_TxnRefNo}`,
+      `JazzCash MWallet request donation #${params.donationId} txn ${pp_TxnRefNo} env=${creds.env} mobile=${mobile.slice(0, 4)}*****${mobile.slice(-2)} cnic=****${cnic.slice(-2)} url=${creds.mwalletUrl}`,
     );
 
     const { data } = await axios.post<Record<string, unknown>>(
@@ -180,6 +184,10 @@ export class JazzCashService {
 
     const pp_ResponseCode = String(raw.pp_ResponseCode ?? "");
     const pp_ResponseMessage = String(raw.pp_ResponseMessage ?? "");
+
+    this.logger.log(
+      `JazzCash MWallet response donation #${params.donationId} txn ${pp_TxnRefNo} code=${pp_ResponseCode} msg=${pp_ResponseMessage}`,
+    );
 
     return {
       success:

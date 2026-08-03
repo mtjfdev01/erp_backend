@@ -15,8 +15,17 @@ export function getJazzCashEnvMode(): JazzCashEnvMode {
   return raw === "production" ? "production" : "sandbox";
 }
 
-const PRODUCTION_BASE =
+/**
+ * JazzCash MWallet REST API v2.0 (2026) + Status Inquiry v2.0:
+ * Sandbox and Production use the same Payment Orchestrator host.
+ * Sandbox vs live is controlled by merchant credentials from
+ * https://onlinepayments.jazzcash.com.pk/sandbox-frontend/
+ */
+const ORCHESTRATOR_BASE =
   "https://onlinepayments.jazzcash.com.pk/payment-orchestrator";
+
+const DEFAULT_MWALLET_URL = `${ORCHESTRATOR_BASE}/api/v2/rest/payments/m-wallet`;
+const DEFAULT_STATUS_INQUIRY_URL = `${ORCHESTRATOR_BASE}/api/v2/rest/payments/status/inquiry`;
 
 export function resolveJazzCashCredentials(): JazzCashCredentials {
   const env = getJazzCashEnvMode();
@@ -45,12 +54,9 @@ export function resolveJazzCashCredentials(): JazzCashCredentials {
     merchantId,
     password,
     integritySalt,
-    mwalletUrl:
-      process.env.JAZZCASH_MWALLET_URL ||
-      `${PRODUCTION_BASE}/api/v2/rest/payments/m-wallet`,
+    mwalletUrl: process.env.JAZZCASH_MWALLET_URL || DEFAULT_MWALLET_URL,
     statusInquiryUrl:
-      process.env.JAZZCASH_STATUS_INQUIRY_URL ||
-      `${PRODUCTION_BASE}/api/v2/rest/payments/status/inquiry`,
+      process.env.JAZZCASH_STATUS_INQUIRY_URL || DEFAULT_STATUS_INQUIRY_URL,
     ipnUrl,
   };
 }
