@@ -4674,7 +4674,33 @@ export class DonationsService {
     if (!statusUrl) {
       throw new BadRequestException("Missing url query parameter from APG listener");
     }
-    const { data } = await axios.get(statusUrl, { timeout: 60000 });
+    this.logger.log(`Alfalah IPN listener received statusUrl=${statusUrl}`);
+    let data: Record<string, any>;
+    try {
+      const response = await axios.get(statusUrl, { timeout: 60000 });
+      data = response.data;
+      this.logger.log(
+        `Alfalah IPN listener GET success httpStatus=${response.status} ` +
+          `ResponseCode=${data?.ResponseCode ?? "n/a"} TransactionStatus=${data?.TransactionStatus ?? "n/a"} ` +
+          `TransactionId=${data?.TransactionId ?? "n/a"} TransactionReferenceNumber=${data?.TransactionReferenceNumber ?? "n/a"} ` +
+          `raw=${JSON.stringify(data)}`,
+      );
+    } catch (err: any) {
+      const httpStatus = err?.response?.status;
+      const responseData = err?.response?.data;
+      this.logger.error(
+        `Alfalah IPN listener GET failed statusUrl=${statusUrl} ` +
+          `httpStatus=${httpStatus ?? "n/a"} message=${err?.message || err} ` +
+          `responseBody=${
+            responseData != null
+              ? typeof responseData === "string"
+                ? responseData
+                : JSON.stringify(responseData)
+              : "n/a"
+          }`,
+      );
+      throw err;
+    }
     const orderRef =
       data?.TransactionReferenceNumber ||
       this.extractAlfalahOrderIdFromIpnUrl(statusUrl);
@@ -4685,6 +4711,9 @@ export class DonationsService {
       source: "alfalah_listener",
       ipnPayload: data,
     });
+    this.logger.log(
+      `Alfalah IPN listener sync done orderRef=${orderRef} mappedStatus=${sync.status}`,
+    );
     return {
       success: true,
       orderId: orderRef,
@@ -4816,20 +4845,43 @@ export class DonationsService {
     }
 
     if (donation.status === "completed") {
+      this.logger.log(
+        `Alfalah sync skip already completed donationId=${donationId} source=${opts?.source || "alfalah_ipn"}`,
+      );
       return { status: "completed" };
     }
 
     let ipn = opts?.ipnPayload;
+    const ipnSource = ipn ? "payload" : "getOrderStatus";
     if (!ipn) {
+      this.logger.log(
+        `Alfalah sync fetching order status donationId=${donationId} orderRef=${orderRef} source=${opts?.source || "alfalah_ipn"}`,
+      );
       ipn = await this.alfalahService.getOrderStatus(orderRef);
+    } else {
+      this.logger.log(
+        `Alfalah sync using provided IPN payload donationId=${donationId} source=${opts?.source || "alfalah_ipn"} ` +
+          `ResponseCode=${ipn?.ResponseCode ?? "n/a"} TransactionStatus=${ipn?.TransactionStatus ?? "n/a"} ` +
+          `raw=${JSON.stringify(ipn)}`,
+      );
     }
 
-    const paid = this.alfalahService.isPaidStatus(ipn?.TransactionStatus);
+    const responseCode = ipn?.ResponseCode;
+    const transactionStatus = ipn?.TransactionStatus;
+    const paid = this.alfalahService.isPaidStatus(transactionStatus);
+    const responseOk = this.alfalahService.isSuccessResponseCode(responseCode);
     const newStatus = paid
       ? "completed"
-      : this.alfalahService.isSuccessResponseCode(ipn?.ResponseCode)
+      : responseOk
         ? "pending"
         : "failed";
+
+    this.logger.log(
+      `Alfalah status mapping donationId=${donationId} orderRef=${orderRef} ipnSource=${ipnSource} ` +
+        `dbStatus=${donation.status} TransactionStatus=${JSON.stringify(transactionStatus)} ` +
+        `ResponseCode=${JSON.stringify(responseCode)} paid=${paid} responseOk=${responseOk} ` +
+        `mappedStatus=${newStatus} Description=${ipn?.Description ?? ipn?.description ?? "n/a"}`,
+    );
 
     const transactionId =
       opts?.uniqueTranId ||
@@ -4884,6 +4936,10 @@ export class DonationsService {
       alfalahUpdate.email_sent = email_sent;
     }
     await this.donationRepository.update(donationId, alfalahUpdate);
+    this.logger.log(
+      `Alfalah DB updated donationId=${donationId} status=${newStatus} orderId=${alfalahUpdate.orderId} ` +
+        `err_msg=${alfalahUpdate.err_msg ?? "n/a"}`,
+    );
 
     let batching: any = null;
     if (newStatus === "completed") {

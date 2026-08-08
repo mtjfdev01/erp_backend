@@ -6,6 +6,12 @@ import { Donation } from "../entities/donation.entity";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
+import {
+  billingIntervalToFrequency,
+  getPeriodKeyForFrequency,
+  listPeriodKeysBetween,
+} from "src/dms/manual_recurring/utils/manual-recurring-period.util";
+import { CampaignTargetFrequency } from "src/dms/campaigns/utils/campaign-recurring.constants";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -93,7 +99,8 @@ export class RecurringDonationsLedgerService {
     }
 
     // Payment / installment collection filters (subscription list):
-    // - pending: no completed installment yet (same meaning as dashboard pending)
+    // - pending: has open period dues OR no completed installment yet
+    // - pending_dues: at least one pending period due
     // - pending_initial: initial donation still pending/failed
     // - completed: at least one completed installment
     const installmentStatus = String(filters.installment_status || "")
@@ -106,8 +113,17 @@ export class RecurringDonationsLedgerService {
         AND inst.is_archived = false
         AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
     )`;
-    if (installmentStatus === "pending") {
-      qb.andWhere(`NOT ${hasCompletedInstallmentSql}`);
+    const hasPendingDueSql = `EXISTS (
+      SELECT 1 FROM recurring_donations inst
+      WHERE inst.parent_id = rd.id
+        AND inst.record_type = 'installment'
+        AND inst.is_archived = false
+        AND LOWER(COALESCE(inst.status, '')) = 'pending'
+    )`;
+    if (installmentStatus === "pending_dues" || installmentStatus === "arrears") {
+      qb.andWhere(hasPendingDueSql);
+    } else if (installmentStatus === "pending") {
+      qb.andWhere(`(NOT ${hasCompletedInstallmentSql} OR ${hasPendingDueSql})`);
     } else if (installmentStatus === "pending_initial") {
       qb.andWhere("rd.initial_donation_id IS NOT NULL");
       qb.andWhere("LOWER(COALESCE(d.status, '')) IN (:...pendingDonationStatuses)", {
@@ -154,6 +170,10 @@ export class RecurringDonationsLedgerService {
         `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success'))`,
         "completed_installment_count",
       )
+      .addSelect(
+        `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false AND LOWER(COALESCE(inst.status, '')) = 'pending')`,
+        "pending_installment_count",
+      )
       .orderBy(`rd.${sortField}`, sortOrder);
 
     if (pageSize > 0) {
@@ -189,6 +209,11 @@ export class RecurringDonationsLedgerService {
       throw new NotFoundException("Recurring donation subscription not found");
     }
 
+    // Ensure current period due exists for non-Stripe (does not create donations)
+    if (!subscription.stripe_subscription_id) {
+      await this.ensurePeriodDuesForSubscription(subscription);
+    }
+
     const [installments, initialDonation, donor] = await Promise.all([
       this.recurringDonationRepo.find({
         where: {
@@ -196,7 +221,7 @@ export class RecurringDonationsLedgerService {
           record_type: "installment",
           is_archived: false,
         },
-        order: { paid_at: "DESC", created_at: "DESC" },
+        order: { period_key: "ASC", created_at: "ASC", id: "ASC" },
       }),
       subscription.initial_donation_id
         ? this.donationRepository.findOne({
@@ -220,7 +245,19 @@ export class RecurringDonationsLedgerService {
         : null,
     ]);
 
-    const totalPaid = installments.reduce(
+    const completed = installments.filter((row) =>
+      ["completed", "paid", "success"].includes(
+        String(row.status || "").toLowerCase(),
+      ),
+    );
+    const pending = installments.filter(
+      (row) => String(row.status || "").toLowerCase() === "pending",
+    );
+    const totalPaid = completed.reduce(
+      (sum, row) => sum + (Number(row.amount) || 0),
+      0,
+    );
+    const arrearsAmount = pending.reduce(
       (sum, row) => sum + (Number(row.amount) || 0),
       0,
     );
@@ -232,7 +269,10 @@ export class RecurringDonationsLedgerService {
       donor,
       summary: {
         installment_count: installments.length,
+        completed_installment_count: completed.length,
+        pending_installment_count: pending.length,
         total_paid_amount: totalPaid,
+        arrears_amount: arrearsAmount,
       },
     };
   }
@@ -305,7 +345,8 @@ export class RecurringDonationsLedgerService {
 
   /**
    * When a non-Stripe donation linked to a subscription is completed,
-   * record an installment under that subscription (idempotent).
+   * settle the oldest pending period due (FIFO). Never deletes donors/donations.
+   * If no pending due exists, creates a completed installment (legacy / first pay).
    */
   async recordNonStripeInstallmentFromDonation(
     donationId: number,
@@ -338,6 +379,21 @@ export class RecurringDonationsLedgerService {
     });
 
     if (!master && donation.donor_id) {
+      const taggedSubId = Number(
+        (donation as any)?.manual_recurring_intent?.recurring_subscription_id,
+      );
+      if (Number.isFinite(taggedSubId) && taggedSubId > 0) {
+        master = await this.recurringDonationRepo.findOne({
+          where: {
+            id: taggedSubId,
+            record_type: "subscription",
+            is_archived: false,
+          },
+        });
+      }
+    }
+
+    if (!master && donation.donor_id) {
       master = await this.recurringDonationRepo
         .createQueryBuilder("rd")
         .where("rd.record_type = :type", { type: "subscription" })
@@ -353,7 +409,10 @@ export class RecurringDonationsLedgerService {
       return { recorded: false, reason: "No non-Stripe subscription found" };
     }
     if (master.stripe_subscription_id) {
-      return { recorded: false, reason: "Stripe subscription — installments via webhook" };
+      return {
+        recorded: false,
+        reason: "Stripe subscription — installments via webhook",
+      };
     }
 
     const invoiceKey = `donation-${donationId}`;
@@ -368,36 +427,225 @@ export class RecurringDonationsLedgerService {
       return { recorded: false, reason: "Installment already recorded" };
     }
 
-    const installment = this.recurringDonationRepo.create({
-      record_type: "installment",
-      parent_id: master.id,
-      initial_donation_id: master.initial_donation_id,
-      donor_id: master.donor_id ?? donation.donor_id,
-      stripe_subscription_id: null,
-      stripe_invoice_id: invoiceKey,
-      stripe_payment_intent_id: String(donationId),
-      billing_interval: master.billing_interval,
-      billing_interval_count: master.billing_interval_count,
-      amount: donation.amount ?? master.amount,
-      currency: donation.currency || master.currency || "PKR",
-      status: "completed",
-      donation_method: donation.donation_method || master.donation_method,
-      project_id: donation.project_id || master.project_id,
-      campaign_id: donation.campaign_id ?? master.campaign_id,
-      donation_type: donation.donation_type || master.donation_type,
-      paid_at: new Date(),
-      stripe_billing_reason:
-        master.initial_donation_id === donationId
+    // Open current (+ gap) period dues before settling so first pay always has a target
+    await this.ensurePeriodDuesForSubscription(master);
+
+    const oldestPending = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.parent_id = :parentId", { parentId: master.id })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .andWhere("LOWER(COALESCE(inst.status, '')) = :status", {
+        status: "pending",
+      })
+      .orderBy("inst.period_key", "ASC")
+      .addOrderBy("inst.created_at", "ASC")
+      .addOrderBy("inst.id", "ASC")
+      .getOne();
+
+    const isInitial = master.initial_donation_id === donationId;
+    const paidAt = new Date();
+    const amount = donation.amount ?? master.amount;
+    const currency = donation.currency || master.currency || "PKR";
+
+    if (oldestPending) {
+      await this.recurringDonationRepo.update(oldestPending.id, {
+        initial_donation_id: master.initial_donation_id,
+        donor_id: master.donor_id ?? donation.donor_id,
+        stripe_invoice_id: invoiceKey,
+        stripe_payment_intent_id: String(donationId),
+        amount,
+        currency,
+        status: "completed",
+        donation_method: donation.donation_method || master.donation_method,
+        project_id: donation.project_id || master.project_id,
+        campaign_id: donation.campaign_id ?? master.campaign_id,
+        donation_type: donation.donation_type || master.donation_type,
+        paid_at: paidAt,
+        stripe_billing_reason: isInitial
+          ? "initial_payment"
+          : "period_settled",
+      });
+    } else {
+      const frequency = billingIntervalToFrequency(master.billing_interval);
+      const periodKey = frequency
+        ? getPeriodKeyForFrequency(frequency)
+        : null;
+      const installment = this.recurringDonationRepo.create({
+        record_type: "installment",
+        parent_id: master.id,
+        initial_donation_id: master.initial_donation_id,
+        donor_id: master.donor_id ?? donation.donor_id,
+        stripe_subscription_id: null,
+        stripe_invoice_id: invoiceKey,
+        stripe_payment_intent_id: String(donationId),
+        billing_interval: master.billing_interval,
+        billing_interval_count: master.billing_interval_count,
+        amount,
+        currency,
+        status: "completed",
+        donation_method: donation.donation_method || master.donation_method,
+        project_id: donation.project_id || master.project_id,
+        campaign_id: donation.campaign_id ?? master.campaign_id,
+        donation_type: donation.donation_type || master.donation_type,
+        paid_at: paidAt,
+        period_key: periodKey,
+        stripe_billing_reason: isInitial
           ? "initial_payment"
           : "manual_payment",
-    });
-    await this.recurringDonationRepo.save(installment);
+      });
+      await this.recurringDonationRepo.save(installment);
+    }
 
     if (master.status !== "active") {
       await this.recurringDonationRepo.update(master.id, { status: "active" });
     }
 
     return { recorded: true };
+  }
+
+  /**
+   * Ensure pending period-due installment rows exist through the current period.
+   * Does not create or modify donations/donors. Skips periods already covered by
+   * legacy completed installments that have no period_key (chronological credit).
+   */
+  async ensurePeriodDuesForSubscription(
+    subscription: RecurringDonation,
+    options?: { upToPeriodKey?: string; maxKeys?: number },
+  ): Promise<{ created: number; pending_count: number }> {
+    if (!subscription?.id || subscription.stripe_subscription_id) {
+      return { created: 0, pending_count: 0 };
+    }
+
+    const frequency = billingIntervalToFrequency(subscription.billing_interval);
+    if (!frequency) {
+      return { created: 0, pending_count: 0 };
+    }
+
+    const now = new Date();
+    const upToKey =
+      options?.upToPeriodKey || getPeriodKeyForFrequency(frequency, now);
+    const startRef = this.resolveSubscriptionPeriodStart(subscription);
+    const endRef = this.resolvePeriodKeyEndRef(frequency, upToKey, now);
+    const maxKeys = options?.maxKeys ?? 36;
+    const periodKeys = listPeriodKeysBetween(
+      frequency,
+      startRef,
+      endRef,
+      maxKeys,
+    );
+
+    const existing = await this.recurringDonationRepo.find({
+      where: {
+        parent_id: subscription.id,
+        record_type: "installment",
+        is_archived: false,
+      },
+      select: ["id", "period_key", "status"],
+    });
+
+    const keyed = new Set(
+      existing
+        .map((r) => String(r.period_key || "").trim())
+        .filter(Boolean),
+    );
+    const legacyCompletedCount = existing.filter((r) => {
+      const st = String(r.status || "").toLowerCase();
+      return (
+        !r.period_key &&
+        ["completed", "paid", "success"].includes(st)
+      );
+    }).length;
+
+    let created = 0;
+    let skipLegacy = legacyCompletedCount;
+
+    for (const periodKey of periodKeys) {
+      if (keyed.has(periodKey)) continue;
+      const isCurrent = periodKey === upToKey;
+      // Credit historical completed installments (no period_key) against older periods only
+      if (!isCurrent && skipLegacy > 0) {
+        skipLegacy -= 1;
+        continue;
+      }
+
+      const row = this.recurringDonationRepo.create({
+        record_type: "installment",
+        parent_id: subscription.id,
+        initial_donation_id: subscription.initial_donation_id,
+        donor_id: subscription.donor_id,
+        stripe_subscription_id: null,
+        stripe_invoice_id: null,
+        billing_interval: subscription.billing_interval,
+        billing_interval_count: subscription.billing_interval_count,
+        amount: subscription.amount,
+        currency: subscription.currency || "PKR",
+        status: "pending",
+        donation_method: subscription.donation_method,
+        project_id: subscription.project_id,
+        campaign_id: subscription.campaign_id,
+        donation_type: subscription.donation_type,
+        paid_at: null,
+        period_key: periodKey,
+        stripe_billing_reason: "period_due",
+      });
+      await this.recurringDonationRepo.save(row);
+      keyed.add(periodKey);
+      created += 1;
+    }
+
+    const pending_count = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.parent_id = :parentId", { parentId: subscription.id })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .andWhere("LOWER(COALESCE(inst.status, '')) = :status", {
+        status: "pending",
+      })
+      .getCount();
+
+    return { created, pending_count };
+  }
+
+  private resolveSubscriptionPeriodStart(
+    subscription: RecurringDonation,
+  ): Date {
+    if (subscription.start_date) {
+      const d = new Date(`${subscription.start_date}T00:00:00`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    if (subscription.created_at) {
+      return new Date(subscription.created_at);
+    }
+    return new Date();
+  }
+
+  /** Approximate a Date inside a period key for listPeriodKeysBetween end bound. */
+  private resolvePeriodKeyEndRef(
+    frequency: CampaignTargetFrequency,
+    periodKey: string,
+    fallback: Date,
+  ): Date {
+    const monthly = /^(\d{4})-(\d{2})$/.exec(periodKey);
+    if (monthly) {
+      return new Date(Number(monthly[1]), Number(monthly[2]) - 1, 15);
+    }
+    const daily = /^(\d{4})-(\d{2})-(\d{2})$/.exec(periodKey);
+    if (daily) {
+      return new Date(
+        Number(daily[1]),
+        Number(daily[2]) - 1,
+        Number(daily[3]),
+      );
+    }
+    const weekly = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(periodKey);
+    if (weekly) {
+      return new Date(weekly[1] + "T12:00:00");
+    }
+    if (frequency === CampaignTargetFrequency.YEARLY && /^\d{4}$/.test(periodKey)) {
+      return new Date(Number(periodKey), 6, 1);
+    }
+    return fallback;
   }
 
   /**
@@ -409,6 +657,7 @@ export class RecurringDonationsLedgerService {
     donation_id: number;
     email_sent: boolean;
     whatsapp_sent: boolean;
+    pending_installment_count: number;
     errors: string[];
   }> {
     const subscription = await this.recurringDonationRepo.findOne({
@@ -429,6 +678,8 @@ export class RecurringDonationsLedgerService {
     if (!subscription.donor_id) {
       throw new BadRequestException("Subscription has no donor linked");
     }
+
+    const dues = await this.ensurePeriodDuesForSubscription(subscription);
 
     const donor = await this.donorRepository.findOne({
       where: { id: subscription.donor_id },
@@ -500,7 +751,109 @@ export class RecurringDonationsLedgerService {
       donation_id: donation.id,
       email_sent,
       whatsapp_sent,
+      pending_installment_count: dues.pending_count,
       errors,
+    };
+  }
+
+  /**
+   * Admin: mark selected pending installment dues as paid.
+   * Does not delete donors/donations; does not create donations.
+   */
+  async markInstallmentsPaid(
+    subscriptionId: number,
+    opts: { installmentIds: number[]; note?: string },
+  ): Promise<{
+    marked: number;
+    installment_ids: number[];
+    pending_remaining: number;
+  }> {
+    const ids = [
+      ...new Set(
+        (opts.installmentIds || [])
+          .map((n) => Number(n))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ];
+    if (!ids.length) {
+      throw new BadRequestException("Select at least one installment");
+    }
+
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+    if (subscription.stripe_subscription_id) {
+      throw new BadRequestException(
+        "Stripe installments are settled via Stripe webhooks",
+      );
+    }
+
+    const rows = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.id IN (:...ids)", { ids })
+      .andWhere("inst.parent_id = :parentId", { parentId: subscriptionId })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .getMany();
+
+    if (!rows.length) {
+      throw new BadRequestException(
+        "No matching installments found for this subscription",
+      );
+    }
+
+    const pendingRows = rows.filter(
+      (r) => String(r.status || "").toLowerCase() === "pending",
+    );
+    if (!pendingRows.length) {
+      throw new BadRequestException(
+        "Selected installments are already paid (or not pending)",
+      );
+    }
+
+    const paidAt = new Date();
+    const noteSuffix = opts.note
+      ? String(opts.note).trim().slice(0, 120)
+      : "";
+
+    for (const row of pendingRows) {
+      await this.recurringDonationRepo.update(row.id, {
+        status: "completed",
+        paid_at: paidAt,
+        stripe_invoice_id: `manual-mark-${row.id}`,
+        stripe_billing_reason: noteSuffix
+          ? `manual_mark_paid:${noteSuffix}`
+          : "manual_mark_paid",
+      });
+    }
+
+    if (subscription.status !== "active") {
+      await this.recurringDonationRepo.update(subscription.id, {
+        status: "active",
+      });
+    }
+
+    const pending_remaining = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.parent_id = :parentId", { parentId: subscriptionId })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .andWhere("LOWER(COALESCE(inst.status, '')) = :status", {
+        status: "pending",
+      })
+      .getCount();
+
+    return {
+      marked: pendingRows.length,
+      installment_ids: pendingRows.map((r) => r.id),
+      pending_remaining,
     };
   }
 

@@ -91,4 +91,12 @@ export class RecurringDonation extends BaseEntity {
 
   @Column({ type: "timestamptz", nullable: true, default: null })
   last_reminder_sent_at: Date | null;
+
+  /**
+   * Billing period this installment/due covers (e.g. 2026-03, week range).
+   * Pending dues use this without creating a new donations row.
+   */
+  @Index()
+  @Column({ type: "varchar", length: 40, nullable: true, default: null })
+  period_key: string | null;
 }

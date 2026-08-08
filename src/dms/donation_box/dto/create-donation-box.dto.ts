@@ -4,10 +4,10 @@ import {
   IsEnum,
   IsNotEmpty,
   IsDateString,
-  IsPhoneNumber,
   IsNumber,
   IsArray,
 } from "class-validator";
+import { Transform } from "class-transformer";
 import {
   BoxType,
   BoxStatus,
@@ -15,24 +15,43 @@ import {
 } from "../entities/donation-box.entity";
 
 export class CreateDonationBoxDto {
-  // Box Identification (Required)
-
+  // Box Identification (optional — both may be null)
+  @Transform(({ value }) => {
+    if (value === "" || value === undefined || value === null) return null;
+    const s = String(value).trim();
+    return s || null;
+  })
   @IsString()
   @IsOptional()
-  box_id_no?: string;
+  box_id_no?: string | null;
 
+  @Transform(({ value }) => {
+    if (value === "" || value === undefined || value === null) return null;
+    const s = String(value).trim();
+    return s || null;
+  })
   @IsString()
   @IsOptional()
-  key_no?: string;
+  key_no?: string | null;
 
-  // Location Details (Required) - Geographic Reference
-  @IsNumber()
-  @IsNotEmpty({ message: "Route ID is required" })
-  route_id: number;
-
+  // Location Details — route is optional
+  @Transform(({ value }) => {
+    if (value === "" || value === undefined || value === null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  })
   @IsNumber()
   @IsOptional()
-  city_id?: number;
+  route_id?: number | null;
+
+  @Transform(({ value }) => {
+    if (value === "" || value === undefined || value === null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  })
+  @IsNumber()
+  @IsOptional()
+  city_id?: number | null;
 
   // Shop Details (Required shop_name)
   @IsString()

@@ -296,8 +296,8 @@ export class DonationBoxImportHandler implements EntityImportHandler {
     let successCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
-    const seenKeyNos = new Set<string>();
-    const seenBoxIds = new Set<string>();
+    /** Same shop + shopkeeper + phone in one file → skip after first. */
+    const seenIdentityInFile = new Map<string, number>();
     const importYear =
       options?.year != null &&
       Number.isInteger(options.year) &&
@@ -325,7 +325,9 @@ export class DonationBoxImportHandler implements EntityImportHandler {
         results.push({
           row: rowNumber,
           success: false,
+          skipped: true,
           error: "Empty row skipped",
+          skip_reason: "Empty row (no shop_name / key_no / box_id_no / route)",
         });
         continue;
       }
@@ -341,16 +343,6 @@ export class DonationBoxImportHandler implements EntityImportHandler {
       }
 
       const { route_id, route_name } = this.resolveRouteFields(row);
-      if (!route_id && !route_name) {
-        failedCount += 1;
-        results.push({
-          row: rowNumber,
-          success: false,
-          email: shopName,
-          error: "route_id or Route is required",
-        });
-        continue;
-      }
 
       const cityName = String(row.city_name || "").trim();
       const cityId = this.parseOptionalInt(row.city_id);
@@ -365,45 +357,15 @@ export class DonationBoxImportHandler implements EntityImportHandler {
         continue;
       }
 
-      if (keyNo) {
-        const keyLower = keyNo.toLowerCase();
-        if (seenKeyNos.has(keyLower)) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: shopName,
-            error: `Duplicate key_no in import file: ${keyNo}`,
-          });
-          continue;
-        }
-        seenKeyNos.add(keyLower);
-      }
-
-      if (boxIdNo) {
-        const boxLower = boxIdNo.toLowerCase();
-        if (seenBoxIds.has(boxLower)) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: shopName,
-            error: `Duplicate box_id_no in import file: ${boxIdNo}`,
-          });
-          continue;
-        }
-        seenBoxIds.add(boxLower);
-      }
-
       const coords = this.parseGoogleCoordinates(row.google_coordinates);
       const hasGps =
         coords.registration_latitude != null &&
         coords.registration_longitude != null;
 
       const payload: Record<string, unknown> = {
-        box_id_no: boxIdNo || undefined,
+        box_id_no: boxIdNo || null,
         shop_name: shopName,
-        key_no: keyNo || undefined,
+        key_no: keyNo || null,
         route_id,
         route_name,
         city_id: cityId,
@@ -433,22 +395,95 @@ export class DonationBoxImportHandler implements EntityImportHandler {
         frd_officer_reference: row.frd_officer_reference?.trim() || undefined,
         assigned_user_ids: this.parseIdList(row.assigned_user_ids),
         ...coords,
-        // CSV rows often lack device GPS; don't force on-site check unless coords given
         require_collection_location: hasGps,
       };
 
       try {
-        const saved = await this.donationBoxService.importDonationBoxRow(
-          payload,
-          user,
+        let resolvedCityId = cityId;
+        if (!resolvedCityId && cityName) {
+          const geo = await this.donationBoxService.resolveGeoForImportRow(
+            payload,
+          );
+          resolvedCityId = geo.city_id;
+          payload.city_id = resolvedCityId;
+        }
+
+        const shopkeeper = String(row.shopkeeper || "").trim();
+        const cellNo = String(row.cell_no || "").trim();
+        const identityKey = this.buildShopIdentityKey(
+          shopName,
+          shopkeeper,
+          cellNo,
         );
-        successCount += 1;
-        results.push({
-          row: rowNumber,
-          success: true,
-          email: shopName,
-          id: saved.id,
-        });
+        if (identityKey) {
+          const seenId = seenIdentityInFile.get(identityKey);
+          if (seenId) {
+            skippedCount += 1;
+            const reason = `Duplicate in this CSV: same shop "${shopName}" + shopkeeper "${shopkeeper || "(empty)"}" + phone "${cellNo || "(empty)"}" already processed (kept id ${seenId}). box_id_no=${boxIdNo || "null"}, key_no=${keyNo || "null"}`;
+            results.push({
+              row: rowNumber,
+              success: true,
+              skipped: true,
+              email: shopName,
+              id: seenId,
+              skip_reason: reason,
+              error: reason,
+            });
+            continue;
+          }
+        }
+
+        const existing =
+          await this.donationBoxService.findExistingDonationBoxForImportRow(
+            payload,
+          );
+        if (existing) {
+          if (identityKey) {
+            seenIdentityInFile.set(identityKey, existing.box.id);
+          }
+          skippedCount += 1;
+          const reason = existing.reason;
+          results.push({
+            row: rowNumber,
+            success: true,
+            skipped: true,
+            email: shopName,
+            id: existing.box.id,
+            skip_reason: reason,
+            error: reason,
+          });
+          continue;
+        }
+
+        const { box, skipped, skip_reason } =
+          await this.donationBoxService.importDonationBoxRow(payload, user);
+        if (identityKey) {
+          seenIdentityInFile.set(identityKey, box.id);
+        }
+        if (skipped) {
+          skippedCount += 1;
+          const reason =
+            skip_reason ||
+            `Already in DB (id ${box.id}); box_id_no=${boxIdNo || "null"}, key_no=${keyNo || "null"}`;
+          results.push({
+            row: rowNumber,
+            success: true,
+            skipped: true,
+            email: shopName,
+            id: box.id,
+            skip_reason: reason,
+            error: reason,
+          });
+        } else {
+          successCount += 1;
+          results.push({
+            row: rowNumber,
+            success: true,
+            skipped: false,
+            email: shopName,
+            id: box.id,
+          });
+        }
       } catch (err: any) {
         failedCount += 1;
         results.push({
@@ -468,5 +503,24 @@ export class DonationBoxImportHandler implements EntityImportHandler {
       skipped_count: skippedCount,
       results,
     };
+  }
+
+  /** shop + shopkeeper + digits-only phone — same shop name alone is not a duplicate. */
+  private buildShopIdentityKey(
+    shopName: string,
+    shopkeeper: string,
+    cellNo: string,
+  ): string | null {
+    const shop = String(shopName || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (!shop) return null;
+    const keeper = String(shopkeeper || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const phone = String(cellNo || "").replace(/\D/g, "");
+    return `${shop}|${keeper}|${phone}`;
   }
 }

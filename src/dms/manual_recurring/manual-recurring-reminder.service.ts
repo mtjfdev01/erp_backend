@@ -1288,6 +1288,18 @@ export class ManualRecurringReminderService {
       for (const row of rows) {
         scanned += 1;
 
+        // Always open period dues for this cycle (even if reminder is deduped)
+        try {
+          await this.recurringLedgerService.ensurePeriodDuesForSubscription(
+            row,
+            { upToPeriodKey: periodKey },
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `ensurePeriodDues failed for recurring_donation ${row.id}: ${err?.message || err}`,
+          );
+        }
+
         if (!force && row.last_reminder_period_key === reminderDedupeKey) {
           skipped += 1;
           continue;

@@ -215,16 +215,55 @@ export class AlfalahService {
   async getOrderStatus(orderId: string): Promise<Record<string, any>> {
     const c = this.creds();
     const url = `${c.baseUrl}/HS/api/IPN/OrderStatus/${c.merchantId}/${c.storeId}/${encodeURIComponent(orderId)}`;
-    const { data } = await axios.get(url, { timeout: 60000 });
-    return data;
+    this.logger.log(
+      `Alfalah getOrderStatus request orderId=${orderId} merchantId=${c.merchantId} storeId=${c.storeId} url=${url}`,
+    );
+    try {
+      const { data, status, statusText } = await axios.get(url, {
+        timeout: 60000,
+      });
+      this.logger.log(
+        `Alfalah getOrderStatus success orderId=${orderId} httpStatus=${status} ${statusText} ` +
+          `ResponseCode=${data?.ResponseCode ?? "n/a"} TransactionStatus=${data?.TransactionStatus ?? "n/a"} ` +
+          `TransactionId=${data?.TransactionId ?? "n/a"} TransactionReferenceNumber=${data?.TransactionReferenceNumber ?? "n/a"} ` +
+          `TransactionAmount=${data?.TransactionAmount ?? "n/a"} Description=${data?.Description ?? "n/a"} ` +
+          `raw=${JSON.stringify(data)}`,
+      );
+      return data;
+    } catch (err: any) {
+      const httpStatus = err?.response?.status;
+      const responseData = err?.response?.data;
+      this.logger.error(
+        `Alfalah getOrderStatus failed orderId=${orderId} url=${url} ` +
+          `httpStatus=${httpStatus ?? "n/a"} message=${err?.message || err} ` +
+          `responseBody=${
+            responseData != null
+              ? typeof responseData === "string"
+                ? responseData
+                : JSON.stringify(responseData)
+              : "n/a"
+          }`,
+      );
+      throw err;
+    }
   }
 
   isPaidStatus(status: unknown): boolean {
-    return String(status || "").toLowerCase() === "paid";
+    const normalized = String(status || "").toLowerCase();
+    const paid = normalized === "paid";
+    this.logger.log(
+      `Alfalah isPaidStatus raw=${JSON.stringify(status)} normalized=${normalized} paid=${paid}`,
+    );
+    return paid;
   }
 
   isSuccessResponseCode(code: unknown): boolean {
-    return String(code || "") === "00";
+    const normalized = String(code || "");
+    const ok = normalized === "00";
+    this.logger.log(
+      `Alfalah isSuccessResponseCode raw=${JSON.stringify(code)} normalized=${normalized} success=${ok}`,
+    );
+    return ok;
   }
 }
 
