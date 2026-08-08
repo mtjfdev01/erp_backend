@@ -211,6 +211,47 @@ export class AlfalahService {
     };
   }
 
+  /**
+   * APG often returns OrderStatus as text/plain JSON (axios leaves it as a string).
+   * Normalize to a plain object so ResponseCode / TransactionStatus are readable.
+   */
+  parseIpnPayload(raw: unknown): Record<string, any> {
+    if (raw == null) {
+      return {};
+    }
+    if (typeof raw === "object" && !Array.isArray(raw)) {
+      return raw as Record<string, any>;
+    }
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        return {};
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          this.logger.log(
+            "Alfalah IPN payload was a JSON string; parsed successfully",
+          );
+          return parsed as Record<string, any>;
+        }
+        this.logger.warn(
+          `Alfalah IPN payload parsed but was not an object: ${typeof parsed}`,
+        );
+        return {};
+      } catch (err: any) {
+        this.logger.error(
+          `Alfalah IPN payload JSON parse failed: ${err?.message || err} raw=${trimmed.slice(0, 500)}`,
+        );
+        throw new BadRequestException(
+          "Invalid Alfalah IPN order status payload (expected JSON object)",
+        );
+      }
+    }
+    this.logger.warn(`Alfalah IPN payload unexpected type: ${typeof raw}`);
+    return {};
+  }
+
   /** IPN — GET order status after payment redirect or listener. */
   async getOrderStatus(orderId: string): Promise<Record<string, any>> {
     const c = this.creds();
@@ -222,14 +263,15 @@ export class AlfalahService {
       const { data, status, statusText } = await axios.get(url, {
         timeout: 60000,
       });
+      const parsed = this.parseIpnPayload(data);
       this.logger.log(
         `Alfalah getOrderStatus success orderId=${orderId} httpStatus=${status} ${statusText} ` +
-          `ResponseCode=${data?.ResponseCode ?? "n/a"} TransactionStatus=${data?.TransactionStatus ?? "n/a"} ` +
-          `TransactionId=${data?.TransactionId ?? "n/a"} TransactionReferenceNumber=${data?.TransactionReferenceNumber ?? "n/a"} ` +
-          `TransactionAmount=${data?.TransactionAmount ?? "n/a"} Description=${data?.Description ?? "n/a"} ` +
-          `raw=${JSON.stringify(data)}`,
+          `ResponseCode=${parsed?.ResponseCode ?? "n/a"} TransactionStatus=${parsed?.TransactionStatus ?? "n/a"} ` +
+          `TransactionId=${parsed?.TransactionId ?? "n/a"} TransactionReferenceNumber=${parsed?.TransactionReferenceNumber ?? "n/a"} ` +
+          `TransactionAmount=${parsed?.TransactionAmount ?? "n/a"} Description=${parsed?.Description ?? "n/a"} ` +
+          `raw=${JSON.stringify(parsed)}`,
       );
-      return data;
+      return parsed;
     } catch (err: any) {
       const httpStatus = err?.response?.status;
       const responseData = err?.response?.data;

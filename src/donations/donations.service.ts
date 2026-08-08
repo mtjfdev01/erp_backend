@@ -4678,7 +4678,7 @@ export class DonationsService {
     let data: Record<string, any>;
     try {
       const response = await axios.get(statusUrl, { timeout: 60000 });
-      data = response.data;
+      data = this.alfalahService.parseIpnPayload(response.data);
       this.logger.log(
         `Alfalah IPN listener GET success httpStatus=${response.status} ` +
           `ResponseCode=${data?.ResponseCode ?? "n/a"} TransactionStatus=${data?.TransactionStatus ?? "n/a"} ` +
@@ -4859,6 +4859,7 @@ export class DonationsService {
       );
       ipn = await this.alfalahService.getOrderStatus(orderRef);
     } else {
+      ipn = this.alfalahService.parseIpnPayload(ipn);
       this.logger.log(
         `Alfalah sync using provided IPN payload donationId=${donationId} source=${opts?.source || "alfalah_ipn"} ` +
           `ResponseCode=${ipn?.ResponseCode ?? "n/a"} TransactionStatus=${ipn?.TransactionStatus ?? "n/a"} ` +
