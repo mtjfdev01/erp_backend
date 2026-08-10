@@ -581,35 +581,58 @@ export class DonationsService {
   }
 
   /**
-   * Recurring donations bypass the generic PKR 5000 auto thanks/reminder threshold.
-   * Generic (one-time) donations still require amount >= 5000.
+   * True only when THIS donation is a recurring payment (initial / installment / intent).
+   * Do not use donor.recurring or “donor has any active subscription” — that would
+   * incorrectly skip the PKR 5000 threshold for unrelated one-time donations.
    */
   private async isRecurringRelatedDonation(donation: {
     id?: number | null;
     donor_id?: number | null;
+    amount?: number | null;
     donation_type?: string | null;
     donation_source?: string | null;
+    note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
-    donor?: { recurring?: boolean | null } | null;
+    donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
     if (!donation) return false;
-    if (donation.donor?.recurring === true) return true;
+
+    const intent = donation.manual_recurring_intent;
+    if (intent && typeof intent === "object") {
+      if (
+        intent.enroll === true ||
+        intent.installment_link === true ||
+        intent.recurring_subscription_id != null
+      ) {
+        return true;
+      }
+    }
+
     if (
-      donation.manual_recurring_intent &&
-      typeof donation.manual_recurring_intent === "object"
+      donation.recurrence_id != null &&
+      Number(donation.recurrence_id) > 0
     ) {
       return true;
     }
+
     const source = String(donation.donation_source || "").toLowerCase();
     if (source.includes("recurring")) return true;
+
     const type = String(donation.donation_type || "").toLowerCase();
     if (type.includes("recurring")) return true;
-    const note = String((donation as any).note || "").toLowerCase();
+
+    const note = String(donation.note || "").toLowerCase();
     if (note.includes("subscription #") || note.includes("installment")) {
       return true;
     }
 
-    // Linked to recurring_donations ledger (subscription or installment)
+    const donationId = Number(donation.id);
+    if (!Number.isFinite(donationId) || donationId <= 0) {
+      return false;
+    }
+
+    // Linked specifically as this donation (initial or installment payment), not "any sub for donor"
     try {
       const qb = this.donationRepository.manager
         .createQueryBuilder()
@@ -620,14 +643,13 @@ export class DonationsService {
           `(
             rd.initial_donation_id = :donationId
             OR (
-              rd.record_type = 'subscription'
-              AND rd.donor_id = :donorId
-              AND rd.status IN ('active', 'past_due', 'trialing')
+              rd.record_type = 'installment'
+              AND rd.stripe_payment_intent_id = :donationIdStr
             )
           )`,
           {
-            donationId: donation.id ?? 0,
-            donorId: donation.donor_id ?? donation.donor?.["id"] ?? 0,
+            donationId,
+            donationIdStr: String(donationId),
           },
         )
         .limit(1);
@@ -639,7 +661,7 @@ export class DonationsService {
     return false;
   }
 
-  /** Auto WhatsApp: unsent + (recurring OR amount >= 5000). */
+  /** Auto WhatsApp: unsent + (this donation is recurring OR amount >= 5000). */
   private async canAutoSendDonationMessage(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -648,6 +670,7 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
@@ -655,7 +678,7 @@ export class DonationsService {
     return this.isThanksEligibleDonation(donation);
   }
 
-  /** Auto email: unsent + (recurring OR amount >= 5000). */
+  /** Auto email: unsent + (this donation is recurring OR amount >= 5000). */
   private async canAutoSendDonationEmail(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -664,6 +687,7 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
@@ -671,7 +695,11 @@ export class DonationsService {
     return this.isThanksEligibleDonation(donation);
   }
 
-  /** Whether this donation qualifies for auto thanks (ignores sent flags). */
+  /**
+   * Auto abandon/thanks eligibility (ignores sent flags):
+   * - recurring donation → always eligible (no amount check)
+   * - one-time (normal) → only when amount >= 5000
+   */
   private async isThanksEligibleDonation(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -679,12 +707,23 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
     if (!donation) return false;
-    if (await this.isRecurringRelatedDonation(donation)) return true;
-    return Number(donation?.amount) >= 5000;
+    if (await this.isRecurringRelatedDonation(donation)) {
+      this.logger.log(
+        `Auto thanks/abandon eligible donationId=${donation.id} reason=recurring (amount check skipped)`,
+      );
+      return true;
+    }
+    const amount = Number(donation.amount);
+    const eligible = Number.isFinite(amount) && amount >= 5000;
+    this.logger.log(
+      `Auto thanks/abandon eligibility donationId=${donation.id} recurring=false amount=${donation.amount} eligible=${eligible} (threshold=5000)`,
+    );
+    return eligible;
   }
 
   /** Claim a thanks channel flag so concurrent paths cannot double-send. */
@@ -4564,14 +4603,41 @@ export class DonationsService {
   }
 
   async handleJazzCashIpn(payload: Record<string, unknown>) {
+    this.logger.log(
+      `JazzCash IPN process start payloadKeys=${Object.keys(payload || {}).join(",") || "none"} ` +
+        `raw=${JSON.stringify(payload)}`,
+    );
+
     const creds = this.jazzcashService.getCredentials();
+    this.logger.log(
+      `JazzCash IPN config env=${creds.env} merchantId=${creds.merchantId} ` +
+        `expectedIpnUrl=${creds.ipnUrl}`,
+    );
+
     const hashValid = verifyJazzCashSecureHash(payload, creds.integritySalt);
+    this.logger.log(
+      `JazzCash IPN hashVerified=${hashValid} ` +
+        `pp_TxnRefNo=${payload?.pp_TxnRefNo ?? "n/a"} ` +
+        `pp_ResponseCode=${payload?.pp_ResponseCode ?? "n/a"} ` +
+        `pp_ResponseMessage=${payload?.pp_ResponseMessage ?? "n/a"} ` +
+        `pp_Amount=${payload?.pp_Amount ?? "n/a"} ` +
+        `pp_AuthCode=${payload?.pp_AuthCode ?? "n/a"} ` +
+        `pp_RetreivalReferenceNo=${payload?.pp_RetreivalReferenceNo ?? payload?.pp_RetrievalReferenceNo ?? "n/a"} ` +
+        `pp_BillReference=${payload?.pp_BillReference ?? "n/a"} ` +
+        `pp_SecureHash=${payload?.pp_SecureHash ? String(payload.pp_SecureHash).slice(0, 12) + "..." : "n/a"}`,
+    );
     if (!hashValid) {
+      this.logger.error(
+        `JazzCash IPN rejected: invalid secure hash payload=${JSON.stringify(payload)}`,
+      );
       throw new BadRequestException("Invalid JazzCash secure hash");
     }
 
     const txnRef = String(payload.pp_TxnRefNo || "").trim();
     if (!txnRef) {
+      this.logger.error(
+        `JazzCash IPN rejected: missing pp_TxnRefNo payload=${JSON.stringify(payload)}`,
+      );
       throw new BadRequestException("Missing pp_TxnRefNo in JazzCash IPN");
     }
 
@@ -4579,25 +4645,35 @@ export class DonationsService {
       where: { orderId: txnRef },
       relations: ["donor"],
     });
+    let lookupPath = donation ? "orderId" : null;
 
     if (!donation) {
-      const idMatch = /^T(\d+)/.exec(txnRef);
+      // Txn format: T + YYYYMMDDHHMMSS + donationId
+      const idMatch = /^T\d{14}(\d+)$/.exec(txnRef);
       const donationId = idMatch ? Number(idMatch[1]) : NaN;
+      this.logger.log(
+        `JazzCash IPN orderId lookup miss txnRef=${txnRef} parsedDonationId=${Number.isFinite(donationId) ? donationId : "n/a"}`,
+      );
       if (Number.isFinite(donationId)) {
         donation = await this.donationRepository.findOne({
           where: { id: donationId },
           relations: ["donor"],
         });
+        if (donation) lookupPath = "txnRefParsedId";
       }
     }
 
     if (!donation) {
+      this.logger.error(
+        `JazzCash IPN donation not found txnRef=${txnRef} payload=${JSON.stringify(payload)}`,
+      );
       throw new NotFoundException(
         `Donation not found for JazzCash txn ${txnRef}`,
       );
     }
 
     const responseCode = String(payload.pp_ResponseCode || "");
+    const previousStatus = donation.status;
     let newStatus = donation.status;
     // IPN: 121 = successful transaction (per JazzCash IPN guide)
     if (responseCode === "121") {
@@ -4605,6 +4681,12 @@ export class DonationsService {
     } else if (["199", "999"].includes(responseCode)) {
       newStatus = "failed";
     }
+
+    this.logger.log(
+      `JazzCash IPN mapping donationId=${donation.id} lookup=${lookupPath} ` +
+        `dbStatus=${previousStatus} responseCode=${responseCode} mappedStatus=${newStatus} ` +
+        `amount=${donation.amount} orderId=${donation.orderId}`,
+    );
 
     if (newStatus !== donation.status) {
       await this.donationRepository.update(donation.id, {
@@ -4624,16 +4706,28 @@ export class DonationsService {
       });
       await this.refreshDonorDonationStats(donation.donor_id);
 
+      this.logger.log(
+        `JazzCash IPN DB updated donationId=${donation.id} ${previousStatus} -> ${newStatus}`,
+      );
+
       if (this.isSuccessfulDonationStatus(newStatus)) {
         await this.afterSuccessfulDonationPayment(donation.id);
       }
+    } else {
+      this.logger.log(
+        `JazzCash IPN no DB status change donationId=${donation.id} status=${donation.status}`,
+      );
     }
 
-    return {
+    const result = {
       donationId: donation.id,
       status: newStatus,
       txnRef,
     };
+    this.logger.log(
+      `JazzCash IPN process done ${JSON.stringify(result)}`,
+    );
+    return result;
   }
 
   buildJazzCashIpnAcknowledgement(): Record<string, string> {

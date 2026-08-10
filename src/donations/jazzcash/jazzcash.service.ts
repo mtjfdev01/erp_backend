@@ -265,6 +265,10 @@ export class JazzCashService {
       pp_ResponseMessage: "IPN received successfully",
     };
     body.pp_SecureHash = buildJazzCashSecureHash(body, creds.integritySalt);
+    this.logger.log(
+      `JazzCash IPN ack built env=${creds.env} merchantId=${creds.merchantId} ` +
+        `body=${JSON.stringify(body)}`,
+    );
     return body;
   }
 }
