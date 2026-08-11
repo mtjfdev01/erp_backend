@@ -93,6 +93,13 @@ export class RecurringDonation extends BaseEntity {
   last_reminder_sent_at: Date | null;
 
   /**
+   * Consecutive unpaid payment-link reminders sent (cron + manual).
+   * Reset when an installment is settled. Used for auto-disable after 3 reminders.
+   */
+  @Column({ type: "int", nullable: true, default: 0 })
+  unpaid_payment_reminder_count: number | null;
+
+  /**
    * Billing period this installment/due covers (e.g. 2026-03, week range).
    * Pending dues use this without creating a new donations row.
    */

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
@@ -12,6 +12,11 @@ import {
   listPeriodKeysBetween,
 } from "src/dms/manual_recurring/utils/manual-recurring-period.util";
 import { CampaignTargetFrequency } from "src/dms/campaigns/utils/campaign-recurring.constants";
+import {
+  MAX_UNPAID_PAYMENT_REMINDERS_BEFORE_DISABLE,
+  RECURRING_SUBSCRIPTION_DISABLED_REASON,
+  RECURRING_SUBSCRIPTION_DISABLED_STATUS,
+} from "./recurring-donations.constants";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -25,6 +30,8 @@ const SORTABLE_FIELDS = new Set([
 
 @Injectable()
 export class RecurringDonationsLedgerService {
+  private readonly logger = new Logger(RecurringDonationsLedgerService.name);
+
   constructor(
     @InjectRepository(RecurringDonation)
     private readonly recurringDonationRepo: Repository<RecurringDonation>,
@@ -501,6 +508,10 @@ export class RecurringDonationsLedgerService {
       await this.recurringDonationRepo.update(master.id, { status: "active" });
     }
 
+    // --- ENABLE LATER: donor paid — reset unpaid reminder streak ---
+    // await this.resetUnpaidPaymentReminderCount(master.id);
+    // --- END ENABLE LATER ---
+
     return { recorded: true };
   }
 
@@ -649,6 +660,90 @@ export class RecurringDonationsLedgerService {
   }
 
   /**
+   * Unpaid payment reminder tracking — used when auto-disable after 3 reminders is enabled.
+   * Wire via commented blocks in processNonStripeLedgerReminders + sendInstallmentPaymentLink.
+   */
+  getUnpaidPaymentReminderCount(subscription: RecurringDonation | null | undefined): number {
+    const n = Number(subscription?.unpaid_payment_reminder_count ?? 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
+  isSubscriptionDisabledByUnpaidReminders(
+    subscription: RecurringDonation | null | undefined,
+  ): boolean {
+    if (!subscription) return false;
+    const status = String(subscription.status || "").toLowerCase();
+    if (status === RECURRING_SUBSCRIPTION_DISABLED_STATUS) {
+      return (
+        String(subscription.stripe_billing_reason || "") ===
+        RECURRING_SUBSCRIPTION_DISABLED_REASON
+      );
+    }
+    return (
+      this.getUnpaidPaymentReminderCount(subscription) >=
+      MAX_UNPAID_PAYMENT_REMINDERS_BEFORE_DISABLE
+    );
+  }
+
+  async isSubscriptionBlockedByUnpaidReminders(
+    subscriptionId: number,
+  ): Promise<boolean> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) return true;
+    if (subscription.stripe_subscription_id) return false;
+    return this.isSubscriptionDisabledByUnpaidReminders(subscription);
+  }
+
+  /** Call after a successful payment-link reminder send. Returns new count + whether disabled. */
+  async recordUnpaidPaymentReminderSent(subscriptionId: number): Promise<{
+    count: number;
+    disabled: boolean;
+  }> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription || subscription.stripe_subscription_id) {
+      return { count: 0, disabled: false };
+    }
+
+    const nextCount =
+      this.getUnpaidPaymentReminderCount(subscription) + 1;
+    const patch: Partial<RecurringDonation> = {
+      unpaid_payment_reminder_count: nextCount,
+    };
+
+    let disabled = false;
+    if (nextCount >= MAX_UNPAID_PAYMENT_REMINDERS_BEFORE_DISABLE) {
+      disabled = true;
+      patch.status = RECURRING_SUBSCRIPTION_DISABLED_STATUS;
+      patch.stripe_billing_reason = RECURRING_SUBSCRIPTION_DISABLED_REASON;
+      this.logger.warn(
+        `Recurring subscription ${subscriptionId} disabled after ${nextCount} unpaid payment reminders`,
+      );
+    }
+
+    await this.recurringDonationRepo.update(subscriptionId, patch);
+    return { count: nextCount, disabled };
+  }
+
+  /** Reset reminder streak when donor pays an installment / initial donation. */
+  async resetUnpaidPaymentReminderCount(subscriptionId: number): Promise<void> {
+    await this.recurringDonationRepo.update(subscriptionId, {
+      unpaid_payment_reminder_count: 0,
+    });
+  }
+
+  /**
    * Manual send of the same installment payment link the cron uses
    * (donation failure/paylink email + abandon WhatsApp).
    * Non-Stripe subscriptions only.
@@ -675,6 +770,15 @@ export class RecurringDonationsLedgerService {
         "Stripe subscriptions are charged automatically — no manual installment link",
       );
     }
+
+    // --- ENABLE LATER: block manual link if 3 unpaid reminders already sent ---
+    // if (await this.isSubscriptionBlockedByUnpaidReminders(subscriptionId)) {
+    //   throw new BadRequestException(
+    //     `Recurring subscription is disabled after ${MAX_UNPAID_PAYMENT_REMINDERS_BEFORE_DISABLE} unpaid payment reminders`,
+    //   );
+    // }
+    // --- END ENABLE LATER ---
+
     if (!subscription.donor_id) {
       throw new BadRequestException("Subscription has no donor linked");
     }
@@ -746,6 +850,10 @@ export class RecurringDonationsLedgerService {
         errors.join("; ") || "Failed to send installment payment link",
       );
     }
+
+    // --- ENABLE LATER: count reminder toward auto-disable after 3 unpaid ---
+    // await this.recordUnpaidPaymentReminderSent(subscriptionId);
+    // --- END ENABLE LATER ---
 
     return {
       donation_id: donation.id,
@@ -839,6 +947,10 @@ export class RecurringDonationsLedgerService {
         status: "active",
       });
     }
+
+    // --- ENABLE LATER: admin marked paid — reset unpaid reminder streak ---
+    // await this.resetUnpaidPaymentReminderCount(subscriptionId);
+    // --- END ENABLE LATER ---
 
     const pending_remaining = await this.recurringDonationRepo
       .createQueryBuilder("inst")

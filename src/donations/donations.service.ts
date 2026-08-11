@@ -60,6 +60,7 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
 import { DonationAuditService } from "./audit/donation-audit.service";
 import { RecurringDonationsStripeService } from "./recurring_donations/recurring-donations-stripe.service";
 import { RecurringDonationsLedgerService } from "./recurring_donations/recurring-donations-ledger.service";
+import { resolveRecurringStartDateForStorage, resolvePrepaidContinueStartDate } from "./recurring_donations/recurring-billing-date.util";
 import { DonationAuditAction } from "./audit/donation-audit-action.enum";
 import { DonationAuditSource } from "./audit/donation-audit-source.enum";
 import {
@@ -416,6 +417,19 @@ export class DonationsService {
       );
     }
 
+    if (mode === "day_of_month") {
+      const dom = createDonationDto.recurring?.day_of_month;
+      if (
+        dom != null &&
+        (!Number.isFinite(Number(dom)) || Number(dom) < 1 || Number(dom) > 31)
+      ) {
+        throw new HttpException(
+          "recurring.day_of_month must be between 1 and 31",
+          400,
+        );
+      }
+    }
+
     if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
       throw new HttpException(
         "recurring.start_date must be YYYY-MM-DD",
@@ -473,6 +487,58 @@ export class DonationsService {
     return "month";
   }
 
+  /** Normalized billing anchor for Stripe + non-Stripe ledger subscriptions. */
+  private resolveRecurringStartConfig(createDonationDto: CreateDonationDto): {
+    startDateMode: string;
+    startDate: string | null;
+  } {
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
+      // Pay N months now → first auto reminder / cycle after coverage ends
+      const startDate = resolvePrepaidContinueStartDate(prepaidMonths);
+      return {
+        startDateMode: "day_of_month",
+        startDate,
+      };
+    }
+
+    const recurring = createDonationDto.recurring;
+    return resolveRecurringStartDateForStorage({
+      startDateMode: recurring?.start_date_mode,
+      startDate: recurring?.start_date,
+      dayOfMonth: recurring?.day_of_month,
+    });
+  }
+
+  private resolveLedgerMonthlyAmount(
+    createDonationDto: CreateDonationDto,
+    savedAmount: number | null | undefined,
+  ): number | null {
+    const raw =
+      savedAmount ??
+      (createDonationDto.amount != null ? Number(createDonationDto.amount) : null);
+    if (raw == null || !Number.isFinite(Number(raw))) return null;
+    const total = Math.round(Number(raw));
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths > 1) {
+      return Math.max(1, Math.round(total / prepaidMonths));
+    }
+    return total;
+  }
+
+  /** True when donor prepaid N months and should continue on ledger after that. */
+  private wantsPrepaidThenRecurring(createDonationDto: CreateDonationDto): boolean {
+    const months = Number(createDonationDto.prepaid_months);
+    return (
+      Number.isFinite(months) &&
+      months >= 1 &&
+      this.hasRecurringConsent(createDonationDto) &&
+      (Boolean(createDonationDto.recurring?.interval) ||
+        this.isDonationRecurring(createDonationDto) ||
+        String(createDonationDto.pledge_mode || "").trim() === "prepaid_months")
+    );
+  }
+
   /** Non-Stripe recurring → same Recurring Donations list as Stripe (cron reminders). */
   private async ensureNonStripeRecurringLedgerSubscription(
     createDonationDto: CreateDonationDto,
@@ -487,14 +553,29 @@ export class DonationsService {
     },
     donorId: number | null,
   ): Promise<void> {
-    if (!this.isDonationRecurring(createDonationDto)) return;
-    if (!this.usesLegacyRecurringPlan(createDonationDto.donation_method)) return;
+    const prepaidThenRecurring = this.wantsPrepaidThenRecurring(createDonationDto);
+    if (!this.isDonationRecurring(createDonationDto) && !prepaidThenRecurring) {
+      return;
+    }
+
+    // Stripe auto-subscriptions use webhooks; prepaid-then-recurring still uses ledger reminders
+    const isStripeMethod = !this.usesLegacyRecurringPlan(
+      createDonationDto.donation_method || savedDonation.donation_method,
+    );
+    if (isStripeMethod && !prepaidThenRecurring) return;
+
+    const { startDateMode, startDate } =
+      this.resolveRecurringStartConfig(createDonationDto);
+    const monthlyAmount = this.resolveLedgerMonthlyAmount(
+      createDonationDto,
+      savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
+    );
 
     await this.recurringDonationsLedgerService.ensureNonStripeSubscriptionFromDonation(
       {
         donationId: savedDonation.id,
         donorId,
-        amount: savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
+        amount: monthlyAmount,
         currency: savedDonation.currency || createDonationDto.currency || "PKR",
         donationMethod:
           savedDonation.donation_method || createDonationDto.donation_method,
@@ -508,9 +589,8 @@ export class DonationsService {
           savedDonation.donation_type || createDonationDto.donation_type,
         billingInterval: this.mapLedgerBillingInterval(createDonationDto),
         billingIntervalCount: createDonationDto.recurring?.interval_count ?? 1,
-        startDateMode:
-          createDonationDto.recurring?.start_date_mode || "same_date",
-        startDate: createDonationDto.recurring?.start_date || null,
+        startDateMode,
+        startDate,
         consent: this.hasRecurringConsent(createDonationDto),
       },
     );
@@ -1035,17 +1115,23 @@ export class DonationsService {
   private resolveStripeRecurring(
     createDonationDto: CreateDonationDto,
   ): StripeRecurringParams | undefined {
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
+      // Prepaid total is charged once; ledger handles continue-after-months
+      return undefined;
+    }
+
     const consent = this.hasRecurringConsent(createDonationDto);
-    const start_date_mode = createDonationDto.recurring?.start_date_mode;
-    const start_date = createDonationDto.recurring?.start_date;
+    const { startDateMode, startDate } =
+      this.resolveRecurringStartConfig(createDonationDto);
 
     if (createDonationDto.recurring?.interval) {
       return {
         interval: createDonationDto.recurring
           .interval as StripeRecurringParams["interval"],
         interval_count: createDonationDto.recurring.interval_count ?? 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1057,8 +1143,8 @@ export class DonationsService {
       return {
         interval: "week",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1066,8 +1152,8 @@ export class DonationsService {
       return {
         interval: "month",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1075,8 +1161,8 @@ export class DonationsService {
       return {
         interval: "day",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
