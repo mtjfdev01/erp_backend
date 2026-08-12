@@ -12,6 +12,8 @@ export enum CommunicationDeliveryStatus {
   OPENED = "opened",
   CLICKED = "clicked",
   REPLIED = "replied",
+  /** Recipient marked email as spam (Resend email.complained). */
+  COMPLAINED = "complained",
   FAILED = "failed",
 }
 

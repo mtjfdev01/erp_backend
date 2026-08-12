@@ -43,6 +43,7 @@ export class EmailTemplateController {
     @Query("template_id") template_id: number,
     @Query("channel") channel: string,
     @Query("batch_status") batch_status: string,
+    @Query("send_source") send_source: string,
   ) {
     return this.emailTemplateService
       .findBatches({
@@ -51,6 +52,7 @@ export class EmailTemplateController {
         template_id: template_id ? Number(template_id) : undefined,
         channel,
         batch_status,
+        send_source: send_source || undefined,
       })
       .then((result) => ({ success: true, ...result }));
   }

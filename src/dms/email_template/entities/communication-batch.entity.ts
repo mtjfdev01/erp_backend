@@ -16,6 +16,12 @@ export enum CommunicationBatchStatus {
   FAILED = "failed",
 }
 
+/** Where the bulk send was initiated from. */
+export enum CommunicationSendSource {
+  DONOR_BULK = "donor_bulk",
+  COMMUNICATION = "communication",
+}
+
 @Entity("communication_batches")
 @Index("idx_communication_batches_template_id", ["template_id"])
 @Index("idx_communication_batches_sent_at", ["sent_at"])
@@ -77,6 +83,14 @@ export class CommunicationBatch extends BaseEntity {
     default: CommunicationBatchStatus.COMPLETED,
   })
   batch_status: CommunicationBatchStatus;
+
+  /** donor_bulk = donors list bulk actions; communication = Communication → Send page */
+  @Column({
+    type: "varchar",
+    length: 32,
+    default: CommunicationSendSource.COMMUNICATION,
+  })
+  send_source: CommunicationSendSource | string;
 
   @OneToMany(() => CommunicationLog, (log) => log.batch)
   logs: CommunicationLog[];

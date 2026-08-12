@@ -17,6 +17,7 @@ import {
   CommunicationBatch,
   CommunicationBatchStatus,
   CommunicationSelectionMode,
+  CommunicationSendSource,
 } from "./entities/communication-batch.entity";
 import { Campaign } from "../campaigns/entities/campaign.entity";
 import { Appeal } from "../appeals/entities/appeal.entity";
@@ -481,6 +482,10 @@ export class EmailTemplateService {
         batch_status: isScheduled
           ? CommunicationBatchStatus.SCHEDULED
           : CommunicationBatchStatus.COMPLETED,
+        send_source:
+          dto.send_source === CommunicationSendSource.DONOR_BULK
+            ? CommunicationSendSource.DONOR_BULK
+            : CommunicationSendSource.COMMUNICATION,
       }),
     );
 
@@ -717,9 +722,16 @@ export class EmailTemplateService {
     template_id?: number;
     channel?: string;
     batch_status?: string;
+    send_source?: string;
   }) {
-    const { page = 1, pageSize = 20, template_id, channel, batch_status } =
-      params;
+    const {
+      page = 1,
+      pageSize = 20,
+      template_id,
+      channel,
+      batch_status,
+      send_source,
+    } = params;
     const query = this.batchRepository
       .createQueryBuilder("batch")
       .leftJoinAndSelect("batch.template", "template")
@@ -731,6 +743,9 @@ export class EmailTemplateService {
     if (channel) query.andWhere("batch.channel = :channel", { channel });
     if (batch_status)
       query.andWhere("batch.batch_status = :batch_status", { batch_status });
+    if (send_source) {
+      query.andWhere("batch.send_source = :send_source", { send_source });
+    }
 
     const [items, total] = await query
       .orderBy("batch.created_at", "DESC")
@@ -738,8 +753,17 @@ export class EmailTemplateService {
       .take(pageSize)
       .getManyAndCount();
 
+    const batchIds = items.map((b) => b.id);
+    const analyticsByBatch =
+      await this.getBatchAnalyticsByIds(batchIds);
+
+    const data = items.map((batch) => ({
+      ...batch,
+      analytics: analyticsByBatch.get(batch.id) || this.emptyBatchAnalytics(),
+    }));
+
     return {
-      data: items,
+      data,
       pagination: {
         total,
         page,
@@ -747,6 +771,83 @@ export class EmailTemplateService {
         totalPages: Math.ceil(total / pageSize),
       },
     };
+  }
+
+  private emptyBatchAnalytics() {
+    return {
+      total: 0,
+      sent: 0,
+      delivered: 0,
+      opened: 0,
+      clicked: 0,
+      failed: 0,
+      spam: 0,
+      scheduled: 0,
+      pending: 0,
+      not_opened: 0,
+    };
+  }
+
+  private async getBatchAnalyticsByIds(
+    batchIds: number[],
+  ): Promise<Map<number, ReturnType<EmailTemplateService["emptyBatchAnalytics"]>>> {
+    const map = new Map<
+      number,
+      ReturnType<EmailTemplateService["emptyBatchAnalytics"]>
+    >();
+    if (!batchIds.length) return map;
+
+    const rows = await this.logRepository
+      .createQueryBuilder("log")
+      .select("log.batch_id", "batch_id")
+      .addSelect("log.delivery_status", "delivery_status")
+      .addSelect("COUNT(*)::int", "cnt")
+      .where("log.batch_id IN (:...batchIds)", { batchIds })
+      .andWhere("log.is_archived = false")
+      .groupBy("log.batch_id")
+      .addGroupBy("log.delivery_status")
+      .getRawMany();
+
+    for (const id of batchIds) {
+      map.set(id, this.emptyBatchAnalytics());
+    }
+
+    for (const row of rows) {
+      const batchId = Number(row.batch_id);
+      const status = String(row.delivery_status || "").toLowerCase();
+      const cnt = Number(row.cnt) || 0;
+      const current = map.get(batchId) || this.emptyBatchAnalytics();
+      current.total += cnt;
+
+      if (status === CommunicationDeliveryStatus.CLICKED) {
+        current.clicked += cnt;
+        current.opened += cnt;
+        current.delivered += cnt;
+        current.sent += cnt;
+      } else if (status === CommunicationDeliveryStatus.OPENED) {
+        current.opened += cnt;
+        current.delivered += cnt;
+        current.sent += cnt;
+      } else if (status === CommunicationDeliveryStatus.DELIVERED) {
+        current.delivered += cnt;
+        current.sent += cnt;
+      } else if (status === CommunicationDeliveryStatus.SENT) {
+        current.sent += cnt;
+      } else if (status === CommunicationDeliveryStatus.COMPLAINED) {
+        current.spam += cnt;
+      } else if (status === CommunicationDeliveryStatus.FAILED) {
+        current.failed += cnt;
+      } else if (status === CommunicationDeliveryStatus.SCHEDULED) {
+        current.scheduled += cnt;
+      } else if (status === CommunicationDeliveryStatus.PENDING) {
+        current.pending += cnt;
+      }
+
+      current.not_opened = Math.max(0, current.sent - current.opened);
+      map.set(batchId, current);
+    }
+
+    return map;
   }
 
   async findBatchOne(id: number) {
@@ -770,17 +871,8 @@ export class EmailTemplateService {
   }
 
   private buildBatchAnalytics(logs: CommunicationLog[]) {
-    const counts = {
-      total: logs.length,
-      sent: 0,
-      delivered: 0,
-      opened: 0,
-      clicked: 0,
-      failed: 0,
-      scheduled: 0,
-      pending: 0,
-      not_opened: 0,
-    };
+    const counts = this.emptyBatchAnalytics();
+    counts.total = logs.length;
 
     for (const log of logs) {
       const status = String(log.delivery_status || "").toLowerCase();
@@ -798,6 +890,8 @@ export class EmailTemplateService {
         counts.sent += 1;
       } else if (status === CommunicationDeliveryStatus.SENT) {
         counts.sent += 1;
+      } else if (status === CommunicationDeliveryStatus.COMPLAINED) {
+        counts.spam += 1;
       } else if (status === CommunicationDeliveryStatus.FAILED) {
         counts.failed += 1;
       } else if (status === CommunicationDeliveryStatus.SCHEDULED) {
@@ -807,9 +901,7 @@ export class EmailTemplateService {
       }
     }
 
-    // Approximate: successfully sent/delivered but no open event yet
     counts.not_opened = Math.max(0, counts.sent - counts.opened);
-
     return counts;
   }
 
@@ -833,8 +925,15 @@ export class EmailTemplateService {
 
     const log = await this.logRepository.findOne({
       where: { provider_message_id: emailId, is_archived: false },
+      relations: ["batch"],
     });
     if (!log) {
+      return { matched: false };
+    }
+
+    // Open/click analytics only for donor bulk sends (DonorBulkActionsModal)
+    const source = String(log.batch?.send_source || "").trim();
+    if (source !== CommunicationSendSource.DONOR_BULK) {
       return { matched: false };
     }
 
@@ -870,9 +969,10 @@ export class EmailTemplateService {
         log.error_message ||
         (type === "email.bounced"
           ? "Email bounced"
-          : type === "email.complained"
-            ? "Marked as spam"
-            : `Resend event: ${type}`);
+          : `Resend event: ${type}`);
+    }
+    if (next.status === CommunicationDeliveryStatus.COMPLAINED) {
+      patch.error_message = log.error_message || "Marked as spam";
     }
 
     await this.logRepository.update(log.id, patch);
@@ -891,6 +991,7 @@ export class EmailTemplateService {
       [CommunicationDeliveryStatus.OPENED]: 4,
       [CommunicationDeliveryStatus.CLICKED]: 5,
       [CommunicationDeliveryStatus.REPLIED]: 6,
+      [CommunicationDeliveryStatus.COMPLAINED]: 98,
       [CommunicationDeliveryStatus.FAILED]: 99,
     };
 
@@ -901,10 +1002,9 @@ export class EmailTemplateService {
       candidate = CommunicationDeliveryStatus.OPENED;
     } else if (eventType === "email.clicked") {
       candidate = CommunicationDeliveryStatus.CLICKED;
-    } else if (
-      eventType === "email.bounced" ||
-      eventType === "email.complained"
-    ) {
+    } else if (eventType === "email.complained") {
+      candidate = CommunicationDeliveryStatus.COMPLAINED;
+    } else if (eventType === "email.bounced") {
       candidate = CommunicationDeliveryStatus.FAILED;
     } else if (eventType === "email.sent") {
       candidate = CommunicationDeliveryStatus.SENT;
@@ -913,9 +1013,10 @@ export class EmailTemplateService {
     if (!candidate) return null;
 
     const currentKey = String(current || CommunicationDeliveryStatus.PENDING);
-    // Never downgrade engagement (opened/clicked). Failed can override non-clicked.
+    // Terminal negative outcomes can override non-clicked engagement
     if (
-      candidate === CommunicationDeliveryStatus.FAILED &&
+      (candidate === CommunicationDeliveryStatus.FAILED ||
+        candidate === CommunicationDeliveryStatus.COMPLAINED) &&
       currentKey !== CommunicationDeliveryStatus.CLICKED
     ) {
       return { status: candidate };
