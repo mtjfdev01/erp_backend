@@ -9,6 +9,7 @@ import {
 } from "typeorm";
 import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import { Route } from "../../geographic/routes/entities/route.entity";
+import { City } from "../../geographic/cities/entities/city.entity";
 import { User } from "../../../users/user.entity";
 
 export enum BoxType {
@@ -41,15 +42,16 @@ export class DonationBox extends BaseEntity {
   @Column({ name: "box_id_no", type: "varchar", nullable: true, unique: true })
   box_id_no: string | null;
 
-  @Column({ nullable: true })
-  key_no: string;
+  /** Physical key number — optional; duplicates allowed across shops. */
+  @Column({ type: "varchar", nullable: true, default: null })
+  key_no: string | null;
 
   // Location Details - Foreign Key
   @Column({ nullable: true })
-  route_id: number;
+  route_id: number | null;
 
   @Column({ nullable: true })
-  city_id: number;
+  city_id: number | null;
 
   // Shop Details
   @Column()
@@ -115,9 +117,13 @@ export class DonationBox extends BaseEntity {
   is_active: boolean;
 
   // Relationships
-  @ManyToOne(() => Route, { nullable: false, onDelete: "CASCADE" })
+  @ManyToOne(() => Route, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "route_id" })
-  route: Route;
+  route: Route | null;
+
+  @ManyToOne(() => City, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "city_id" })
+  city: City | null;
 
   @ManyToMany(() => User, (user) => user.donationBoxes, { cascade: true })
   @JoinTable({

@@ -1,8 +1,17 @@
 /** Task.project_id prefix — one follow-up task per donation. */
 export const DONATION_PENDING_TASK_PROJECT_PREFIX = "donation-pending:";
 
+/**
+ * Kill switch for pending/failed website donation → call-center task creation.
+ * Set true to re-enable cron + manual follow-up task creation.
+ */
+export const DONATION_PENDING_FOLLOW_UP_ENABLED = false;
+
 /** Minutes after creation before a pending donation triggers a call-center task. */
 export const PENDING_DONATION_FOLLOW_UP_MINUTES = 3;
+
+/** Only create follow-up tasks when donation amount is at least this (PKR / currency units). */
+export const MIN_DONATION_FOLLOW_UP_AMOUNT = 1000;
 
 export const DONATION_PENDING_MOV_ITEMS = [
   "Contacted Donor",

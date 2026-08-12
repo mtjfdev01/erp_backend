@@ -7,6 +7,7 @@ import { MigrationController } from "./migration.controller";
 import { DonationsSummaryController } from "./donations-summary.controller";
 import { CommunicationController } from "../utils/controllers/communication.controller";
 import { Donation } from "./entities/donation.entity";
+import { DonationAttachment } from "./entities/donation-attachment.entity";
 import { DonationInKind } from "../dms/donation_in_kind/entities/donation_in_kind.entity";
 import { User } from "../users/user.entity";
 import { JwtModule } from "@nestjs/jwt";
@@ -15,6 +16,7 @@ import { EmailModule } from "../email/email.module";
 import { PayfastService } from "./payfast.service";
 import { StripeService } from "./stripe.service";
 import { AlfalahService } from "./alfalah/alfalah.service";
+import { JazzCashService } from "./jazzcash/jazzcash.service";
 import { DonorModule } from "../dms/donor/donor.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
@@ -42,6 +44,7 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
     ManualRecurringModule,
     TypeOrmModule.forFeature([
       Donation,
+      DonationAttachment,
       DonationInKind,
       User,
       RecurringDonationPlan,
@@ -74,6 +77,7 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
     PayfastService,
     StripeService,
     AlfalahService,
+    JazzCashService,
     WhatsAppService,
     DonationGeoBackfillService,
     DonationGeoBackfillRunner,

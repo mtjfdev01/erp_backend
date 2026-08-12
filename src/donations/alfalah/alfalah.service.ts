@@ -211,20 +211,101 @@ export class AlfalahService {
     };
   }
 
+  /**
+   * APG often returns OrderStatus as text/plain JSON (axios leaves it as a string).
+   * Normalize to a plain object so ResponseCode / TransactionStatus are readable.
+   */
+  parseIpnPayload(raw: unknown): Record<string, any> {
+    if (raw == null) {
+      return {};
+    }
+    if (typeof raw === "object" && !Array.isArray(raw)) {
+      return raw as Record<string, any>;
+    }
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        return {};
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          this.logger.log(
+            "Alfalah IPN payload was a JSON string; parsed successfully",
+          );
+          return parsed as Record<string, any>;
+        }
+        this.logger.warn(
+          `Alfalah IPN payload parsed but was not an object: ${typeof parsed}`,
+        );
+        return {};
+      } catch (err: any) {
+        this.logger.error(
+          `Alfalah IPN payload JSON parse failed: ${err?.message || err} raw=${trimmed.slice(0, 500)}`,
+        );
+        throw new BadRequestException(
+          "Invalid Alfalah IPN order status payload (expected JSON object)",
+        );
+      }
+    }
+    this.logger.warn(`Alfalah IPN payload unexpected type: ${typeof raw}`);
+    return {};
+  }
+
   /** IPN — GET order status after payment redirect or listener. */
   async getOrderStatus(orderId: string): Promise<Record<string, any>> {
     const c = this.creds();
     const url = `${c.baseUrl}/HS/api/IPN/OrderStatus/${c.merchantId}/${c.storeId}/${encodeURIComponent(orderId)}`;
-    const { data } = await axios.get(url, { timeout: 60000 });
-    return data;
+    this.logger.log(
+      `Alfalah getOrderStatus request orderId=${orderId} merchantId=${c.merchantId} storeId=${c.storeId} url=${url}`,
+    );
+    try {
+      const { data, status, statusText } = await axios.get(url, {
+        timeout: 60000,
+      });
+      const parsed = this.parseIpnPayload(data);
+      this.logger.log(
+        `Alfalah getOrderStatus success orderId=${orderId} httpStatus=${status} ${statusText} ` +
+          `ResponseCode=${parsed?.ResponseCode ?? "n/a"} TransactionStatus=${parsed?.TransactionStatus ?? "n/a"} ` +
+          `TransactionId=${parsed?.TransactionId ?? "n/a"} TransactionReferenceNumber=${parsed?.TransactionReferenceNumber ?? "n/a"} ` +
+          `TransactionAmount=${parsed?.TransactionAmount ?? "n/a"} Description=${parsed?.Description ?? "n/a"} ` +
+          `raw=${JSON.stringify(parsed)}`,
+      );
+      return parsed;
+    } catch (err: any) {
+      const httpStatus = err?.response?.status;
+      const responseData = err?.response?.data;
+      this.logger.error(
+        `Alfalah getOrderStatus failed orderId=${orderId} url=${url} ` +
+          `httpStatus=${httpStatus ?? "n/a"} message=${err?.message || err} ` +
+          `responseBody=${
+            responseData != null
+              ? typeof responseData === "string"
+                ? responseData
+                : JSON.stringify(responseData)
+              : "n/a"
+          }`,
+      );
+      throw err;
+    }
   }
 
   isPaidStatus(status: unknown): boolean {
-    return String(status || "").toLowerCase() === "paid";
+    const normalized = String(status || "").toLowerCase();
+    const paid = normalized === "paid";
+    this.logger.log(
+      `Alfalah isPaidStatus raw=${JSON.stringify(status)} normalized=${normalized} paid=${paid}`,
+    );
+    return paid;
   }
 
   isSuccessResponseCode(code: unknown): boolean {
-    return String(code || "") === "00";
+    const normalized = String(code || "");
+    const ok = normalized === "00";
+    this.logger.log(
+      `Alfalah isSuccessResponseCode raw=${JSON.stringify(code)} normalized=${normalized} success=${ok}`,
+    );
+    return ok;
   }
 }
 

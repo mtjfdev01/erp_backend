@@ -200,6 +200,7 @@ export class DonationBoxService {
   private buildDonationBoxPatch(dto: Record<string, unknown>): Record<string, unknown> {
     const allowed = [
       "key_no",
+      "box_id_no",
       "route_id",
       "city_id",
       "shop_name",
@@ -217,7 +218,19 @@ export class DonationBoxService {
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
-      if (dto[key] !== undefined) patch[key] = dto[key];
+      if (dto[key] === undefined) continue;
+      if (key === "key_no" || key === "box_id_no") {
+        patch[key] = this.normalizeOptionalText(dto[key]);
+      } else if (key === "route_id" || key === "city_id") {
+        const raw = dto[key];
+        if (raw === "" || raw === null) patch[key] = null;
+        else {
+          const n = Number(raw);
+          patch[key] = Number.isFinite(n) ? n : null;
+        }
+      } else {
+        patch[key] = dto[key];
+      }
     }
     return patch;
   }
@@ -234,16 +247,18 @@ export class DonationBoxService {
     currentUser: any,
   ): Promise<DonationBox> {
     try {
-      // Validate that route exists
-      const route = await this.routeRepository.findOne({
-        where: { id: createDonationBoxDto.route_id },
-        relations: ["region", "country"],
-      });
+      let route: Route | null = null;
+      if (createDonationBoxDto.route_id != null) {
+        route = await this.routeRepository.findOne({
+          where: { id: createDonationBoxDto.route_id },
+          relations: ["region", "country"],
+        });
 
-      if (!route) {
-        throw new NotFoundException(
-          `Route with ID ${createDonationBoxDto.route_id} not found`,
-        );
+        if (!route) {
+          throw new NotFoundException(
+            `Route with ID ${createDonationBoxDto.route_id} not found`,
+          );
+        }
       }
 
       // Validate assigned users if provided
@@ -272,8 +287,14 @@ export class DonationBoxService {
       // Create donation box entity
       const { assigned_user_ids, ...boxData } = createDonationBoxDto;
       const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
+      const normalizedBoxIdNo = this.normalizeOptionalText(boxData.box_id_no);
+      const normalizedKeyNo = this.normalizeOptionalText(boxData.key_no);
       const donationBox = this.donationBoxRepository.create({
         ...boxData,
+        box_id_no: normalizedBoxIdNo,
+        key_no: normalizedKeyNo,
+        route_id: boxData.route_id ?? null,
+        city_id: boxData.city_id ?? null,
         ...(auditUserId != null
           ? { created_by: { id: auditUserId } as any }
           : {}),
@@ -307,7 +328,7 @@ export class DonationBoxService {
     city_name?: string;
     region_id?: number;
     region_name?: string;
-  }): Promise<{ route_id: number; city_id: number; region_id?: number }> {
+  }): Promise<{ route_id: number | null; city_id: number; region_id?: number }> {
     let regionId = params.region_id;
     if (!regionId && params.region_name?.trim()) {
       const regions = await this.regionRepository.find({
@@ -385,7 +406,7 @@ export class DonationBoxService {
 
     const routeName = params.route_name?.trim();
     if (!routeName) {
-      throw new NotFoundException("route_id or Route is required");
+      return { route_id: null, city_id: city.id, region_id: regionId };
     }
 
     const existingRoutes = await this.routeRepository
@@ -481,7 +502,7 @@ export class DonationBoxService {
   async importDonationBoxRow(
     row: Record<string, unknown>,
     user: any,
-  ): Promise<DonationBox> {
+  ): Promise<{ box: DonationBox; skipped: boolean; skip_reason?: string }> {
     const resolved = await this.resolveGeoForImport({
       route_id: row.route_id as number | undefined,
       route_name: row.route_name as string | undefined,
@@ -504,10 +525,22 @@ export class DonationBoxService {
     const hasGps =
       row.registration_latitude != null && row.registration_longitude != null;
 
-    const createDto = {
-      box_id_no: (row.box_id_no as string | undefined) || undefined,
+    const existing = await this.findExistingDonationBoxForImport({
+      box_id_no: row.box_id_no as string | undefined,
       key_no: row.key_no as string | undefined,
-      route_id: resolved.route_id,
+      shop_name: String(row.shop_name || ""),
+      shopkeeper: row.shopkeeper as string | undefined,
+      cell_no: row.cell_no as string | undefined,
+      city_id: resolved.city_id,
+    });
+    if (existing) {
+      return { box: existing.box, skipped: true, skip_reason: existing.reason };
+    }
+
+    const createDto = {
+      box_id_no: this.normalizeOptionalText(row.box_id_no as string | undefined),
+      key_no: this.normalizeOptionalText(row.key_no as string | undefined),
+      route_id: resolved.route_id ?? null,
       city_id: resolved.city_id,
       shop_name: String(row.shop_name || "").trim(),
       shopkeeper: row.shopkeeper as string | undefined,
@@ -528,7 +561,116 @@ export class DonationBoxService {
         row.require_collection_location === true || hasGps,
     } as CreateDonationBoxDto;
 
-    return this.create(createDto, user);
+    const box = await this.create(createDto, user);
+    return { box, skipped: false };
+  }
+
+  /** Blank / whitespace → null so unique(box_id_no) and optional key_no stay clean. */
+  private normalizeOptionalText(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    const s = String(value).trim();
+    return s || null;
+  }
+
+  /** Resolve city/route for import rows (used by handler for in-file dedupe). */
+  async resolveGeoForImportRow(
+    row: Record<string, unknown>,
+  ): Promise<{ route_id: number | null; city_id: number; region_id?: number }> {
+    return this.resolveGeoForImport({
+      route_id: row.route_id as number | undefined,
+      route_name: row.route_name as string | undefined,
+      city_id: row.city_id as number | undefined,
+      city_name: row.city_name as string | undefined,
+      region_id: row.region_id as number | undefined,
+      region_name: row.region_name as string | undefined,
+    });
+  }
+
+  /** Check if import row already maps to an existing box. */
+  async findExistingDonationBoxForImportRow(
+    row: Record<string, unknown>,
+  ): Promise<{ box: DonationBox; reason: string } | null> {
+    const resolved = await this.resolveGeoForImportRow(row);
+    return this.findExistingDonationBoxForImport({
+      box_id_no: row.box_id_no as string | undefined,
+      key_no: row.key_no as string | undefined,
+      shop_name: String(row.shop_name || ""),
+      shopkeeper: row.shopkeeper as string | undefined,
+      cell_no: row.cell_no as string | undefined,
+      city_id: resolved.city_id,
+    });
+  }
+
+  /**
+   * Identity for import skip:
+   * 1) box_id_no when present
+   * 2) shop_name + shopkeeper + cell_no (same shop name alone is NOT a duplicate)
+   */
+  private async findExistingDonationBoxForImport(params: {
+    box_id_no?: string | null;
+    key_no?: string | null;
+    shop_name?: string | null;
+    shopkeeper?: string | null;
+    cell_no?: string | null;
+    city_id?: number | null;
+  }): Promise<{ box: DonationBox; reason: string } | null> {
+    const boxIdNo = String(params.box_id_no || "")
+      .trim()
+      .toLowerCase();
+    const shopName = this.normalizeName(params.shop_name);
+    const shopkeeper = this.normalizeName(params.shopkeeper);
+    const phone = this.normalizePhone(params.cell_no);
+
+    const baseQb = () =>
+      this.donationBoxRepository
+        .createQueryBuilder("b")
+        .where("b.is_archived = false");
+
+    if (boxIdNo) {
+      const byBoxId = await baseQb()
+        .andWhere("LOWER(TRIM(b.box_id_no)) = :boxIdNo", { boxIdNo })
+        .orderBy("b.id", "ASC")
+        .getOne();
+      if (byBoxId) {
+        return {
+          box: byBoxId,
+          reason: `Already in DB (matched box_id_no="${params.box_id_no}" → id ${byBoxId.id})`,
+        };
+      }
+    }
+
+    // Same shop name alone is allowed; require shop + shopkeeper + phone combo.
+    if (shopName) {
+      const candidates = await baseQb()
+        .andWhere("LOWER(TRIM(b.shop_name)) = :shopName", { shopName })
+        .orderBy("b.id", "ASC")
+        .getMany();
+
+      for (const box of candidates) {
+        const boxKeeper = this.normalizeName(box.shopkeeper);
+        const boxPhone = this.normalizePhone(box.cell_no);
+        if (boxKeeper === shopkeeper && boxPhone === phone) {
+          return {
+            box,
+            reason: `Already in DB (matched shop="${params.shop_name}" + shopkeeper="${params.shopkeeper || ""}" + phone="${params.cell_no || ""}" → id ${box.id})`,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeName(value: unknown): string {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  /** Digits-only phone so 0301-6464990 matches 03016464990. */
+  private normalizePhone(value: unknown): string {
+    return String(value || "").replace(/\D/g, "");
   }
 
   /**
@@ -577,7 +719,8 @@ export class DonationBoxService {
         .leftJoinAndSelect("route.cities", "cities")
         .leftJoinAndSelect("route.region", "region")
         .leftJoinAndSelect("route.country", "country")
-        .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers");
+        .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers")
+        .where("donation_box.is_archived = false");
 
       // Apply common filters
       const filters: FilterPayload = {
@@ -644,12 +787,14 @@ export class DonationBoxService {
   async findOne(id: number): Promise<DonationBox> {
     try {
       const donationBox = await this.donationBoxRepository.findOne({
-        where: { id },
+        where: { id, is_archived: false },
         relations: [
           "route",
           "route.cities",
           "route.region",
           "route.country",
+          "city",
+          "city.region",
           "assignedUsers",
           "created_by",
           "updated_by",
@@ -697,7 +842,7 @@ export class DonationBoxService {
         ...this.buildDonationBoxPatch(dto),
       };
 
-      if (updateDonationBoxDto.route_id) {
+      if (updateDonationBoxDto.route_id != null) {
         const route = await this.routeRepository.findOne({
           where: { id: updateDonationBoxDto.route_id },
         });
@@ -892,7 +1037,7 @@ export class DonationBoxService {
   async findByKeyNumber(key_number: string): Promise<DonationBox> {
     try {
       return await this.donationBoxRepository.findOne({
-        where: { key_no: key_number },
+        where: { key_no: key_number, is_archived: false },
       });
     } catch (error) {
       console.error("Error retrieving donation box by key number:", error);
@@ -920,7 +1065,8 @@ export class DonationBoxService {
         "box.is_active",
         "route.id",
         "route.name",
-      ]);
+      ])
+      .where("box.is_archived = false");
 
     if (options?.activeOnly !== undefined) {
       queryBuilder.andWhere("box.is_active = :isActive", {

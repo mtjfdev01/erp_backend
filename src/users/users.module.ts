@@ -15,6 +15,7 @@ import { DonorFollowup } from "../dms/donor_relationship/entities/donor-followup
 import { DonorInteraction } from "../dms/donor_relationship/entities/donor-interaction.entity";
 import { DonationBox } from "../dms/donation_box/entities/donation-box.entity";
 import { DonationBoxDonation } from "../dms/donation_box/donation_box_donation/entities/donation_box_donation.entity";
+import { EmailModule } from "../email/email.module";
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { DonationBoxDonation } from "../dms/donation_box/donation_box_donation/e
     }),
     PermissionsModule,
     GeographicAssignmentModule,
+    EmailModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, UserPerformanceService],

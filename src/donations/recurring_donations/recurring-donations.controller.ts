@@ -88,4 +88,33 @@ export class RecurringDonationsController {
       });
     }
   }
+
+  /** Admin: mark selected pending period dues as paid (no donor/donation deletes). */
+  @Post(":id/mark-installments-paid")
+  @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
+  async markInstallmentsPaid(
+    @Param("id") id: string,
+    @Body() body: { installment_ids?: number[]; note?: string },
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.ledgerService.markInstallmentsPaid(+id, {
+        installmentIds: body?.installment_ids || [],
+        note: body?.note,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: `Marked ${data.marked} installment(s) as paid`,
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to mark installments as paid",
+        data: null,
+      });
+    }
+  }
 }

@@ -10,6 +10,8 @@ import { UpdateDonationDto } from "./dto/update-donation.dto";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Brackets, Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "./entities/donation.entity";
+import { DonationAttachment } from "./entities/donation-attachment.entity";
+import { AddDonationAttachmentDto } from "./dto/add-donation-attachment.dto";
 import {
   DonationInKind,
   DonationInKindCategory,
@@ -23,6 +25,8 @@ import {
   StripeService,
 } from "./stripe.service";
 import { AlfalahService } from "./alfalah/alfalah.service";
+import { JazzCashService } from "./jazzcash/jazzcash.service";
+import { verifyJazzCashSecureHash } from "./jazzcash/jazzcash-hash.util";
 import { DonorService } from "../dms/donor/donor.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
@@ -56,6 +60,7 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
 import { DonationAuditService } from "./audit/donation-audit.service";
 import { RecurringDonationsStripeService } from "./recurring_donations/recurring-donations-stripe.service";
 import { RecurringDonationsLedgerService } from "./recurring_donations/recurring-donations-ledger.service";
+import { resolveRecurringStartDateForStorage, resolvePrepaidContinueStartDate } from "./recurring_donations/recurring-billing-date.util";
 import { DonationAuditAction } from "./audit/donation-audit-action.enum";
 import { DonationAuditSource } from "./audit/donation-audit-source.enum";
 import {
@@ -96,6 +101,7 @@ export class DonationsService {
     "blinq",
     "payfast",
     "alfalah",
+    "jazzcash",
     "stripe",
     "stripe_embed",
   ] as const;
@@ -103,6 +109,8 @@ export class DonationsService {
   constructor(
     @InjectRepository(Donation)
     private donationRepository: Repository<Donation>,
+    @InjectRepository(DonationAttachment)
+    private donationAttachmentRepository: Repository<DonationAttachment>,
     @InjectRepository(DonationInKind)
     private donationInKindRepository: Repository<DonationInKind>,
     @InjectRepository(User)
@@ -111,6 +119,7 @@ export class DonationsService {
     private payfastService: PayfastService,
     private stripeService: StripeService,
     private alfalahService: AlfalahService,
+    private jazzcashService: JazzCashService,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
     @InjectRepository(RecurringDonationPlan)
@@ -408,6 +417,19 @@ export class DonationsService {
       );
     }
 
+    if (mode === "day_of_month") {
+      const dom = createDonationDto.recurring?.day_of_month;
+      if (
+        dom != null &&
+        (!Number.isFinite(Number(dom)) || Number(dom) < 1 || Number(dom) > 31)
+      ) {
+        throw new HttpException(
+          "recurring.day_of_month must be between 1 and 31",
+          400,
+        );
+      }
+    }
+
     if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
       throw new HttpException(
         "recurring.start_date must be YYYY-MM-DD",
@@ -465,6 +487,58 @@ export class DonationsService {
     return "month";
   }
 
+  /** Normalized billing anchor for Stripe + non-Stripe ledger subscriptions. */
+  private resolveRecurringStartConfig(createDonationDto: CreateDonationDto): {
+    startDateMode: string;
+    startDate: string | null;
+  } {
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
+      // Pay N months now → first auto reminder / cycle after coverage ends
+      const startDate = resolvePrepaidContinueStartDate(prepaidMonths);
+      return {
+        startDateMode: "day_of_month",
+        startDate,
+      };
+    }
+
+    const recurring = createDonationDto.recurring;
+    return resolveRecurringStartDateForStorage({
+      startDateMode: recurring?.start_date_mode,
+      startDate: recurring?.start_date,
+      dayOfMonth: recurring?.day_of_month,
+    });
+  }
+
+  private resolveLedgerMonthlyAmount(
+    createDonationDto: CreateDonationDto,
+    savedAmount: number | null | undefined,
+  ): number | null {
+    const raw =
+      savedAmount ??
+      (createDonationDto.amount != null ? Number(createDonationDto.amount) : null);
+    if (raw == null || !Number.isFinite(Number(raw))) return null;
+    const total = Math.round(Number(raw));
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths > 1) {
+      return Math.max(1, Math.round(total / prepaidMonths));
+    }
+    return total;
+  }
+
+  /** True when donor prepaid N months and should continue on ledger after that. */
+  private wantsPrepaidThenRecurring(createDonationDto: CreateDonationDto): boolean {
+    const months = Number(createDonationDto.prepaid_months);
+    return (
+      Number.isFinite(months) &&
+      months >= 1 &&
+      this.hasRecurringConsent(createDonationDto) &&
+      (Boolean(createDonationDto.recurring?.interval) ||
+        this.isDonationRecurring(createDonationDto) ||
+        String(createDonationDto.pledge_mode || "").trim() === "prepaid_months")
+    );
+  }
+
   /** Non-Stripe recurring → same Recurring Donations list as Stripe (cron reminders). */
   private async ensureNonStripeRecurringLedgerSubscription(
     createDonationDto: CreateDonationDto,
@@ -479,14 +553,29 @@ export class DonationsService {
     },
     donorId: number | null,
   ): Promise<void> {
-    if (!this.isDonationRecurring(createDonationDto)) return;
-    if (!this.usesLegacyRecurringPlan(createDonationDto.donation_method)) return;
+    const prepaidThenRecurring = this.wantsPrepaidThenRecurring(createDonationDto);
+    if (!this.isDonationRecurring(createDonationDto) && !prepaidThenRecurring) {
+      return;
+    }
+
+    // Stripe auto-subscriptions use webhooks; prepaid-then-recurring still uses ledger reminders
+    const isStripeMethod = !this.usesLegacyRecurringPlan(
+      createDonationDto.donation_method || savedDonation.donation_method,
+    );
+    if (isStripeMethod && !prepaidThenRecurring) return;
+
+    const { startDateMode, startDate } =
+      this.resolveRecurringStartConfig(createDonationDto);
+    const monthlyAmount = this.resolveLedgerMonthlyAmount(
+      createDonationDto,
+      savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
+    );
 
     await this.recurringDonationsLedgerService.ensureNonStripeSubscriptionFromDonation(
       {
         donationId: savedDonation.id,
         donorId,
-        amount: savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
+        amount: monthlyAmount,
         currency: savedDonation.currency || createDonationDto.currency || "PKR",
         donationMethod:
           savedDonation.donation_method || createDonationDto.donation_method,
@@ -500,9 +589,8 @@ export class DonationsService {
           savedDonation.donation_type || createDonationDto.donation_type,
         billingInterval: this.mapLedgerBillingInterval(createDonationDto),
         billingIntervalCount: createDonationDto.recurring?.interval_count ?? 1,
-        startDateMode:
-          createDonationDto.recurring?.start_date_mode || "same_date",
-        startDate: createDonationDto.recurring?.start_date || null,
+        startDateMode,
+        startDate,
         consent: this.hasRecurringConsent(createDonationDto),
       },
     );
@@ -573,35 +661,58 @@ export class DonationsService {
   }
 
   /**
-   * Recurring donations bypass the generic PKR 5000 auto thanks/reminder threshold.
-   * Generic (one-time) donations still require amount >= 5000.
+   * True only when THIS donation is a recurring payment (initial / installment / intent).
+   * Do not use donor.recurring or “donor has any active subscription” — that would
+   * incorrectly skip the PKR 5000 threshold for unrelated one-time donations.
    */
   private async isRecurringRelatedDonation(donation: {
     id?: number | null;
     donor_id?: number | null;
+    amount?: number | null;
     donation_type?: string | null;
     donation_source?: string | null;
+    note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
-    donor?: { recurring?: boolean | null } | null;
+    donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
     if (!donation) return false;
-    if (donation.donor?.recurring === true) return true;
+
+    const intent = donation.manual_recurring_intent;
+    if (intent && typeof intent === "object") {
+      if (
+        intent.enroll === true ||
+        intent.installment_link === true ||
+        intent.recurring_subscription_id != null
+      ) {
+        return true;
+      }
+    }
+
     if (
-      donation.manual_recurring_intent &&
-      typeof donation.manual_recurring_intent === "object"
+      donation.recurrence_id != null &&
+      Number(donation.recurrence_id) > 0
     ) {
       return true;
     }
+
     const source = String(donation.donation_source || "").toLowerCase();
     if (source.includes("recurring")) return true;
+
     const type = String(donation.donation_type || "").toLowerCase();
     if (type.includes("recurring")) return true;
-    const note = String((donation as any).note || "").toLowerCase();
+
+    const note = String(donation.note || "").toLowerCase();
     if (note.includes("subscription #") || note.includes("installment")) {
       return true;
     }
 
-    // Linked to recurring_donations ledger (subscription or installment)
+    const donationId = Number(donation.id);
+    if (!Number.isFinite(donationId) || donationId <= 0) {
+      return false;
+    }
+
+    // Linked specifically as this donation (initial or installment payment), not "any sub for donor"
     try {
       const qb = this.donationRepository.manager
         .createQueryBuilder()
@@ -612,14 +723,13 @@ export class DonationsService {
           `(
             rd.initial_donation_id = :donationId
             OR (
-              rd.record_type = 'subscription'
-              AND rd.donor_id = :donorId
-              AND rd.status IN ('active', 'past_due', 'trialing')
+              rd.record_type = 'installment'
+              AND rd.stripe_payment_intent_id = :donationIdStr
             )
           )`,
           {
-            donationId: donation.id ?? 0,
-            donorId: donation.donor_id ?? donation.donor?.["id"] ?? 0,
+            donationId,
+            donationIdStr: String(donationId),
           },
         )
         .limit(1);
@@ -631,7 +741,7 @@ export class DonationsService {
     return false;
   }
 
-  /** Auto WhatsApp: unsent + (recurring OR amount >= 5000). */
+  /** Auto WhatsApp: unsent + (this donation is recurring OR amount >= 5000). */
   private async canAutoSendDonationMessage(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -640,6 +750,7 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
@@ -647,7 +758,7 @@ export class DonationsService {
     return this.isThanksEligibleDonation(donation);
   }
 
-  /** Auto email: unsent + (recurring OR amount >= 5000). */
+  /** Auto email: unsent + (this donation is recurring OR amount >= 5000). */
   private async canAutoSendDonationEmail(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -656,6 +767,7 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
@@ -663,7 +775,11 @@ export class DonationsService {
     return this.isThanksEligibleDonation(donation);
   }
 
-  /** Whether this donation qualifies for auto thanks (ignores sent flags). */
+  /**
+   * Auto abandon/thanks eligibility (ignores sent flags):
+   * - recurring donation → always eligible (no amount check)
+   * - one-time (normal) → only when amount >= 5000
+   */
   private async isThanksEligibleDonation(donation: {
     id?: number | null;
     donor_id?: number | null;
@@ -671,12 +787,23 @@ export class DonationsService {
     donation_type?: string | null;
     donation_source?: string | null;
     note?: string | null;
+    recurrence_id?: number | null;
     manual_recurring_intent?: Record<string, unknown> | null;
     donor?: { id?: number | null; recurring?: boolean | null } | null;
   } | null | undefined): Promise<boolean> {
     if (!donation) return false;
-    if (await this.isRecurringRelatedDonation(donation)) return true;
-    return Number(donation?.amount) >= 5000;
+    if (await this.isRecurringRelatedDonation(donation)) {
+      this.logger.log(
+        `Auto thanks/abandon eligible donationId=${donation.id} reason=recurring (amount check skipped)`,
+      );
+      return true;
+    }
+    const amount = Number(donation.amount);
+    const eligible = Number.isFinite(amount) && amount >= 5000;
+    this.logger.log(
+      `Auto thanks/abandon eligibility donationId=${donation.id} recurring=false amount=${donation.amount} eligible=${eligible} (threshold=5000)`,
+    );
+    return eligible;
   }
 
   /** Claim a thanks channel flag so concurrent paths cannot double-send. */
@@ -738,7 +865,6 @@ export class DonationsService {
     const donorName =
       donor.name ||
       donor.first_name ||
-      donor.company_name ||
       donor.email ||
       "Valued Donor";
 
@@ -989,17 +1115,23 @@ export class DonationsService {
   private resolveStripeRecurring(
     createDonationDto: CreateDonationDto,
   ): StripeRecurringParams | undefined {
+    const prepaidMonths = Number(createDonationDto.prepaid_months);
+    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
+      // Prepaid total is charged once; ledger handles continue-after-months
+      return undefined;
+    }
+
     const consent = this.hasRecurringConsent(createDonationDto);
-    const start_date_mode = createDonationDto.recurring?.start_date_mode;
-    const start_date = createDonationDto.recurring?.start_date;
+    const { startDateMode, startDate } =
+      this.resolveRecurringStartConfig(createDonationDto);
 
     if (createDonationDto.recurring?.interval) {
       return {
         interval: createDonationDto.recurring
           .interval as StripeRecurringParams["interval"],
         interval_count: createDonationDto.recurring.interval_count ?? 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1011,8 +1143,8 @@ export class DonationsService {
       return {
         interval: "week",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1020,8 +1152,8 @@ export class DonationsService {
       return {
         interval: "month",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -1029,8 +1161,8 @@ export class DonationsService {
       return {
         interval: "day",
         interval_count: 1,
-        start_date_mode,
-        start_date,
+        start_date_mode: startDateMode,
+        start_date: startDate ?? undefined,
         consent,
       };
     }
@@ -2171,6 +2303,36 @@ export class DonationsService {
               "Blinq status is updated via callback. Showing current DB status.",
           },
         };
+      } else if (method === "jazzcash") {
+        if (!donation.orderId) {
+          return {
+            donationId,
+            provider,
+            providerStatus: "no_order_id",
+            donationStatus: donation.status,
+            dbUpdated: false,
+            details: {
+              message:
+                "No JazzCash txn ref on this donation. Cannot query provider.",
+            },
+          };
+        }
+        const inquiry = await this.jazzcashService.inquireTransactionStatus(
+          donation.orderId,
+        );
+        providerStatus =
+          inquiry.pp_PaymentResponseCode || inquiry.pp_Status || "";
+        donationStatus = inquiry.paymentCompleted
+          ? "completed"
+          : inquiry.pp_ResponseCode === "000"
+            ? donation.status
+            : "failed";
+        details = {
+          pp_ResponseCode: inquiry.pp_ResponseCode,
+          pp_PaymentResponseCode: inquiry.pp_PaymentResponseCode,
+          pp_Status: inquiry.pp_Status,
+          hashVerified: inquiry.hashVerified,
+        };
       } else if (method === "alfalah") {
         const orderRef = String(donation.id);
         const ipn = await this.alfalahService.getOrderStatus(orderRef);
@@ -2857,6 +3019,16 @@ export class DonationsService {
           );
           throw e;
         }
+      } else if (createDonationDto.donation_method === "jazzcash") {
+        try {
+          data = await this.startJazzCashPayment(savedDonation, createDonationDto);
+        } catch (e) {
+          await this.persistGatewayInvoiceError(
+            savedDonation.id,
+            e instanceof Error ? e.message : String(e),
+          );
+          throw e;
+        }
       } else if (createDonationDto.donation_method === "alfalah") {
         try {
           data = await this.startAlfalahPayment(savedDonation);
@@ -2982,7 +3154,7 @@ export class DonationsService {
   async findAll(
     page = 1,
     pageSize = 10,
-    sortField = "created_at",
+    sortField = "id",
     sortOrder: "ASC" | "DESC" = "DESC",
     filters: FilterPayload = {},
     hybridFilters: HybridFilter[] = [],
@@ -3024,6 +3196,8 @@ export class DonationsService {
         donationSourceNot as string | null | undefined,
       );
 
+      // One tracker max per donation — a plain join multiplies rows and breaks
+      // OFFSET/LIMIT so the first page looks like a random set of IDs.
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
@@ -3031,7 +3205,14 @@ export class DonationsService {
           "donation.progress_tracker",
           ProgressTracker,
           "progress_tracker",
-          "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
+          `progress_tracker.id = (
+            SELECT pt.id
+            FROM progress_trackers pt
+            WHERE pt.donation_id = donation.id
+              AND pt.is_archived = false
+            ORDER BY pt.id DESC
+            LIMIT 1
+          )`,
         )
         .addSelect("donor.name", "donor_name")
         .addSelect("donor.id", "donor_id");
@@ -3039,7 +3220,6 @@ export class DonationsService {
         query.addSelect("donor.email", "donor_email");
         query.addSelect("donor.phone", "donor_phone");
       }
-      query.getRawMany();
       // Apply filters
       this.applyDonationSourceNotFilter(
         query,
@@ -3049,15 +3229,22 @@ export class DonationsService {
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       applyHybridFilters(query, hybridFilters, "donation");
 
-      // 1b) Progress tracking filter: only donations whose tracker uses this template
+      // 1b) Progress tracking filter: any non-archived tracker for this template
       if (
         progressTemplateId &&
         Number.isFinite(progressTemplateId) &&
         progressTemplateId > 0
       ) {
-        query.andWhere("progress_tracker.template_id = :ptid", {
-          ptid: progressTemplateId,
-        });
+        query.andWhere(
+          `EXISTS (
+            SELECT 1
+            FROM progress_trackers pt_filter
+            WHERE pt_filter.donation_id = donation.id
+              AND pt_filter.is_archived = false
+              AND pt_filter.template_id = :ptid
+          )`,
+          { ptid: progressTemplateId },
+        );
       }
 
       // 2) Relation search (const config) using top-level search
@@ -3134,15 +3321,38 @@ export class DonationsService {
         geoScope,
       );
 
+      const allowedSortFields = new Set([
+        "id",
+        "created_at",
+        "updated_at",
+        "date",
+        "amount",
+        "donation_type",
+        "donation_method",
+        "donation_source",
+        "status",
+      ]);
+      const safeSortField = allowedSortFields.has(String(sortField))
+        ? String(sortField)
+        : "id";
+      const safeSortOrder =
+        String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+      // Sorting before pagination for stable pages
+      if (safeSortField === "id") {
+        query.orderBy("donation.id", safeSortOrder);
+      } else {
+        query
+          .orderBy(`donation.${safeSortField}`, safeSortOrder)
+          .addOrderBy("donation.id", "DESC");
+      }
+
       // Pagination — pageSize -1 (or 0) means view all
       const viewAll = pageSize === -1 || pageSize === 0;
       if (!viewAll) {
         const skip = (page - 1) * pageSize;
         query.skip(skip).take(pageSize);
       }
-
-      // Sorting
-      query.orderBy(`donation.${sortField}`, sortOrder);
 
       this.logFinalQuery("list", query);
 
@@ -3216,9 +3426,16 @@ export class DonationsService {
         Number.isFinite(progressTemplateId) &&
         progressTemplateId > 0
       ) {
-        sumQuery.andWhere("progress_tracker.template_id = :ptidSum", {
-          ptidSum: progressTemplateId,
-        });
+        sumQuery.andWhere(
+          `EXISTS (
+            SELECT 1
+            FROM progress_trackers pt_filter
+            WHERE pt_filter.donation_id = donation.id
+              AND pt_filter.is_archived = false
+              AND pt_filter.template_id = :ptidSum
+          )`,
+          { ptidSum: progressTemplateId },
+        );
       }
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -3265,6 +3482,7 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
         .leftJoinAndSelect("donation.created_by", "created_by")
+        .leftJoinAndSelect("donation.attachments", "attachments")
         .where("donation.id = :id", { id })
         .getOne();
 
@@ -3331,6 +3549,50 @@ export class DonationsService {
         `Failed to retrieve donation in kind records: ${error.message}`,
       );
     }
+  }
+
+  async addAttachment(
+    donationId: number,
+    dto: AddDonationAttachmentDto,
+    currentUser?: User | null,
+  ): Promise<DonationAttachment> {
+    const donation = await this.donationRepository.findOne({
+      where: { id: donationId },
+    });
+    if (!donation) {
+      throw new NotFoundException(`Donation with ID ${donationId} not found`);
+    }
+
+    const attachment = this.donationAttachmentRepository.create({
+      donation,
+      file_name: dto.file_name,
+      file_url: dto.file_url,
+      file_type: dto.file_type,
+      description: dto.description || null,
+      uploaded_by: currentUser || null,
+    });
+    return this.donationAttachmentRepository.save(attachment);
+  }
+
+  async removeAttachment(
+    donationId: number,
+    attachmentId: number,
+  ): Promise<{ deleted: boolean }> {
+    const attachment = await this.donationAttachmentRepository.findOne({
+      where: { id: attachmentId },
+      relations: ["donation"],
+    });
+
+    if (
+      !attachment ||
+      !attachment.donation ||
+      Number(attachment.donation.id) !== Number(donationId)
+    ) {
+      throw new NotFoundException("Attachment not found for this donation");
+    }
+
+    await this.donationAttachmentRepository.remove(attachment);
+    return { deleted: true };
   }
 
   async getDonationAuditHistory(donationId: number) {
@@ -4369,6 +4631,196 @@ export class DonationsService {
   // ─── Bank Alfalah APG — credit/debit card only (page redirection) ───────────
 
   /**
+   * JazzCash MWallet v2 — synchronous charge; IPN is backup confirmation.
+   */
+  private async startJazzCashPayment(
+    savedDonation: Donation,
+    createDonationDto: CreateDonationDto,
+  ) {
+    const phone = createDonationDto.donor_phone;
+    const cnic = createDonationDto.jazzcash_cnic;
+    if (!phone?.trim()) {
+      throw new BadRequestException(
+        "JazzCash requires a mobile number linked to the JazzCash wallet",
+      );
+    }
+    if (!cnic?.trim()) {
+      throw new BadRequestException(
+        "JazzCash requires the last 6 digits of CNIC",
+      );
+    }
+
+    const result = await this.jazzcashService.initiateMWalletPayment({
+      donationId: savedDonation.id,
+      amount: Number(savedDonation.amount),
+      mobileNumber: phone,
+      cnicLast6: cnic,
+      description:
+        createDonationDto.item_description ||
+        createDonationDto.project_name ||
+        "MTJ Foundation Donation",
+    });
+
+    const newStatus = result.success ? "completed" : "failed";
+    await this.donationRepository.update(savedDonation.id, {
+      orderId: result.pp_TxnRefNo,
+      status: newStatus,
+      transaction_id:
+        result.pp_RetreivalReferenceNo ||
+        result.pp_AuthCode ||
+        null,
+      err_msg: result.success ? null : result.pp_ResponseMessage,
+    });
+
+    if (result.success) {
+      await this.afterSuccessfulDonationPayment(savedDonation.id);
+    }
+
+    return this.withDonationId(
+      {
+        status: newStatus,
+        pp_ResponseCode: result.pp_ResponseCode,
+        pp_ResponseMessage: result.pp_ResponseMessage,
+        pp_TxnRefNo: result.pp_TxnRefNo,
+        paymentCompleted: result.success,
+      },
+      savedDonation.id,
+    );
+  }
+
+  async handleJazzCashIpn(payload: Record<string, unknown>) {
+    this.logger.log(
+      `JazzCash IPN process start payloadKeys=${Object.keys(payload || {}).join(",") || "none"} ` +
+        `raw=${JSON.stringify(payload)}`,
+    );
+
+    const creds = this.jazzcashService.getCredentials();
+    this.logger.log(
+      `JazzCash IPN config env=${creds.env} merchantId=${creds.merchantId} ` +
+        `expectedIpnUrl=${creds.ipnUrl}`,
+    );
+
+    const hashValid = verifyJazzCashSecureHash(payload, creds.integritySalt);
+    this.logger.log(
+      `JazzCash IPN hashVerified=${hashValid} ` +
+        `pp_TxnRefNo=${payload?.pp_TxnRefNo ?? "n/a"} ` +
+        `pp_ResponseCode=${payload?.pp_ResponseCode ?? "n/a"} ` +
+        `pp_ResponseMessage=${payload?.pp_ResponseMessage ?? "n/a"} ` +
+        `pp_Amount=${payload?.pp_Amount ?? "n/a"} ` +
+        `pp_AuthCode=${payload?.pp_AuthCode ?? "n/a"} ` +
+        `pp_RetreivalReferenceNo=${payload?.pp_RetreivalReferenceNo ?? payload?.pp_RetrievalReferenceNo ?? "n/a"} ` +
+        `pp_BillReference=${payload?.pp_BillReference ?? "n/a"} ` +
+        `pp_SecureHash=${payload?.pp_SecureHash ? String(payload.pp_SecureHash).slice(0, 12) + "..." : "n/a"}`,
+    );
+    if (!hashValid) {
+      this.logger.error(
+        `JazzCash IPN rejected: invalid secure hash payload=${JSON.stringify(payload)}`,
+      );
+      throw new BadRequestException("Invalid JazzCash secure hash");
+    }
+
+    const txnRef = String(payload.pp_TxnRefNo || "").trim();
+    if (!txnRef) {
+      this.logger.error(
+        `JazzCash IPN rejected: missing pp_TxnRefNo payload=${JSON.stringify(payload)}`,
+      );
+      throw new BadRequestException("Missing pp_TxnRefNo in JazzCash IPN");
+    }
+
+    let donation = await this.donationRepository.findOne({
+      where: { orderId: txnRef },
+      relations: ["donor"],
+    });
+    let lookupPath = donation ? "orderId" : null;
+
+    if (!donation) {
+      // Txn format: T + YYYYMMDDHHMMSS + donationId
+      const idMatch = /^T\d{14}(\d+)$/.exec(txnRef);
+      const donationId = idMatch ? Number(idMatch[1]) : NaN;
+      this.logger.log(
+        `JazzCash IPN orderId lookup miss txnRef=${txnRef} parsedDonationId=${Number.isFinite(donationId) ? donationId : "n/a"}`,
+      );
+      if (Number.isFinite(donationId)) {
+        donation = await this.donationRepository.findOne({
+          where: { id: donationId },
+          relations: ["donor"],
+        });
+        if (donation) lookupPath = "txnRefParsedId";
+      }
+    }
+
+    if (!donation) {
+      this.logger.error(
+        `JazzCash IPN donation not found txnRef=${txnRef} payload=${JSON.stringify(payload)}`,
+      );
+      throw new NotFoundException(
+        `Donation not found for JazzCash txn ${txnRef}`,
+      );
+    }
+
+    const responseCode = String(payload.pp_ResponseCode || "");
+    const previousStatus = donation.status;
+    let newStatus = donation.status;
+    // IPN: 121 = successful transaction (per JazzCash IPN guide)
+    if (responseCode === "121") {
+      newStatus = "completed";
+    } else if (["199", "999"].includes(responseCode)) {
+      newStatus = "failed";
+    }
+
+    this.logger.log(
+      `JazzCash IPN mapping donationId=${donation.id} lookup=${lookupPath} ` +
+        `dbStatus=${previousStatus} responseCode=${responseCode} mappedStatus=${newStatus} ` +
+        `amount=${donation.amount} orderId=${donation.orderId}`,
+    );
+
+    if (newStatus !== donation.status) {
+      await this.donationRepository.update(donation.id, {
+        status: newStatus,
+        orderId: txnRef,
+        transaction_id: String(
+          payload.pp_RetreivalReferenceNo ||
+            payload.pp_RetrievalReferenceNo ||
+            payload.pp_AuthCode ||
+            donation.transaction_id ||
+            "",
+        ),
+        err_msg:
+          newStatus === "failed"
+            ? String(payload.pp_ResponseMessage || "")
+            : null,
+      });
+      await this.refreshDonorDonationStats(donation.donor_id);
+
+      this.logger.log(
+        `JazzCash IPN DB updated donationId=${donation.id} ${previousStatus} -> ${newStatus}`,
+      );
+
+      if (this.isSuccessfulDonationStatus(newStatus)) {
+        await this.afterSuccessfulDonationPayment(donation.id);
+      }
+    } else {
+      this.logger.log(
+        `JazzCash IPN no DB status change donationId=${donation.id} status=${donation.status}`,
+      );
+    }
+
+    const result = {
+      donationId: donation.id,
+      status: newStatus,
+      txnRef,
+    };
+    this.logger.log(
+      `JazzCash IPN process done ${JSON.stringify(result)}`,
+    );
+    return result;
+  }
+
+  buildJazzCashIpnAcknowledgement(): Record<string, string> {
+    return this.jazzcashService.buildIpnAcknowledgement();
+  }
+
+  /**
    * APG card — server handshake (HS/HS/HS) then SSO form for browser POST.
    */
   private async startAlfalahPayment(savedDonation: Donation) {
@@ -4402,7 +4854,33 @@ export class DonationsService {
     if (!statusUrl) {
       throw new BadRequestException("Missing url query parameter from APG listener");
     }
-    const { data } = await axios.get(statusUrl, { timeout: 60000 });
+    this.logger.log(`Alfalah IPN listener received statusUrl=${statusUrl}`);
+    let data: Record<string, any>;
+    try {
+      const response = await axios.get(statusUrl, { timeout: 60000 });
+      data = this.alfalahService.parseIpnPayload(response.data);
+      this.logger.log(
+        `Alfalah IPN listener GET success httpStatus=${response.status} ` +
+          `ResponseCode=${data?.ResponseCode ?? "n/a"} TransactionStatus=${data?.TransactionStatus ?? "n/a"} ` +
+          `TransactionId=${data?.TransactionId ?? "n/a"} TransactionReferenceNumber=${data?.TransactionReferenceNumber ?? "n/a"} ` +
+          `raw=${JSON.stringify(data)}`,
+      );
+    } catch (err: any) {
+      const httpStatus = err?.response?.status;
+      const responseData = err?.response?.data;
+      this.logger.error(
+        `Alfalah IPN listener GET failed statusUrl=${statusUrl} ` +
+          `httpStatus=${httpStatus ?? "n/a"} message=${err?.message || err} ` +
+          `responseBody=${
+            responseData != null
+              ? typeof responseData === "string"
+                ? responseData
+                : JSON.stringify(responseData)
+              : "n/a"
+          }`,
+      );
+      throw err;
+    }
     const orderRef =
       data?.TransactionReferenceNumber ||
       this.extractAlfalahOrderIdFromIpnUrl(statusUrl);
@@ -4413,6 +4891,9 @@ export class DonationsService {
       source: "alfalah_listener",
       ipnPayload: data,
     });
+    this.logger.log(
+      `Alfalah IPN listener sync done orderRef=${orderRef} mappedStatus=${sync.status}`,
+    );
     return {
       success: true,
       orderId: orderRef,
@@ -4544,20 +5025,44 @@ export class DonationsService {
     }
 
     if (donation.status === "completed") {
+      this.logger.log(
+        `Alfalah sync skip already completed donationId=${donationId} source=${opts?.source || "alfalah_ipn"}`,
+      );
       return { status: "completed" };
     }
 
     let ipn = opts?.ipnPayload;
+    const ipnSource = ipn ? "payload" : "getOrderStatus";
     if (!ipn) {
+      this.logger.log(
+        `Alfalah sync fetching order status donationId=${donationId} orderRef=${orderRef} source=${opts?.source || "alfalah_ipn"}`,
+      );
       ipn = await this.alfalahService.getOrderStatus(orderRef);
+    } else {
+      ipn = this.alfalahService.parseIpnPayload(ipn);
+      this.logger.log(
+        `Alfalah sync using provided IPN payload donationId=${donationId} source=${opts?.source || "alfalah_ipn"} ` +
+          `ResponseCode=${ipn?.ResponseCode ?? "n/a"} TransactionStatus=${ipn?.TransactionStatus ?? "n/a"} ` +
+          `raw=${JSON.stringify(ipn)}`,
+      );
     }
 
-    const paid = this.alfalahService.isPaidStatus(ipn?.TransactionStatus);
+    const responseCode = ipn?.ResponseCode;
+    const transactionStatus = ipn?.TransactionStatus;
+    const paid = this.alfalahService.isPaidStatus(transactionStatus);
+    const responseOk = this.alfalahService.isSuccessResponseCode(responseCode);
     const newStatus = paid
       ? "completed"
-      : this.alfalahService.isSuccessResponseCode(ipn?.ResponseCode)
+      : responseOk
         ? "pending"
         : "failed";
+
+    this.logger.log(
+      `Alfalah status mapping donationId=${donationId} orderRef=${orderRef} ipnSource=${ipnSource} ` +
+        `dbStatus=${donation.status} TransactionStatus=${JSON.stringify(transactionStatus)} ` +
+        `ResponseCode=${JSON.stringify(responseCode)} paid=${paid} responseOk=${responseOk} ` +
+        `mappedStatus=${newStatus} Description=${ipn?.Description ?? ipn?.description ?? "n/a"}`,
+    );
 
     const transactionId =
       opts?.uniqueTranId ||
@@ -4612,6 +5117,10 @@ export class DonationsService {
       alfalahUpdate.email_sent = email_sent;
     }
     await this.donationRepository.update(donationId, alfalahUpdate);
+    this.logger.log(
+      `Alfalah DB updated donationId=${donationId} status=${newStatus} orderId=${alfalahUpdate.orderId} ` +
+        `err_msg=${alfalahUpdate.err_msg ?? "n/a"}`,
+    );
 
     let batching: any = null;
     if (newStatus === "completed") {

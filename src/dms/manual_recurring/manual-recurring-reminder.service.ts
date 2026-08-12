@@ -37,6 +37,7 @@ import {
 } from "../campaigns/utils/campaign-communication.constants";
 import { CampaignTargetFrequency } from "../campaigns/utils/campaign-recurring.constants";
 import { RecurringDonationsLedgerService } from "../../donations/recurring_donations/recurring-donations-ledger.service";
+import { isSubscriptionBillingDayToday } from "../../donations/recurring_donations/recurring-billing-date.util";
 
 export interface ManualRecurringReminderDetail {
   pledge_id: number;
@@ -801,7 +802,6 @@ export class ManualRecurringReminderService {
     return (
       donor?.name ||
       (donor as any)?.first_name ||
-      (donor as any)?.company_name ||
       "Valued Donor"
     );
   }
@@ -1262,9 +1262,20 @@ export class ManualRecurringReminderService {
       [CampaignTargetFrequency.MONTHLY]: "month",
     };
 
+    const intervalsToProcess = new Set<string>();
     for (const frequency of frequencies) {
       const billingInterval = intervalByFreq[frequency];
-      if (!billingInterval) continue;
+      if (billingInterval) intervalsToProcess.add(billingInterval);
+    }
+    // Monthly ledger subs use each subscription's billing day, not only the 2nd-of-month cron
+    intervalsToProcess.add("month");
+
+    for (const billingInterval of intervalsToProcess) {
+      const frequency =
+        (Object.entries(intervalByFreq).find(
+          ([, interval]) => interval === billingInterval,
+        )?.[0] as CampaignTargetFrequency) ||
+        CampaignTargetFrequency.MONTHLY;
 
       const periodKey =
         options.period_key || getPeriodKeyForFrequency(frequency);
@@ -1289,10 +1300,37 @@ export class ManualRecurringReminderService {
       for (const row of rows) {
         scanned += 1;
 
+        if (
+          billingInterval === "month" &&
+          !isSubscriptionBillingDayToday(row)
+        ) {
+          skipped += 1;
+          continue;
+        }
+
+        // Always open period dues for this cycle (even if reminder is deduped)
+        try {
+          await this.recurringLedgerService.ensurePeriodDuesForSubscription(
+            row,
+            { upToPeriodKey: periodKey },
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `ensurePeriodDues failed for recurring_donation ${row.id}: ${err?.message || err}`,
+          );
+        }
+
         if (!force && row.last_reminder_period_key === reminderDedupeKey) {
           skipped += 1;
           continue;
         }
+
+        // --- ENABLE LATER: skip / stop if subscription hit 3 unpaid payment reminders ---
+        // if (await this.recurringLedgerService.isSubscriptionBlockedByUnpaidReminders(row.id)) {
+        //   skipped += 1;
+        //   continue;
+        // }
+        // --- END ENABLE LATER ---
 
         const paidDonation = await this.donationRepo
           .createQueryBuilder("d")
@@ -1400,6 +1438,9 @@ export class ManualRecurringReminderService {
                 last_reminder_period_key: reminderDedupeKey,
                 last_reminder_sent_at: new Date(),
               });
+              // --- ENABLE LATER: payment received — reset unpaid reminder streak ---
+              // await this.recurringLedgerService.resetUnpaidPaymentReminderCount(row.id);
+              // --- END ENABLE LATER ---
               if (sentOk) thanks_sent += 1;
               else skipped += 1;
             } else {
@@ -1431,6 +1472,17 @@ export class ManualRecurringReminderService {
                 last_reminder_period_key: reminderDedupeKey,
                 last_reminder_sent_at: new Date(),
               });
+              // --- ENABLE LATER: increment unpaid reminder count; disable at 3 ---
+              // const reminderTrack =
+              //   await this.recurringLedgerService.recordUnpaidPaymentReminderSent(
+              //     row.id,
+              //   );
+              // if (reminderTrack.disabled) {
+              //   this.logger.warn(
+              //     `Recurring subscription ${row.id} auto-disabled after ${reminderTrack.count} unpaid payment reminders`,
+              //   );
+              // }
+              // --- END ENABLE LATER ---
               reminders_sent += 1;
             } else {
               failed += 1;

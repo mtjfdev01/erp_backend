@@ -14,11 +14,14 @@ import { DonorPasswordBackfillRunner } from "./donor-password-backfill.runner";
 import { DonorGeoBackfillService } from "./donor-geo-backfill.service";
 import { DonorGeoBackfillRunner } from "./donor-geo-backfill.runner";
 import { DonorAuditModule } from "./audit/donor-audit.module";
+import { DonorPipelineStageHistory } from "./pipeline/entities/donor-pipeline-stage-history.entity";
+import { OrganizationsModule } from "../organizations/organizations.module";
 
 @Module({
   imports: [
     DonorAuditModule,
-    TypeOrmModule.forFeature([Donor, User, Donation]),
+    OrganizationsModule,
+    TypeOrmModule.forFeature([Donor, User, Donation, DonorPipelineStageHistory]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },

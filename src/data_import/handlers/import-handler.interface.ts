@@ -1,9 +1,13 @@
 export interface ImportRowResult {
   row: number;
   success: boolean;
+  /** True when row was not inserted (duplicate / empty / already exists). */
+  skipped?: boolean;
   email?: string;
   id?: number;
   error?: string;
+  /** Human-readable why this row was skipped (shown in import UI). */
+  skip_reason?: string;
 }
 
 export interface ImportBatchResult {

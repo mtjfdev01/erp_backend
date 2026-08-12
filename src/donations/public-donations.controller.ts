@@ -8,6 +8,7 @@ import {
   Body,
   Param,
   Req,
+  Logger,
 } from "@nestjs/common";
 import { Request, Response } from "express";
 import { DonationsService } from "./donations.service";
@@ -16,6 +17,8 @@ import { renderApgAutoPostHtml } from "./alfalah/apg-gateway-html.util";
 
 @Controller("donations/public")
 export class PublicDonationsController {
+  private readonly logger = new Logger(PublicDonationsController.name);
+
   constructor(
     private readonly donationsService: DonationsService,
     private readonly donorService: DonorService,
@@ -125,6 +128,45 @@ export class PublicDonationsController {
         message: error.message,
         timestamp: new Date().toISOString(),
       });
+    }
+  }
+
+  // Public JazzCash IPN endpoint - NO GUARDS
+  @Post("jazzcash/ipn")
+  async handleJazzCashIpn(
+    @Body() payload: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const receivedAt = new Date().toISOString();
+    this.logger.log(
+      `JazzCash IPN incoming at=${receivedAt} method=${req.method} url=${req.originalUrl || req.url} ` +
+        `ip=${req.ip || req.socket?.remoteAddress || "n/a"} ` +
+        `contentType=${req.headers["content-type"] || "n/a"} ` +
+        `userAgent=${req.headers["user-agent"] || "n/a"} ` +
+        `body=${JSON.stringify(payload)}`,
+    );
+    try {
+      const result = await this.donationsService.handleJazzCashIpn(payload);
+      const ack = this.donationsService.buildJazzCashIpnAcknowledgement();
+      this.logger.log(
+        `JazzCash IPN success response at=${new Date().toISOString()} ` +
+          `donationId=${result?.donationId ?? "n/a"} status=${result?.status ?? "n/a"} ` +
+          `txnRef=${result?.txnRef ?? "n/a"} ack=${JSON.stringify(ack)}`,
+      );
+      return res.status(HttpStatus.OK).json(ack);
+    } catch (error) {
+      const errorBody = {
+        pp_ResponseCode: "999",
+        pp_ResponseMessage: error.message || "IPN processing error",
+        pp_SecureHash: "",
+      };
+      this.logger.error(
+        `JazzCash IPN failure at=${new Date().toISOString()} ` +
+          `message=${error?.message || error} stack=${error?.stack || "n/a"} ` +
+          `incomingBody=${JSON.stringify(payload)} response=${JSON.stringify(errorBody)}`,
+      );
+      return res.status(HttpStatus.OK).json(errorBody);
     }
   }
 

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DonorService } from "../../dms/donor/donor.service";
 import { DonorType } from "../../dms/donor/entities/donor.entity";
+import { OrganizationsService } from "../../dms/organizations/organizations.service";
 import {
   EntityImportHandler,
   ImportBatchResult,
@@ -12,13 +13,19 @@ const HEADER_ALIASES: Record<string, string> = {
   assignee_user_id: "assigned_to_user_id",
   referrer_id: "referrer_user_id",
   type: "donor_type",
+  company_name: "organization_name",
+  organization: "organization_name",
+  contact_person: "name",
 };
 
 @Injectable()
 export class DonorsImportHandler implements EntityImportHandler {
   readonly entityName = "donors";
 
-  constructor(private readonly donorService: DonorService) {}
+  constructor(
+    private readonly donorService: DonorService,
+    private readonly organizationsService: OrganizationsService,
+  ) {}
 
   getRequiredHeaders(): string[] {
     return ["donor_type", "email", "phone"];
@@ -30,13 +37,13 @@ export class DonorsImportHandler implements EntityImportHandler {
       "first_name",
       "last_name",
       "cnic",
-      "company_name",
-      "company_registration",
-      "contact_person",
-      "designation",
-      "company_address",
-      "company_phone",
-      "company_email",
+      "organization_name",
+      "organization_id",
+      "organization_registration",
+      "organization_email",
+      "organization_phone",
+      "organization_address",
+      "affiliation_role",
       "address",
       "city",
       "country",
@@ -106,7 +113,7 @@ export class DonorsImportHandler implements EntityImportHandler {
       const phone = String(row.phone || "").trim();
       const donorType = this.normalizeDonorType(row.donor_type);
 
-      if (!emailRaw && !phone && !row.name && !row.company_name) {
+      if (!emailRaw && !phone && !row.name && !row.organization_name) {
         skippedCount += 1;
         results.push({
           row: rowNumber,
@@ -160,10 +167,27 @@ export class DonorsImportHandler implements EntityImportHandler {
       }
       seenEmails.add(emailRaw);
 
+      const name =
+        row.name?.trim() ||
+        `${row.first_name || ""} ${row.last_name || ""}`.trim();
+      if (!name) {
+        failedCount += 1;
+        results.push({
+          row: rowNumber,
+          success: false,
+          email: emailRaw,
+          error: "Name is required",
+        });
+        continue;
+      }
+
       const payload: Record<string, any> = {
         donor_type: donorType,
         email: emailRaw,
         phone,
+        name,
+        first_name: row.first_name?.trim() || undefined,
+        last_name: row.last_name?.trim() || undefined,
         address: row.address?.trim() || undefined,
         city: row.city?.trim() || undefined,
         country: row.country?.trim() || undefined,
@@ -181,60 +205,43 @@ export class DonorsImportHandler implements EntityImportHandler {
         assigned_to_user_id: this.parseOptionalInt(row.assigned_to_user_id),
         referrer_user_id: this.parseOptionalInt(row.referrer_user_id),
         password: row.password?.trim() || undefined,
+        affiliation_role: row.affiliation_role?.trim() || undefined,
       };
 
-      if (donorType === DonorType.INDIVIDUAL) {
-        const name =
-          row.name?.trim() ||
-          `${row.first_name || ""} ${row.last_name || ""}`.trim();
-        if (!name) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: emailRaw,
-            error: "Name is required for individual donors",
-          });
-          continue;
-        }
-        payload.name = name;
-        payload.first_name = row.first_name?.trim() || undefined;
-        payload.last_name = row.last_name?.trim() || undefined;
-      } else {
-        const companyName = row.company_name?.trim();
-        const contactPerson = row.contact_person?.trim();
-        if (!companyName) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: emailRaw,
-            error: "company_name is required for csr donors",
-          });
-          continue;
-        }
-        if (!contactPerson) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: emailRaw,
-            error: "contact_person is required for csr donors",
-          });
-          continue;
-        }
-        payload.name = row.name?.trim() || companyName;
-        payload.company_name = companyName;
-        payload.company_registration =
-          row.company_registration?.trim() || undefined;
-        payload.contact_person = contactPerson;
-        payload.designation = row.designation?.trim() || undefined;
-        payload.company_address = row.company_address?.trim() || undefined;
-        payload.company_phone = row.company_phone?.trim() || undefined;
-        payload.company_email = row.company_email?.trim() || undefined;
-      }
-
       try {
+        let organizationId = this.parseOptionalInt(row.organization_id);
+        if (!organizationId && row.organization_name?.trim()) {
+          const org = await this.organizationsService.findOrCreateFromCompanyFields(
+            {
+              company_name: row.organization_name,
+              company_registration:
+                row.organization_registration?.trim() || undefined,
+              company_email: row.organization_email?.trim() || undefined,
+              company_phone: row.organization_phone?.trim() || undefined,
+              company_address: row.organization_address?.trim() || undefined,
+              city: row.city?.trim() || undefined,
+              country: row.country?.trim() || undefined,
+            },
+          );
+          organizationId = org?.id;
+        }
+
+        if (donorType === DonorType.CSR && !organizationId) {
+          failedCount += 1;
+          results.push({
+            row: rowNumber,
+            success: false,
+            email: emailRaw,
+            error:
+              "organization_name or organization_id is required for csr donors",
+          });
+          continue;
+        }
+
+        if (organizationId) {
+          payload.organization_id = organizationId;
+        }
+
         const saved = await this.donorService.importDonorRow(payload, user);
         successCount += 1;
         results.push({

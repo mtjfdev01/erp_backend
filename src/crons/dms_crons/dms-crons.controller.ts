@@ -120,4 +120,29 @@ export class DmsCronsController {
       });
     }
   }
+
+  /**
+   * Manual trigger: spawn next DMS todo occurrences for due recurring items.
+   * POST /dms-crons/dms-todos-spawn-due-recurring?as_of=2026-07-29
+   */
+  @Post("dms-todos-spawn-due-recurring")
+  async spawnDueRecurringDmsTodos(
+    @Query("as_of") asOf: string | undefined,
+    @Res() res: Response,
+  ) {
+    try {
+      const result =
+        await this.dmsCronsService.runDmsTodosDueRecurringSpawn(asOf);
+      return res.status(200).json({
+        success: true,
+        message: `DMS todos recurring spawn — scanned: ${result.scanned}, spawned: ${result.spawned}, skipped: ${result.skipped}`,
+        data: result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: `DMS todos recurring spawn failed: ${error.message}`,
+      });
+    }
+  }
 }

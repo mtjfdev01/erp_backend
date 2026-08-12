@@ -540,11 +540,6 @@ export class GeographicScopeService {
     if (this.textContainsAnyToken(record.address, scope.searchTokens)) {
       return true;
     }
-    if (
-      this.textContainsAnyToken(record.company_address, scope.searchTokens)
-    ) {
-      return true;
-    }
     return false;
   }
 
@@ -819,14 +814,6 @@ export class GeographicScopeService {
       paramKey,
       `${label}_addr`,
     );
-    this.appendContainsConditions(
-      qb,
-      alias,
-      "company_address",
-      scope.searchTokens,
-      paramKey,
-      `${label}_coaddr`,
-    );
   }
 
   private applyDonationsQuery<T>(
@@ -954,9 +941,6 @@ export class GeographicScopeService {
       parts.push(
         `LOWER(COALESCE(d.address, '')) LIKE :${paramKey}_offlineAddr${index}`,
       );
-      parts.push(
-        `LOWER(COALESCE(d.company_address, '')) LIKE :${paramKey}_offlineCoAddr${index}`,
-      );
     });
     if (!parts.length) {
       return "SELECT d.id FROM donors d WHERE 1 = 0";
@@ -993,7 +977,6 @@ export class GeographicScopeService {
         `%${token}%`,
       );
       query.setParameter(`${paramKey}_offlineAddr${index}`, `%${token}%`);
-      query.setParameter(`${paramKey}_offlineCoAddr${index}`, `%${token}%`);
     });
   }
 

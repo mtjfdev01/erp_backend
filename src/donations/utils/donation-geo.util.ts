@@ -7,7 +7,6 @@ export type DonationGeoDonorSnapshot = {
   country?: string | null;
   city?: string | null;
   address?: string | null;
-  company_address?: string | null;
 };
 
 export type DonationGeoFields = {
@@ -45,7 +44,6 @@ export const buildDonationGeoSnapshotForCreate = (
   const address = pickNonEmptyGeoValue(
     input.address,
     donor?.address,
-    donor?.company_address,
   );
 
   return {
@@ -70,7 +68,6 @@ export const buildDonationGeoSnapshotForBackfill = (
   const address = pickNonEmptyGeoValue(
     donation.address,
     donor?.address,
-    donor?.company_address,
   );
 
   return {

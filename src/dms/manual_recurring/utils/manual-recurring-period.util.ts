@@ -141,3 +141,79 @@ export function getDueReminderFrequencies(
   }
   return due;
 }
+
+/** Map recurring_donations.billing_interval → campaign frequency. */
+export function billingIntervalToFrequency(
+  billingInterval: string | null | undefined,
+): CampaignTargetFrequency | null {
+  const v = String(billingInterval || "")
+    .trim()
+    .toLowerCase();
+  if (v === "day" || v === "daily") return CampaignTargetFrequency.DAILY;
+  if (v === "week" || v === "weekly") return CampaignTargetFrequency.WEEKLY;
+  if (v === "month" || v === "monthly") return CampaignTargetFrequency.MONTHLY;
+  if (v === "year" || v === "yearly") return CampaignTargetFrequency.YEARLY;
+  return null;
+}
+
+/** Move a reference date forward by one billing period (local calendar). */
+export function advanceByFrequency(
+  reference: Date,
+  frequency: CampaignTargetFrequency,
+): Date {
+  const d = new Date(reference);
+  if (frequency === CampaignTargetFrequency.DAILY) {
+    d.setDate(d.getDate() + 1);
+    return d;
+  }
+  if (frequency === CampaignTargetFrequency.WEEKLY) {
+    d.setDate(d.getDate() + 7);
+    return d;
+  }
+  if (frequency === CampaignTargetFrequency.BI_WEEKLY) {
+    d.setDate(d.getDate() + 14);
+    return d;
+  }
+  if (frequency === CampaignTargetFrequency.MONTHLY) {
+    d.setMonth(d.getMonth() + 1);
+    return d;
+  }
+  if (frequency === CampaignTargetFrequency.QUARTERLY) {
+    d.setMonth(d.getMonth() + 3);
+    return d;
+  }
+  d.setFullYear(d.getFullYear() + 1);
+  return d;
+}
+
+/**
+ * Inclusive list of period keys from startRef through endRef (capped).
+ * Used to open missing period dues without creating donations.
+ */
+export function listPeriodKeysBetween(
+  frequency: CampaignTargetFrequency,
+  startRef: Date,
+  endRef: Date,
+  maxKeys = 36,
+): string[] {
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  let cursor = new Date(startRef);
+  const endMs = endRef.getTime();
+  let guard = 0;
+
+  while (guard < maxKeys + 5 && cursor.getTime() <= endMs + 86400000) {
+    guard += 1;
+    const key = getPeriodKeyForFrequency(frequency, cursor);
+    if (!seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+      if (keys.length >= maxKeys) break;
+    }
+    const endKey = getPeriodKeyForFrequency(frequency, endRef);
+    if (key === endKey) break;
+    cursor = advanceByFrequency(cursor, frequency);
+  }
+
+  return keys;
+}

@@ -27,6 +27,9 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { DonorRelationshipModule } from './donor_relationship/donor-relationship.module';
 import { CommunicationModule } from './communication/communication.module';
 import { ManualRecurringModule } from './manual_recurring/manual-recurring.module';
+import { DmsTodosModule } from './todos/dms-todos.module';
+import { OrganizationsModule } from './organizations/organizations.module';
+import { AidModule } from './aid/aid.module';
 
 @Module({
   controllers: [DmsController],
@@ -38,6 +41,8 @@ import { ManualRecurringModule } from './manual_recurring/manual-recurring.modul
     }),
     PermissionsModule,
     DonorModule,
+    OrganizationsModule,
+    AidModule,
     UserDonorsModule,
     DonationBoxModule,
     DonationInKindModule,
@@ -61,6 +66,7 @@ import { ManualRecurringModule } from './manual_recurring/manual-recurring.modul
     DonorRelationshipModule,
     CommunicationModule,
     ManualRecurringModule,
+    DmsTodosModule,
   ],
 })
 export class DmsModule {}

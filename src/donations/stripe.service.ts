@@ -6,6 +6,7 @@ export type StripeRecurringInterval = "day" | "week" | "month" | "year";
 export type StripeRecurringStartDateMode =
   | "same_date"
   | "first_of_month"
+  | "day_of_month"
   | "custom";
 
 export interface StripeRecurringParams {
@@ -127,6 +128,13 @@ export class StripeService {
       );
     }
 
+    if (start_date_mode === "day_of_month" && !start_date) {
+      throw new HttpException(
+        "recurring.start_date is required when start_date_mode is day_of_month",
+        400,
+      );
+    }
+
     const billing_cycle_anchor =
       recurring.billing_cycle_anchor ??
       this.resolveBillingCycleAnchor(start_date_mode, start_date);
@@ -147,11 +155,16 @@ export class StripeService {
     const m = String(mode || "same_date")
       .trim()
       .toLowerCase();
-    if (m === "first_of_month" || m === "custom" || m === "same_date") {
+    if (
+      m === "first_of_month" ||
+      m === "custom" ||
+      m === "same_date" ||
+      m === "day_of_month"
+    ) {
       return m;
     }
     throw new HttpException(
-      "recurring.start_date_mode must be one of: same_date, first_of_month, custom",
+      "recurring.start_date_mode must be one of: same_date, first_of_month, day_of_month, custom",
       400,
     );
   }
@@ -160,7 +173,7 @@ export class StripeService {
    * Resolve Stripe billing_cycle_anchor (unix seconds).
    *
    * same_date: undefined — charge now, repeat on the same calendar date (Stripe default).
-   * first_of_month / custom: anchor to start_date (or next 1st). When the anchor is in the
+   * first_of_month / day_of_month / custom: anchor to start_date (or next 1st). When the anchor is in the
    * future we set billing_cycle_anchor and use proration_behavior create_prorations so Stripe
    * still creates an immediate invoice (collects payment method + charges the partial period
    * until the anchor); subsequent full-period invoices align to the 1st / custom date.
@@ -175,7 +188,7 @@ export class StripeService {
     if (mode === "first_of_month" && !dateStr) {
       dateStr = this.nextFirstOfMonthIso();
     }
-    if (!dateStr) {
+    if ((mode === "day_of_month" || mode === "custom") && !dateStr) {
       throw new HttpException(
         "recurring.start_date is required for this start_date_mode",
         400,
