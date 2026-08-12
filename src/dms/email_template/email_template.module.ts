@@ -3,6 +3,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule } from "@nestjs/config";
 import { EmailTemplateService } from "./email_template.service";
 import { EmailTemplateController } from "./email_template.controller";
+import { PublicResendWebhookController } from "./public-resend-webhook.controller";
 import { EmailTemplate } from "./entities/email_template.entity";
 import { CommunicationLog } from "./entities/communication-log.entity";
 import { CommunicationBatch } from "./entities/communication-batch.entity";
@@ -36,7 +37,7 @@ import { WhatsAppService } from "../../utils/services/whatsapp.service";
       signOptions: { expiresIn: "24h" },
     }),
   ],
-  controllers: [EmailTemplateController],
+  controllers: [EmailTemplateController, PublicResendWebhookController],
   providers: [EmailTemplateService, WhatsAppService],
   exports: [EmailTemplateService],
 })

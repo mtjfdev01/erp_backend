@@ -38,6 +38,7 @@ import {
 import { CampaignTargetFrequency } from "../campaigns/utils/campaign-recurring.constants";
 import { RecurringDonationsLedgerService } from "../../donations/recurring_donations/recurring-donations-ledger.service";
 import { isSubscriptionBillingDayToday } from "../../donations/recurring_donations/recurring-billing-date.util";
+import { isSubscriptionPrepaidPeriodCovered } from "../../donations/recurring_donations/recurring-prepaid.util";
 
 export interface ManualRecurringReminderDetail {
   pledge_id: number;
@@ -1306,6 +1307,25 @@ export class ManualRecurringReminderService {
         ) {
           skipped += 1;
           continue;
+        }
+
+        // Prepaid coverage: skip reminders (thanks sent once on upfront payment)
+        if (isSubscriptionPrepaidPeriodCovered(row, periodKey)) {
+          const prepaidSettled =
+            await this.recurringLedgerService.hasCompletedInstallmentForPeriod(
+              row.id,
+              periodKey,
+            );
+          if (prepaidSettled) {
+            if (!force && row.last_reminder_period_key !== reminderDedupeKey) {
+              await this.stripeRecurringRepo.update(row.id, {
+                last_reminder_period_key: reminderDedupeKey,
+                last_reminder_sent_at: new Date(),
+              });
+            }
+            skipped += 1;
+            continue;
+          }
         }
 
         // Always open period dues for this cycle (even if reminder is deduped)

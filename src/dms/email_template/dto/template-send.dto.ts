@@ -63,4 +63,10 @@ export class SendTemplateBulkDto {
   @IsOptional()
   @IsDateString()
   scheduled_at?: string | null;
+
+  /** donor_bulk = donors list modal; communication = Communication send page */
+  @IsOptional()
+  @IsString()
+  @IsIn(["donor_bulk", "communication"])
+  send_source?: "donor_bulk" | "communication";
 }

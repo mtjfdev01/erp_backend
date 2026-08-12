@@ -161,9 +161,9 @@ export function addCalendarMonthsToYmd(ymd: string, months: number): string {
 
 /**
  * First recurring billing date after prepaid coverage.
- * Example: pay 3 months on Aug 10 → first reminder ~Nov 10 (still respects min gap).
+ * @deprecated Use resolvePrepaidContinueStartDate from recurring-prepaid.util.ts
  */
-export function resolvePrepaidContinueStartDate(
+export function resolvePrepaidContinueStartDateLegacyMonths(
   prepaidMonths: number,
   reference = new Date(),
   minGapDays: number = MIN_MONTHLY_RECURRING_GAP_DAYS,

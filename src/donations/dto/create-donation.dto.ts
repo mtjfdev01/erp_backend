@@ -255,4 +255,10 @@ export class CreateDonationDto {
   @IsInt()
   @Type(() => Number)
   prepaid_months?: number;
+
+  /** Days / weeks / months prepaid upfront (matches donation_frequency / recurring.interval). */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  prepaid_periods?: number;
 }

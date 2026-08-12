@@ -41,6 +41,9 @@ interface PaginationOptions {
   donation_box_id?: number;
   status?: string;
   payment_method?: string;
+  min_amount?: string | number;
+  max_amount?: string | number;
+  date?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -354,6 +357,35 @@ export class DonationBoxDonationService {
     return this.create(createDto, user?.id);
   }
 
+  private applyCollectionDateFilter(
+    query: SelectQueryBuilder<DonationBoxDonation>,
+    filters: {
+      date?: string;
+      start_date?: string;
+      end_date?: string;
+    },
+  ): void {
+    const dateField = "donation_box_donation.collection_date";
+    if (filters.start_date && filters.end_date) {
+      query.andWhere(`${dateField} BETWEEN :cbdStartDate AND :cbdEndDate`, {
+        cbdStartDate: filters.start_date,
+        cbdEndDate: filters.end_date,
+      });
+    } else if (filters.start_date) {
+      query.andWhere(`${dateField} >= :cbdStartDate`, {
+        cbdStartDate: filters.start_date,
+      });
+    } else if (filters.end_date) {
+      query.andWhere(`${dateField} <= :cbdEndDate`, {
+        cbdEndDate: filters.end_date,
+      });
+    } else if (filters.date) {
+      query.andWhere(`${dateField} = :cbdExactDate`, {
+        cbdExactDate: filters.date,
+      });
+    }
+  }
+
   /**
    * Find all collections with pagination and filtering
    */
@@ -372,6 +404,9 @@ export class DonationBoxDonationService {
         donation_box_id,
         status = "",
         payment_method = "",
+        min_amount,
+        max_amount,
+        date = "",
         start_date,
         end_date,
       } = options;
@@ -386,6 +421,9 @@ export class DonationBoxDonationService {
         "receipt_number",
         "cheque_number",
         "bank_name",
+        "donation_box.shop_name",
+        "donation_box.key_no",
+        "donation_box.box_id_no",
       ];
 
       // Build query with relations
@@ -401,8 +439,6 @@ export class DonationBoxDonationService {
         search,
         status,
         payment_method,
-        start_date,
-        end_date,
       };
 
       if (donation_box_id) {
@@ -410,6 +446,29 @@ export class DonationBoxDonationService {
       }
 
       applyCommonFilters(query, filters, searchFields, "donation_box_donation");
+
+      this.applyCollectionDateFilter(query, { date, start_date, end_date });
+
+      const hybridFilters: HybridFilter[] = [];
+      const minAmount = Number(min_amount);
+      if (Number.isFinite(minAmount)) {
+        hybridFilters.push({
+          column: "collection_amount",
+          operator: "gte",
+          value: minAmount,
+        });
+      }
+      const maxAmount = Number(max_amount);
+      if (Number.isFinite(maxAmount)) {
+        hybridFilters.push({
+          column: "collection_amount",
+          operator: "lte",
+          value: maxAmount,
+        });
+      }
+      if (hybridFilters.length) {
+        applyHybridFilters(query, hybridFilters, "donation_box_donation");
+      }
 
       if (geoScope) {
         this.geographicScopeService.applyToQuery(

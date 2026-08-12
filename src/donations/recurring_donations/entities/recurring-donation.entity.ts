@@ -79,6 +79,22 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "varchar", nullable: true, default: null })
   donation_type: string | null;
 
+  /** Months paid upfront on initial donation; reminders skipped until coverage ends. */
+  @Column({ type: "int", nullable: true, default: null })
+  prepaid_months: number | null;
+
+  /** Billing periods paid upfront (days / weeks / months depending on billing_interval). */
+  @Column({ type: "int", nullable: true, default: null })
+  prepaid_periods: number | null;
+
+  /** First month (YYYY-MM) covered by upfront prepaid payment. */
+  @Column({ type: "varchar", length: 16, nullable: true, default: null })
+  prepaid_start_period_key: string | null;
+
+  /** Last month (YYYY-MM) covered by upfront prepaid payment. */
+  @Column({ type: "varchar", length: 16, nullable: true, default: null })
+  prepaid_end_period_key: string | null;
+
   @Column({ type: "timestamp", nullable: true, default: null })
   paid_at: Date | null;
 
