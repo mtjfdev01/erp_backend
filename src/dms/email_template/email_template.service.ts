@@ -931,9 +931,10 @@ export class EmailTemplateService {
       return { matched: false };
     }
 
-    // Open/click analytics only for donor bulk sends (DonorBulkActionsModal)
+    // Open/click analytics primarily for donor bulk sends.
+    // If send_source is missing (e.g., column not synced yet), do not block updates.
     const source = String(log.batch?.send_source || "").trim();
-    if (source !== CommunicationSendSource.DONOR_BULK) {
+    if (source && source !== CommunicationSendSource.DONOR_BULK) {
       return { matched: false };
     }
 
