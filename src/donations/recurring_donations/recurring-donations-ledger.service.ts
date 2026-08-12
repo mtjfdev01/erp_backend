@@ -17,6 +17,13 @@ import {
   RECURRING_SUBSCRIPTION_DISABLED_REASON,
   RECURRING_SUBSCRIPTION_DISABLED_STATUS,
 } from "./recurring-donations.constants";
+import {
+  isSubscriptionPrepaidPeriodCovered,
+  listPrepaidPeriodKeysInRange,
+  prepaidInstallmentInvoiceKey,
+  resolvePrepaidPeriodCount,
+  resolveSubscriptionPrepaidPeriodKeys,
+} from "./recurring-prepaid.util";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -161,6 +168,10 @@ export class RecurringDonationsLedgerService {
       "rd.project_id AS project_id",
       "rd.campaign_id AS campaign_id",
       "rd.donation_type AS donation_type",
+      "rd.prepaid_months AS prepaid_months",
+      "rd.prepaid_periods AS prepaid_periods",
+      "rd.prepaid_start_period_key AS prepaid_start_period_key",
+      "rd.prepaid_end_period_key AS prepaid_end_period_key",
       "rd.paid_at AS paid_at",
       "rd.created_at AS created_at",
       "rd.updated_at AS updated_at",
@@ -302,6 +313,7 @@ export class RecurringDonationsLedgerService {
     startDateMode?: string | null;
     startDate?: string | null;
     consent?: boolean | null;
+    prepaidPeriods?: number | null;
   }): Promise<RecurringDonation | null> {
     if (!params.donationId) return null;
 
@@ -319,12 +331,31 @@ export class RecurringDonationsLedgerService {
         patch.consent = true;
         patch.consent_at = new Date();
       }
+      const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+        params.prepaidPeriods,
+        params.billingInterval,
+      );
+      if (
+        prepaid.prepaidPeriods &&
+        !existing.prepaid_periods &&
+        !existing.prepaid_start_period_key
+      ) {
+        patch.prepaid_periods = prepaid.prepaidPeriods;
+        patch.prepaid_months = prepaid.prepaidMonths;
+        patch.prepaid_start_period_key = prepaid.start;
+        patch.prepaid_end_period_key = prepaid.end;
+      }
       if (Object.keys(patch).length) {
         await this.recurringDonationRepo.update(existing.id, patch);
         return this.recurringDonationRepo.findOne({ where: { id: existing.id } });
       }
       return existing;
     }
+
+    const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+      params.prepaidPeriods,
+      params.billingInterval,
+    );
 
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
@@ -346,6 +377,10 @@ export class RecurringDonationsLedgerService {
       project_id: params.projectId ?? null,
       campaign_id: params.campaignId ?? null,
       donation_type: params.donationType ?? null,
+      prepaid_months: prepaid.prepaidMonths,
+      prepaid_periods: prepaid.prepaidPeriods,
+      prepaid_start_period_key: prepaid.start,
+      prepaid_end_period_key: prepaid.end,
     });
     return this.recurringDonationRepo.save(row);
   }
@@ -434,6 +469,34 @@ export class RecurringDonationsLedgerService {
       return { recorded: false, reason: "Installment already recorded" };
     }
 
+    const isInitial = master.initial_donation_id === donationId;
+    const prepaidPeriods = resolvePrepaidPeriodCount({
+      prepaid_periods: master.prepaid_periods,
+      prepaid_months: master.prepaid_months,
+    });
+    if (
+      isInitial &&
+      prepaidPeriods != null &&
+      prepaidPeriods >= 1 &&
+      master.prepaid_start_period_key &&
+      master.prepaid_end_period_key
+    ) {
+      const prepaidResult = await this.settlePrepaidPeriodsFromDonation(
+        master,
+        donation,
+      );
+      if (prepaidResult.recorded) {
+        return prepaidResult;
+      }
+      const fullySettled = await this.isPrepaidCoverageFullySettled(master);
+      if (fullySettled) {
+        return {
+          recorded: false,
+          reason: prepaidResult.reason || "Prepaid periods already settled",
+        };
+      }
+    }
+
     // Open current (+ gap) period dues before settling so first pay always has a target
     await this.ensurePeriodDuesForSubscription(master);
 
@@ -450,7 +513,6 @@ export class RecurringDonationsLedgerService {
       .addOrderBy("inst.id", "ASC")
       .getOne();
 
-    const isInitial = master.initial_donation_id === donationId;
     const paidAt = new Date();
     const amount = donation.amount ?? master.amount;
     const currency = donation.currency || master.currency || "PKR";
@@ -515,6 +577,181 @@ export class RecurringDonationsLedgerService {
     return { recorded: true };
   }
 
+  /** Whether a completed installment exists for this subscription + period. */
+  async hasCompletedInstallmentForPeriod(
+    subscriptionId: number,
+    periodKey: string,
+  ): Promise<boolean> {
+    if (!subscriptionId || !periodKey) return false;
+    const row = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.parent_id = :parentId", { parentId: subscriptionId })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .andWhere("inst.period_key = :periodKey", { periodKey })
+      .andWhere("LOWER(COALESCE(inst.status, '')) IN (:...statuses)", {
+        statuses: ["completed", "paid", "success"],
+      })
+      .getOne();
+    return Boolean(row);
+  }
+
+  async isPrepaidCoverageFullySettled(
+    subscription: Pick<
+      RecurringDonation,
+      | "id"
+      | "prepaid_start_period_key"
+      | "prepaid_end_period_key"
+      | "billing_interval"
+    >,
+  ): Promise<boolean> {
+    if (
+      !subscription?.id ||
+      !subscription.prepaid_start_period_key ||
+      !subscription.prepaid_end_period_key
+    ) {
+      return false;
+    }
+    const periodKeys = listPrepaidPeriodKeysInRange(
+      subscription.prepaid_start_period_key,
+      subscription.prepaid_end_period_key,
+      subscription.billing_interval || "month",
+    );
+    if (!periodKeys.length) return false;
+    const settled = await Promise.all(
+      periodKeys.map((pk) =>
+        this.hasCompletedInstallmentForPeriod(subscription.id, pk),
+      ),
+    );
+    return settled.every(Boolean);
+  }
+
+  /**
+   * Split upfront prepaid payment into one completed installment per covered period.
+   * Each period gets the subscription per-period amount (total ÷ prepaid_periods).
+   */
+  private async settlePrepaidPeriodsFromDonation(
+    master: RecurringDonation,
+    donation: Donation,
+  ): Promise<{ recorded: boolean; reason?: string }> {
+    const startKey = master.prepaid_start_period_key;
+    const endKey = master.prepaid_end_period_key;
+    if (!startKey || !endKey) {
+      return { recorded: false, reason: "Missing prepaid period keys" };
+    }
+
+    const periodKeys = listPrepaidPeriodKeysInRange(
+      startKey,
+      endKey,
+      master.billing_interval || "month",
+    );
+    if (!periodKeys.length) {
+      return { recorded: false, reason: "No prepaid periods" };
+    }
+
+    const allSettled = await Promise.all(
+      periodKeys.map((pk) =>
+        this.hasCompletedInstallmentForPeriod(master.id, pk),
+      ),
+    );
+    if (allSettled.every(Boolean)) {
+      return { recorded: false, reason: "Prepaid periods already settled" };
+    }
+
+    const paidAt = new Date();
+    const periodAmount = Number(master.amount) || 0;
+    const currency = donation.currency || master.currency || "PKR";
+    let created = 0;
+
+    for (const periodKey of periodKeys) {
+      const invoiceKey = prepaidInstallmentInvoiceKey(donation.id, periodKey);
+
+      const byInvoice = await this.recurringDonationRepo.findOne({
+        where: {
+          record_type: "installment",
+          stripe_invoice_id: invoiceKey,
+          is_archived: false,
+        },
+      });
+      if (byInvoice) continue;
+
+      const pending = await this.recurringDonationRepo.findOne({
+        where: {
+          parent_id: master.id,
+          record_type: "installment",
+          period_key: periodKey,
+          is_archived: false,
+        },
+      });
+
+      if (pending) {
+        await this.recurringDonationRepo.update(pending.id, {
+          initial_donation_id: master.initial_donation_id,
+          donor_id: master.donor_id ?? donation.donor_id,
+          stripe_invoice_id: invoiceKey,
+          stripe_payment_intent_id: String(donation.id),
+          amount: periodAmount,
+          currency,
+          status: "completed",
+          donation_method: donation.donation_method || master.donation_method,
+          project_id: donation.project_id || master.project_id,
+          campaign_id: donation.campaign_id ?? master.campaign_id,
+          donation_type: donation.donation_type || master.donation_type,
+          paid_at: paidAt,
+          stripe_billing_reason: "prepaid_period",
+        });
+        created += 1;
+        continue;
+      }
+
+      const existingCompleted = await this.recurringDonationRepo
+        .createQueryBuilder("inst")
+        .where("inst.parent_id = :parentId", { parentId: master.id })
+        .andWhere("inst.period_key = :periodKey", { periodKey })
+        .andWhere("inst.record_type = :type", { type: "installment" })
+        .andWhere("inst.is_archived = false")
+        .andWhere("LOWER(COALESCE(inst.status, '')) IN (:...statuses)", {
+          statuses: ["completed", "paid", "success"],
+        })
+        .getOne();
+      if (existingCompleted) continue;
+
+      const installment = this.recurringDonationRepo.create({
+        record_type: "installment",
+        parent_id: master.id,
+        initial_donation_id: master.initial_donation_id,
+        donor_id: master.donor_id ?? donation.donor_id,
+        stripe_subscription_id: null,
+        stripe_invoice_id: invoiceKey,
+        stripe_payment_intent_id: String(donation.id),
+        billing_interval: master.billing_interval,
+        billing_interval_count: master.billing_interval_count,
+        amount: periodAmount,
+        currency,
+        status: "completed",
+        donation_method: donation.donation_method || master.donation_method,
+        project_id: donation.project_id || master.project_id,
+        campaign_id: donation.campaign_id ?? master.campaign_id,
+        donation_type: donation.donation_type || master.donation_type,
+        paid_at: paidAt,
+        period_key: periodKey,
+        stripe_billing_reason: "prepaid_period",
+      });
+      await this.recurringDonationRepo.save(installment);
+      created += 1;
+    }
+
+    if (master.status !== "active") {
+      await this.recurringDonationRepo.update(master.id, { status: "active" });
+    }
+
+    if (created === 0 && allSettled.some(Boolean)) {
+      return { recorded: false, reason: "Prepaid periods already settled" };
+    }
+
+    return { recorded: created > 0 };
+  }
+
   /**
    * Ensure pending period-due installment rows exist through the current period.
    * Does not create or modify donations/donors. Skips periods already covered by
@@ -573,6 +810,12 @@ export class RecurringDonationsLedgerService {
 
     for (const periodKey of periodKeys) {
       if (keyed.has(periodKey)) continue;
+
+      if (isSubscriptionPrepaidPeriodCovered(subscription, periodKey)) {
+        // Prepaid coverage — installments created on payment, not pending dues
+        continue;
+      }
+
       const isCurrent = periodKey === upToKey;
       // Credit historical completed installments (no period_key) against older periods only
       if (!isCurrent && skipLegacy > 0) {

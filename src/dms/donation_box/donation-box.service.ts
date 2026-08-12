@@ -36,13 +36,32 @@ interface PaginationOptions {
   search?: string;
   region?: string;
   city?: string;
+  region_id?: string | number;
+  city_id?: string | number;
+  route_id?: string | number;
+  assigned_user_id?: string | number;
   box_type?: string;
   status?: string;
   frequency?: string;
   is_active?: boolean;
+  date?: string;
   start_date?: string;
   end_date?: string;
 }
+
+const DONATION_BOX_SORT_FIELDS = new Set([
+  "created_at",
+  "updated_at",
+  "active_since",
+  "shop_name",
+  "box_id_no",
+  "key_no",
+  "status",
+  "box_type",
+  "frequency",
+  "total_collected",
+  "last_collection_date",
+]);
 
 @Injectable()
 export class DonationBoxService {
@@ -673,6 +692,35 @@ export class DonationBoxService {
     return String(value || "").replace(/\D/g, "");
   }
 
+  private applyDonationBoxActiveSinceDateFilter(
+    query: SelectQueryBuilder<DonationBox>,
+    filters: {
+      date?: string;
+      start_date?: string;
+      end_date?: string;
+    },
+  ): void {
+    const dateField = "donation_box.active_since";
+    if (filters.start_date && filters.end_date) {
+      query.andWhere(`${dateField} BETWEEN :dbStartDate AND :dbEndDate`, {
+        dbStartDate: filters.start_date,
+        dbEndDate: filters.end_date,
+      });
+    } else if (filters.start_date) {
+      query.andWhere(`${dateField} >= :dbStartDate`, {
+        dbStartDate: filters.start_date,
+      });
+    } else if (filters.end_date) {
+      query.andWhere(`${dateField} <= :dbEndDate`, {
+        dbEndDate: filters.end_date,
+      });
+    } else if (filters.date) {
+      query.andWhere(`${dateField} = :dbExactDate`, {
+        dbExactDate: filters.date,
+      });
+    }
+  }
+
   /**
    * Find all donation boxes with pagination and filtering
    */
@@ -690,10 +738,15 @@ export class DonationBoxService {
         search = "",
         region = "",
         city = "",
+        region_id = "",
+        city_id = "",
+        route_id = "",
+        assigned_user_id = "",
         box_type = "",
         status = "",
         frequency = "",
         is_active,
+        date = "",
         start_date,
         end_date,
       } = options;
@@ -722,16 +775,12 @@ export class DonationBoxService {
         .leftJoinAndSelect("donation_box.assignedUsers", "assignedUsers")
         .where("donation_box.is_archived = false");
 
-      // Apply common filters
+      // Apply common filters (direct columns only — geo/date handled below)
       const filters: FilterPayload = {
         search,
-        region,
-        city,
         box_type,
         status,
         frequency,
-        start_date,
-        end_date,
       };
 
       if (is_active !== undefined) {
@@ -739,6 +788,56 @@ export class DonationBoxService {
       }
 
       applyCommonFilters(query, filters, searchFields, "donation_box");
+
+      const regionId = Number(region_id);
+      if (Number.isFinite(regionId) && regionId > 0) {
+        query.andWhere("route.region_id = :filterRegionId", {
+          filterRegionId: regionId,
+        });
+      } else if (region && String(region).trim()) {
+        query.andWhere("LOWER(region.name) = LOWER(:filterRegionName)", {
+          filterRegionName: String(region).trim(),
+        });
+      }
+
+      const cityId = Number(city_id);
+      if (Number.isFinite(cityId) && cityId > 0) {
+        query.andWhere("donation_box.city_id = :filterCityId", {
+          filterCityId: cityId,
+        });
+      } else if (city && String(city).trim()) {
+        query.andWhere(
+          `(LOWER(cities.name) = LOWER(:filterCityName) OR donation_box.city_id IN (
+            SELECT c.id FROM cities c WHERE LOWER(c.name) = LOWER(:filterCityName)
+          ))`,
+          { filterCityName: String(city).trim() },
+        );
+      }
+
+      const routeId = Number(route_id);
+      if (Number.isFinite(routeId) && routeId > 0) {
+        query.andWhere("donation_box.route_id = :filterRouteId", {
+          filterRouteId: routeId,
+        });
+      }
+
+      const assigneeId = Number(assigned_user_id);
+      if (Number.isFinite(assigneeId) && assigneeId > 0) {
+        query.andWhere(
+          `EXISTS (
+            SELECT 1 FROM donation_box_users dbu
+            WHERE dbu.donation_box_id = donation_box.id
+            AND dbu.user_id = :filterAssigneeId
+          )`,
+          { filterAssigneeId: assigneeId },
+        );
+      }
+
+      this.applyDonationBoxActiveSinceDateFilter(query, {
+        date,
+        start_date,
+        end_date,
+      });
 
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
@@ -754,8 +853,11 @@ export class DonationBoxService {
         this.applyDonationBoxListDataScope(query, scope, geoScope);
       }
 
-      // Apply sorting
-      query.orderBy(`donation_box.${sortField}`, sortOrder);
+      // Apply sorting (whitelist to prevent SQL injection)
+      const safeSortField = DONATION_BOX_SORT_FIELDS.has(sortField || "")
+        ? sortField!
+        : "created_at";
+      query.orderBy(`donation_box.${safeSortField}`, sortOrder);
 
       // Apply pagination
       query.skip(skip).take(pageSize);

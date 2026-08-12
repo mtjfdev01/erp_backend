@@ -395,8 +395,15 @@ export class EmailTemplateService {
           ? CommunicationDeliveryStatus.SENT
           : CommunicationDeliveryStatus.FAILED,
         sent_at: result.success ? new Date() : null,
+        provider_message_id: result.messageId || null,
         error_message: result.error || null,
-        metadata: { test: true, context: rendered.context },
+        metadata: {
+          test: true,
+          context: rendered.context,
+          ...(result.messageId
+            ? { provider_message_id: result.messageId }
+            : {}),
+        },
       }),
     );
 
@@ -546,7 +553,13 @@ export class EmailTemplateService {
           ? CommunicationDeliveryStatus.SENT
           : CommunicationDeliveryStatus.FAILED,
         error: dispatch.error,
-        metadata: { context: rendered.context },
+        providerMessageId: dispatch.messageId || null,
+        metadata: {
+          context: rendered.context,
+          ...(dispatch.messageId
+            ? { provider_message_id: dispatch.messageId }
+            : {}),
+        },
       });
       if (dispatch.success) sentCount += 1;
       else failedCount += 1;
@@ -751,7 +764,167 @@ export class EmailTemplateService {
       order: { created_at: "DESC" },
     });
 
-    return { batch, logs };
+    const analytics = this.buildBatchAnalytics(logs);
+
+    return { batch, logs, analytics };
+  }
+
+  private buildBatchAnalytics(logs: CommunicationLog[]) {
+    const counts = {
+      total: logs.length,
+      sent: 0,
+      delivered: 0,
+      opened: 0,
+      clicked: 0,
+      failed: 0,
+      scheduled: 0,
+      pending: 0,
+      not_opened: 0,
+    };
+
+    for (const log of logs) {
+      const status = String(log.delivery_status || "").toLowerCase();
+      if (status === CommunicationDeliveryStatus.CLICKED) {
+        counts.clicked += 1;
+        counts.opened += 1;
+        counts.delivered += 1;
+        counts.sent += 1;
+      } else if (status === CommunicationDeliveryStatus.OPENED) {
+        counts.opened += 1;
+        counts.delivered += 1;
+        counts.sent += 1;
+      } else if (status === CommunicationDeliveryStatus.DELIVERED) {
+        counts.delivered += 1;
+        counts.sent += 1;
+      } else if (status === CommunicationDeliveryStatus.SENT) {
+        counts.sent += 1;
+      } else if (status === CommunicationDeliveryStatus.FAILED) {
+        counts.failed += 1;
+      } else if (status === CommunicationDeliveryStatus.SCHEDULED) {
+        counts.scheduled += 1;
+      } else if (status === CommunicationDeliveryStatus.PENDING) {
+        counts.pending += 1;
+      }
+    }
+
+    // Approximate: successfully sent/delivered but no open event yet
+    counts.not_opened = Math.max(0, counts.sent - counts.opened);
+
+    return counts;
+  }
+
+  /**
+   * Apply Resend webhook events (delivered / opened / clicked / bounced) to communication_logs.
+   */
+  async handleResendWebhookEvent(event: {
+    type?: string;
+    created_at?: string;
+    data?: {
+      email_id?: string;
+      to?: string[];
+      [key: string]: any;
+    };
+  }): Promise<{ matched: boolean; log_id?: number; status?: string }> {
+    const type = String(event?.type || "").trim();
+    const emailId = String(event?.data?.email_id || "").trim();
+    if (!emailId) {
+      return { matched: false };
+    }
+
+    const log = await this.logRepository.findOne({
+      where: { provider_message_id: emailId, is_archived: false },
+    });
+    if (!log) {
+      return { matched: false };
+    }
+
+    const eventAt = event?.created_at
+      ? new Date(event.created_at)
+      : new Date();
+    const next = this.mapResendEventToStatus(type, log.delivery_status);
+    if (!next) {
+      return { matched: true, log_id: log.id, status: log.delivery_status };
+    }
+
+    const patch: Partial<CommunicationLog> = {
+      delivery_status: next.status,
+      metadata: {
+        ...(log.metadata || {}),
+        last_resend_event: type,
+        last_resend_event_at: eventAt.toISOString(),
+      },
+    };
+
+    if (next.status === CommunicationDeliveryStatus.DELIVERED && !log.sent_at) {
+      patch.sent_at = eventAt;
+    }
+    if (next.status === CommunicationDeliveryStatus.OPENED && !log.opened_at) {
+      patch.opened_at = eventAt;
+    }
+    if (next.status === CommunicationDeliveryStatus.CLICKED) {
+      if (!log.opened_at) patch.opened_at = eventAt;
+      if (!log.clicked_at) patch.clicked_at = eventAt;
+    }
+    if (next.status === CommunicationDeliveryStatus.FAILED) {
+      patch.error_message =
+        log.error_message ||
+        (type === "email.bounced"
+          ? "Email bounced"
+          : type === "email.complained"
+            ? "Marked as spam"
+            : `Resend event: ${type}`);
+    }
+
+    await this.logRepository.update(log.id, patch);
+    return { matched: true, log_id: log.id, status: next.status };
+  }
+
+  private mapResendEventToStatus(
+    eventType: string,
+    current: CommunicationDeliveryStatus | string | null,
+  ): { status: CommunicationDeliveryStatus } | null {
+    const rank: Record<string, number> = {
+      [CommunicationDeliveryStatus.PENDING]: 0,
+      [CommunicationDeliveryStatus.SCHEDULED]: 1,
+      [CommunicationDeliveryStatus.SENT]: 2,
+      [CommunicationDeliveryStatus.DELIVERED]: 3,
+      [CommunicationDeliveryStatus.OPENED]: 4,
+      [CommunicationDeliveryStatus.CLICKED]: 5,
+      [CommunicationDeliveryStatus.REPLIED]: 6,
+      [CommunicationDeliveryStatus.FAILED]: 99,
+    };
+
+    let candidate: CommunicationDeliveryStatus | null = null;
+    if (eventType === "email.delivered") {
+      candidate = CommunicationDeliveryStatus.DELIVERED;
+    } else if (eventType === "email.opened") {
+      candidate = CommunicationDeliveryStatus.OPENED;
+    } else if (eventType === "email.clicked") {
+      candidate = CommunicationDeliveryStatus.CLICKED;
+    } else if (
+      eventType === "email.bounced" ||
+      eventType === "email.complained"
+    ) {
+      candidate = CommunicationDeliveryStatus.FAILED;
+    } else if (eventType === "email.sent") {
+      candidate = CommunicationDeliveryStatus.SENT;
+    }
+
+    if (!candidate) return null;
+
+    const currentKey = String(current || CommunicationDeliveryStatus.PENDING);
+    // Never downgrade engagement (opened/clicked). Failed can override non-clicked.
+    if (
+      candidate === CommunicationDeliveryStatus.FAILED &&
+      currentKey !== CommunicationDeliveryStatus.CLICKED
+    ) {
+      return { status: candidate };
+    }
+
+    if ((rank[candidate] || 0) > (rank[currentKey] || 0)) {
+      return { status: candidate };
+    }
+    return null;
   }
 
   async findLogs(params: {
@@ -822,7 +995,11 @@ export class EmailTemplateService {
     recipient: string,
     subject: string,
     body: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    messageId?: string | null;
+  }> {
     try {
       if (channel === "email") {
         const sent = await this.emailService.sendDynamicEmail({
@@ -830,10 +1007,14 @@ export class EmailTemplateService {
           subject,
           body,
           data: {},
+          tags: [{ name: "source", value: "communication" }],
         });
-        return sent
-          ? { success: true }
-          : { success: false, error: "Email send failed" };
+        return sent.success
+          ? { success: true, messageId: sent.messageId || null }
+          : {
+              success: false,
+              error: sent.error || "Email send failed",
+            };
       }
 
       if (channel === "whatsapp") {
@@ -870,6 +1051,7 @@ export class EmailTemplateService {
     status: CommunicationDeliveryStatus;
     error?: string | null;
     scheduledAt?: Date | null;
+    providerMessageId?: string | null;
     metadata?: Record<string, any>;
   }) {
     return this.logRepository.save(
@@ -887,6 +1069,7 @@ export class EmailTemplateService {
           params.status === CommunicationDeliveryStatus.SENT
             ? new Date()
             : null,
+        provider_message_id: params.providerMessageId ?? null,
         error_message: params.error ?? null,
         metadata: params.metadata ?? null,
       }),

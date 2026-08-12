@@ -20,6 +20,7 @@ export enum CommunicationDeliveryStatus {
 @Index("idx_communication_logs_template_id", ["template_id"])
 @Index("idx_communication_logs_batch_id", ["batch_id"])
 @Index("idx_communication_logs_status", ["delivery_status"])
+@Index("idx_communication_logs_provider_message_id", ["provider_message_id"])
 export class CommunicationLog extends BaseEntity {
   @ManyToOne(() => CommunicationBatch, (batch) => batch.logs, {
     nullable: true,
@@ -78,6 +79,10 @@ export class CommunicationLog extends BaseEntity {
 
   @Column({ type: "timestamptz", nullable: true })
   replied_at: Date | null;
+
+  /** Resend email id (result.data.id) used to match webhook open/click/delivered events. */
+  @Column({ type: "varchar", length: 100, nullable: true })
+  provider_message_id: string | null;
 
   @Column({ type: "text", nullable: true })
   error_message: string | null;

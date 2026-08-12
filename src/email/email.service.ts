@@ -64,17 +64,19 @@ export class EmailService implements OnModuleInit {
   /**
    * Send a dynamic email using a template string and data for placeholders.
    * Placeholders should be in the format {{variable_name}}.
+   * Returns Resend message id when available (needed for open/click webhooks).
    */
   async sendDynamicEmail(params: {
     to: string;
     subject: string;
     body: string;
     data: Record<string, any>;
-  }): Promise<boolean> {
+    tags?: Array<{ name: string; value: string }>;
+  }): Promise<{ success: boolean; messageId?: string | null; error?: string }> {
     try {
       if (!this.resend) {
         this.logger.error("Resend is not configured - cannot send email");
-        return false;
+        return { success: false, error: "Resend is not configured" };
       }
 
       const fromEmail = this.configService.get<string>(
@@ -101,6 +103,7 @@ export class EmailService implements OnModuleInit {
         to: [params.to],
         subject: renderedSubject,
         html: renderedBody,
+        ...(params.tags?.length ? { tags: params.tags } : {}),
         headers: {
           "X-Mailer": "MTJ Foundation Dynamic Email System",
           "Reply-To": fromEmail,
@@ -111,15 +114,51 @@ export class EmailService implements OnModuleInit {
         this.logger.warn(
           `Resend error sending dynamic email: ${JSON.stringify(result.error)}`,
         );
-        return false;
+        return {
+          success: false,
+          error: JSON.stringify(result.error),
+        };
       }
 
-      this.logger.log(`Dynamic email sent successfully to ${params.to}`);
-      return true;
+      const messageId = result.data?.id || null;
+      this.logger.log(
+        `Dynamic email sent successfully to ${params.to}${messageId ? ` (id: ${messageId})` : ""}`,
+      );
+      return { success: true, messageId };
     } catch (error: any) {
       this.logger.error(`Failed to send dynamic email: ${error.message}`);
-      return false;
+      return { success: false, error: error?.message || "Send failed" };
     }
+  }
+
+  /**
+   * Verify Resend (Svix) webhook signature. Requires raw body string + svix headers.
+   */
+  verifyResendWebhook(
+    rawBody: string | Buffer,
+    headers: {
+      "svix-id"?: string;
+      "svix-timestamp"?: string;
+      "svix-signature"?: string;
+    },
+  ): Record<string, any> {
+    const secret = this.configService.get<string>("RESEND_WEBHOOK_SECRET", "");
+    if (!secret) {
+      throw new Error("RESEND_WEBHOOK_SECRET is not configured");
+    }
+
+    // Lazy-require so app boots even if svix is missing in odd environments
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Webhook } = require("svix") as typeof import("svix");
+    const wh = new Webhook(secret);
+    const payload =
+      typeof rawBody === "string" ? rawBody : rawBody.toString("utf8");
+
+    return wh.verify(payload, {
+      "svix-id": headers["svix-id"] || "",
+      "svix-timestamp": headers["svix-timestamp"] || "",
+      "svix-signature": headers["svix-signature"] || "",
+    }) as Record<string, any>;
   }
 
   private donationLabel(type?: string) {

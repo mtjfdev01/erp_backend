@@ -60,7 +60,11 @@ import { ProgressWorkflowTemplate } from "../progress_tracking/progress_workflow
 import { DonationAuditService } from "./audit/donation-audit.service";
 import { RecurringDonationsStripeService } from "./recurring_donations/recurring-donations-stripe.service";
 import { RecurringDonationsLedgerService } from "./recurring_donations/recurring-donations-ledger.service";
-import { resolveRecurringStartDateForStorage, resolvePrepaidContinueStartDate } from "./recurring_donations/recurring-billing-date.util";
+import { resolveRecurringStartDateForStorage } from "./recurring_donations/recurring-billing-date.util";
+import {
+  resolvePrepaidContinueStartDate,
+  resolvePrepaidPeriodCount,
+} from "./recurring_donations/recurring-prepaid.util";
 import { DonationAuditAction } from "./audit/donation-audit-action.enum";
 import { DonationAuditSource } from "./audit/donation-audit-source.enum";
 import {
@@ -492,12 +496,18 @@ export class DonationsService {
     startDateMode: string;
     startDate: string | null;
   } {
-    const prepaidMonths = Number(createDonationDto.prepaid_months);
-    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
-      // Pay N months now → first auto reminder / cycle after coverage ends
-      const startDate = resolvePrepaidContinueStartDate(prepaidMonths);
+    const prepaidPeriods = resolvePrepaidPeriodCount({
+      prepaid_periods: createDonationDto.prepaid_periods,
+      prepaid_months: createDonationDto.prepaid_months,
+    });
+    if (prepaidPeriods != null && prepaidPeriods >= 1) {
+      const billingInterval = this.mapLedgerBillingInterval(createDonationDto);
+      const startDate = resolvePrepaidContinueStartDate(
+        prepaidPeriods,
+        billingInterval,
+      );
       return {
-        startDateMode: "day_of_month",
+        startDateMode: billingInterval === "month" ? "day_of_month" : "same_date",
         startDate,
       };
     }
@@ -510,7 +520,7 @@ export class DonationsService {
     });
   }
 
-  private resolveLedgerMonthlyAmount(
+  private resolveLedgerPeriodAmount(
     createDonationDto: CreateDonationDto,
     savedAmount: number | null | undefined,
   ): number | null {
@@ -519,19 +529,25 @@ export class DonationsService {
       (createDonationDto.amount != null ? Number(createDonationDto.amount) : null);
     if (raw == null || !Number.isFinite(Number(raw))) return null;
     const total = Math.round(Number(raw));
-    const prepaidMonths = Number(createDonationDto.prepaid_months);
-    if (Number.isFinite(prepaidMonths) && prepaidMonths > 1) {
-      return Math.max(1, Math.round(total / prepaidMonths));
+    const prepaidPeriods = resolvePrepaidPeriodCount({
+      prepaid_periods: createDonationDto.prepaid_periods,
+      prepaid_months: createDonationDto.prepaid_months,
+    });
+    if (prepaidPeriods != null && prepaidPeriods > 1) {
+      return Math.max(1, Math.round(total / prepaidPeriods));
     }
     return total;
   }
 
-  /** True when donor prepaid N months and should continue on ledger after that. */
+  /** True when donor prepaid N periods and should continue on ledger after that. */
   private wantsPrepaidThenRecurring(createDonationDto: CreateDonationDto): boolean {
-    const months = Number(createDonationDto.prepaid_months);
+    const periods = resolvePrepaidPeriodCount({
+      prepaid_periods: createDonationDto.prepaid_periods,
+      prepaid_months: createDonationDto.prepaid_months,
+    });
     return (
-      Number.isFinite(months) &&
-      months >= 1 &&
+      periods != null &&
+      periods >= 1 &&
       this.hasRecurringConsent(createDonationDto) &&
       (Boolean(createDonationDto.recurring?.interval) ||
         this.isDonationRecurring(createDonationDto) ||
@@ -566,16 +582,23 @@ export class DonationsService {
 
     const { startDateMode, startDate } =
       this.resolveRecurringStartConfig(createDonationDto);
-    const monthlyAmount = this.resolveLedgerMonthlyAmount(
+    const periodAmount = this.resolveLedgerPeriodAmount(
       createDonationDto,
       savedDonation.amount ?? Number(createDonationDto.amount) ?? null,
     );
+    const billingInterval = this.mapLedgerBillingInterval(createDonationDto);
+    const prepaidPeriods = this.wantsPrepaidThenRecurring(createDonationDto)
+      ? resolvePrepaidPeriodCount({
+          prepaid_periods: createDonationDto.prepaid_periods,
+          prepaid_months: createDonationDto.prepaid_months,
+        })
+      : null;
 
     await this.recurringDonationsLedgerService.ensureNonStripeSubscriptionFromDonation(
       {
         donationId: savedDonation.id,
         donorId,
-        amount: monthlyAmount,
+        amount: periodAmount,
         currency: savedDonation.currency || createDonationDto.currency || "PKR",
         donationMethod:
           savedDonation.donation_method || createDonationDto.donation_method,
@@ -587,11 +610,12 @@ export class DonationsService {
             : null),
         donationType:
           savedDonation.donation_type || createDonationDto.donation_type,
-        billingInterval: this.mapLedgerBillingInterval(createDonationDto),
+        billingInterval,
         billingIntervalCount: createDonationDto.recurring?.interval_count ?? 1,
         startDateMode,
         startDate,
         consent: this.hasRecurringConsent(createDonationDto),
+        prepaidPeriods,
       },
     );
 
@@ -1115,9 +1139,12 @@ export class DonationsService {
   private resolveStripeRecurring(
     createDonationDto: CreateDonationDto,
   ): StripeRecurringParams | undefined {
-    const prepaidMonths = Number(createDonationDto.prepaid_months);
-    if (Number.isFinite(prepaidMonths) && prepaidMonths >= 1) {
-      // Prepaid total is charged once; ledger handles continue-after-months
+    const prepaidPeriods = resolvePrepaidPeriodCount({
+      prepaid_periods: createDonationDto.prepaid_periods,
+      prepaid_months: createDonationDto.prepaid_months,
+    });
+    if (prepaidPeriods != null && prepaidPeriods >= 1) {
+      // Prepaid total is charged once; ledger handles continue-after coverage
       return undefined;
     }
 
@@ -2837,6 +2864,7 @@ export class DonationsService {
           campaign_pledge_lines: _pledgeLines,
           pledge_mode: _pledgeMode,
           prepaid_months: _prepaidMonths,
+          prepaid_periods: _prepaidPeriods,
           recurring: _recurring,
           recurring_consent: _recurringConsent,
           donation_items: _donationItems,
