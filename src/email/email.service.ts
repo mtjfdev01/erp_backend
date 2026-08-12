@@ -120,11 +120,16 @@ export class EmailService implements OnModuleInit {
         };
       }
 
-      const messageId = result.data?.id || null;
+      // Resend webhooks match on `data.email_id` (UUID) for opened/clicked events.
+      // `data.id` is a different identifier (often `msg_...`), so store `email_id` when present.
+      const responseData: any = (result as any)?.data;
+      const emailId = responseData?.email_id || responseData?.id || null;
       this.logger.log(
-        `Dynamic email sent successfully to ${params.to}${messageId ? ` (id: ${messageId})` : ""}`,
+        `Dynamic email sent successfully to ${params.to}${
+          emailId ? ` (emailId: ${emailId})` : ""
+        }`,
       );
-      return { success: true, messageId };
+      return { success: true, messageId: emailId };
     } catch (error: any) {
       this.logger.error(`Failed to send dynamic email: ${error.message}`);
       return { success: false, error: error?.message || "Send failed" };
