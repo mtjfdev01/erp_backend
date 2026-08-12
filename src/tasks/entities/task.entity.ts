@@ -198,4 +198,10 @@ export class Task {
 
   @UpdateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   updated_at: Date;
+
+   @Column({ type: "varchar", nullable: true })
+  source: string; // e.g., "ceo_note"
+
+  @Column({ type: "int", nullable: true })
+  source_id: number; // The ID of the source entity
 }

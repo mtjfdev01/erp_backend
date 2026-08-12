@@ -39,6 +39,8 @@ export enum UserRole {
   RECONCILE_AGENT = "reconcile_agent",
   BACK_OFFICE_CLERK = "back_office_clerk",
   CALL_CENTER_AGENT = "call_center_agent",
+  CEO = "ceo",
+  PA = "pa",
 }
 
 export enum Department {
