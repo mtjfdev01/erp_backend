@@ -35,6 +35,7 @@ import { DonorPortalModule } from "./donor_portal/donor-portal.module";
 import { DataImportModule } from "./data_import/data-import.module";
 import { S3StorageModule } from "./utils/storage/s3-storage.module";
 import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
+import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
     DonorPortalModule,
     DataImportModule,
     KnowledgeBaseModule,
+    CeoOfficeModule,
   ],
   controllers: [AppController],
   providers: [AppService],
