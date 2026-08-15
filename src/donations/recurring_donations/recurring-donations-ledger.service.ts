@@ -1076,9 +1076,8 @@ export class RecurringDonationsLedgerService {
 
     if (donor.phone) {
       try {
-        whatsapp_sent = !!(await this.whatsAppService.sendAbandonMessage({
+        whatsapp_sent = !!(await this.whatsAppService.sendRecurringPaymentReminder({
           phoneNumber: donor.phone,
-          userName: donorName,
           amount: String(amount),
           donationId: donation.id,
         }));

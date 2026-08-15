@@ -51,13 +51,13 @@ export class DmsCronsService {
   }
 
   /**
-   * Every day 9:00 AM (Asia/Karachi).
+   * Every day 10:00 AM (Asia/Karachi).
    * Runs due recurring-campaign automations:
    * - daily campaigns every day
    * - weekly campaigns on Saturday & Sunday (remind if no donation that week)
    * - monthly (+ bi/quarter/year) on the 2nd
    */
-  @Cron("0 9 * * *", {
+  @Cron("0 10 * * *", {
     name: "recurring-campaign-donor-reminders",
     timeZone: "Asia/Karachi",
   })
