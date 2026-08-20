@@ -453,6 +453,7 @@ export class EmailTemplateService {
 
     const donors = await this.donorRepository.find({
       where: { id: In(audience.ids), is_archived: false },
+      relations: ["assigned_to"],
     });
 
     const scheduleDate = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
@@ -536,7 +537,14 @@ export class EmailTemplateService {
           metadata: { context: rendered.context },
         });
         scheduledCount += 1;
-        await this.recordDonorInteraction(template, donor, dto.channel, log);
+        await this.recordDonorInteraction(
+          template,
+          donor,
+          dto.channel,
+          log,
+          true,
+          sentByUserId,
+        );
         results.push({ donor_id: donor.id, success: true, log_id: log.id });
         continue;
       }
@@ -591,6 +599,7 @@ export class EmailTemplateService {
         dto.channel,
         log,
         dispatch.success,
+        sentByUserId,
       );
       results.push({
         donor_id: donor.id,
@@ -1013,8 +1022,19 @@ export class EmailTemplateService {
     if (next?.status === CommunicationDeliveryStatus.COMPLAINED) {
       patch.error_message = log.error_message || "Marked as spam";
     }
+    if (next?.status === CommunicationDeliveryStatus.REPLIED && !log.replied_at) {
+      patch.replied_at = eventAt;
+    }
 
     await this.logRepository.update(log.id, patch);
+
+    await this.syncDonorInteractionFromCommunicationLog(
+      log.id,
+      type,
+      data,
+      eventAt,
+    );
+
     return {
       matched: true,
       log_id: log.id,
@@ -1093,6 +1113,11 @@ export class EmailTemplateService {
       candidate = CommunicationDeliveryStatus.FAILED;
     } else if (eventType === "email.sent") {
       candidate = CommunicationDeliveryStatus.SENT;
+    } else if (
+      eventType === "email.replied" ||
+      eventType === "email.received"
+    ) {
+      candidate = CommunicationDeliveryStatus.REPLIED;
     }
 
     if (!candidate) return null;
@@ -1281,6 +1306,7 @@ export class EmailTemplateService {
     channel: string,
     log: CommunicationLog,
     success = true,
+    createdByUserId?: number | null,
   ) {
     const activityType =
       channel === "email"
@@ -1288,6 +1314,13 @@ export class EmailTemplateService {
         : channel === "whatsapp"
           ? "whatsapp"
           : "sms";
+
+    const assignedToId =
+      (donor as any).assigned_to?.id ??
+      (typeof (donor as any).assigned_to === "number"
+        ? (donor as any).assigned_to
+        : null) ??
+      (createdByUserId && createdByUserId > 0 ? createdByUserId : null);
 
     await this.interactionRepository.save(
       this.interactionRepository.create({
@@ -1298,7 +1331,73 @@ export class EmailTemplateService {
         donor_response_text: success ? null : log.error_message,
         status: success ? "completed" : "need_followup",
         custom_activity_title: `Template: ${template.name}`,
+        communication_log_id: log.id,
+        assigned_to_user_id: assignedToId,
+        ...(createdByUserId && createdByUserId > 0
+          ? { created_by: { id: createdByUserId } as any }
+          : {}),
       }),
     );
+  }
+
+  private async syncDonorInteractionFromCommunicationLog(
+    logId: number,
+    eventType: string,
+    eventData: Record<string, any> = {},
+    eventAt?: Date,
+  ): Promise<void> {
+    const interaction = await this.interactionRepository.findOne({
+      where: { communication_log_id: logId, is_archived: false },
+    });
+    if (!interaction) return;
+
+    const type = String(eventType || "").toLowerCase();
+    const patch: Partial<DonorInteraction> = {};
+
+    if (type === "email.opened") {
+      patch.donor_response_type = "opened";
+      patch.donor_response_text = "Donor opened the email.";
+    } else if (type === "email.clicked") {
+      const link = eventData?.click?.link || eventData?.link || "";
+      patch.donor_response_type = "clicked";
+      patch.donor_response_text = link
+        ? `Donor clicked link: ${link}`
+        : "Donor clicked a link in the email.";
+    } else if (type.includes("replied") || type.includes("received")) {
+      patch.donor_response_type = "replied";
+      patch.donor_response_text =
+        this.extractDonorReplyText(eventData) || "Donor replied to the email.";
+    } else if (type === "email.bounced") {
+      patch.donor_response_type = "negative";
+      patch.donor_response_text = "Email bounced.";
+      patch.status = "need_followup";
+    } else if (type === "email.complained") {
+      patch.donor_response_type = "negative";
+      patch.donor_response_text = "Donor marked the email as spam.";
+      patch.status = "need_followup";
+    }
+
+    if (!Object.keys(patch).length) return;
+
+    if (eventAt && !Number.isNaN(eventAt.getTime())) {
+      patch.activity_datetime = eventAt;
+    }
+
+    await this.interactionRepository.update(interaction.id, patch);
+  }
+
+  private extractDonorReplyText(data: Record<string, any>): string | null {
+    const candidates = [
+      data?.text,
+      data?.body,
+      data?.html,
+      data?.subject,
+      data?.message,
+    ];
+    for (const value of candidates) {
+      const text = String(value || "").trim();
+      if (text) return text.slice(0, 2000);
+    }
+    return null;
   }
 }

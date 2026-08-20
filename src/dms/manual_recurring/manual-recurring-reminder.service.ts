@@ -959,7 +959,9 @@ export class ManualRecurringReminderService {
             continue;
           }
           const ok =
-            await this.emailService.sendDonationFailureEmail(donation);
+            await this.emailService.sendRecurringPaymentReminderEmail(
+              donation,
+            );
           if (ok) sent += 1;
           else {
             failed += 1;
@@ -1471,8 +1473,9 @@ export class ManualRecurringReminderService {
             }
             if (donor?.email) {
               sentOk =
-                (await this.emailService.sendDonationFailureEmail(donation)) ||
-                sentOk;
+                (await this.emailService.sendRecurringPaymentReminderEmail(
+                  donation,
+                )) || sentOk;
             }
             if (donor?.phone) {
               const wa = await this.whatsAppService.sendRecurringPaymentReminder({
