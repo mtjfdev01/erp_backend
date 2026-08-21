@@ -256,7 +256,7 @@ export class TasksService {
     });
   }
 
-  private async sendAssignmentEmailsToAssignees(
+  async sendAssignmentEmailsToAssignees(
     task: Task,
     master?: Task,
   ): Promise<void> {
@@ -707,6 +707,16 @@ export class TasksService {
       const assignedUsersMeta = await this.getAssignedUsersMeta(
         dto.assigned_users,
       );
+      const assignedUserIds = new Set(
+        (dto.assigned_users || []).map((id) => Number(id)),
+      );
+      const movAssignments = Array.isArray(dto.mov_assignments)
+        ? dto.mov_assignments.filter(
+            (item) =>
+              Number.isInteger(Number(item.mov_index)) &&
+              (item.user_id == null || assignedUserIds.has(Number(item.user_id))),
+          )
+        : [];
 
       // Handle MOV checklist - store only in mov_items, not in description
       let movItemsFromDto: string[] = [];
@@ -749,6 +759,7 @@ export class TasksService {
           ? dto.assigned_users
           : null,
         assigned_users_meta: assignedUsersMeta,
+        mov_assignments: movAssignments,
         approval_required_user_ids: Array.isArray(
           dto.approval_required_user_ids,
         )
@@ -1913,7 +1924,11 @@ export class TasksService {
     }
   }
 
-  async findOne(id: number, currentUser?: User): Promise<Task> {
+  async findOne(
+    id: number,
+    currentUser?: User,
+    options: { filterMov?: boolean } = {},
+  ): Promise<Task> {
     try {
       const qb = this.taskRepo
         .createQueryBuilder("task")
@@ -2018,10 +2033,46 @@ export class TasksService {
         }
       }
 
+      const isTaskCreator =
+        currentUser && Number(task.created_by_id) === Number(currentUser.id);
+      if (currentUser && options.filterMov !== false && !isTaskCreator) {
+        this.filterMovItemsForUser(task, currentUser);
+      }
+
       return task;
     } catch (e) {
       throw e;
     }
+  }
+
+  private filterMovItemsForUser(task: Task, currentUser: User): void {
+    const assignments = Array.isArray(task.mov_assignments)
+      ? task.mov_assignments
+      : [];
+
+    // Older tasks have no per-MOV assignments, so retain their existing visibility.
+    if (assignments.length === 0) return;
+
+    const userId = Number(currentUser.id);
+    const visibleIndices = new Set(
+      assignments
+        .filter((item) => Number(item.user_id) === userId)
+        .map((item) => Number(item.mov_index))
+        .filter((index) => Number.isInteger(index) && index >= 0),
+    );
+
+    (task as any).mov_item_count = Array.isArray(task.mov_items)
+      ? task.mov_items.length
+      : 0;
+    (task as any).mov_item_indices = Array.from(visibleIndices).sort(
+      (a, b) => a - b,
+    );
+    task.mov_items = (task.mov_items || []).filter((_item, index) =>
+      visibleIndices.has(index),
+    );
+    task.mov_assignments = assignments.filter((item) =>
+      visibleIndices.has(Number(item.mov_index)),
+    );
   }
 
   async update(
@@ -2030,7 +2081,7 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     try {
-      const task = await this.findOne(id, currentUser);
+      const task = await this.findOne(id, currentUser, { filterMov: false });
 
       if (
         task.status === TaskStatus.COMPLETED &&
@@ -2189,6 +2240,19 @@ export class TasksService {
       let finalMovItems = Array.isArray(dto.mov_items) && dto.mov_items.length > 0
         ? dto.mov_items
         : task.mov_items;
+      const assignedUserIds = new Set(
+        (Array.isArray(dto.assigned_users)
+          ? dto.assigned_users
+          : task.assigned_user_ids || []
+        ).map((id) => Number(id)),
+      );
+      const movAssignments = Array.isArray(dto.mov_assignments)
+        ? dto.mov_assignments.filter(
+            (item) =>
+              Number.isInteger(Number(item.mov_index)) &&
+              (item.user_id == null || assignedUserIds.has(Number(item.user_id))),
+          )
+        : task.mov_assignments;
 
       // Determine final description: only the actual task description, no MOV items
       let finalDescription = task.description;
@@ -2271,6 +2335,7 @@ export class TasksService {
         mov_items: Array.isArray(finalMovItems) && finalMovItems.length > 0
           ? finalMovItems
           : task.mov_items,
+        mov_assignments: movAssignments,
       });
       const saved = await this.taskRepo.save(task);
 
@@ -2378,7 +2443,7 @@ export class TasksService {
     dto: StatusTransitionDto,
     currentUser: User,
   ): Promise<Task> {
-    const task = await this.findOne(id, currentUser);
+    const task = await this.findOne(id, currentUser, { filterMov: false });
     const perms = await this.getTaskPermissionsForUser(currentUser);
     const assignedIds = Array.isArray(task.assigned_user_ids)
       ? task.assigned_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
@@ -2436,15 +2501,15 @@ export class TasksService {
       throw new ForbiddenException("Only authorized staff can close tasks");
     }
     const oldStatus = task.status;
-    if (
-      nextStatus === TaskStatus.COMPLETED &&
-      task.description &&
-      task.description.trim().length > 0 &&
-      task.progress < 100
-    ) {
-      throw new BadRequestException(
-        "Task cannot be marked as completed until all MOV points are completed.",
-      );
+    if (nextStatus === TaskStatus.COMPLETED && !dto.force_complete) {
+      const completion = this.getMovCompletionSummary(task);
+      if (completion.incompleteAssigneeCount > 0) {
+        throw new ConflictException({
+          code: "INCOMPLETE_MOV_CONFIRMATION_REQUIRED",
+          message: `${completion.incompleteAssigneeCount} assignees still have incomplete MOVs.`,
+          incomplete_assignee_count: completion.incompleteAssigneeCount,
+        });
+      }
     }
     const updated = await this.update(
       id,
@@ -2494,7 +2559,7 @@ export class TasksService {
     currentUser: User,
   ): Promise<Task> {
     try {
-      const task = await this.findOne(id, currentUser);
+      const task = await this.findOne(id, currentUser, { filterMov: false });
       const oldAssignedUserIds = Array.isArray(task.assigned_user_ids)
         ? [...task.assigned_user_ids]
         : [];
@@ -3202,8 +3267,22 @@ export class TasksService {
     payload: { progress: number; notes?: string },
     currentUser: User,
   ): Promise<Task> {
-    const task = await this.findOne(id, currentUser);
+    const task = await this.findOne(id, currentUser, { filterMov: false });
+    this.validateMovProgressAccess(task, payload.notes, currentUser);
+    const mergedNotes = this.mergeMovProgressNotes(
+      task.last_progress_notes,
+      payload.notes,
+      currentUser,
+    );
     let value = Math.min(100, Math.max(0, Number(payload.progress) || 0));
+
+    if (mergedNotes && Array.isArray(task.mov_items) && task.mov_items.length > 0) {
+      const indicesMatch = mergedNotes.match(/\[indices:([^\]]*)\]/);
+      const checkedCount = indicesMatch && indicesMatch[1]
+        ? indicesMatch[1].split(',').filter(Boolean).length
+        : 0;
+      value = Math.round((checkedCount / task.mov_items.length) * 100);
+    }
 
     // Donation pending follow-up: two mutually exclusive MOV items — one check = done.
     if (
@@ -3221,7 +3300,15 @@ export class TasksService {
     const oldStatus = task.status;
 
     task.progress = value;
-    task.last_progress_notes = payload.notes || null;
+    task.last_progress_notes = mergedNotes || payload.notes || null;
+
+    const completion = this.getMovCompletionSummary(task, mergedNotes);
+    if (completion.hasAssignedMovs && completion.allMovsCompleted) {
+      task.status = TaskStatus.COMPLETED;
+      if (task.workflow_type === TaskWorkflowType.STANDARD) {
+        task.completed_date = task.completed_date ?? new Date();
+      }
+    }
 
     // Automatically transition to IN_PROGRESS if the task is currently OPEN or DRAFT
     // and progress is being made (value > 0)
@@ -3254,6 +3341,152 @@ export class TasksService {
 
     const refreshed = await this.findOne(id, currentUser);
     return refreshed;
+  }
+
+  private getMovCompletionSummary(
+    task: Task,
+    notes = task.last_progress_notes || "",
+  ): {
+    hasAssignedMovs: boolean;
+    allMovsCompleted: boolean;
+    incompleteAssigneeCount: number;
+  } {
+    const movItems = Array.isArray(task.mov_items) ? task.mov_items : [];
+    const assignments = Array.isArray(task.mov_assignments)
+      ? task.mov_assignments.filter((item) => Number.isInteger(Number(item.mov_index)))
+      : [];
+    const checkedMatch = String(notes || "").match(/\[indices:([^\]]*)\]/);
+    const checkedIndices = new Set(
+      checkedMatch && checkedMatch[1]
+        ? checkedMatch[1].split(",").filter(Boolean).map(Number)
+        : [],
+    );
+
+    if (assignments.length === 0) {
+      const allCompleted = movItems.length === 0 || movItems.every((_item, index) => checkedIndices.has(index));
+      return {
+        hasAssignedMovs: false,
+        allMovsCompleted: allCompleted,
+        incompleteAssigneeCount: 0,
+      };
+    }
+
+    const userCompletion = new Map<number, boolean>();
+    assignments.forEach((item) => {
+      const userId = Number(item.user_id);
+      const movIndex = Number(item.mov_index);
+      const complete = checkedIndices.has(movIndex);
+      userCompletion.set(userId, (userCompletion.get(userId) ?? true) && complete);
+    });
+
+    const incompleteAssigneeCount = Array.from(userCompletion.values()).filter(
+      (complete) => !complete,
+    ).length;
+    return {
+      hasAssignedMovs: true,
+      allMovsCompleted: incompleteAssigneeCount === 0,
+      incompleteAssigneeCount,
+    };
+  }
+
+  private validateMovProgressAccess(
+    task: Task,
+    notes: string | undefined,
+    currentUser: User,
+  ): void {
+    const assignments = Array.isArray(task.mov_assignments)
+      ? task.mov_assignments
+      : [];
+    if (assignments.length === 0) return;
+
+    const isTaskCreator =
+      Number(task.created_by_id) === Number(currentUser.id);
+    const isAssignedToTask = Array.isArray(task.assigned_user_ids)
+      && task.assigned_user_ids.some(
+        (userId) => Number(userId) === Number(currentUser.id),
+      );
+    if (isTaskCreator && !isAssignedToTask) {
+      throw new ForbiddenException(
+        "The task creator must be assigned to the task to update MOVs.",
+      );
+    }
+    if (!notes) return;
+
+    const match = notes.match(/\[indices:([^\]]*)\]/);
+    if (!match) return;
+
+    const assignedIndices = new Set(
+      assignments
+        .filter((item) => Number(item.user_id) === Number(currentUser.id))
+        .map((item) => Number(item.mov_index)),
+    );
+    const requestedIndices = match[1]
+      .split(',')
+      .filter(Boolean)
+      .map(Number);
+
+    if (requestedIndices.some((index) => !assignedIndices.has(index))) {
+      throw new ForbiddenException(
+        "You cannot access a MOV assigned to another user.",
+      );
+    }
+  }
+
+  private mergeMovProgressNotes(
+    existingNotes: string | null | undefined,
+    incomingNotes: string | undefined,
+    currentUser: User,
+  ): string | undefined {
+    if (!incomingNotes) return incomingNotes;
+
+    const incomingIndicesMatch = incomingNotes.match(/\[indices:([^\]]*)\]/);
+    if (!incomingIndicesMatch) return incomingNotes;
+
+    const parseIndices = (notes: string | null | undefined): number[] => {
+      const match = notes?.match(/\[indices:([^\]]*)\]/);
+      return match && match[1]
+        ? match[1].split(',').filter(Boolean).map(Number)
+        : [];
+    };
+    const parseOwnership = (notes: string | null | undefined): Record<number, number> => {
+      const match = notes?.match(/\[ownership:([^\]]+)\]/);
+      if (!match) return {};
+      return Object.fromEntries(
+        match[1].split(',').map((pair) => pair.split('=')).filter(([index, userId]) =>
+          Number.isInteger(Number(index)) && Number.isInteger(Number(userId)),
+        ).map(([index, userId]) => [Number(index), Number(userId)]),
+      );
+    };
+
+    const existingOwnership = parseOwnership(existingNotes);
+    const incomingOwnership = parseOwnership(incomingNotes);
+    const currentUserId = Number(currentUser.id);
+    const mergedOwnership: Record<number, number> = {};
+
+    Object.entries(existingOwnership).forEach(([index, userId]) => {
+      if (Number(userId) !== currentUserId) mergedOwnership[Number(index)] = Number(userId);
+    });
+    Object.entries(incomingOwnership).forEach(([index, userId]) => {
+      mergedOwnership[Number(index)] = Number(userId);
+    });
+
+    const incomingIndices = new Set(parseIndices(incomingNotes));
+    const currentOwnedIndices = new Set(
+      Object.entries(existingOwnership)
+        .filter(([, userId]) => Number(userId) === currentUserId)
+        .map(([index]) => Number(index)),
+    );
+    currentOwnedIndices.forEach((index) => {
+      if (!incomingIndices.has(index)) delete mergedOwnership[index];
+    });
+
+    const mergedIndices = Object.keys(mergedOwnership).map(Number).sort((a, b) => a - b);
+    const ownership = Object.entries(mergedOwnership)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([index, userId]) => `${index}=${userId}`)
+      .join(',');
+    const noteText = incomingNotes.split(' [indices:')[0];
+    return `${noteText} [indices:${mergedIndices.join(',')}]${ownership ? `[ownership:${ownership}]` : ''}`;
   }
 
   async overdueEscalation(): Promise<number> {
@@ -3595,6 +3828,16 @@ export class TasksService {
           reported_by_id: master.reported_by_id,
           created_by_id: master.created_by_id,
           approval_required_user_ids: master.approval_required_user_ids,
+          // Reuse the MOV definitions and assignments, but start the new
+          // recurrence with a fresh unchecked progress state.
+          mov_items: Array.isArray(master.mov_items)
+            ? [...master.mov_items]
+            : master.mov_items,
+          mov_assignments: Array.isArray(master.mov_assignments)
+            ? master.mov_assignments.map((item) => ({ ...item }))
+            : master.mov_assignments,
+          progress: 0,
+          last_progress_notes: null,
         });
 
         await this.taskRepo.save(child);
@@ -3647,9 +3890,64 @@ export class TasksService {
 
       return createdCount;
     } catch (e) {
-      this.logger.error(`Recurrence processing failed: ${e.message}`);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      this.logger.error(`Recurrence processing failed: ${errorMessage}`);
       throw e;
     }
+  }
+
+  async finalizeRecurringCutoffs(): Promise<number> {
+    const now = new Date();
+    const karachiParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Karachi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+    const parts = Object.fromEntries(
+      karachiParts.map((part) => [part.type, part.value]),
+    );
+    const today = `${parts.year}-${parts.month}-${parts.day}`;
+    const cutoffHour = Number(parts.hour);
+    if (!Number.isFinite(cutoffHour) || cutoffHour < 12) return 0;
+
+    const tomorrow = new Date(`${today}T00:00:00Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+    const recurringTasks = await this.taskRepo.find({
+      where: { task_type: TaskType.RECURRING },
+    });
+
+    let finalized = 0;
+    for (const task of recurringTasks) {
+      const nextDate = task.recurrence_next_date
+        ? new Date(task.recurrence_next_date).toISOString().slice(0, 10)
+        : null;
+      if (nextDate !== tomorrowDate) continue;
+      if (
+        [TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.CANCELLED].includes(
+          task.status,
+        )
+      ) {
+        continue;
+      }
+
+      const oldStatus = task.status;
+      task.status = TaskStatus.COMPLETED;
+      if (task.workflow_type === TaskWorkflowType.STANDARD) {
+        task.completed_date = task.completed_date ?? now;
+      }
+      const saved = await this.taskRepo.save(task);
+      await this.logActivity(saved, null, "recurrence_cutoff_finalized", {
+        from_status: oldStatus,
+        cutoff: "12:00 Asia/Karachi",
+        next_recurrence_date: nextDate,
+      });
+      finalized++;
+    }
+    return finalized;
   }
 
   private async createNotification(
