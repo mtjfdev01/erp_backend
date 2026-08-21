@@ -822,7 +822,7 @@ export class ManualRecurringReminderService {
     return 0;
   }
 
-  /** Existing donation thanks email + Digiconn payment_confirmation WhatsApp. */
+  /** Existing donation thanks email + eOcean donation_confirmation_new WhatsApp. */
   private async sendDefaultThanksMessages(params: {
     pledge: ManualRecurringPledge;
     campaign?: Campaign | null;
@@ -892,9 +892,8 @@ export class ManualRecurringReminderService {
             sent += 1;
             continue;
           }
-          const ok = await this.whatsAppService.sendPaymentConfirmation({
+          const ok = await this.whatsAppService.sendRecurringConfirmation({
             phoneNumber: donor.phone,
-            userName: donorName,
             amount: String(amount),
           });
           if (ok) {
@@ -916,7 +915,7 @@ export class ManualRecurringReminderService {
   }
 
   /**
-   * Existing payment-link email + Digiconn abandonded_cart_payment WhatsApp.
+   * Existing payment-link email + eOcean donation_payment_reminder_new WhatsApp.
    * Reuses a pending donation for the pledge/campaign or creates one.
    */
   private async sendDefaultPaymentLinkMessages(params: {
@@ -960,7 +959,9 @@ export class ManualRecurringReminderService {
             continue;
           }
           const ok =
-            await this.emailService.sendDonationFailureEmail(donation);
+            await this.emailService.sendRecurringPaymentReminderEmail(
+              donation,
+            );
           if (ok) sent += 1;
           else {
             failed += 1;
@@ -972,9 +973,8 @@ export class ManualRecurringReminderService {
             failed += 1;
             continue;
           }
-          const ok = await this.whatsAppService.sendAbandonMessage({
+          const ok = await this.whatsAppService.sendRecurringPaymentReminder({
             phoneNumber: donor.phone,
-            userName: donorName,
             amount: String(amount),
             donationId: donation.id,
           });
@@ -1438,9 +1438,8 @@ export class ManualRecurringReminderService {
               sentOk = emailJustSent || sentOk;
             }
             if (donor?.phone && !alreadyMessaged) {
-              messageJustSent = !!(await this.whatsAppService.sendPaymentConfirmation({
+              messageJustSent = !!(await this.whatsAppService.sendRecurringConfirmation({
                 phoneNumber: donor.phone,
-                userName: donorName,
                 amount: String(amount),
               }));
               sentOk = messageJustSent || sentOk;
@@ -1474,13 +1473,13 @@ export class ManualRecurringReminderService {
             }
             if (donor?.email) {
               sentOk =
-                (await this.emailService.sendDonationFailureEmail(donation)) ||
-                sentOk;
+                (await this.emailService.sendRecurringPaymentReminderEmail(
+                  donation,
+                )) || sentOk;
             }
             if (donor?.phone) {
-              const wa = await this.whatsAppService.sendAbandonMessage({
+              const wa = await this.whatsAppService.sendRecurringPaymentReminder({
                 phoneNumber: donor.phone,
-                userName: donorName,
                 amount: String(amount),
                 donationId: donation.id,
               });

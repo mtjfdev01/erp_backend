@@ -8,6 +8,7 @@ import { DonationPendingFollowUpService } from "../../donations/donation-pending
 import { ManualRecurringReminderService } from "../../dms/manual_recurring/manual-recurring-reminder.service";
 import { ProcessManualRecurringRemindersDto } from "../../dms/manual_recurring/dto/manual-recurring-filters.dto";
 import { DmsTodosService } from "../../dms/todos/dms-todos.service";
+import { DonorFollowupCronService } from "../../dms/donor_relationship/donor-followup-cron.service";
 
 @Injectable()
 export class DmsCronsService {
@@ -20,6 +21,7 @@ export class DmsCronsService {
     private readonly donationPendingFollowUpService: DonationPendingFollowUpService,
     private readonly manualRecurringReminderService: ManualRecurringReminderService,
     private readonly dmsTodosService: DmsTodosService,
+    private readonly donorFollowupCronService: DonorFollowupCronService,
   ) {}
 
   /**
@@ -51,13 +53,41 @@ export class DmsCronsService {
   }
 
   /**
-   * Every day 9:00 AM (Asia/Karachi).
+   * Every day 8:30 AM (Asia/Karachi).
+   * Marks overdue donor follow-ups and emails assignees a daily reminder.
+   */
+  @Cron("30 8 * * *", {
+    name: "donor-followup-reminders",
+    timeZone: "Asia/Karachi",
+  })
+  async handleDonorFollowupReminders() {
+    try {
+      const result = await this.donorFollowupCronService.processDailyFollowups();
+      if (
+        result.marked_overdue > 0 ||
+        result.reminders_sent > 0 ||
+        result.reminder_failures > 0
+      ) {
+        this.logger.log(
+          `Donor follow-ups: marked overdue ${result.marked_overdue}, reminders sent ${result.reminders_sent}, failed ${result.reminder_failures}`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Donor follow-up reminders cron failed: ${error?.message}`,
+        error?.stack,
+      );
+    }
+  }
+
+  /**
+   * Every day 10:00 AM (Asia/Karachi).
    * Runs due recurring-campaign automations:
    * - daily campaigns every day
    * - weekly campaigns on Saturday & Sunday (remind if no donation that week)
    * - monthly (+ bi/quarter/year) on the 2nd
    */
-  @Cron("0 9 * * *", {
+  @Cron("0 10 * * *", {
     name: "recurring-campaign-donor-reminders",
     timeZone: "Asia/Karachi",
   })

@@ -30,6 +30,7 @@ import { ManualRecurringModule } from './manual_recurring/manual-recurring.modul
 import { DmsTodosModule } from './todos/dms-todos.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AidModule } from './aid/aid.module';
+import { WebsiteDonationProjectsModule } from './website_donation_projects/website-donation-projects.module';
 
 @Module({
   controllers: [DmsController],
@@ -67,6 +68,7 @@ import { AidModule } from './aid/aid.module';
     CommunicationModule,
     ManualRecurringModule,
     DmsTodosModule,
+    WebsiteDonationProjectsModule,
   ],
 })
 export class DmsModule {}

@@ -966,6 +966,32 @@ export class DonationsService {
         `sendDonationThanksOnce failed for ${donationId}: ${err?.message || err}`,
       );
     }
+
+    await this.advanceDonorPipelineIfDonationCompleted(donationId);
+  }
+
+  private async advanceDonorPipelineIfDonationCompleted(
+    donationId: number,
+  ): Promise<void> {
+    try {
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId },
+      });
+      if (!donation?.donor_id) return;
+      if (!this.isSuccessfulDonationStatus(donation.status)) return;
+      await this.donorService.advancePipelineOnDonationCompleted(
+        donation.donor_id,
+        {
+          donationId: donation.id,
+          amount: Number(donation.paid_amount ?? donation.amount ?? 0),
+          currency: donation.currency,
+        },
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `advanceDonorPipelineIfDonationCompleted failed for ${donationId}: ${err?.message || err}`,
+      );
+    }
   }
 
   /**
@@ -2887,6 +2913,9 @@ export class DonationsService {
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
         await this.syncDonorLastDonationDate(savedDonation);
+        if (this.isSuccessfulDonationStatus(savedDonation.status)) {
+          await this.advanceDonorPipelineIfDonationCompleted(savedDonation.id);
+        }
 
         // Prepaid campaign pledge (manual_recurring_pledges) — optional
         if (manualRecurringIntent && donorId) {
@@ -2979,6 +3008,9 @@ export class DonationsService {
           }
           donor = (savedDonation as any).donor ?? donor;
           donorId = (savedDonation as any).donor_id ?? donorId;
+          if (this.isSuccessfulDonationStatus(savedDonation.status)) {
+            await this.advanceDonorPipelineIfDonationCompleted(savedDonation.id);
+          }
         }
       }
       if (
@@ -3682,6 +3714,14 @@ export class DonationsService {
           changes: auditChanges,
           performedByUserId: auditUserId,
         });
+      }
+      const nextStatus =
+        patch.status !== undefined ? String(patch.status) : donation.status;
+      if (
+        this.isSuccessfulDonationStatus(nextStatus) &&
+        !this.isSuccessfulDonationStatus(donation.status)
+      ) {
+        await this.advanceDonorPipelineIfDonationCompleted(id);
       }
       return await this.findOne(id);
     } catch (error) {
