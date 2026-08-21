@@ -11,6 +11,8 @@ import {
   ApplyScopeOptions,
   DataScopeType,
   ResolvedDataScope,
+  TeamFilterInput,
+  TeamFilterMode,
 } from "./data-scope.types";
 
 @Injectable()
@@ -68,12 +70,124 @@ export class DataScopeService {
     return reports.map((u) => u.id);
   }
 
+  /**
+   * All reportees under a manager at every depth (BFS, cycle-safe).
+   * Does not include the manager themself.
+   */
+  async getAllReportIds(managerId: number): Promise<number[]> {
+    const root = Number(managerId);
+    if (!root) return [];
+
+    const all: number[] = [];
+    const seen = new Set<number>([root]);
+    let frontier = [root];
+
+    while (frontier.length) {
+      const rows = await this.userRepository
+        .createQueryBuilder("u")
+        .select("u.id", "id")
+        .where("u.manager_id IN (:...ids)", { ids: frontier })
+        .andWhere("u.is_archived = false")
+        .getRawMany();
+
+      frontier = [];
+      for (const row of rows) {
+        const id = Number(row.id);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        all.push(id);
+        frontier.push(id);
+      }
+    }
+
+    return all;
+  }
+
   async getDepartmentUserIds(department: string): Promise<number[]> {
     const users = await this.userRepository.find({
       where: { department: department as any, is_archived: false },
       select: ["id"],
     });
     return users.map((u) => u.id);
+  }
+
+  parseTeamFilter(
+    modeRaw?: string | null,
+    userIdRaw?: string | number | null,
+  ): TeamFilterInput | null {
+    const mode = String(modeRaw || "")
+      .trim()
+      .toLowerCase() as TeamFilterMode | "";
+    if (
+      !mode ||
+      (mode !== "all" &&
+        mode !== "me" &&
+        mode !== "direct" &&
+        mode !== "entire" &&
+        mode !== "user")
+    ) {
+      return null;
+    }
+    const userId =
+      userIdRaw != null && String(userIdRaw).trim() !== ""
+        ? Number(userIdRaw)
+        : null;
+    return {
+      mode,
+      userId: Number.isFinite(userId) && (userId as number) > 0 ? userId : null,
+    };
+  }
+
+  /**
+   * Narrow a resolved access-scope ceiling with a list Team filter.
+   * Never expands beyond allowedUserIds (when set).
+   */
+  async narrowScopeWithTeamFilter(
+    scope: ResolvedDataScope,
+    filter: TeamFilterInput | null | undefined,
+  ): Promise<ResolvedDataScope> {
+    if (!filter?.mode || filter.mode === "all") {
+      return scope;
+    }
+
+    const selfId = Number(scope.userId);
+    if (!selfId || selfId < 1) return scope;
+
+    let candidateIds: number[] = [];
+    if (filter.mode === "me") {
+      candidateIds = [selfId];
+    } else if (filter.mode === "direct") {
+      candidateIds = await this.getDirectReportIds(selfId);
+    } else if (filter.mode === "entire") {
+      candidateIds = await this.getAllReportIds(selfId);
+    } else if (filter.mode === "user") {
+      const pick = Number(filter.userId);
+      if (!pick) {
+        return { ...scope, bypass: false, allowedUserIds: [] };
+      }
+      const tree = new Set<number>([
+        selfId,
+        ...(await this.getAllReportIds(selfId)),
+      ]);
+      // Person picker is limited to self + reporting tree
+      candidateIds = tree.has(pick) ? [pick] : [];
+    }
+
+    const intersect = (ids: number[]): number[] => {
+      if (scope.bypass || scope.type === "org" || scope.allowedUserIds == null) {
+        return ids;
+      }
+      const allowed = new Set(scope.allowedUserIds.map(Number));
+      return ids.filter((id) => allowed.has(id));
+    };
+
+    const narrowed = intersect(candidateIds);
+    return {
+      ...scope,
+      bypass: false,
+      type: scope.type === "org" || scope.bypass ? "team" : scope.type,
+      allowedUserIds: narrowed,
+    };
   }
 
   async resolveScope(
@@ -136,7 +250,8 @@ export class DataScopeService {
     }
 
     if (scopeType === "team") {
-      const reportIds = await this.getDirectReportIds(numericUserId);
+      // Full reporting tree (all depths) + self
+      const reportIds = await this.getAllReportIds(numericUserId);
       const allowed = Array.from(new Set([numericUserId, ...reportIds]));
       return {
         bypass: false,
@@ -201,7 +316,12 @@ export class DataScopeService {
     scope: ResolvedDataScope,
     options?: ApplyScopeOptions,
   ): void {
-    if (scope.bypass || scope.type === "org" || !scope.allowedUserIds?.length) {
+    if (scope.bypass || scope.type === "org" || scope.allowedUserIds == null) {
+      return;
+    }
+
+    if (!scope.allowedUserIds.length) {
+      query.andWhere("1 = 0");
       return;
     }
 
@@ -252,8 +372,12 @@ export class DataScopeService {
     },
     options?: { useAssignedTo?: boolean },
   ): void {
-    if (scope.bypass || scope.type === "org" || !scope.allowedUserIds?.length) {
+    if (scope.bypass || scope.type === "org" || scope.allowedUserIds == null) {
       return;
+    }
+
+    if (!scope.allowedUserIds.length) {
+      throw new ForbiddenException("You do not have access to this record");
     }
 
     const ownerIds = this.getRecordOwnerIds(record, options);

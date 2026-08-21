@@ -29,6 +29,7 @@ import {
   encryptDonorPassword,
 } from "../utils/crypto/donor-password-vault";
 import { EmailService } from "../email/email.service";
+import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 
 interface PaginationOptions {
   page: number;
@@ -54,6 +55,7 @@ export class UsersService {
     private readonly permissionsRepository: Repository<PermissionsEntity>,
     private readonly geographicAssignmentService: GeographicAssignmentService,
     private readonly emailService: EmailService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
 
   pickGeographicContext(
@@ -807,5 +809,75 @@ export class UsersService {
       .where("user.id IN (:...ids)", { ids: uniqueValidIds })
       .andWhere("user.is_archived = :archived", { archived: false })
       .getMany();
+  }
+
+  private toTeamFilterUser(user: User) {
+    return {
+      id: user.id,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      full_name:
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.email,
+      department: user.department,
+      role: user.role,
+      manager_id: user.manager_id,
+    };
+  }
+
+  /**
+   * Hierarchy options for list Team filters (Me / Direct / Entire / pick person).
+   */
+  async getTeamFilterOptions(currentUserId: number, search?: string) {
+    const selfId = Number(currentUserId);
+    if (!selfId) {
+      return {
+        me: null,
+        direct_reports: [],
+        entire_team: [],
+        has_direct_reports: false,
+        has_team: false,
+      };
+    }
+
+    const me = await this.userRepository.findOne({
+      where: { id: selfId, is_archived: false },
+    });
+
+    const directIds = await this.dataScopeService.getDirectReportIds(selfId);
+    const entireIds = await this.dataScopeService.getAllReportIds(selfId);
+
+    const loadByIds = async (ids: number[]) => {
+      if (!ids.length) return [];
+      const users = await this.userRepository
+        .createQueryBuilder("user")
+        .where("user.id IN (:...ids)", { ids })
+        .andWhere("user.is_archived = :archived", { archived: false })
+        .orderBy("user.first_name", "ASC")
+        .addOrderBy("user.last_name", "ASC")
+        .getMany();
+      return users.map((u) => this.toTeamFilterUser(u));
+    };
+
+    let direct_reports = await loadByIds(directIds);
+    let entire_team = await loadByIds(entireIds);
+
+    const q = (search || "").trim().toLowerCase();
+    if (q) {
+      const match = (u: {
+        full_name: string;
+        email: string;
+      }) => `${u.full_name} ${u.email}`.toLowerCase().includes(q);
+      direct_reports = direct_reports.filter(match);
+      entire_team = entire_team.filter(match);
+    }
+
+    return {
+      me: me ? this.toTeamFilterUser(me) : null,
+      direct_reports,
+      entire_team,
+      has_direct_reports: directIds.length > 0,
+      has_team: entireIds.length > 0,
+    };
   }
 }

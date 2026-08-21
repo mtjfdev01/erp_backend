@@ -34,6 +34,7 @@ import { User, UserRole, Department } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
 import { applyCommonFilters } from "../utils/filters/common-filter.util";
 import { PermissionsService } from "../permissions/permissions.service";
+import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
 import * as fs from "fs";
@@ -75,6 +76,7 @@ export class TasksService {
     private readonly dueReminderRepo: Repository<TaskDueReminder>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
+    private readonly dataScopeService: DataScopeService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -944,6 +946,13 @@ export class TasksService {
       delete safeFilters.assignee_id;
       delete safeFilters.assigned_user_id;
 
+      const teamFilter = this.dataScopeService.parseTeamFilter(
+        safeFilters.team_filter,
+        safeFilters.team_filter_user_id,
+      );
+      delete safeFilters.team_filter;
+      delete safeFilters.team_filter_user_id;
+
       // Declare searchTerm and userNameFilter early
       const searchTerm = safeFilters.search;
       const userNameFilter = safeFilters.user_name;
@@ -977,6 +986,45 @@ export class TasksService {
               dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
                 metaObj: JSON.stringify([{ user_id: assigneeId }]),
               });
+            }),
+          );
+        }
+      }
+
+      if (
+        teamFilter &&
+        teamFilter.mode &&
+        teamFilter.mode !== "all" &&
+        currentUser?.id
+      ) {
+        const baseScope = {
+          bypass: false,
+          type: "org" as const,
+          allowedUserIds: null as number[] | null,
+          userId: Number(currentUser.id),
+          userDepartment: currentUser.department,
+        };
+        const narrowed = await this.dataScopeService.narrowScopeWithTeamFilter(
+          baseScope,
+          teamFilter,
+        );
+        const teamUserIds = narrowed.allowedUserIds || [];
+        if (!teamUserIds.length) {
+          qb.andWhere("1 = 0");
+        } else {
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where(
+                "task.assigned_user_ids && ARRAY[:...teamFilterUserIds]::int[]",
+                { teamFilterUserIds: teamUserIds },
+              );
+              dqb.orWhere(
+                `EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee
+                  WHERE (assignee->>'user_id')::int IN (:...teamFilterUserIds)
+                )`,
+                { teamFilterUserIds: teamUserIds },
+              );
             }),
           );
         }

@@ -46,6 +46,8 @@ interface PaginationOptions {
   date?: string;
   start_date?: string;
   end_date?: string;
+  team_filter?: string;
+  team_filter_user_id?: string | number;
 }
 
 @Injectable()
@@ -409,6 +411,8 @@ export class DonationBoxDonationService {
         date = "",
         start_date,
         end_date,
+        team_filter,
+        team_filter_user_id,
       } = options;
 
       const skip = (page - 1) * pageSize;
@@ -481,7 +485,17 @@ export class DonationBoxDonationService {
       }
 
       if (currentUser?.id) {
-        const scope = await this.resolveCollectionScope(currentUser);
+        let scope = await this.resolveCollectionScope(currentUser);
+        const teamFilter = this.dataScopeService.parseTeamFilter(
+          team_filter,
+          team_filter_user_id,
+        );
+        if (teamFilter) {
+          scope = await this.dataScopeService.narrowScopeWithTeamFilter(
+            scope,
+            teamFilter,
+          );
+        }
         this.applyCollectionListDataScope(query, scope, geoScope);
       }
 

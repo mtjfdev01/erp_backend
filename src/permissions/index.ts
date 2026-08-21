@@ -7,6 +7,8 @@ export { DataScopeService } from "./data-scope/data-scope.service";
 export type {
   DataScopeType,
   ResolvedDataScope,
+  TeamFilterInput,
+  TeamFilterMode,
 } from "./data-scope/data-scope.types";
 export { GeographicScopeService } from "./geographic-scope/geographic-scope.service";
 export type {
