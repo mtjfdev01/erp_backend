@@ -302,8 +302,13 @@ export class UsersService {
     if (currentUser.role !== UserRole.ADMIN) {
       throw new ConflictException("Only admin can create users");
     }
+
+    const email =
+      createUserDto.email?.trim()?.toLowerCase() ||
+      `user-${Date.now()}-${Math.floor(Math.random() * 10000)}@placeholder.local`;
+
     const existingUser = await this.userRepository.findOne({
-      where: { email: createUserDto.email },
+      where: { email },
     });
     if (existingUser) {
       throw new ConflictException("Email already exists");
@@ -312,6 +317,8 @@ export class UsersService {
     const passwordFields = await this.buildPasswordFields(plainPassword);
     const user = this.userRepository.create({
       ...createUserDto,
+      email,
+      role: createUserDto.role || UserRole.USER,
       ...passwordFields,
     });
     return await this.userRepository.save(user);

@@ -3520,7 +3520,7 @@ export class TasksService {
 
         const users = await this.userRepo.find({
           where: { id: In(recipientIds) },
-          select: ["id", "email"],
+          select: ["id", "email", "first_name", "last_name"],
         });
 
         const emails = [
@@ -3538,11 +3538,31 @@ export class TasksService {
           continue;
         }
 
+        const nameById = new Map(
+          users.map((u) => [
+            u.id,
+            `${u.first_name || ""} ${u.last_name || ""}`.trim() ||
+              String(u.email || "").trim() ||
+              `User #${u.id}`,
+          ]),
+        );
+        const assigneeIds = this.normalizeUserIds(
+          Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : [],
+        );
+        const assignedNames = assigneeIds
+          .map((id) => nameById.get(id))
+          .filter(Boolean);
+        const taskForEmail = {
+          ...t,
+          assigned_to_display:
+            assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned",
+        };
+
         let anySuccess = false;
         for (const email of emails) {
           const success = await this.emailService.sendTaskOverdueNotification(
             email,
-            t,
+            taskForEmail,
             escalationLevel,
           );
           if (success) anySuccess = true;

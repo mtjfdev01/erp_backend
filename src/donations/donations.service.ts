@@ -3261,6 +3261,7 @@ export class DonationsService {
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
+        .where("donation.is_archived = false")
         .leftJoinAndMapOne(
           "donation.progress_tracker",
           ProgressTracker,

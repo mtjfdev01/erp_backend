@@ -1068,6 +1068,7 @@ export class RecurringDonationsLedgerService {
         email_sent =
           !!(await this.emailService.sendRecurringPaymentReminderEmail(
             donation,
+            donor.email,
           ));
         if (!email_sent) errors.push("Payment link email failed");
       } catch (err: any) {

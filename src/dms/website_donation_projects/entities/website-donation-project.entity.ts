@@ -34,6 +34,10 @@ export class WebsiteDonationProject extends BaseEntity {
   @Column({ type: "boolean", default: true })
   is_active: boolean;
 
+  /** Card image on public /projects listing page. */
+  @Column({ type: "varchar", nullable: true })
+  listing_image_url: string | null;
+
   /** Structured project page content (header, subProjects, FAQs, testimonials). */
   @Column({ type: "jsonb", nullable: true })
   page_content: Record<string, unknown> | null;
