@@ -7,7 +7,7 @@ import {
   HttpStatus,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { User, UserRole, Department } from "./user.entity";
 import { PermissionsEntity } from "../permissions/entities/permissions.entity";
 import {
@@ -317,11 +317,18 @@ export class UsersService {
     }
     const plainPassword = createUserDto.password || "defaultPassword123";
     const passwordFields = await this.buildPasswordFields(plainPassword);
+
+    const { manager_ids, manager_id, ...rest } = createUserDto;
+    const managerIdList = this.normalizeManagerIds(manager_ids, manager_id);
+    const managers = await this.loadManagersByIds(managerIdList);
+
     const user = this.userRepository.create({
-      ...createUserDto,
+      ...rest,
       email,
       role: createUserDto.role || UserRole.USER,
       ...passwordFields,
+      manager_id: managerIdList[0] ?? null,
+      managers,
     });
     return await this.userRepository.save(user);
   }
@@ -416,10 +423,44 @@ export class UsersService {
     );
   }
 
+  /** Merge manager_ids + legacy manager_id; drop invalid / self. */
+  private normalizeManagerIds(
+    managerIds?: number[] | null,
+    managerId?: number | null,
+    excludeUserId?: number | null,
+  ): number[] {
+    const fromArray = Array.isArray(managerIds)
+      ? managerIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+    const single =
+      managerId != null && Number(managerId) > 0 ? [Number(managerId)] : [];
+    const exclude = excludeUserId != null ? Number(excludeUserId) : null;
+    return Array.from(new Set([...fromArray, ...single])).filter(
+      (id) => id !== exclude,
+    );
+  }
+
+  private async loadManagersByIds(ids: number[]): Promise<User[]> {
+    if (!ids.length) return [];
+    return this.userRepository.find({
+      where: { id: In(ids), is_archived: false },
+      select: ["id", "first_name", "last_name", "email", "department", "role"],
+    });
+  }
+
+  private summarizeManagers(managers: User[] | undefined | null) {
+    return (managers || []).map((m) => ({
+      id: m.id,
+      first_name: m.first_name,
+      last_name: m.last_name,
+      email: m.email,
+    }));
+  }
+
   async findOneForView(id: number) {
     const user = await this.userRepository.findOne({
       where: { id },
-      relations: ["permissions", "manager"],
+      relations: ["permissions", "manager", "managers"],
     });
     if (!user) {
       throw new NotFoundException("User not found");
@@ -434,17 +475,21 @@ export class UsersService {
       resetToken: _resetToken,
       resetTokenExpiry: _resetTokenExpiry,
       manager,
+      managers,
       ...safeUser
     } = user;
 
-    const managerSummary = manager
-      ? {
-          id: manager.id,
-          first_name: manager.first_name,
-          last_name: manager.last_name,
-          email: manager.email,
-        }
-      : null;
+    const managersSummary = this.summarizeManagers(managers);
+    const managerSummary =
+      managersSummary[0] ||
+      (manager
+        ? {
+            id: manager.id,
+            first_name: manager.first_name,
+            last_name: manager.last_name,
+            email: manager.email,
+          }
+        : null);
 
     let geographic_assignments: Awaited<
       ReturnType<GeographicAssignmentService["resolve"]>
@@ -463,7 +508,10 @@ export class UsersService {
 
     return {
       ...safeUser,
+      manager_id: managersSummary[0]?.id ?? user.manager_id ?? null,
+      manager_ids: managersSummary.map((m) => m.id),
       manager: managerSummary,
+      managers: managersSummary,
       geographic_assignments,
     };
   }
@@ -479,11 +527,24 @@ export class UsersService {
       }
 
       // Extract user data and permissions
-      const { permissions, ...userData } = updateDto;
+      const { permissions, manager_ids, manager_id, ...userData } = updateDto;
 
       // Update user data
       const user = await this.findOne(id);
       Object.assign(user, userData);
+
+      const managersTouched =
+        manager_ids !== undefined || manager_id !== undefined;
+      if (managersTouched) {
+        const managerIdList = this.normalizeManagerIds(
+          manager_ids,
+          manager_id,
+          id,
+        );
+        user.managers = await this.loadManagersByIds(managerIdList);
+        user.manager_id = managerIdList[0] ?? null;
+      }
+
       await this.userRepository.save(user);
 
       // Update permissions if provided
@@ -519,7 +580,7 @@ export class UsersService {
       // Return updated user with permissions
       return await this.userRepository.findOne({
         where: { id },
-        relations: ["permissions"],
+        relations: ["permissions", "managers", "manager"],
       });
     } catch (error) {
       throw error;

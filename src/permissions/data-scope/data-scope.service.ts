@@ -63,16 +63,31 @@ export class DataScopeService {
   }
 
   async getDirectReportIds(managerId: number): Promise<number[]> {
-    const reports = await this.userRepository.find({
-      where: { manager_id: managerId, is_archived: false },
-      select: ["id"],
-    });
-    return reports.map((u) => u.id);
+    const mid = Number(managerId);
+    if (!mid) return [];
+
+    const rows = await this.userRepository
+      .createQueryBuilder("u")
+      .select("u.id", "id")
+      .where("u.is_archived = false")
+      .andWhere(
+        `(u.manager_id = :mid OR EXISTS (
+          SELECT 1 FROM user_managers um
+          WHERE um.user_id = u.id AND um.manager_id = :mid
+        ))`,
+        { mid },
+      )
+      .getRawMany();
+
+    return Array.from(
+      new Set(rows.map((r) => Number(r.id)).filter((id) => id > 0)),
+    );
   }
 
   /**
    * All reportees under a manager at every depth (BFS, cycle-safe).
    * Does not include the manager themself.
+   * Uses user_managers join (+ legacy manager_id for pre-backfill rows).
    */
   async getAllReportIds(managerId: number): Promise<number[]> {
     const root = Number(managerId);
@@ -86,8 +101,14 @@ export class DataScopeService {
       const rows = await this.userRepository
         .createQueryBuilder("u")
         .select("u.id", "id")
-        .where("u.manager_id IN (:...ids)", { ids: frontier })
-        .andWhere("u.is_archived = false")
+        .where("u.is_archived = false")
+        .andWhere(
+          `(u.manager_id IN (:...ids) OR EXISTS (
+            SELECT 1 FROM user_managers um
+            WHERE um.user_id = u.id AND um.manager_id IN (:...ids)
+          ))`,
+          { ids: frontier },
+        )
         .getRawMany();
 
       frontier = [];

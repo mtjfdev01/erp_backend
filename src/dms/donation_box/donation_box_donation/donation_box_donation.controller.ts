@@ -41,13 +41,21 @@ export class DonationBoxDonationController {
       await this.donationBoxDonationService.getDonationBoxById(donationBoxId);
     if (!box) return;
 
-    await this.geographicScopeService.assertRecordAccess(
+    // Resolve with donation_box_donations so module `bypass_location` applies
+    // to collection flows (create / list-by-box), not only the main list.
+    const scope = await this.geographicScopeService.resolveForUser(
       userId,
-      "donation_boxes",
-      box,
       userRole,
       userSnapshot as any,
+      "donation_box_donations",
     );
+    if (
+      !this.geographicScopeService.recordMatches(scope, "donation_boxes", box)
+    ) {
+      throw new ForbiddenException(
+        "You do not have geographic access to this record",
+      );
+    }
   }
 
   @Post()
@@ -151,6 +159,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
 
@@ -236,6 +245,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
 
@@ -348,6 +358,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
       this.donationBoxDonationService.assertCollectionViewAccess(
@@ -407,6 +418,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
       this.donationBoxDonationService.assertCollectionViewAccess(
@@ -466,6 +478,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
       this.donationBoxDonationService.assertCollectionViewAccess(
@@ -526,6 +539,7 @@ export class DonationBoxDonationController {
             currentUser.id,
             currentUser.role,
             currentUser,
+            "donation_box_donations",
           )
         : null;
       this.donationBoxDonationService.assertCollectionViewAccess(
