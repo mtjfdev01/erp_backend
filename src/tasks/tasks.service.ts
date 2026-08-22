@@ -2131,19 +2131,6 @@ export class TasksService {
     try {
       const task = await this.findOne(id, currentUser, { filterMov: false });
 
-      if (
-        task.status === TaskStatus.COMPLETED &&
-        dto.status !== TaskStatus.PENDING_APPROVAL &&
-        dto.status !== TaskStatus.CLOSED
-      ) {
-        if (
-          currentUser.role !== UserRole.SUPER_ADMIN &&
-          currentUser.role !== UserRole.ADMIN
-        ) {
-          throw new ForbiddenException("Only Admins can edit completed tasks");
-        }
-      }
-
       // If user is trying to CLOSE a COMPLETED task, allow it if they are the creator or reporter
       if (
         task.status === TaskStatus.COMPLETED &&
