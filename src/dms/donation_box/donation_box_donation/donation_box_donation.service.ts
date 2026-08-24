@@ -498,17 +498,15 @@ export class DonationBoxDonationService {
       }
 
       if (currentUser?.id) {
-        let scope = await this.resolveCollectionScope(currentUser);
-        const teamFilter = this.dataScopeService.parseTeamFilter(
-          team_filter,
-          team_filter_user_id,
-        );
-        if (teamFilter) {
-          scope = await this.dataScopeService.narrowScopeWithTeamFilter(
-            scope,
-            teamFilter,
-          );
-        }
+        const scope = await this.dataScopeService.resolveListScope({
+          userId: currentUser.id,
+          userRole: currentUser.role,
+          userDepartment: currentUser.department,
+          permissionDepartment: "fund_raising",
+          module: "donation_box_donations",
+          teamFilter: team_filter,
+          teamFilterUserId: team_filter_user_id,
+        });
         this.applyCollectionListDataScope(query, scope, geoScope);
       }
 

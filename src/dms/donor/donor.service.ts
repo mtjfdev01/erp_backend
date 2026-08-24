@@ -691,17 +691,15 @@ export class DonorService {
       }
 
       if (currentUser?.id) {
-        let scope = await this.resolveDonorScope(currentUser);
-        const teamFilter = this.dataScopeService.parseTeamFilter(
-          options?.team_filter,
-          options?.team_filter_user_id,
-        );
-        if (teamFilter) {
-          scope = await this.dataScopeService.narrowScopeWithTeamFilter(
-            scope,
-            teamFilter,
-          );
-        }
+        const scope = await this.dataScopeService.resolveListScope({
+          userId: currentUser.id,
+          userRole: currentUser.role,
+          userDepartment: currentUser.department,
+          permissionDepartment: "fund_raising",
+          module: "donors",
+          teamFilter: options?.team_filter,
+          teamFilterUserId: options?.team_filter_user_id,
+        });
         this.applyDonorListDataScope(queryBuilder, scope, geoScope);
       }
 
