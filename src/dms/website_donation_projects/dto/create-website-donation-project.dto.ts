@@ -94,6 +94,10 @@ export class CreateWebsiteDonationProjectDto {
   is_active?: boolean;
 
   @IsOptional()
+  @IsString()
+  listing_image_url?: string | null;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => WebsiteDonationInitiativeDto)

@@ -34,6 +34,7 @@ import { User, UserRole, Department } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
 import { applyCommonFilters } from "../utils/filters/common-filter.util";
 import { PermissionsService } from "../permissions/permissions.service";
+import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
 import * as fs from "fs";
@@ -75,6 +76,7 @@ export class TasksService {
     private readonly dueReminderRepo: Repository<TaskDueReminder>,
     private readonly emailService: EmailService,
     private readonly permissionsService: PermissionsService,
+    private readonly dataScopeService: DataScopeService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
@@ -944,6 +946,13 @@ export class TasksService {
       delete safeFilters.assignee_id;
       delete safeFilters.assigned_user_id;
 
+      const teamFilter = this.dataScopeService.parseTeamFilter(
+        safeFilters.team_filter,
+        safeFilters.team_filter_user_id,
+      );
+      delete safeFilters.team_filter;
+      delete safeFilters.team_filter_user_id;
+
       // Declare searchTerm and userNameFilter early
       const searchTerm = safeFilters.search;
       const userNameFilter = safeFilters.user_name;
@@ -977,6 +986,45 @@ export class TasksService {
               dqb.orWhere("task.assigned_users_meta @> :metaObj::jsonb", {
                 metaObj: JSON.stringify([{ user_id: assigneeId }]),
               });
+            }),
+          );
+        }
+      }
+
+      if (
+        teamFilter &&
+        teamFilter.mode &&
+        teamFilter.mode !== "all" &&
+        currentUser?.id
+      ) {
+        const baseScope = {
+          bypass: false,
+          type: "org" as const,
+          allowedUserIds: null as number[] | null,
+          userId: Number(currentUser.id),
+          userDepartment: currentUser.department,
+        };
+        const narrowed = await this.dataScopeService.narrowScopeWithTeamFilter(
+          baseScope,
+          teamFilter,
+        );
+        const teamUserIds = narrowed.allowedUserIds || [];
+        if (!teamUserIds.length) {
+          qb.andWhere("1 = 0");
+        } else {
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where(
+                "task.assigned_user_ids && ARRAY[:...teamFilterUserIds]::int[]",
+                { teamFilterUserIds: teamUserIds },
+              );
+              dqb.orWhere(
+                `EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee
+                  WHERE (assignee->>'user_id')::int IN (:...teamFilterUserIds)
+                )`,
+                { teamFilterUserIds: teamUserIds },
+              );
             }),
           );
         }
@@ -3506,7 +3554,7 @@ export class TasksService {
 
         const users = await this.userRepo.find({
           where: { id: In(recipientIds) },
-          select: ["id", "email"],
+          select: ["id", "email", "first_name", "last_name"],
         });
 
         const emails = [
@@ -3524,11 +3572,31 @@ export class TasksService {
           continue;
         }
 
+        const nameById = new Map(
+          users.map((u) => [
+            u.id,
+            `${u.first_name || ""} ${u.last_name || ""}`.trim() ||
+              String(u.email || "").trim() ||
+              `User #${u.id}`,
+          ]),
+        );
+        const assigneeIds = this.normalizeUserIds(
+          Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : [],
+        );
+        const assignedNames = assigneeIds
+          .map((id) => nameById.get(id))
+          .filter(Boolean);
+        const taskForEmail = {
+          ...t,
+          assigned_to_display:
+            assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned",
+        };
+
         let anySuccess = false;
         for (const email of emails) {
           const success = await this.emailService.sendTaskOverdueNotification(
             email,
-            t,
+            taskForEmail,
             escalationLevel,
           );
           if (success) anySuccess = true;

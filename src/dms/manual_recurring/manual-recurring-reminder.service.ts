@@ -687,11 +687,6 @@ export class ManualRecurringReminderService {
       markThanked: false,
     };
 
-    const useDefaults = this.shouldUseDonationViewDefaults(
-      params.campaign,
-      "reminder",
-    );
-
     if (
       !params.force &&
       params.pledge.last_reminder_period_key === params.reminderDedupeKey
@@ -721,30 +716,20 @@ export class ManualRecurringReminderService {
         would_send: 1,
         detail: {
           ...params.baseDetail,
-          action: useDefaults
-            ? "would_send_reminder_default"
-            : "would_send_reminder",
+          action: "would_send_reminder_default",
           channels,
         },
       };
     }
 
-    const sendResult = useDefaults
-      ? await this.sendDefaultPaymentLinkMessages({
-          pledge: params.pledge,
-          campaign: params.campaign,
-          donor: params.donor,
-          channels,
-        })
-      : await this.sendSlotMessages({
-          pledge: params.pledge,
-          campaign: params.campaign,
-          donorId: params.pledge.donor_id,
-          slot: "reminder",
-          channels,
-          periodKey: params.periodKey,
-          purposeFallbackCache: params.purposeFallbackCache,
-        });
+    // Recurring payment reminders always use the dedicated reminder email +
+    // eOcean WhatsApp template — not campaign slot templates.
+    const sendResult = await this.sendDefaultPaymentLinkMessages({
+      pledge: params.pledge,
+      campaign: params.campaign,
+      donor: params.donor,
+      channels,
+    });
 
     if (sendResult.sent > 0) {
       return {
@@ -754,7 +739,7 @@ export class ManualRecurringReminderService {
         reminders_failed: sendResult.failed > 0 ? 1 : 0,
         detail: {
           ...params.baseDetail,
-          action: useDefaults ? "reminder_sent_default" : "reminder_sent",
+          action: "reminder_sent_default",
           channels,
           error: sendResult.errors.join("; ") || undefined,
         },
@@ -961,6 +946,7 @@ export class ManualRecurringReminderService {
           const ok =
             await this.emailService.sendRecurringPaymentReminderEmail(
               donation,
+              donor.email,
             );
           if (ok) sent += 1;
           else {
@@ -1475,6 +1461,7 @@ export class ManualRecurringReminderService {
               sentOk =
                 (await this.emailService.sendRecurringPaymentReminderEmail(
                   donation,
+                  donor.email,
                 )) || sentOk;
             }
             if (donor?.phone) {

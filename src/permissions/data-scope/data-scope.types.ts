@@ -1,5 +1,13 @@
 export type DataScopeType = "self" | "team" | "department" | "org";
 
+/** List filter modes — narrows within the resolved data-access ceiling. */
+export type TeamFilterMode = "all" | "me" | "direct" | "entire" | "user";
+
+export interface TeamFilterInput {
+  mode?: TeamFilterMode | string | null;
+  userId?: number | null;
+}
+
 export interface ResolvedDataScope {
   /** Super admin — no row filtering */
   bypass: boolean;

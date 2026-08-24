@@ -79,6 +79,7 @@ export class WebsiteDonationProjectsService {
       title: project.title,
       category: project.category,
       icon_key: project.icon_key,
+      listingImage: project.listing_image_url || "",
       price: project.price == null ? null : Number(project.price),
       new: !!project.is_new,
       is_default: !!project.is_default,
@@ -288,6 +289,7 @@ export class WebsiteDonationProjectsService {
       template_code: dto.template_code || null,
       sort_order: dto.sort_order ?? 0,
       is_active: dto.is_active !== false,
+      listing_image_url: dto.listing_image_url?.trim() || null,
       page_content: dto.page_content ?? null,
     });
     const saved = await this.projectRepo.save(project);
@@ -317,6 +319,10 @@ export class WebsiteDonationProjectsService {
           : project.template_code,
       sort_order: dto.sort_order != null ? dto.sort_order : project.sort_order,
       is_active: dto.is_active != null ? dto.is_active : project.is_active,
+      listing_image_url:
+        dto.listing_image_url !== undefined
+          ? dto.listing_image_url?.trim() || null
+          : project.listing_image_url,
       ...(dto.page_content !== undefined
         ? { page_content: dto.page_content }
         : {}),

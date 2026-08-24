@@ -31,6 +31,7 @@ import { DmsTodosModule } from './todos/dms-todos.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AidModule } from './aid/aid.module';
 import { WebsiteDonationProjectsModule } from './website_donation_projects/website-donation-projects.module';
+import { WebsiteHomeHeroModule } from './website_home_hero/website-home-hero.module';
 
 @Module({
   controllers: [DmsController],
@@ -69,6 +70,7 @@ import { WebsiteDonationProjectsModule } from './website_donation_projects/websi
     ManualRecurringModule,
     DmsTodosModule,
     WebsiteDonationProjectsModule,
+    WebsiteHomeHeroModule,
   ],
 })
 export class DmsModule {}

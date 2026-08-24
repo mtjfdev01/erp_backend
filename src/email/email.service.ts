@@ -449,9 +449,18 @@ export class EmailService implements OnModuleInit {
   /**
    * Recurring payment reminder email (separate from incomplete-donation / abandon email).
    */
-  async sendRecurringPaymentReminderEmail(donation: any): Promise<boolean> {
+  async sendRecurringPaymentReminderEmail(
+    donation: any,
+    donorEmail?: string | null,
+  ): Promise<boolean> {
     try {
-      const toEmail = donation?.donor?.email;
+      const toEmail = (
+        donorEmail ||
+        donation?.donor?.email ||
+        donation?.donor_email ||
+        ""
+      )
+        .trim();
       if (!toEmail) {
         this.logger.error(
           "Recurring reminder email skipped — donor email not found",
@@ -497,11 +506,24 @@ export class EmailService implements OnModuleInit {
         },
       });
 
+      if (result.error) {
+        this.logger.error(
+          `Recurring payment reminder email Resend error: ${JSON.stringify(result.error)}`,
+        );
+        return false;
+      }
+
       const messageId = result.data?.id || "unknown";
       this.logger.log(
         `Sent recurring payment reminder via Resend to ${toEmail} (id: ${messageId})`,
       );
-      return !!result.data?.id || true;
+      if (!result.data?.id) {
+        this.logger.warn(
+          `Recurring reminder Resend response missing message ID: ${JSON.stringify(result)}`,
+        );
+        return false;
+      }
+      return true;
     } catch (error: any) {
       this.logger.error(
         `Recurring payment reminder email send failed: ${error?.message}`,

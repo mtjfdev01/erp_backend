@@ -18,9 +18,9 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import { Response } from "express";
 import { JwtGuard } from "../../auth/jwt.guard";
-import { WebsiteDonationProjectsService } from "./website-donation-projects.service";
-import { CreateWebsiteDonationProjectDto } from "./dto/create-website-donation-project.dto";
-import { UpdateWebsiteDonationProjectDto } from "./dto/update-website-donation-project.dto";
+import { WebsiteHomeHeroService } from "./website-home-hero.service";
+import { CreateWebsiteHomeHeroSlideDto } from "./dto/create-website-home-hero-slide.dto";
+import { UpdateWebsiteHomeHeroSlideDto } from "./dto/update-website-home-hero-slide.dto";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
 
 const imageUploadOptions = {
@@ -28,15 +28,15 @@ const imageUploadOptions = {
   limits: { fileSize: 5 * 1024 * 1024 },
 };
 
-@Controller("website-donation-projects")
+@Controller("website-home-hero")
 @UseGuards(JwtGuard)
-export class WebsiteDonationProjectsController {
+export class WebsiteHomeHeroController {
   constructor(
-    private readonly service: WebsiteDonationProjectsService,
+    private readonly service: WebsiteHomeHeroService,
     private readonly s3Storage: S3StorageService,
   ) {}
 
-  /** Upload page content image to S3 (donations/website-donation-projects/...). */
+  /** Upload hero slide image to S3 (donations/website-home-hero/...). */
   @Post("upload/image")
   @UseInterceptors(FileInterceptor("file", imageUploadOptions))
   async uploadImage(
@@ -47,8 +47,7 @@ export class WebsiteDonationProjectsController {
       if (!file) {
         throw new BadRequestException("File is required");
       }
-      const result =
-        await this.s3Storage.uploadWebsiteDonationProjectImage(file);
+      const result = await this.s3Storage.uploadWebsiteHomeHeroImage(file);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Image uploaded successfully",
@@ -66,7 +65,7 @@ export class WebsiteDonationProjectsController {
   }
 
   @Post()
-  async create(@Body() dto: CreateWebsiteDonationProjectDto) {
+  async create(@Body() dto: CreateWebsiteHomeHeroSlideDto) {
     const data = await this.service.create(dto);
     return { success: true, data };
   }
@@ -90,7 +89,7 @@ export class WebsiteDonationProjectsController {
   @Patch(":id")
   async update(
     @Param("id") id: string,
-    @Body() dto: UpdateWebsiteDonationProjectDto,
+    @Body() dto: UpdateWebsiteHomeHeroSlideDto,
   ) {
     const data = await this.service.update(+id, dto);
     return { success: true, data };
@@ -99,6 +98,6 @@ export class WebsiteDonationProjectsController {
   @Delete(":id")
   async remove(@Param("id") id: string) {
     await this.service.remove(+id);
-    return { success: true, message: "Website donation project archived" };
+    return { success: true, message: "Home hero slide archived" };
   }
 }
