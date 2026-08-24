@@ -5,7 +5,9 @@ export { PermissionsModule } from "./permissions.module";
 export { PermissionsService } from "./permissions.service";
 export { DataScopeService } from "./data-scope/data-scope.service";
 export type {
+  ApplyUserIdsFilterOptions,
   DataScopeType,
+  ResolveListScopeInput,
   ResolvedDataScope,
   TeamFilterInput,
   TeamFilterMode,

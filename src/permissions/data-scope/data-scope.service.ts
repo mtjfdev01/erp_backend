@@ -9,7 +9,9 @@ import { PermissionsService } from "../permissions.service";
 import { User, UserRole } from "../../users/user.entity";
 import {
   ApplyScopeOptions,
+  ApplyUserIdsFilterOptions,
   DataScopeType,
+  ResolveListScopeInput,
   ResolvedDataScope,
   TeamFilterInput,
   TeamFilterMode,
@@ -124,6 +126,15 @@ export class DataScopeService {
     return all;
   }
 
+  /** Reporting tree only (no self). Shared by team listings across modules. */
+  async getReportingTeamIds(managerId: number): Promise<number[]> {
+    const mid = Number(managerId);
+    if (!mid) return [];
+    return (await this.getAllReportIds(mid)).filter(
+      (id) => id > 0 && id !== mid,
+    );
+  }
+
   async getDepartmentUserIds(department: string): Promise<number[]> {
     const users = await this.userRepository.find({
       where: { department: department as any, is_archived: false },
@@ -209,6 +220,30 @@ export class DataScopeService {
       type: scope.type === "org" || scope.bypass ? "team" : scope.type,
       allowedUserIds: narrowed,
     };
+  }
+
+  /**
+   * One-shot: Access Scope + optional Team filter.
+   * Prefer this in every list endpoint that supports team_filter.
+   */
+  async resolveListScope(
+    input: ResolveListScopeInput,
+  ): Promise<ResolvedDataScope> {
+    let scope = await this.resolveScope(
+      input.userId,
+      input.userRole,
+      input.userDepartment,
+      input.permissionDepartment,
+      input.module,
+    );
+    const teamFilter = this.parseTeamFilter(
+      input.teamFilter,
+      input.teamFilterUserId,
+    );
+    if (teamFilter) {
+      scope = await this.narrowScopeWithTeamFilter(scope, teamFilter);
+    }
+    return scope;
   }
 
   async resolveScope(
@@ -341,24 +376,106 @@ export class DataScopeService {
       return;
     }
 
-    if (!scope.allowedUserIds.length) {
+    const columns = options?.assignedToColumn
+      ? [`${alias}.created_by`, options.assignedToColumn]
+      : [`${alias}.created_by`];
+
+    this.applyUserIdsFilter(query, scope.allowedUserIds || [], { columns });
+  }
+
+  /**
+   * Restrict query to rows linked to any of `userIds`.
+   * Shared by Team filter / "assigned to my team" across modules.
+   */
+  applyUserIdsFilter<T>(
+    query: SelectQueryBuilder<T>,
+    userIds: number[],
+    options: ApplyUserIdsFilterOptions = {},
+  ): void {
+    const ids = Array.from(
+      new Set(
+        (userIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+
+    if (!ids.length) {
       query.andWhere("1 = 0");
       return;
     }
 
-    const ids = scope.allowedUserIds;
-    const createdCol = `${alias}.created_by`;
+    const key = options.paramKey || "dataScopeUserIds";
+    const parts: string[] = [];
+    const params: Record<string, unknown> = { [key]: ids };
 
-    if (options?.assignedToColumn) {
-      query.andWhere(
-        `(${createdCol} IN (:...dataScopeUserIds) OR ${options.assignedToColumn} IN (:...dataScopeUserIds))`,
-        { dataScopeUserIds: ids },
+    for (const col of options.columns || []) {
+      parts.push(`${col} IN (:...${key})`);
+    }
+    if (options.intArrayColumn) {
+      parts.push(`${options.intArrayColumn} && :${key}Arr::int[]`);
+      params[`${key}Arr`] = ids;
+    }
+    if (options.jsonbUserIdsColumn) {
+      parts.push(
+        `EXISTS (
+          SELECT 1 FROM jsonb_array_elements(COALESCE(${options.jsonbUserIdsColumn}, '[]'::jsonb)) AS _ds_assignee
+          WHERE (_ds_assignee->>'user_id')::int IN (:...${key})
+        )`,
+      );
+    }
+
+    if (!parts.length) {
+      this.logger.warn(
+        "applyUserIdsFilter called without columns / intArrayColumn / jsonbUserIdsColumn",
       );
       return;
     }
 
-    query.andWhere(`${createdCol} IN (:...dataScopeUserIds)`, {
-      dataScopeUserIds: ids,
+    query.andWhere(`(${parts.join(" OR ")})`, params);
+
+    const excludeId = Number(options.excludeAssigneeUserId);
+    if (excludeId > 0) {
+      const exKey = `${key}Exclude`;
+      const notParts: string[] = [];
+      if (options.intArrayColumn) {
+        notParts.push(
+          `(${options.intArrayColumn} IS NULL OR NOT (${options.intArrayColumn} @> ARRAY[:${exKey}]::int[]))`,
+        );
+      }
+      if (options.jsonbUserIdsColumn) {
+        notParts.push(
+          `(${options.jsonbUserIdsColumn} IS NULL OR NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(${options.jsonbUserIdsColumn}) AS _ds_ex
+            WHERE (_ds_ex->>'user_id')::int = :${exKey}
+          ))`,
+        );
+      }
+      if (notParts.length) {
+        query.andWhere(`(${notParts.join(" AND ")})`, { [exKey]: excludeId });
+      }
+    }
+  }
+
+  /**
+   * Filter to the manager's reporting tree (not self).
+   * Use for "team" tabs / views in any module.
+   */
+  async applyReportingTeamFilter<T>(
+    query: SelectQueryBuilder<T>,
+    managerId: number,
+    options: Omit<ApplyUserIdsFilterOptions, "excludeAssigneeUserId"> & {
+      /** Default true: exclude manager from assignee match (team tab). */
+      excludeSelf?: boolean;
+    } = {},
+  ): Promise<void> {
+    const mid = Number(managerId);
+    const reportIds = await this.getReportingTeamIds(mid);
+    const { excludeSelf = true, ...filterOpts } = options;
+    this.applyUserIdsFilter(query, reportIds, {
+      ...filterOpts,
+      paramKey: filterOpts.paramKey || `reportTeam_${mid}`,
+      excludeAssigneeUserId: excludeSelf ? mid : undefined,
     });
   }
 
