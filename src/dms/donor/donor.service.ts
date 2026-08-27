@@ -169,11 +169,21 @@ export class DonorService {
     return this.resolveAudienceIds(payload, geoScope, sourceAccess, user ?? undefined);
   }
 
-  async resolveDonorScope(currentUser?: {
-    id?: number;
-    role?: string;
-    department?: string;
-  }): Promise<ResolvedDataScope> {
+  async resolveDonorScope(
+    currentUser?: {
+      id?: number;
+      role?: string;
+      department?: string;
+    },
+    donorSource?: string | null,
+  ): Promise<ResolvedDataScope> {
+    if (donorSource !== undefined && currentUser?.id) {
+      const scoped = await this.resolveDonorRecordScope(
+        currentUser,
+        donorSource,
+      );
+      if (scoped) return scoped;
+    }
     return this.dataScopeService.resolveScope(
       currentUser?.id,
       currentUser?.role,
@@ -183,25 +193,86 @@ export class DonorService {
     );
   }
 
+  /**
+   * Resolve data scope for a donor module, falling back to unified `donors`
+   * when the specific online/offline key is absent (legacy permissions).
+   */
+  private async resolveDonorModuleScope(
+    currentUser: {
+      id?: number;
+      role?: string;
+      department?: string;
+    },
+    module: "donors" | "online_donors" | "offline_donors",
+  ): Promise<ResolvedDataScope> {
+    const permissions = await this.permissionsService.getUserPermissions(
+      Number(currentUser.id),
+    );
+    const specific = permissions?.fund_raising?.[module];
+    const useModule =
+      specific && typeof specific === "object" ? module : "donors";
+    return this.dataScopeService.resolveScope(
+      currentUser.id,
+      currentUser.role,
+      currentUser.department,
+      "fund_raising",
+      useModule,
+    );
+  }
+
+  /** List scope: online_donors / offline_donors (merged when user has both). */
+  async resolveDonorListScope(
+    currentUser: {
+      id?: number;
+      role?: string;
+      department?: string;
+    } | null | undefined,
+    sourceAccess: { online: boolean; offline: boolean },
+  ): Promise<ResolvedDataScope | null> {
+    if (!currentUser?.id || currentUser.id === -1) return null;
+
+    const onlineScope = await this.resolveDonorModuleScope(
+      currentUser,
+      "online_donors",
+    );
+    const offlineScope = await this.resolveDonorModuleScope(
+      currentUser,
+      "offline_donors",
+    );
+
+    if (sourceAccess.online && sourceAccess.offline) {
+      return this.dataScopeService.mergeScopes(onlineScope, offlineScope);
+    }
+    if (sourceAccess.online) return onlineScope;
+    if (sourceAccess.offline) return offlineScope;
+    return onlineScope;
+  }
+
+  /** Single-record scope from donor.source (website = online). */
+  async resolveDonorRecordScope(
+    currentUser: {
+      id?: number;
+      role?: string;
+      department?: string;
+    } | null | undefined,
+    donorSource: string | null | undefined,
+  ): Promise<ResolvedDataScope | null> {
+    if (!currentUser?.id || currentUser.id === -1) return null;
+    const module =
+      donorSource === "website" ? "online_donors" : "offline_donors";
+    return this.resolveDonorModuleScope(currentUser, module);
+  }
+
   assertDonorRecordAccess(scope: ResolvedDataScope, record: Donor): void {
     this.dataScopeService.assertRecordAccess(scope, record, {
       useAssignedTo: true,
     });
   }
 
-  private toDonorGeoRecord(donor: Donor) {
-    return {
-      city: donor.city,
-      country: donor.country,
-      address: donor.address,
-      geo_search: donor.geo_search,
-      created_by: donor.created_by,
-    };
-  }
-
   /**
-   * When geographic territory filter is active, geo match governs access.
-   * Otherwise fall back to data scope (created_by / assigned_to).
+   * View access: geographic territory when active, plus ownership/assignment
+   * for offline (non-website) donors. Website donors skip created_by checks
+   * (same pattern as online donations).
    */
   assertDonorViewAccess(
     dataScope: ResolvedDataScope,
@@ -220,24 +291,32 @@ export class DonorService {
           "You do not have geographic access to this record",
         );
       }
+    }
+
+    if (donor.source === "website") {
       return;
     }
 
     this.assertDonorRecordAccess(dataScope, donor);
   }
 
+  private toDonorGeoRecord(donor: Donor) {
+    return {
+      city: donor.city,
+      country: donor.country,
+      address: donor.address,
+      geo_search: donor.geo_search,
+      created_by: donor.created_by,
+    };
+  }
+
   private applyDonorListDataScope(
     query: SelectQueryBuilder<Donor>,
     dataScope: ResolvedDataScope | null,
-    geoScope?: ResolvedGeographicScope | null,
+    _geoScope?: ResolvedGeographicScope | null,
   ): void {
     if (!dataScope) return;
-    if (
-      geoScope &&
-      this.geographicScopeService.isGeographicFilterActive(geoScope)
-    ) {
-      return;
-    }
+    // Geographic filter is applied separately; ownership/assignment always stacks (AND).
     this.dataScopeService.applyToQuery(query, "donor", dataScope, {
       assignedToColumn: "donor.assigned_to",
     });
@@ -691,15 +770,20 @@ export class DonorService {
       }
 
       if (currentUser?.id) {
-        const scope = await this.dataScopeService.resolveListScope({
-          userId: currentUser.id,
-          userRole: currentUser.role,
-          userDepartment: currentUser.department,
-          permissionDepartment: "fund_raising",
-          module: "donors",
-          teamFilter: options?.team_filter,
-          teamFilterUserId: options?.team_filter_user_id,
-        });
+        let scope = await this.resolveDonorListScope(
+          currentUser,
+          sourceAccess || { online: true, offline: true },
+        );
+        const teamFilter = this.dataScopeService.parseTeamFilter(
+          options?.team_filter,
+          options?.team_filter_user_id,
+        );
+        if (scope && teamFilter) {
+          scope = await this.dataScopeService.narrowScopeWithTeamFilter(
+            scope,
+            teamFilter,
+          );
+        }
         this.applyDonorListDataScope(queryBuilder, scope, geoScope);
       }
 
@@ -1081,7 +1165,10 @@ export class DonorService {
     }
 
     if (currentUser?.id) {
-      const scope = await this.resolveDonorScope(currentUser);
+      const scope = await this.resolveDonorListScope(
+        currentUser,
+        sourceAccess || { online: true, offline: true },
+      );
       this.applyDonorListDataScope(queryBuilder, scope, geoScope);
     }
 
