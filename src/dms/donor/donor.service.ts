@@ -386,6 +386,26 @@ export class DonorService {
     return patch;
   }
 
+  private normalizeDonorContact(
+    email?: string | null,
+    phone?: string | null,
+  ): { email: string | null; phone: string | null } {
+    const normalizedEmail =
+      email != null && String(email).trim() !== ""
+        ? String(email).trim().toLowerCase()
+        : null;
+    const normalizedPhone =
+      phone != null && String(phone).trim() !== ""
+        ? String(phone).trim()
+        : null;
+
+    if (!normalizedEmail && !normalizedPhone) {
+      throw new BadRequestException("Either email or phone is required");
+    }
+
+    return { email: normalizedEmail, phone: normalizedPhone };
+  }
+
   async getDonorAuditHistory(donorId: number) {
     return this.donorAuditService.findByDonorId(donorId);
   }
@@ -445,13 +465,21 @@ export class DonorService {
         );
       }
 
-      // Check if email already exists
-      const existingDonor = await this.donorRepository.findOne({
-        where: { email: createDonorDto.email },
-      });
+      const contact = this.normalizeDonorContact(
+        createDonorDto.email,
+        createDonorDto.phone,
+      );
+      createDonorDto.email = contact.email ?? undefined;
+      createDonorDto.phone = contact.phone ?? undefined;
 
-      if (existingDonor) {
-        throw new ConflictException("Email already exists");
+      if (contact.email) {
+        const existingDonor = await this.donorRepository.findOne({
+          where: { email: contact.email },
+        });
+
+        if (existingDonor) {
+          throw new ConflictException("Email already exists");
+        }
       }
       let assigned_to = null;
       let referred_by = null;
@@ -509,6 +537,8 @@ export class DonorService {
 
       const donor = this.donorRepository.create({
         ...donorFields,
+        email: contact.email,
+        phone: contact.phone,
         password: hashedPassword,
         password_enc: enc.payload,
         password_enc_version: enc.version,
@@ -1635,6 +1665,36 @@ export class DonorService {
       delete dto.affiliation_role;
       delete dto.affiliation_is_primary;
       delete dto.organization_affiliations;
+
+      const nextEmail =
+        dto.email !== undefined
+          ? dto.email == null || String(dto.email).trim() === ""
+            ? null
+            : String(dto.email).trim().toLowerCase()
+          : donor.email;
+      const nextPhone =
+        dto.phone !== undefined
+          ? dto.phone == null || String(dto.phone).trim() === ""
+            ? null
+            : String(dto.phone).trim()
+          : donor.phone;
+      this.normalizeDonorContact(nextEmail, nextPhone);
+
+      if (nextEmail && nextEmail !== donor.email) {
+        const existingDonor = await this.donorRepository.findOne({
+          where: { email: nextEmail },
+        });
+        if (existingDonor && existingDonor.id !== donor.id) {
+          throw new ConflictException("Email already exists");
+        }
+      }
+
+      if (dto.email !== undefined) {
+        dto.email = nextEmail;
+      }
+      if (dto.phone !== undefined) {
+        dto.phone = nextPhone;
+      }
 
       const patch = this.buildDonorPatch(dto as UpdateDonorDto);
 
