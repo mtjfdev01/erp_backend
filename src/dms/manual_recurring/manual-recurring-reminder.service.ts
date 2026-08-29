@@ -1294,6 +1294,23 @@ export class ManualRecurringReminderService {
       for (const row of rows) {
         scanned += 1;
 
+        if (row.initial_donation_id) {
+          const initial = await this.donationRepo.findOne({
+            where: { id: row.initial_donation_id, is_archived: false },
+            select: ["id", "status"],
+          });
+          const initialStatus = String(initial?.status || "")
+            .trim()
+            .toLowerCase();
+          if (
+            !initial ||
+            !["completed", "paid", "success"].includes(initialStatus)
+          ) {
+            skipped += 1;
+            continue;
+          }
+        }
+
         let reminderPhase: "early" | "due" | null = null;
         let periodKey = defaultPeriodKey;
         let reminderDedupeKey = getReminderDedupeKey(frequency, periodKey);
