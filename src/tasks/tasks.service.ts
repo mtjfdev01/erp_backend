@@ -324,11 +324,6 @@ export class TasksService {
       return;
     }
 
-    if (isAssignee) {
-      throw new ForbiddenException(
-        "Assignees cannot edit or delete tasks assigned to them.",
-      );
-    }
 
     const requiredPermission =
       operation === "delete" ? perms?.canDelete : perms?.canUpdate;
@@ -2119,7 +2114,28 @@ export class TasksService {
     try {
       const task = await this.findOne(id, currentUser, { filterMov: false });
       const perms = await this.getTaskPermissionsForUser(currentUser);
-      this.assertTaskMutationAllowed(task, currentUser, "update", perms);
+
+      const assignedIds = Array.isArray(task.assigned_user_ids)
+        ? task.assigned_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
+        : [];
+      const metaIds = Array.isArray(task.assigned_users_meta)
+        ? task.assigned_users_meta
+            .map((meta: any) =>
+              meta && meta.user_id != null ? Number(meta.user_id) : null,
+            )
+            .filter((v) => v !== null && !isNaN(v as number))
+        : [];
+      const isCurrentUserAssignee = [...assignedIds, ...metaIds].includes(
+        Number(currentUser.id),
+      );
+      const isApprovalSubmission =
+        dto.status === TaskStatus.PENDING_APPROVAL &&
+        task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED &&
+        isCurrentUserAssignee;
+
+      if (!isApprovalSubmission) {
+        this.assertTaskMutationAllowed(task, currentUser, "update", perms);
+      }
       // If user is trying to CLOSE a COMPLETED task, allow it if they are the creator or reporter
       if (
         task.status === TaskStatus.COMPLETED &&
