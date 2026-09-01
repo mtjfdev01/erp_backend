@@ -357,7 +357,29 @@ export class DonationsService {
     donor: { name?: string } | null | undefined,
     createDonationDto: CreateDonationDto,
   ): string {
-    return donor?.name || createDonationDto.donor_name || "Anonymous";
+    return donor?.name || createDonationDto?.donor_name || "Anonymous";
+  }
+
+  private hasDonorContactInfo(createDonationDto: CreateDonationDto): boolean {
+    const email = createDonationDto?.donor_email?.trim();
+    const phone = createDonationDto?.donor_phone?.trim();
+    return !!(email || phone);
+  }
+
+  private buildAutoRegisterDonationPayload(
+    createDonationDto: CreateDonationDto,
+  ) {
+    return {
+      donor_name: createDonationDto?.donor_name,
+      donor_email: createDonationDto?.donor_email,
+      donor_phone: createDonationDto?.donor_phone,
+      city: createDonationDto?.city,
+      country: createDonationDto?.country,
+      address: createDonationDto?.address,
+      notification_subscription: createDonationDto?.notification_subscription,
+      recurring: this.isDonationRecurring(createDonationDto),
+      recurring_consent: this.hasRecurringConsent(createDonationDto),
+    };
   }
 
   private withDonationId<T extends Record<string, unknown>>(
@@ -1191,16 +1213,13 @@ export class DonationsService {
     }
 
     const consent = this.hasRecurringConsent(createDonationDto);
-    const { startDateMode, startDate } =
-      this.resolveRecurringStartConfig(createDonationDto);
 
     if (createDonationDto.recurring?.interval) {
       return {
         interval: createDonationDto.recurring
           .interval as StripeRecurringParams["interval"],
         interval_count: createDonationDto.recurring.interval_count ?? 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1212,8 +1231,7 @@ export class DonationsService {
       return {
         interval: "week",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1221,8 +1239,7 @@ export class DonationsService {
       return {
         interval: "month",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1230,8 +1247,7 @@ export class DonationsService {
       return {
         interval: "day",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1300,54 +1316,25 @@ export class DonationsService {
     createDonationDto: CreateDonationDto,
     donationId: number,
   ): Promise<Donor | null> {
-    if (createDonationDto.donor_id) {
+    if (createDonationDto?.donor_id) {
       return this.donorRepository.findOne({
         where: { id: createDonationDto.donor_id },
       });
     }
 
-    if (!createDonationDto.donor_email || !createDonationDto.donor_phone) {
+    if (!this.hasDonorContactInfo(createDonationDto)) {
       return null;
     }
 
-    let donor = await this.donorService.findByEmail(
-      createDonationDto.donor_email,
+    const donor = await this.donorService.autoRegisterFromDonation(
+      this.buildAutoRegisterDonationPayload(createDonationDto),
     );
 
-    if (donor) {
-      if (donor.is_archived === true) {
-        this.logger.warn(
-          `Post-create donor link skipped: archived donor ${donor.email} (donation ${donationId})`,
-        );
-        return null;
-      }
-      const alreadyMultiTimeDonor = donor.multi_time_donor || false;
-      if (!alreadyMultiTimeDonor) {
-        donor.multi_time_donor = true;
-      }
-      if (createDonationDto.notification_subscription !== undefined) {
-        donor.notification_subscription =
-          createDonationDto.notification_subscription;
-      }
-      donor = await this.donorRepository.save(donor);
-    } else {
-      donor = await this.donorService.autoRegisterFromDonation({
-        donor_name: createDonationDto.donor_name,
-        donor_email: createDonationDto.donor_email,
-        donor_phone: createDonationDto.donor_phone,
-        city: createDonationDto.city,
-        country: createDonationDto.country,
-        address: createDonationDto.address,
-        notification_subscription:
-          createDonationDto.notification_subscription,
-        recurring: this.isDonationRecurring(createDonationDto),
-        recurring_consent: this.hasRecurringConsent(createDonationDto),
-      });
-      if (!donor) {
-        donor = await this.donorService.findByEmail(
-          createDonationDto.donor_email,
-        );
-      }
+    if (donor?.is_archived === true) {
+      this.logger.warn(
+        `Post-create donor link skipped: archived donor (donation ${donationId})`,
+      );
+      return null;
     }
 
     if (!donor?.id) {
@@ -2820,50 +2807,20 @@ export class DonationsService {
           }
         } else if (donorId) {
           // Explicit donor_id (staff): use as-is only.
-        } else if (
-          createDonationDto.donor_email &&
-          createDonationDto.donor_phone
-        ) {
+        } else if (this.hasDonorContactInfo(createDonationDto)) {
           console.log(
-            `🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`,
+            `🔍 Resolving donor from donation contact: ${createDonationDto?.donor_email || "—"} / ${createDonationDto?.donor_phone || "—"}`,
           );
 
-          donor = await this.donorService.findByEmail(
-            createDonationDto.donor_email,
+          donor = await this.donorService.autoRegisterFromDonation(
+            this.buildAutoRegisterDonationPayload(createDonationDto),
           );
 
-          if (donor) {
-            const alreadyMultiTimeDonor = donor?.multi_time_donor || false;
-            if (!alreadyMultiTimeDonor) {
-              donor.multi_time_donor = true;
-              await this.donorRepository.save(donor);
-            }
-            if (createDonationDto.notification_subscription !== undefined) {
-              donor.notification_subscription =
-                createDonationDto.notification_subscription;
-              await this.donorRepository.save(donor);
-            }
+          if (donor?.is_archived === true) {
+            throw new HttpException("Donor is archived", 400);
+          }
+          if (donor?.id) {
             donorId = donor.id;
-            if (donor?.is_archived === true) {
-              throw new HttpException("Donor is archived", 400);
-            }
-          } else {
-            donor = await this.donorService.autoRegisterFromDonation({
-              donor_name: createDonationDto.donor_name,
-              donor_email: createDonationDto.donor_email,
-              donor_phone: createDonationDto.donor_phone,
-              city: createDonationDto.city,
-              country: createDonationDto.country,
-              address: createDonationDto?.address,
-              notification_subscription:
-                createDonationDto.notification_subscription,
-              recurring: this.isDonationRecurring(createDonationDto),
-              recurring_consent: this.hasRecurringConsent(createDonationDto),
-            });
-
-            if (donor) {
-              donorId = donor.id;
-            }
           }
         }
 

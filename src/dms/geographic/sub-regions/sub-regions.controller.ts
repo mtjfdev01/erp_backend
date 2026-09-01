@@ -12,33 +12,33 @@ import {
   Query,
 } from "@nestjs/common";
 import { Response } from "express";
-import { DistrictsService } from "./districts.service";
-import { CreateDistrictDto } from "./dto/create-district.dto";
-import { UpdateDistrictDto } from "./dto/update-district.dto";
+import { SubRegionsService } from "./sub-regions.service";
+import { CreateSubRegionDto } from "./dto/create-sub-region.dto";
+import { UpdateSubRegionDto } from "./dto/update-sub-region.dto";
 import { JwtGuard } from "../../../auth/jwt.guard";
 import { PermissionsGuard } from "../../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../../permissions/decorators/require-permission.decorator";
 
-@Controller("districts")
+@Controller("sub-regions")
 @UseGuards(JwtGuard, PermissionsGuard)
-export class DistrictsController {
-  constructor(private readonly districtsService: DistrictsService) {}
+export class SubRegionsController {
+  constructor(private readonly subRegionsService: SubRegionsService) {}
 
   @Post()
   @RequiredPermissions([
-    "geographic.districts.create",
+    "geographic.sub_regions.create",
     "super_admin",
     "geographic_manager",
   ])
   async create(
-    @Body() createDistrictDto: CreateDistrictDto,
+    @Body() createSubRegionDto: CreateSubRegionDto,
     @Res() res: Response,
   ) {
     try {
-      const result = await this.districtsService.create(createDistrictDto);
+      const result = await this.subRegionsService.create(createSubRegionDto);
       return res.status(HttpStatus.CREATED).json({
         success: true,
-        message: "District created successfully",
+        message: "Sub region created successfully",
         data: result,
       });
     } catch (error) {
@@ -54,28 +54,24 @@ export class DistrictsController {
   }
 
   @Get()
-  // @RequiredPermissions(['geographic.districts.list_view', 'super_admin', 'geographic_manager', 'geographic_user'])
   async findAll(
     @Query("region_id") regionId?: string,
     @Query("country_id") countryId?: string,
-    @Query("sub_region_id") subRegionId?: string,
     @Res() res?: Response,
   ) {
     try {
       let result;
-      if (subRegionId) {
-        result = await this.districtsService.findBySubRegion(+subRegionId);
-      } else if (regionId) {
-        result = await this.districtsService.findByRegion(+regionId);
+      if (regionId) {
+        result = await this.subRegionsService.findByRegion(+regionId);
       } else if (countryId) {
-        result = await this.districtsService.findByCountry(+countryId);
+        result = await this.subRegionsService.findByCountry(+countryId);
       } else {
-        result = await this.districtsService.findAll();
+        result = await this.subRegionsService.findAll();
       }
 
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: "Districts retrieved successfully",
+        message: "Sub regions retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -89,17 +85,17 @@ export class DistrictsController {
 
   @Get(":id")
   @RequiredPermissions([
-    "geographic.districts.view",
+    "geographic.sub_regions.view",
     "super_admin",
     "geographic_manager",
     "geographic_user",
   ])
   async findOne(@Param("id") id: string, @Res() res: Response) {
     try {
-      const result = await this.districtsService.findOne(+id);
+      const result = await this.subRegionsService.findOne(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: "District retrieved successfully",
+        message: "Sub region retrieved successfully",
         data: result,
       });
     } catch (error) {
@@ -116,20 +112,20 @@ export class DistrictsController {
 
   @Patch(":id")
   @RequiredPermissions([
-    "geographic.districts.update",
+    "geographic.sub_regions.update",
     "super_admin",
     "geographic_manager",
   ])
   async update(
     @Param("id") id: string,
-    @Body() updateDistrictDto: UpdateDistrictDto,
+    @Body() updateSubRegionDto: UpdateSubRegionDto,
     @Res() res: Response,
   ) {
     try {
-      const result = await this.districtsService.update(+id, updateDistrictDto);
+      const result = await this.subRegionsService.update(+id, updateSubRegionDto);
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: "District updated successfully",
+        message: "Sub region updated successfully",
         data: result,
       });
     } catch (error) {
@@ -146,13 +142,13 @@ export class DistrictsController {
 
   @Delete(":id")
   @RequiredPermissions([
-    "geographic.districts.delete",
+    "geographic.sub_regions.delete",
     "super_admin",
     "geographic_manager",
   ])
   async remove(@Param("id") id: string, @Res() res: Response) {
     try {
-      const result = await this.districtsService.remove(+id);
+      const result = await this.subRegionsService.remove(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result.message,

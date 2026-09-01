@@ -1,25 +1,24 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
-import { DistrictsService } from "./districts.service";
-import { DistrictsController } from "./districts.controller";
-import { District } from "./entities/district.entity";
+import { SubRegionsService } from "./sub-regions.service";
+import { SubRegionsController } from "./sub-regions.controller";
+import { SubRegion } from "./entities/sub-region.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
-import { SubRegion } from "../sub-regions/entities/sub-region.entity";
 import { JwtModule } from "@nestjs/jwt";
 import { PermissionsModule } from "src/permissions";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([District, Region, Country, SubRegion]),
+    TypeOrmModule.forFeature([SubRegion, Region, Country]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
   ],
-  controllers: [DistrictsController],
-  providers: [DistrictsService],
-  exports: [DistrictsService, TypeOrmModule],
+  controllers: [SubRegionsController],
+  providers: [SubRegionsService],
+  exports: [SubRegionsService, TypeOrmModule],
 })
-export class DistrictsModule {}
+export class SubRegionsModule {}

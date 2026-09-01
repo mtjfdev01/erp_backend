@@ -8,14 +8,14 @@ import {
 } from "typeorm";
 import { BaseEntity } from "../../../../utils/base_utils/entities/baseEntity";
 import { Country } from "../../countries/entities/country.entity";
-import { City } from "../../cities/entities/city.entity";
+import { Region } from "../../regions/entities/region.entity";
 import { District } from "../../districts/entities/district.entity";
-import { SubRegion } from "../../sub-regions/entities/sub-region.entity";
 
-@Entity("regions")
-@Index("idx_region_name", ["name"])
-@Index("idx_region_country", ["country_id"])
-export class Region extends BaseEntity {
+@Entity("sub_regions")
+@Index("idx_sub_region_name", ["name"])
+@Index("idx_sub_region_region", ["region_id"])
+@Index("idx_sub_region_country", ["country_id"])
+export class SubRegion extends BaseEntity {
   @Column({ length: 100 })
   name: string;
 
@@ -28,26 +28,25 @@ export class Region extends BaseEntity {
   @Column({ type: "text", nullable: true })
   description: string;
 
-  // Foreign Keys
+  @Column()
+  region_id: number;
+
   @Column()
   country_id: number;
 
-  // Relationships
-  @ManyToOne(() => Country, (country) => country.regions, {
+  @ManyToOne(() => Region, (region) => region.sub_regions, {
     nullable: false,
     onDelete: "CASCADE",
   })
+  @JoinColumn({ name: "region_id" })
+  region: Region;
+
+  @ManyToOne(() => Country, { nullable: false, onDelete: "CASCADE" })
   @JoinColumn({ name: "country_id" })
   country: Country;
 
-  @OneToMany(() => SubRegion, (subRegion) => subRegion.region, {
+  @OneToMany(() => District, (district) => district.sub_region, {
     cascade: true,
   })
-  sub_regions: SubRegion[];
-
-  @OneToMany(() => District, (district) => district.region, { cascade: true })
   districts: District[];
-
-  @OneToMany(() => City, (city) => city.region, { cascade: true })
-  cities: City[];
 }

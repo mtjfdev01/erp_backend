@@ -10,6 +10,7 @@ import { UpdateDistrictDto } from "./dto/update-district.dto";
 import { District } from "./entities/district.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
+import { SubRegion } from "../sub-regions/entities/sub-region.entity";
 
 @Injectable()
 export class DistrictsService {
@@ -20,7 +21,29 @@ export class DistrictsService {
     private readonly regionRepository: Repository<Region>,
     @InjectRepository(Country)
     private readonly countryRepository: Repository<Country>,
+    @InjectRepository(SubRegion)
+    private readonly subRegionRepository: Repository<SubRegion>,
   ) {}
+
+  private async validateSubRegion(
+    subRegionId: number,
+    regionId: number,
+  ): Promise<SubRegion> {
+    const subRegion = await this.subRegionRepository.findOne({
+      where: { id: subRegionId },
+    });
+    if (!subRegion) {
+      throw new NotFoundException(
+        `Sub region with ID ${subRegionId} not found`,
+      );
+    }
+    if (subRegion.region_id !== regionId) {
+      throw new ConflictException(
+        "Sub region does not belong to the selected region",
+      );
+    }
+    return subRegion;
+  }
 
   async create(createDistrictDto: CreateDistrictDto): Promise<District> {
     try {
@@ -43,6 +66,13 @@ export class DistrictsService {
       if (!country) {
         throw new NotFoundException(
           `Country with ID ${createDistrictDto.country_id} not found`,
+        );
+      }
+
+      if (createDistrictDto.sub_region_id) {
+        await this.validateSubRegion(
+          createDistrictDto.sub_region_id,
+          createDistrictDto.region_id,
         );
       }
 
@@ -78,7 +108,7 @@ export class DistrictsService {
       return await this.districtRepository.find({
         where: { is_active: true },
         order: { name: "ASC" },
-        relations: ["region", "country", "tehsils"],
+        relations: ["region", "country", "sub_region", "tehsils"],
       });
     } catch (error) {
       throw new Error(`Failed to retrieve districts: ${error.message}`);
@@ -90,7 +120,7 @@ export class DistrictsService {
       return await this.districtRepository.find({
         where: { region_id: regionId, is_active: true },
         order: { name: "ASC" },
-        relations: ["region", "country", "tehsils"],
+        relations: ["region", "country", "sub_region", "tehsils"],
       });
     } catch (error) {
       throw new Error(
@@ -104,7 +134,7 @@ export class DistrictsService {
       return await this.districtRepository.find({
         where: { country_id: countryId, is_active: true },
         order: { name: "ASC" },
-        relations: ["region", "country", "tehsils"],
+        relations: ["region", "country", "sub_region", "tehsils"],
       });
     } catch (error) {
       throw new Error(
@@ -113,11 +143,25 @@ export class DistrictsService {
     }
   }
 
+  async findBySubRegion(subRegionId: number): Promise<District[]> {
+    try {
+      return await this.districtRepository.find({
+        where: { sub_region_id: subRegionId, is_active: true },
+        order: { name: "ASC" },
+        relations: ["region", "country", "sub_region", "tehsils"],
+      });
+    } catch (error) {
+      throw new Error(
+        `Failed to retrieve districts for sub region: ${error.message}`,
+      );
+    }
+  }
+
   async findOne(id: number): Promise<District> {
     try {
       const district = await this.districtRepository.findOne({
         where: { id },
-        relations: ["region", "country", "tehsils", "tehsils.cities"],
+        relations: ["region", "country", "sub_region", "tehsils", "tehsils.cities"],
       });
 
       if (!district) {
@@ -168,6 +212,11 @@ export class DistrictsService {
             `Country with ID ${updateDistrictDto.country_id} not found`,
           );
         }
+      }
+
+      const regionId = updateDistrictDto.region_id || district.region_id;
+      if (updateDistrictDto.sub_region_id) {
+        await this.validateSubRegion(updateDistrictDto.sub_region_id, regionId);
       }
 
       // Check for conflicts if updating name

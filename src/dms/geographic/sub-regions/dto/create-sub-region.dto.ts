@@ -8,15 +8,15 @@ import {
   Length,
 } from "class-validator";
 
-export class CreateDistrictDto {
+export class CreateSubRegionDto {
   @IsString()
-  @IsNotEmpty({ message: "District name is required" })
-  @MaxLength(100, { message: "District name must not exceed 100 characters" })
+  @IsNotEmpty({ message: "Sub region name is required" })
+  @MaxLength(100, { message: "Sub region name must not exceed 100 characters" })
   name: string;
 
   @IsString()
   @IsOptional()
-  @Length(1, 10, { message: "District code must be 1-10 characters" })
+  @Length(1, 10, { message: "Sub region code must be 1-10 characters" })
   code?: string;
 
   @IsNumber()
@@ -26,10 +26,6 @@ export class CreateDistrictDto {
   @IsNumber()
   @IsNotEmpty({ message: "Country ID is required" })
   country_id: number;
-
-  @IsNumber()
-  @IsOptional()
-  sub_region_id?: number;
 
   @IsBoolean()
   @IsOptional()
