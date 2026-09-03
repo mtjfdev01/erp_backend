@@ -14,11 +14,16 @@ import {
 } from "@nestjs/common";
 import { Response } from "express";
 import { OrganizationsService } from "./organizations.service";
+import { CsrPocsService } from "./csr-pocs.service";
+import { CreateCsrPocDto } from "./dto/create-csr-poc.dto";
+import { UpdateCsrPocDto } from "./dto/update-csr-poc.dto";
+import { parseCsrPocListQuery } from "./utils/parse-csr-poc-list-query";
 import { CreateOrganizationDto } from "./dto/create-organization.dto";
 import { UpdateOrganizationDto } from "./dto/update-organization.dto";
 import { CreateAffiliationDto } from "./dto/create-affiliation.dto";
 import { CreateOrganizationBranchDto } from "./dto/create-organization-branch.dto";
 import { UpdateOrganizationBranchDto } from "./dto/update-organization-branch.dto";
+import { ChangePipelineStageDto } from "../donor/dto/change-pipeline-stage.dto";
 import { JwtGuard } from "../../auth/jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
@@ -29,11 +34,20 @@ import {
   ORGANIZATION_UPDATE_GUARD,
   ORGANIZATION_VIEW_GUARD,
 } from "../../permissions/organization-permissions.constants";
+import {
+  CSR_POC_CREATE_GUARD,
+  CSR_POC_DELETE_GUARD,
+  CSR_POC_UPDATE_GUARD,
+  CSR_POC_VIEW_GUARD,
+} from "../../permissions/csr-poc-permissions.constants";
 
-@Controller("organizations")
+@Controller(["csr-donors", "organizations"])
 @UseGuards(JwtGuard, PermissionsGuard)
 export class OrganizationsController {
-  constructor(private readonly organizationsService: OrganizationsService) {}
+  constructor(
+    private readonly organizationsService: OrganizationsService,
+    private readonly csrPocsService: CsrPocsService,
+  ) {}
 
   @Post()
   @RequiredPermissions([...ORGANIZATION_CREATE_GUARD])
@@ -54,12 +68,18 @@ export class OrganizationsController {
   @RequiredPermissions([...ORGANIZATION_LIST_GUARD])
   async findAll(
     @Query("search") search: string,
+    @Query("city") city: string,
+    @Query("is_active") isActive: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
     @Res() res: Response,
   ) {
+    const activeFilter =
+      isActive === "true" ? true : isActive === "false" ? false : undefined;
     const result = await this.organizationsService.findAll({
       search,
+      city,
+      is_active: activeFilter,
       page: page ? Number(page) : 1,
       pageSize: pageSize ? Number(pageSize) : 20,
     });
@@ -96,12 +116,144 @@ export class OrganizationsController {
   }
 
   @Get(":id/people")
-  @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
-  async listPeople(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.organizationsService.listPeopleForOrganization(+id);
+  @RequiredPermissions([...CSR_POC_VIEW_GUARD])
+  async listPeople(
+    @Param("id") id: string,
+    @Query() query: Record<string, string>,
+    @Res() res: Response,
+  ) {
+    const data = await this.organizationsService.listPeopleForOrganization(
+      +id,
+      parseCsrPocListQuery(query),
+    );
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: "Organization people retrieved",
+      message: "Organization POCs retrieved",
+      data,
+    });
+  }
+
+  @Get(":id/pocs")
+  @RequiredPermissions([...CSR_POC_VIEW_GUARD])
+  async listPocs(
+    @Param("id") id: string,
+    @Query() query: Record<string, string>,
+    @Res() res: Response,
+  ) {
+    const result = await this.csrPocsService.findAll({
+      ...parseCsrPocListQuery(query),
+      csr_donor_id: +id,
+    });
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "POCs retrieved",
+      data: result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row)),
+      pagination: result.pagination,
+    });
+  }
+
+  @Post(":id/pocs")
+  @RequiredPermissions([...CSR_POC_CREATE_GUARD])
+  async createPoc(
+    @Param("id") id: string,
+    @Body() body: Omit<CreateCsrPocDto, "csr_donor_id">,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.csrPocsService.create(
+      { ...body, csr_donor_id: +id },
+      req?.user,
+    );
+    return res.status(HttpStatus.CREATED).json({
+      success: true,
+      message: "POC created",
+      data,
+    });
+  }
+
+  @Patch(":id/pocs/:pocId")
+  @RequiredPermissions([...CSR_POC_UPDATE_GUARD])
+  async updatePoc(
+    @Param("id") id: string,
+    @Param("pocId") pocId: string,
+    @Body() dto: UpdateCsrPocDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const poc = await this.csrPocsService.findOne(+pocId);
+    if (poc.csr_donor_id !== +id) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "POC does not belong to this CSR donor",
+      });
+    }
+    const data = await this.csrPocsService.update(+pocId, dto, req?.user);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "POC updated",
+      data,
+    });
+  }
+
+  @Delete(":id/pocs/:pocId")
+  @RequiredPermissions([...CSR_POC_DELETE_GUARD])
+  async deletePoc(
+    @Param("id") id: string,
+    @Param("pocId") pocId: string,
+    @Res() res: Response,
+  ) {
+    const poc = await this.csrPocsService.findOne(+pocId);
+    if (poc.csr_donor_id !== +id) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "POC does not belong to this CSR donor",
+      });
+    }
+    await this.csrPocsService.softDelete(+pocId);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "POC archived",
+    });
+  }
+
+  @Get(":id/pipeline-history")
+  @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
+  async getPipelineHistory(@Param("id") id: string, @Res() res: Response) {
+    const data = await this.organizationsService.getPipelineHistory(+id);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "CSR donor pipeline history retrieved",
+      data,
+    });
+  }
+
+  @Post(":id/pipeline-stage")
+  @RequiredPermissions([...ORGANIZATION_UPDATE_GUARD])
+  async changePipelineStage(
+    @Param("id") id: string,
+    @Body() dto: ChangePipelineStageDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.organizationsService.changePipelineStage(
+      +id,
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Pipeline stage updated successfully",
+      data,
+    });
+  }
+
+  @Get(":id/audit-history")
+  @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
+  async getAuditHistory(@Param("id") id: string, @Res() res: Response) {
+    const data = await this.organizationsService.getAuditHistory(+id);
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "CSR donor audit history retrieved",
       data,
     });
   }
@@ -118,9 +270,10 @@ export class OrganizationsController {
   async update(
     @Param("id") id: string,
     @Body() dto: UpdateOrganizationDto,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.update(+id, dto);
+    const data = await this.organizationsService.update(+id, dto, req?.user);
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Organization updated",

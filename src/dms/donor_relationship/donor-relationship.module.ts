@@ -6,6 +6,8 @@ import { DonorRelationshipService } from "./donor-relationship.service";
 import { DonorInteraction } from "./entities/donor-interaction.entity";
 import { DonorFollowup } from "./entities/donor-followup.entity";
 import { Donor } from "../donor/entities/donor.entity";
+import { Organization } from "../organizations/entities/organization.entity";
+import { CsrPoc } from "../organizations/entities/csr-poc.entity";
 import { User } from "../../users/user.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { EmailModule } from "../../email/email.module";
@@ -21,6 +23,8 @@ import { DonorFollowupCronService } from "./donor-followup-cron.service";
       DonorInteraction,
       DonorFollowup,
       Donor,
+      Organization,
+      CsrPoc,
       User,
     ]),
     JwtModule.register({

@@ -456,12 +456,9 @@ export class DonorService {
    */
   async register(createDonorDto: CreateDonorDto, user: any): Promise<Donor> {
     try {
-      if (
-        createDonorDto.donor_type === DonorType.CSR &&
-        !createDonorDto.organization_id
-      ) {
+      if (createDonorDto.donor_type === DonorType.CSR) {
         throw new BadRequestException(
-          "Organization is required for CSR donors",
+          "POC contacts belong on CSR Donors (csr_pocs), not in the donors module. Add them via CSR Donor view or POST /csr-donors/:id/pocs.",
         );
       }
 
@@ -1687,6 +1684,16 @@ export class DonorService {
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
+      }
+
+      if (
+        (updateDonorDto as { donor_type?: DonorType }).donor_type ===
+          DonorType.CSR &&
+        donor.donor_type !== DonorType.CSR
+      ) {
+        throw new BadRequestException(
+          "POC contacts must be managed under CSR Donors (csr_pocs), not as donors.",
+        );
       }
 
       const auditUserId = this.donorAuditUserId(user?.id);

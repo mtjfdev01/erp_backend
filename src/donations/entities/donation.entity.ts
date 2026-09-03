@@ -3,6 +3,7 @@ import { Column, Entity, ManyToOne, JoinColumn, Index, OneToMany } from "typeorm
 import { Donor } from "../../dms/donor/entities/donor.entity";
 import { DonationAttachment } from "./donation-attachment.entity";
 import { Organization } from "../../dms/organizations/entities/organization.entity";
+import { CsrPoc } from "../../dms/organizations/entities/csr-poc.entity";
 
 //nullabe true to all column
 @Entity("donations")
@@ -25,6 +26,14 @@ export class Donation extends BaseEntity {
   @ManyToOne(() => Organization, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "organization_id" })
   organization: Organization | null;
+
+  /** Optional POC contact when the gift is tied to a specific CSR contact. */
+  @Column({ type: "int", nullable: true, default: null })
+  csr_poc_id: number | null;
+
+  @ManyToOne(() => CsrPoc, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "csr_poc_id" })
+  csr_poc: CsrPoc | null;
 
   @Column({ type: "bigint", nullable: true, default: null })
   campaign_id: number | null;

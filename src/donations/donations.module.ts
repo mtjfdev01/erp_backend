@@ -8,6 +8,7 @@ import { DonationsSummaryController } from "./donations-summary.controller";
 import { CommunicationController } from "../utils/controllers/communication.controller";
 import { Donation } from "./entities/donation.entity";
 import { DonationAttachment } from "./entities/donation-attachment.entity";
+import { CsrPoc } from "../dms/organizations/entities/csr-poc.entity";
 import { DonationInKind } from "../dms/donation_in_kind/entities/donation_in_kind.entity";
 import { User } from "../users/user.entity";
 import { JwtModule } from "@nestjs/jwt";
@@ -50,6 +51,7 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
       RecurringDonationPlan,
       ProgressWorkflowTemplate,
       Task,
+      CsrPoc,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",

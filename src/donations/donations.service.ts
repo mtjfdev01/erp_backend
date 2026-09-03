@@ -50,6 +50,7 @@ import {
 import axios from "axios";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
 import { Donor } from "src/dms/donor/entities/donor.entity";
+import { CsrPoc } from "../dms/organizations/entities/csr-poc.entity";
 import { RecurringDonationPlan } from "./recurring_donations/entities/recurring-donation-plan.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
@@ -126,6 +127,8 @@ export class DonationsService {
     private jazzcashService: JazzCashService,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
+    @InjectRepository(CsrPoc)
+    private csrPocRepository: Repository<CsrPoc>,
     @InjectRepository(RecurringDonationPlan)
     private recurringDonationPlanRepository: Repository<RecurringDonationPlan>,
     private donorService: DonorService,
@@ -144,6 +147,47 @@ export class DonationsService {
     private readonly geographicScopeService: GeographicScopeService,
     private readonly manualRecurringService: ManualRecurringService,
   ) {}
+
+  private async resolveCsrPocForDonation(
+    organizationId: number,
+    csrPocId: number,
+  ): Promise<CsrPoc> {
+    const poc = await this.csrPocRepository.findOne({
+      where: { id: csrPocId, csr_donor_id: organizationId },
+    });
+    if (!poc) {
+      throw new HttpException("CSR POC not found for this donor company", 400);
+    }
+    return poc;
+  }
+
+  private async isDonorCsrPocLegacyForOrg(
+    donorId: number,
+    organizationId: number,
+  ): Promise<boolean> {
+    const count = await this.csrPocRepository.count({
+      where: { legacy_donor_id: donorId, csr_donor_id: organizationId },
+    });
+    return count > 0;
+  }
+
+  private async enrichDonationCsrPocFromLegacyDonor(
+    donation: Donation,
+  ): Promise<Donation> {
+    if (donation?.csr_poc || !donation?.organization_id || !donation?.donor_id) {
+      return donation;
+    }
+    const inferredPoc = await this.csrPocRepository.findOne({
+      where: {
+        legacy_donor_id: donation.donor_id,
+        csr_donor_id: donation.organization_id,
+      },
+    });
+    if (inferredPoc) {
+      (donation as Donation & { csr_poc?: CsrPoc }).csr_poc = inferredPoc;
+    }
+    return donation;
+  }
 
   private async syncDonorLastDonationDate(
     donation?: Pick<Donation, "donor_id" | "date" | "created_at"> | null,
@@ -333,6 +377,58 @@ export class DonationsService {
     query.andWhere(
       `COALESCE(donation.donation_source, '') != :${paramKey}`,
       { [paramKey]: String(notSource) },
+    );
+  }
+
+  /**
+   * CSR donor scope: organization_id match OR legacy POC donor rows.
+   * Filter key `_csr_donor_id` is stripped before applyCommonFilters.
+   */
+  private applyCsrDonorScopeFilter(
+    query: SelectQueryBuilder<Donation>,
+    csrDonorIdRaw: unknown,
+    paramSuffix = "",
+  ): void {
+    const csrDonorId = Number(csrDonorIdRaw);
+    if (!Number.isFinite(csrDonorId) || csrDonorId <= 0) return;
+
+    const orgKey = `csrDonorOrgId${paramSuffix}`;
+    const legacyKey = `csrDonorLegacyScope${paramSuffix}`;
+
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where(`donation.organization_id = :${orgKey}`, {
+          [orgKey]: csrDonorId,
+        }).orWhere(
+          `donation.donor_id IN (
+            SELECT poc.legacy_donor_id
+            FROM csr_pocs poc
+            WHERE poc.csr_donor_id = :${legacyKey}
+              AND poc.legacy_donor_id IS NOT NULL
+              AND poc.is_archived = false
+          )`,
+          { [legacyKey]: csrDonorId },
+        );
+      }),
+    );
+  }
+
+  /** All CSR-linked donations (any company or legacy POC donor). */
+  private applyCsrDonationsOnlyFilter(
+    query: SelectQueryBuilder<Donation>,
+    _paramSuffix = "",
+  ): void {
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where("donation.organization_id IS NOT NULL").orWhere(
+          `donation.donor_id IN (
+            SELECT poc.legacy_donor_id
+            FROM csr_pocs poc
+            WHERE poc.legacy_donor_id IS NOT NULL
+              AND poc.is_archived = false
+          )`,
+        );
+      }),
     );
   }
 
@@ -2793,6 +2889,18 @@ export class DonationsService {
       let donor: any;
       let savedDonation: any;
       let recurringRowId = 0;
+      const organizationId = createDonationDto.organization_id ?? null;
+      const csrPocId = createDonationDto.csr_poc_id ?? null;
+
+      if (organizationId && csrPocId) {
+        const csrPoc = await this.resolveCsrPocForDonation(
+          organizationId,
+          csrPocId,
+        );
+        if (!donorId && csrPoc.legacy_donor_id) {
+          donorId = csrPoc.legacy_donor_id;
+        }
+      }
 
       if (!createDonationDto?.previous_donation_id) {
         if (Number(createDonationDto?.amount) < 50) {
@@ -2820,7 +2928,18 @@ export class DonationsService {
             throw new HttpException("Donor is archived", 400);
           }
           if (donor?.id) {
-            donorId = donor.id;
+            if (organizationId && !csrPocId) {
+              const isPocLegacy = await this.isDonorCsrPocLegacyForOrg(
+                donor.id,
+                organizationId,
+              );
+              donorId = isPocLegacy ? null : donor.id;
+              if (isPocLegacy) {
+                donor = null;
+              }
+            } else {
+              donorId = donor.id;
+            }
           }
         }
 
@@ -3224,6 +3343,14 @@ export class DonationsService {
       if ((filters as Record<string, unknown>)._donation_source_not !== undefined) {
         delete (filters as Record<string, unknown>)._donation_source_not;
       }
+      const csrDonorScopeId = (filters as Record<string, unknown>)._csr_donor_id;
+      if ((filters as Record<string, unknown>)._csr_donor_id !== undefined) {
+        delete (filters as Record<string, unknown>)._csr_donor_id;
+      }
+      const csrDonationsOnly = (filters as Record<string, unknown>)._csr_donations_only;
+      if ((filters as Record<string, unknown>)._csr_donations_only !== undefined) {
+        delete (filters as Record<string, unknown>)._csr_donations_only;
+      }
       const donationListMode = this.resolveDonationListMode(
         filters,
         donationSourceNot as string | null | undefined,
@@ -3253,6 +3380,7 @@ export class DonationsService {
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
+        .leftJoinAndSelect("donation.organization", "organization")
         .where("donation.is_archived = false")
         .leftJoinAndMapOne(
           "donation.progress_tracker",
@@ -3278,6 +3406,10 @@ export class DonationsService {
         query,
         donationSourceNot as string | null | undefined,
       );
+      this.applyCsrDonorScopeFilter(query, csrDonorScopeId);
+      if (csrDonationsOnly === true || csrDonationsOnly === "true") {
+        this.applyCsrDonationsOnlyFilter(query);
+      }
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       applyHybridFilters(query, hybridFilters, "donation");
@@ -3420,6 +3552,7 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .select("SUM(donation.amount)", "totalDonationAmount")
         .leftJoin("donation.donor", "donor")
+        .leftJoin("donation.organization", "organization")
         .leftJoin(
           ProgressTracker,
           "progress_tracker",
@@ -3432,6 +3565,10 @@ export class DonationsService {
         donationSourceNot as string | null | undefined,
         "Sum",
       );
+      this.applyCsrDonorScopeFilter(sumQuery, csrDonorScopeId, "Sum");
+      if (csrDonationsOnly === true || csrDonationsOnly === "true") {
+        this.applyCsrDonationsOnlyFilter(sumQuery, "Sum");
+      }
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
       applyHybridFilters(sumQuery, hybridFilters, "donation");
       applyRelationsSearch(
@@ -3537,6 +3674,8 @@ export class DonationsService {
       const donation = await this.donationRepository
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
+        .leftJoinAndSelect("donation.organization", "organization")
+        .leftJoinAndSelect("donation.csr_poc", "csr_poc")
         .leftJoinAndSelect("donation.created_by", "created_by")
         .leftJoinAndSelect("donation.attachments", "attachments")
         .where("donation.id = :id", { id })
@@ -3545,6 +3684,8 @@ export class DonationsService {
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
+
+      await this.enrichDonationCsrPocFromLegacyDonor(donation);
 
       // if donation.donation_method is in_kind then get its all in kind items
       if (donation.donation_method === "in_kind") {

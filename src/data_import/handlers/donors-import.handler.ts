@@ -123,13 +123,25 @@ export class DonorsImportHandler implements EntityImportHandler {
         continue;
       }
 
+      if (donorType === DonorType.CSR) {
+        failedCount += 1;
+        results.push({
+          row: rowNumber,
+          success: false,
+          email: emailRaw || undefined,
+          error:
+            "donor_type=csr is no longer supported. Import POCs via csr_pocs entity instead.",
+        });
+        continue;
+      }
+
       if (!donorType) {
         failedCount += 1;
         results.push({
           row: rowNumber,
           success: false,
           email: emailRaw || undefined,
-          error: "Invalid or missing donor_type (use individual or csr)",
+          error: "Invalid or missing donor_type (use individual)",
         });
         continue;
       }
@@ -224,18 +236,6 @@ export class DonorsImportHandler implements EntityImportHandler {
             },
           );
           organizationId = org?.id;
-        }
-
-        if (donorType === DonorType.CSR && !organizationId) {
-          failedCount += 1;
-          results.push({
-            row: rowNumber,
-            success: false,
-            email: emailRaw,
-            error:
-              "organization_name or organization_id is required for csr donors",
-          });
-          continue;
         }
 
         if (organizationId) {

@@ -70,11 +70,19 @@ export class DonorRelationshipController {
   ])
   async getInteractions(
     @Query("donor_id") donorId: string,
+    @Query("csr_donor_id") csrDonorId: string,
+    @Query("csr_poc_id") csrPocId: string,
     @CurrentUser() user: any,
     @Res() res: Response,
   ) {
     try {
-      const data = await this.service.getDonorInteractions(+donorId, user);
+      const data = csrDonorId
+        ? await this.service.getCsrDonorInteractions(
+            +csrDonorId,
+            user,
+            csrPocId ? +csrPocId : undefined,
+          )
+        : await this.service.getDonorInteractions(+donorId, user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Interactions retrieved",
@@ -187,6 +195,44 @@ export class DonorRelationshipController {
         success: false,
         message: error?.message || "Failed to delete interaction",
         data: null,
+      });
+    }
+  }
+
+  @Get("follow-ups/by-csr")
+  @RequiredPermissions([
+    "fund_raising.donor_relationship.list_view",
+    "fund_raising.donor_relationship.view",
+    "fund_raising.organizations.view",
+    "fund_raising.csr_pocs.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async getCsrFollowups(
+    @Query("csr_donor_id") csrDonorId: string,
+    @Query("csr_poc_id") csrPocId: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.service.getCsrDonorFollowups(
+        +csrDonorId,
+        user,
+        csrPocId ? +csrPocId : undefined,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "CSR follow-ups retrieved",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status || error?.getStatus?.() || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message,
+        data: [],
       });
     }
   }

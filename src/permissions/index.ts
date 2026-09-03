@@ -52,6 +52,14 @@ export {
 } from "./organization-permissions.constants";
 
 export {
+  CSR_POC_LIST_GUARD,
+  CSR_POC_VIEW_GUARD,
+  CSR_POC_CREATE_GUARD,
+  CSR_POC_UPDATE_GUARD,
+  CSR_POC_DELETE_GUARD,
+} from "./csr-poc-permissions.constants";
+
+export {
   AID_PEOPLE_LIST_GUARD,
   AID_PEOPLE_VIEW_GUARD,
   AID_PEOPLE_CREATE_GUARD,
