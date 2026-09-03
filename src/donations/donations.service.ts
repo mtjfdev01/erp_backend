@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   Logger,
@@ -73,6 +74,7 @@ import {
   buildDonationStatusChange,
 } from "./audit/donation-audit.util";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../permissions/geographic-scope/geographic-scope.types";
@@ -146,6 +148,7 @@ export class DonationsService {
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
     private readonly manualRecurringService: ManualRecurringService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   private async resolveCsrPocForDonation(
@@ -2903,8 +2906,24 @@ export class DonationsService {
       }
 
       if (!createDonationDto?.previous_donation_id) {
-        if (Number(createDonationDto?.amount) < 50) {
+        if (
+          createDonationDto.donation_method !== "in_kind" &&
+          Number(createDonationDto?.amount) < 50
+        ) {
           throw new HttpException("Donation amount is less than 50 PKR", 400);
+        }
+
+        // In-kind gifts always start pending; amount = sum of line estimated values.
+        if (createDonationDto.donation_method === "in_kind") {
+          const items = Array.isArray(createDonationDto.in_kind_items)
+            ? createDonationDto.in_kind_items
+            : [];
+          const estimatedTotal = items.reduce((sum, item: any) => {
+            const value = Number(item?.estimated_value);
+            return sum + (Number.isFinite(value) ? value : 0);
+          }, 0);
+          createDonationDto.amount = estimatedTotal;
+          createDonationDto.status = "pending";
         }
 
         if (deferPostCreate) {
@@ -3808,6 +3827,29 @@ export class DonationsService {
       }
 
       const patch = this.buildDonationPatch(updateDonationDto);
+      const method = String(
+        patch.donation_method !== undefined
+          ? patch.donation_method
+          : donation.donation_method || "",
+      ).toLowerCase();
+      const isInKind = method === "in_kind";
+
+      // In-kind amount is derived from line items; never edit amount via PATCH.
+      if (isInKind && patch.amount !== undefined) {
+        delete patch.amount;
+      }
+
+      if (isInKind && patch.status !== undefined) {
+        const nextStatus = String(patch.status || "").toLowerCase();
+        const prevStatus = String(donation.status || "").toLowerCase();
+        const completing =
+          this.isSuccessfulDonationStatus(nextStatus) &&
+          !this.isSuccessfulDonationStatus(prevStatus);
+        if (completing) {
+          await this.assertCanCompleteInKindDonation(user);
+        }
+      }
+
       const geoTouched =
         patch.country !== undefined ||
         patch.city !== undefined ||
@@ -3862,11 +3904,46 @@ export class DonationsService {
       }
       return await this.findOne(id);
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       throw new Error(`Failed to update donation: ${error.message}`);
     }
+  }
+
+  /** Only Completing / FR manager / super admin can mark in-kind donations completed. */
+  private async assertCanCompleteInKindDonation(user?: any): Promise<void> {
+    const userId = Number(user?.id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new ForbiddenException(
+        "You do not have permission to complete in-kind donations",
+      );
+    }
+    if (userId === -1) return;
+
+    if (await this.permissionsService.hasPermission(userId, "super_admin")) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(userId, "fund_raising_manager")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.in_kind_donations.completing",
+      )
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      "You do not have permission to complete in-kind donations",
+    );
   }
 
   /** Whitelist fields for PATCH; in-kind rows are not updated here. */
@@ -4014,6 +4091,16 @@ export class DonationsService {
         };
       }
 
+      const isInKind =
+        String(donation.donation_method || "").toLowerCase() === "in_kind";
+      if (
+        isInKind &&
+        this.isSuccessfulDonationStatus(newStatus) &&
+        !this.isSuccessfulDonationStatus(donation.status)
+      ) {
+        await this.assertCanCompleteInKindDonation(user);
+      }
+
       const auditUserId = this.donationAuditUserId(user);
       const statusPatch: Record<string, unknown> = { status: newStatus };
       if (auditUserId != null) {
@@ -4059,7 +4146,10 @@ export class DonationsService {
         message: `Donation status updated successfully from "${donation.status}" to "${newStatus}"`,
       };
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException
+      ) {
         throw error;
       }
       throw new Error(`Failed to update donation status: ${error.message}`);
