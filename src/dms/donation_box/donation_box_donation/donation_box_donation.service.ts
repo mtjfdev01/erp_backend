@@ -11,6 +11,7 @@ import { DonationBoxDonation } from "./entities/donation_box_donation.entity";
 import { CreateDonationBoxDonationDto } from "./dto/create-donation_box_donation.dto";
 import { UpdateDonationBoxDonationDto } from "./dto/update-donation_box_donation.dto";
 import { DonationBox } from "../entities/donation-box.entity";
+import { City } from "../../geographic/cities/entities/city.entity";
 import {
   applyCommonFilters,
   FilterPayload,
@@ -46,6 +47,10 @@ interface PaginationOptions {
   date?: string;
   start_date?: string;
   end_date?: string;
+  region?: string;
+  city?: string;
+  region_id?: string | number;
+  city_id?: string | number;
   team_filter?: string;
   team_filter_user_id?: string | number;
 }
@@ -59,6 +64,8 @@ export class DonationBoxDonationService {
     private readonly donationBoxRepository: Repository<DonationBox>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(City)
+    private readonly cityRepository: Repository<City>,
     private readonly dashboardAggregateService: DashboardAggregateService,
     private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
     private readonly dataScopeService: DataScopeService,
@@ -424,6 +431,10 @@ export class DonationBoxDonationService {
         date = "",
         start_date,
         end_date,
+        region = "",
+        city = "",
+        region_id = "",
+        city_id = "",
         team_filter,
         team_filter_user_id,
       } = options;
@@ -466,6 +477,54 @@ export class DonationBoxDonationService {
       applyCommonFilters(query, filters, searchFields, "donation_box_donation");
 
       this.applyCollectionDateFilter(query, { date, start_date, end_date });
+
+      // Collections inherit location from parent box (city_id). Region → cities → boxes.
+      const cityId = Number(city_id);
+      if (Number.isFinite(cityId) && cityId > 0) {
+        query.andWhere("donation_box.city_id = :filterCityId", {
+          filterCityId: cityId,
+        });
+      } else if (city && String(city).trim()) {
+        query.andWhere(
+          `donation_box.city_id IN (
+            SELECT c.id FROM cities c WHERE LOWER(c.name) = LOWER(:filterCityName)
+          )`,
+          { filterCityName: String(city).trim() },
+        );
+      } else {
+        const regionId = Number(region_id);
+        let regionCityIds: number[] | null = null;
+
+        if (Number.isFinite(regionId) && regionId > 0) {
+          const cityRows = await this.cityRepository.find({
+            where: { region_id: regionId, is_active: true },
+            select: ["id"],
+          });
+          regionCityIds = cityRows.map((c) => c.id);
+        } else if (region && String(region).trim()) {
+          const cityRows = await this.cityRepository
+            .createQueryBuilder("c")
+            .innerJoin("c.region", "r")
+            .select(["c.id"])
+            .where("c.is_active = true")
+            .andWhere("LOWER(r.name) = LOWER(:filterRegionName)", {
+              filterRegionName: String(region).trim(),
+            })
+            .getMany();
+          regionCityIds = cityRows.map((c) => c.id);
+        }
+
+        if (regionCityIds) {
+          if (!regionCityIds.length) {
+            query.andWhere("1 = 0");
+          } else {
+            query.andWhere(
+              "donation_box.city_id IN (:...filterRegionCityIds)",
+              { filterRegionCityIds: regionCityIds },
+            );
+          }
+        }
+      }
 
       const hybridFilters: HybridFilter[] = [];
       const minAmount = Number(min_amount);

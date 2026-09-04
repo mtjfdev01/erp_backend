@@ -11,6 +11,7 @@ import {
   HttpStatus,
   Res,
   Req,
+  ForbiddenException,
 } from "@nestjs/common";
 import { Response } from "express";
 import { OrganizationsService } from "./organizations.service";
@@ -49,6 +50,15 @@ export class OrganizationsController {
     private readonly csrPocsService: CsrPocsService,
   ) {}
 
+  private async assertOrgAccess(user: any, orgId: number) {
+    if (!user?.id) return;
+    const org = await this.organizationsService.findOne(orgId);
+    const scope =
+      await this.organizationsService.resolveOrganizationScope(user);
+    this.organizationsService.assertOrganizationRecordAccess(scope, org);
+    return org;
+  }
+
   @Post()
   @RequiredPermissions([...ORGANIZATION_CREATE_GUARD])
   async create(
@@ -56,12 +66,21 @@ export class OrganizationsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.create(dto, req?.user);
-    return res.status(HttpStatus.CREATED).json({
-      success: true,
-      message: "Organization created",
-      data,
-    });
+    try {
+      const data = await this.organizationsService.create(dto, req?.user);
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "Organization created",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Get()
@@ -72,17 +91,21 @@ export class OrganizationsController {
     @Query("is_active") isActive: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
     const activeFilter =
       isActive === "true" ? true : isActive === "false" ? false : undefined;
-    const result = await this.organizationsService.findAll({
-      search,
-      city,
-      is_active: activeFilter,
-      page: page ? Number(page) : 1,
-      pageSize: pageSize ? Number(pageSize) : 20,
-    });
+    const result = await this.organizationsService.findAll(
+      {
+        search,
+        city,
+        is_active: activeFilter,
+        page: page ? Number(page) : 1,
+        pageSize: pageSize ? Number(pageSize) : 20,
+      },
+      req?.user,
+    );
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Organizations retrieved",
@@ -120,17 +143,29 @@ export class OrganizationsController {
   async listPeople(
     @Param("id") id: string,
     @Query() query: Record<string, string>,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.listPeopleForOrganization(
-      +id,
-      parseCsrPocListQuery(query),
-    );
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Organization POCs retrieved",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.listPeopleForOrganization(
+        +id,
+        parseCsrPocListQuery(query),
+        req?.user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Organization POCs retrieved",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Get(":id/pocs")
@@ -138,18 +173,29 @@ export class OrganizationsController {
   async listPocs(
     @Param("id") id: string,
     @Query() query: Record<string, string>,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const result = await this.csrPocsService.findAll({
-      ...parseCsrPocListQuery(query),
-      csr_donor_id: +id,
-    });
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "POCs retrieved",
-      data: result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row)),
-      pagination: result.pagination,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const result = await this.csrPocsService.findAll({
+        ...parseCsrPocListQuery(query),
+        csr_donor_id: +id,
+      }, req?.user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POCs retrieved",
+        data: result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row)),
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Post(":id/pocs")
@@ -160,15 +206,25 @@ export class OrganizationsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.csrPocsService.create(
-      { ...body, csr_donor_id: +id },
-      req?.user,
-    );
-    return res.status(HttpStatus.CREATED).json({
-      success: true,
-      message: "POC created",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.csrPocsService.create(
+        { ...body, csr_donor_id: +id },
+        req?.user,
+      );
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "POC created",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Patch(":id/pocs/:pocId")
@@ -180,19 +236,29 @@ export class OrganizationsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const poc = await this.csrPocsService.findOne(+pocId);
-    if (poc.csr_donor_id !== +id) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
-        success: false,
-        message: "POC does not belong to this CSR donor",
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const poc = await this.csrPocsService.findOne(+pocId);
+      if (poc.csr_donor_id !== +id) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "POC does not belong to this CSR donor",
+        });
+      }
+      const data = await this.csrPocsService.update(+pocId, dto, req?.user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POC updated",
+        data,
       });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
     }
-    const data = await this.csrPocsService.update(+pocId, dto, req?.user);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "POC updated",
-      data,
-    });
   }
 
   @Delete(":id/pocs/:pocId")
@@ -200,31 +266,56 @@ export class OrganizationsController {
   async deletePoc(
     @Param("id") id: string,
     @Param("pocId") pocId: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const poc = await this.csrPocsService.findOne(+pocId);
-    if (poc.csr_donor_id !== +id) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
-        success: false,
-        message: "POC does not belong to this CSR donor",
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const poc = await this.csrPocsService.findOne(+pocId);
+      if (poc.csr_donor_id !== +id) {
+        return res.status(HttpStatus.BAD_REQUEST).json({
+          success: false,
+          message: "POC does not belong to this CSR donor",
+        });
+      }
+      await this.csrPocsService.softDelete(+pocId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POC archived",
       });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
     }
-    await this.csrPocsService.softDelete(+pocId);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "POC archived",
-    });
   }
 
   @Get(":id/pipeline-history")
   @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
-  async getPipelineHistory(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.organizationsService.getPipelineHistory(+id);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "CSR donor pipeline history retrieved",
-      data,
-    });
+  async getPipelineHistory(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.getPipelineHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "CSR donor pipeline history retrieved",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Post(":id/pipeline-stage")
@@ -235,34 +326,71 @@ export class OrganizationsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.changePipelineStage(
-      +id,
-      dto,
-      req?.user,
-    );
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Pipeline stage updated successfully",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.changePipelineStage(
+        +id,
+        dto,
+        req?.user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Pipeline stage updated successfully",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Get(":id/audit-history")
   @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
-  async getAuditHistory(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.organizationsService.getAuditHistory(+id);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "CSR donor audit history retrieved",
-      data,
-    });
+  async getAuditHistory(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.getAuditHistory(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "CSR donor audit history retrieved",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Get(":id")
   @RequiredPermissions([...ORGANIZATION_VIEW_GUARD])
-  async findOne(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.organizationsService.findOne(+id);
-    return res.status(HttpStatus.OK).json({ success: true, data });
+  async findOne(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.assertOrgAccess(req?.user, +id);
+      return res.status(HttpStatus.OK).json({ success: true, data });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Patch(":id")
@@ -273,22 +401,46 @@ export class OrganizationsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.update(+id, dto, req?.user);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Organization updated",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.update(+id, dto, req?.user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Organization updated",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Delete(":id")
   @RequiredPermissions([...ORGANIZATION_DELETE_GUARD])
-  async remove(@Param("id") id: string, @Res() res: Response) {
-    await this.organizationsService.softDelete(+id);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Organization archived",
-    });
+  async remove(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      await this.organizationsService.softDelete(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Organization archived",
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Post(":id/branches")
@@ -296,14 +448,25 @@ export class OrganizationsController {
   async createBranch(
     @Param("id") id: string,
     @Body() body: CreateOrganizationBranchDto,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.createBranch(+id, body);
-    return res.status(HttpStatus.CREATED).json({
-      success: true,
-      message: body.parent_branch_id ? "Sub-branch created" : "Branch created",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.createBranch(+id, body);
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: body.parent_branch_id ? "Sub-branch created" : "Branch created",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Patch(":id/branches/:branchId")
@@ -312,18 +475,29 @@ export class OrganizationsController {
     @Param("id") id: string,
     @Param("branchId") branchId: string,
     @Body() body: UpdateOrganizationBranchDto,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.organizationsService.updateBranch(
-      +id,
-      +branchId,
-      body,
-    );
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Branch updated",
-      data,
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      const data = await this.organizationsService.updateBranch(
+        +id,
+        +branchId,
+        body,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Branch updated",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Delete(":id/branches/:branchId")
@@ -331,12 +505,23 @@ export class OrganizationsController {
   async deleteBranch(
     @Param("id") id: string,
     @Param("branchId") branchId: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    await this.organizationsService.softDeleteBranch(+id, +branchId);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "Branch archived",
-    });
+    try {
+      await this.assertOrgAccess(req?.user, +id);
+      await this.organizationsService.softDeleteBranch(+id, +branchId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Branch archived",
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 }

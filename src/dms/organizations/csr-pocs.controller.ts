@@ -11,7 +11,7 @@ import {
   HttpStatus,
   Res,
   Req,
-  BadRequestException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { Response } from "express";
 import { CsrPocsService } from "./csr-pocs.service";
@@ -38,25 +38,57 @@ export class CsrPocsController {
   async listByCsrDonor(
     @Query("csr_donor_id") csrDonorId: string,
     @Query() query: Record<string, string>,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const listParams = parseCsrPocListQuery(query);
-    const result = await this.csrPocsService.findAll({
-      ...listParams,
-      csr_donor_id: csrDonorId ? +csrDonorId : undefined,
-    });
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      data: result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row)),
-      pagination: result.pagination,
-    });
+    try {
+      if (csrDonorId) {
+        await this.csrPocsService.assertCsrDonorIdAccess(+csrDonorId, req?.user);
+      }
+      const listParams = parseCsrPocListQuery(query);
+      const result = await this.csrPocsService.findAll(
+        {
+          ...listParams,
+          csr_donor_id: csrDonorId ? +csrDonorId : undefined,
+        },
+        req?.user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result.data.map((row) =>
+          this.csrPocsService.mapPocForPeopleList(row),
+        ),
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Get(":id")
   @RequiredPermissions([...CSR_POC_VIEW_GUARD])
-  async findOne(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.csrPocsService.findOne(+id);
-    return res.status(HttpStatus.OK).json({ success: true, data });
+  async findOne(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.csrPocsService.findOne(+id);
+      await this.csrPocsService.assertPocOrganizationAccess(data, req?.user);
+      return res.status(HttpStatus.OK).json({ success: true, data });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Post()
@@ -66,12 +98,27 @@ export class CsrPocsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.csrPocsService.create(dto, req?.user);
-    return res.status(HttpStatus.CREATED).json({
-      success: true,
-      message: "POC created",
-      data,
-    });
+    try {
+      if (dto.csr_donor_id) {
+        await this.csrPocsService.assertCsrDonorIdAccess(
+          dto.csr_donor_id,
+          req?.user,
+        );
+      }
+      const data = await this.csrPocsService.create(dto, req?.user);
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "POC created",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Patch(":id")
@@ -82,21 +129,47 @@ export class CsrPocsController {
     @Req() req: any,
     @Res() res: Response,
   ) {
-    const data = await this.csrPocsService.update(+id, dto, req?.user);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "POC updated",
-      data,
-    });
+    try {
+      const existing = await this.csrPocsService.findOne(+id);
+      await this.csrPocsService.assertPocOrganizationAccess(existing, req?.user);
+      const data = await this.csrPocsService.update(+id, dto, req?.user);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POC updated",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 
   @Delete(":id")
   @RequiredPermissions([...CSR_POC_DELETE_GUARD])
-  async remove(@Param("id") id: string, @Res() res: Response) {
-    await this.csrPocsService.softDelete(+id);
-    return res.status(HttpStatus.OK).json({
-      success: true,
-      message: "POC archived",
-    });
+  async remove(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const existing = await this.csrPocsService.findOne(+id);
+      await this.csrPocsService.assertPocOrganizationAccess(existing, req?.user);
+      await this.csrPocsService.softDelete(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POC archived",
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res
+          .status(HttpStatus.FORBIDDEN)
+          .json({ success: false, message: error.message, data: null });
+      }
+      throw error;
+    }
   }
 }

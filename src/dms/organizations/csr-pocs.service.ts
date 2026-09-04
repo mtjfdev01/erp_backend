@@ -15,6 +15,8 @@ import { Donor, DonorType } from "../donor/entities/donor.entity";
 import { CreateCsrPocDto } from "./dto/create-csr-poc.dto";
 import { UpdateCsrPocDto } from "./dto/update-csr-poc.dto";
 import { OrganizationAffiliationRole } from "./entities/donor-organization-affiliation.entity";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 
 export interface CsrPocListParams {
   csr_donor_id?: number;
@@ -42,7 +44,56 @@ export class CsrPocsService implements OnModuleInit {
     private readonly affiliationRepo: Repository<DonorOrganizationAffiliation>,
     @InjectRepository(Donor)
     private readonly donorRepo: Repository<Donor>,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveOrganizationScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "organizations",
+    );
+  }
+
+  assertOrganizationRecordAccess(
+    scope: ResolvedDataScope,
+    record: Organization,
+  ): void {
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
+
+  async assertPocOrganizationAccess(
+    poc: CsrPoc,
+    currentUser?: { id?: number; role?: string; department?: string },
+  ): Promise<void> {
+    if (!currentUser?.id) return;
+    // Always reload with created_by so ownership checks are reliable.
+    await this.assertCsrDonorIdAccess(poc.csr_donor_id, currentUser);
+  }
+
+  async assertCsrDonorIdAccess(
+    csrDonorId: number,
+    currentUser?: { id?: number; role?: string; department?: string },
+  ): Promise<Organization> {
+    const org = await this.orgRepo.findOne({
+      where: { id: csrDonorId, is_archived: false },
+      relations: ["created_by"],
+    });
+    if (!org) {
+      throw new NotFoundException(`CSR donor ${csrDonorId} not found`);
+    }
+    if (currentUser?.id) {
+      const scope = await this.resolveOrganizationScope(currentUser);
+      this.assertOrganizationRecordAccess(scope, org);
+    }
+    return org;
+  }
 
   /** One-time idempotent copy: donor_type=csr → csr_pocs (keeps legacy donor rows). */
   async onModuleInit(): Promise<void> {
@@ -170,7 +221,10 @@ export class CsrPocsService implements OnModuleInit {
     return this.pocRepo.save(poc);
   }
 
-  async findAll(params: CsrPocListParams = {}) {
+  async findAll(
+    params: CsrPocListParams = {},
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(
       200,
@@ -182,6 +236,7 @@ export class CsrPocsService implements OnModuleInit {
       .leftJoinAndSelect("poc.branch", "branch")
       .leftJoinAndSelect("poc.legacy_donor", "legacy_donor")
       .leftJoinAndSelect("poc.csr_donor", "csr_donor")
+      .leftJoinAndSelect("csr_donor.created_by", "csr_donor_created_by")
       .where("poc.is_archived = false");
 
     if (params.csr_donor_id) {
@@ -220,6 +275,12 @@ export class CsrPocsService implements OnModuleInit {
       qb.andWhere("poc.is_active = :isActive", { isActive: params.is_active });
     }
 
+    // Scope POCs by parent CSR donor ownership (fund_raising.organizations scope).
+    if (currentUser?.id) {
+      const scope = await this.resolveOrganizationScope(currentUser);
+      this.dataScopeService.applyToQuery(qb, "csr_donor", scope);
+    }
+
     qb.orderBy("poc.is_primary", "DESC")
       .addOrderBy("poc.name", "ASC")
       .addOrderBy("poc.id", "ASC");
@@ -256,7 +317,7 @@ export class CsrPocsService implements OnModuleInit {
   async findOne(id: number): Promise<CsrPoc> {
     const row = await this.pocRepo.findOne({
       where: { id, is_archived: false },
-      relations: ["csr_donor", "branch", "legacy_donor"],
+      relations: ["csr_donor", "csr_donor.created_by", "branch", "legacy_donor"],
     });
     if (!row) {
       throw new NotFoundException(`POC with ID ${id} not found`);

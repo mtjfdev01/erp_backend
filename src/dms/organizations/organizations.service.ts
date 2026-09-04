@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, IsNull } from "typeorm";
+import { Repository, IsNull, SelectQueryBuilder } from "typeorm";
 import { Organization } from "./entities/organization.entity";
 import { OrganizationBranch } from "./entities/organization-branch.entity";
 import {
@@ -31,6 +31,8 @@ import {
 } from "./audit/csr-donor-audit.util";
 import { DonorAuditAction } from "../donor/audit/donor-audit-action.enum";
 import { DonorAuditSource } from "../donor/audit/donor-audit-source.enum";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 
 export type OrganizationBranchTreeNode = OrganizationBranch & {
   sub_branches: OrganizationBranch[];
@@ -51,7 +53,37 @@ export class OrganizationsService {
     private readonly pipelineHistoryRepo: Repository<CsrDonorPipelineStageHistory>,
     private readonly csrPocsService: CsrPocsService,
     private readonly csrDonorAuditService: CsrDonorAuditService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveOrganizationScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "organizations",
+    );
+  }
+
+  assertOrganizationRecordAccess(
+    scope: ResolvedDataScope,
+    record: Organization,
+  ): void {
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
+
+  private applyOrganizationListDataScope(
+    query: SelectQueryBuilder<Organization>,
+    dataScope: ResolvedDataScope | null,
+  ): void {
+    if (!dataScope) return;
+    this.dataScopeService.applyToQuery(query, "org", dataScope);
+  }
 
   private auditUserId(userId?: number | null): number | null {
     return userId && userId !== -1 ? userId : null;
@@ -84,17 +116,21 @@ export class OrganizationsService {
     return this.orgRepo.save(org);
   }
 
-  async findAll(params: {
-    search?: string;
-    page?: number;
-    pageSize?: number;
-    is_active?: boolean;
-    city?: string;
-  }) {
+  async findAll(
+    params: {
+      search?: string;
+      page?: number;
+      pageSize?: number;
+      is_active?: boolean;
+      city?: string;
+    },
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
     const qb = this.orgRepo
       .createQueryBuilder("org")
+      .leftJoinAndSelect("org.created_by", "created_by")
       .where("org.is_archived = false")
       .orderBy("org.name", "ASC");
 
@@ -118,6 +154,11 @@ export class OrganizationsService {
 
     if (params.is_active === true || params.is_active === false) {
       qb.andWhere("org.is_active = :isActive", { isActive: params.is_active });
+    }
+
+    if (currentUser?.id) {
+      const scope = await this.resolveOrganizationScope(currentUser);
+      this.applyOrganizationListDataScope(qb, scope);
     }
 
     const [data, total] = await qb
@@ -158,7 +199,7 @@ export class OrganizationsService {
   > {
     const org = await this.orgRepo.findOne({
       where: { id, is_archived: false },
-      relations: ["branches", "parent_organization"],
+      relations: ["branches", "parent_organization", "created_by"],
     });
     if (!org) throw new NotFoundException(`Organization ${id} not found`);
 
@@ -427,14 +468,18 @@ export class OrganizationsService {
   async listPeopleForOrganization(
     organizationId: number,
     params: Omit<CsrPocListParams, "csr_donor_id"> = {},
+    currentUser?: { id?: number; role?: string; department?: string },
   ) {
     await this.findOne(organizationId);
-    const result = await this.csrPocsService.findAll({
-      ...params,
-      csr_donor_id: organizationId,
-      page: params.page || 1,
-      pageSize: params.pageSize || 200,
-    });
+    const result = await this.csrPocsService.findAll(
+      {
+        ...params,
+        csr_donor_id: organizationId,
+        page: params.page || 1,
+        pageSize: params.pageSize || 200,
+      },
+      currentUser,
+    );
     return result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row));
   }
 
