@@ -10,11 +10,12 @@ import { JwtModule } from "@nestjs/jwt";
 import { PermissionsModule } from "src/permissions";
 import { DashboardModule } from "../../../dashboard/dashboard.module";
 import { DonationBoxDonationAuditModule } from "./audit/donation-box-donation-audit.module";
+import { City } from "../../geographic/cities/entities/city.entity";
 
 @Module({
   imports: [
     DonationBoxDonationAuditModule,
-    TypeOrmModule.forFeature([DonationBox, DonationBoxDonation, User]),
+    TypeOrmModule.forFeature([DonationBox, DonationBoxDonation, User, City]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },

@@ -4,11 +4,21 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  ValidateIf,
 } from "class-validator";
 
 export class CreateDonorInteractionDto {
+  @ValidateIf((o) => !o.csr_donor_id)
   @IsInt()
-  donor_id: number;
+  donor_id?: number;
+
+  @ValidateIf((o) => !o.donor_id)
+  @IsInt()
+  csr_donor_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  csr_poc_id?: number;
 
   @IsString()
   @IsNotEmpty()

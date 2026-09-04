@@ -24,7 +24,7 @@ export class CreateDonationInKindItemDto {
 
   @IsEnum(ItemCategory, {
     message:
-      "Category must be one of: clothing, food, medical, educational, electronics, furniture, books, toys, household, other",
+      "Category must be one of: clothing, food, medical, educational, electronics, furniture, books, toys, household, food_items, beverages_refreshments, clothing_apparel, hygiene_personal_care, medical_supplies, education_stationery, household_items, relief_emergency, it_electronics, construction_materials, agriculture_plantation, office_supplies, other",
   })
   @IsNotEmpty({ message: "Category is required" })
   category: ItemCategory;

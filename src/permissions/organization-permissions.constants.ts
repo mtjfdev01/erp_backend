@@ -1,9 +1,12 @@
-/** Permissions for corporate organizations / branches CRM. */
+/** Permissions for CSR donors (corporate master records) / branches CRM. */
 const ORG = "fund_raising.organizations";
+const POC = "fund_raising.csr_pocs";
 
 export const ORGANIZATION_LIST_GUARD = [
   `${ORG}.list_view`,
   `${ORG}.view`,
+  `${POC}.list_view`,
+  `${POC}.view`,
   "fund_raising.donors.list_view",
   "fund_raising.donors.view",
   "fund_raising.offline_donors.list_view",
@@ -15,6 +18,8 @@ export const ORGANIZATION_LIST_GUARD = [
 export const ORGANIZATION_VIEW_GUARD = [
   `${ORG}.view`,
   `${ORG}.list_view`,
+  `${POC}.view`,
+  `${POC}.list_view`,
   "fund_raising.donors.view",
   "fund_raising.offline_donors.view",
   "fund_raising.online_donors.view",

@@ -9,12 +9,6 @@ import { Repository } from "typeorm";
 import { DonationInKindItem } from "./entities/donation_in_kind_item.entity";
 import { CreateDonationInKindItemDto } from "./dto/create-donation_in_kind_item.dto";
 import { UpdateDonationInKindItemDto } from "./dto/update-donation_in_kind_item.dto";
-import {
-  applyCommonFilters,
-  FilterPayload,
-  applyHybridFilters,
-  HybridFilter,
-} from "../../../utils/filters/common-filter.util";
 import { ProcurementsService } from "src/procurements/services/procurements.service";
 import { CreateProcurementsDto } from "src/procurements/dto/create-procurements.dto/create-procurements.dto";
 
@@ -129,8 +123,6 @@ export class DonationInKindItemsService {
         sortOrder = "DESC",
         search,
         category,
-        condition,
-        status,
         start_date,
         end_date,
       } = options;
@@ -139,40 +131,29 @@ export class DonationInKindItemsService {
       const queryBuilder =
         this.donationInKindItemRepository.createQueryBuilder("item");
 
-      // Apply filters
-      const filters: FilterPayload = {
-        search,
-        start_date,
-        end_date,
-      };
+      if (search?.trim()) {
+        queryBuilder.andWhere(
+          "(LOWER(item.name) LIKE LOWER(:search) OR LOWER(COALESCE(item.description, '')) LIKE LOWER(:search))",
+          { search: `%${search.trim()}%` },
+        );
+      }
 
-      // Apply common filters (search, date range)
-      // applyCommonFilters(queryBuilder, filters, '[item]');
+      if (start_date) {
+        queryBuilder.andWhere("item.created_at >= :start_date", {
+          start_date,
+        });
+      }
 
-      // Apply specific filters
+      if (end_date) {
+        queryBuilder.andWhere("item.created_at <= :end_date", { end_date });
+      }
+
       if (category) {
         queryBuilder.andWhere("item.category = :category", { category });
       }
 
-      if (condition) {
-        queryBuilder.andWhere("item.condition = :condition", { condition });
-      }
-
-      if (status) {
-        queryBuilder.andWhere("item.status = :status", { status });
-      }
-
       // Apply sorting
-      const allowedSortFields = [
-        "name",
-        "category",
-        "condition",
-        "status",
-        "quantity",
-        "estimated_value",
-        "created_at",
-        "updated_at",
-      ];
+      const allowedSortFields = ["name", "category", "created_at", "updated_at"];
 
       if (allowedSortFields.includes(sortField)) {
         queryBuilder.orderBy(`item.${sortField}`, sortOrder);

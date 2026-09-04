@@ -9,6 +9,7 @@ import { DonorsImportHandler } from "./handlers/donors-import.handler";
 import { DonationBoxImportHandler } from "./handlers/donation-box-import.handler";
 import { DonationBoxDonationsImportHandler } from "./handlers/donation-box-donations-import.handler";
 import { VolunteersImportHandler } from "./handlers/volunteers-import.handler";
+import { CsrPocsImportHandler } from "./handlers/csr-pocs-import.handler";
 import {
   EntityImportHandler,
   ImportBatchResult,
@@ -32,6 +33,7 @@ export class DataImportService {
     private readonly donationBoxImportHandler: DonationBoxImportHandler,
     private readonly donationBoxDonationsImportHandler: DonationBoxDonationsImportHandler,
     private readonly volunteersImportHandler: VolunteersImportHandler,
+    private readonly csrPocsImportHandler: CsrPocsImportHandler,
     private readonly permissionsService: PermissionsService,
   ) {
     this.handlers = new Map<string, EntityImportHandler>([
@@ -42,6 +44,7 @@ export class DataImportService {
         donationBoxDonationsImportHandler,
       ],
       [volunteersImportHandler.entityName, volunteersImportHandler],
+      [csrPocsImportHandler.entityName, csrPocsImportHandler],
     ]);
   }
 
@@ -126,6 +129,17 @@ export class DataImportService {
         verification_status: "unverified",
         source: "import",
         comments: "Imported via CSV",
+      };
+    }
+    if (entityName === "csr_pocs") {
+      return {
+        csr_donor_name: "Sample Corp Ltd",
+        name: "Jane POC",
+        email: "jane.poc@samplecorp.com",
+        phone: "03001234567",
+        role: "contact",
+        is_primary: "true",
+        is_active: "true",
       };
     }
     return {};
@@ -220,6 +234,32 @@ export class DataImportService {
       if (!canCreate) {
         throw new BadRequestException(
           "Insufficient permissions to import volunteers",
+        );
+      }
+      return;
+    }
+
+    if (entity === "csr_pocs") {
+      const canCreatePoc =
+        (await this.permissionsService.hasPermission(
+          userId,
+          "fund_raising.csr_pocs.create",
+        )) ||
+        (await this.permissionsService.hasPermission(
+          userId,
+          "fund_raising.csr_pocs.update",
+        )) ||
+        (await this.permissionsService.hasPermission(
+          userId,
+          "fund_raising.organizations.create",
+        )) ||
+        (await this.permissionsService.hasPermission(
+          userId,
+          "fund_raising.organizations.update",
+        ));
+      if (!canCreatePoc) {
+        throw new BadRequestException(
+          "Insufficient permissions to import CSR POCs",
         );
       }
       return;

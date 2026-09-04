@@ -58,11 +58,14 @@ export class DistrictsController {
   async findAll(
     @Query("region_id") regionId?: string,
     @Query("country_id") countryId?: string,
+    @Query("sub_region_id") subRegionId?: string,
     @Res() res?: Response,
   ) {
     try {
       let result;
-      if (regionId) {
+      if (subRegionId) {
+        result = await this.districtsService.findBySubRegion(+subRegionId);
+      } else if (regionId) {
         result = await this.districtsService.findByRegion(+regionId);
       } else if (countryId) {
         result = await this.districtsService.findByCountry(+countryId);

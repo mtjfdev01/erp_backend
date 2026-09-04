@@ -155,6 +155,11 @@ export class CreateDonationDto {
   @IsNumber()
   organization_id?: number;
 
+  /** CSR POC when the gift is tied to a specific contact (optional). */
+  @IsOptional()
+  @IsNumber()
+  csr_poc_id?: number;
+
   @IsOptional()
   @IsNumber()
   campaign_id?: number;

@@ -124,6 +124,23 @@ export class DonationBoxImportHandler implements EntityImportHandler {
       .filter((n) => Number.isInteger(n) && n > 0);
   }
 
+  private normalizeBoxStatus(value: string | undefined): BoxStatus {
+    const legacy: Record<string, BoxStatus> = {
+      maintenance: BoxStatus.BROKEN,
+      retired: BoxStatus.REMOVED,
+      damaged: BoxStatus.BROKEN,
+    };
+    const raw = String(value || "")
+      .trim()
+      .toLowerCase();
+    if (legacy[raw]) return legacy[raw];
+    return this.normalizeEnum(
+      value,
+      Object.values(BoxStatus),
+      BoxStatus.ACTIVE,
+    );
+  }
+
   private normalizeEnum<T extends string>(
     value: string | undefined,
     allowed: readonly T[],
@@ -380,11 +397,7 @@ export class DonationBoxImportHandler implements EntityImportHandler {
           Object.values(BoxType),
           BoxType.MEDIUM,
         ),
-        status: this.normalizeEnum(
-          row.status,
-          Object.values(BoxStatus),
-          BoxStatus.ACTIVE,
-        ),
+        status: this.normalizeBoxStatus(row.status),
         frequency: this.normalizeEnum(
           row.frequency,
           Object.values(CollectionFrequency),

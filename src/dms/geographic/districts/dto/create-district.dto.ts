@@ -27,6 +27,10 @@ export class CreateDistrictDto {
   @IsNotEmpty({ message: "Country ID is required" })
   country_id: number;
 
+  @IsNumber()
+  @IsOptional()
+  sub_region_id?: number;
+
   @IsBoolean()
   @IsOptional()
   is_active?: boolean;

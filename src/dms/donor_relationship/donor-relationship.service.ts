@@ -9,6 +9,8 @@ import { In, Repository } from "typeorm";
 import { DonorInteraction } from "./entities/donor-interaction.entity";
 import { DonorFollowup } from "./entities/donor-followup.entity";
 import { Donor } from "../donor/entities/donor.entity";
+import { Organization } from "../organizations/entities/organization.entity";
+import { CsrPoc } from "../organizations/entities/csr-poc.entity";
 import { CreateDonorInteractionDto } from "./dto/create-interaction.dto";
 import { UpdateDonorInteractionDto } from "./dto/update-interaction.dto";
 import { RescheduleFollowupDto } from "./dto/reschedule-followup.dto";
@@ -32,6 +34,10 @@ export class DonorRelationshipService {
     private readonly followupRepository: Repository<DonorFollowup>,
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(Organization)
+    private readonly organizationRepository: Repository<Organization>,
+    @InjectRepository(CsrPoc)
+    private readonly csrPocRepository: Repository<CsrPoc>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly permissionsService: PermissionsService,
@@ -39,6 +45,13 @@ export class DonorRelationshipService {
   ) {}
 
   async createInteraction(dto: CreateDonorInteractionDto, user: CurrentUser) {
+    if (dto.csr_donor_id) {
+      return this.createCsrDonorInteraction(dto, user);
+    }
+    if (!dto.donor_id) {
+      throw new BadRequestException("donor_id or csr_donor_id is required");
+    }
+
     const donor = await this.assertDonorAccess(dto.donor_id, user);
 
     const activityDatetime = dto.activity_datetime
@@ -79,6 +92,130 @@ export class DonorRelationshipService {
     }
 
     return this.findInteractionById(saved.id, user);
+  }
+
+  private async createCsrDonorInteraction(
+    dto: CreateDonorInteractionDto,
+    user: CurrentUser,
+  ) {
+    const csrDonorId = dto.csr_donor_id!;
+    await this.assertCsrDonorAccess(csrDonorId, user);
+    await this.validateCsrPoc(csrDonorId, dto.csr_poc_id);
+
+    const activityDatetime = dto.activity_datetime
+      ? new Date(dto.activity_datetime)
+      : new Date();
+    if (Number.isNaN(activityDatetime.getTime())) {
+      throw new BadRequestException("Invalid activity_datetime");
+    }
+
+    const interaction = this.interactionRepository.create({
+      csr_donor_id: csrDonorId,
+      csr_poc_id: dto.csr_poc_id ?? null,
+      donor_id: null,
+      activity_type: dto.activity_type,
+      custom_activity_title: dto.custom_activity_title || null,
+      assigned_to_user_id: dto.assigned_to_user_id ?? user.id,
+      activity_datetime: activityDatetime,
+      user_action_text: dto.user_action_text,
+      donor_response_text: dto.donor_response_text || null,
+      donor_response_type: dto.donor_response_type || null,
+      next_action_text: dto.next_action_text || null,
+      next_followup_datetime: dto.next_followup_datetime
+        ? new Date(dto.next_followup_datetime)
+        : null,
+      status: dto.status || "need_followup",
+      created_by: { id: user.id } as User,
+    });
+
+    const saved = await this.interactionRepository.save(interaction);
+
+    if (dto.next_followup_datetime) {
+      const due = new Date(dto.next_followup_datetime);
+      if (!Number.isNaN(due.getTime())) {
+        await this.createCsrFollowupFromInteraction(
+          saved,
+          due,
+          saved.assigned_to_user_id ?? user.id,
+        );
+      }
+    }
+
+    return this.findInteractionById(saved.id, user);
+  }
+
+  async getCsrDonorInteractions(
+    csrDonorId: number,
+    user: CurrentUser,
+    csrPocId?: number,
+  ) {
+    await this.assertCsrDonorAccess(csrDonorId, user);
+    if (csrPocId) {
+      await this.validateCsrPoc(csrDonorId, csrPocId);
+    }
+
+    const where: Record<string, unknown> = {
+      csr_donor_id: csrDonorId,
+      is_archived: false,
+    };
+    if (csrPocId) {
+      where.csr_poc_id = csrPocId;
+    }
+
+    const interactions = await this.interactionRepository.find({
+      where,
+      relations: ["created_by", "assigned_to", "csr_donor", "csr_poc"],
+      order: { activity_datetime: "DESC" },
+    });
+
+    if (!interactions.length) {
+      return [];
+    }
+
+    const interactionIds = interactions.map((row) => row.id);
+    const completedFollowups = await this.followupRepository.find({
+      where: {
+        interaction_id: In(interactionIds),
+        status: "completed",
+        is_archived: false,
+      },
+      select: ["interaction_id"],
+    });
+    const completedFollowupIds = new Set(
+      completedFollowups
+        .map((row) => row.interaction_id)
+        .filter((id): id is number => id != null),
+    );
+
+    return interactions.map((interaction) => ({
+      ...interaction,
+      has_completed_followup: completedFollowupIds.has(interaction.id),
+    }));
+  }
+
+  async getCsrDonorFollowups(
+    csrDonorId: number,
+    user: CurrentUser,
+    csrPocId?: number,
+  ) {
+    await this.assertCsrDonorAccess(csrDonorId, user);
+    if (csrPocId) {
+      await this.validateCsrPoc(csrDonorId, csrPocId);
+    }
+
+    const qb = this.followupRepository
+      .createQueryBuilder("followup")
+      .leftJoinAndSelect("followup.interaction", "interaction")
+      .leftJoinAndSelect("followup.csr_poc", "csr_poc")
+      .leftJoinAndSelect("followup.assigned_to", "assigned_to")
+      .where("followup.csr_donor_id = :csrDonorId", { csrDonorId })
+      .andWhere("followup.is_archived = false");
+
+    if (csrPocId) {
+      qb.andWhere("followup.csr_poc_id = :csrPocId", { csrPocId });
+    }
+
+    return qb.orderBy("followup.due_datetime", "DESC").getMany();
   }
 
   async getDonorInteractions(donorId: number, user: CurrentUser) {
@@ -289,6 +426,8 @@ export class DonorRelationshipService {
       .createQueryBuilder("followup")
       .leftJoinAndSelect("followup.donor", "donor")
       .leftJoinAndSelect("donor.assigned_to", "donor_assigned")
+      .leftJoinAndSelect("followup.csr_donor", "csr_donor")
+      .leftJoinAndSelect("followup.csr_poc", "csr_poc")
       .leftJoinAndSelect("followup.interaction", "interaction")
       .where("followup.assigned_to_user_id = :userId", { userId: user.id })
       .andWhere("followup.is_archived = :archived", { archived: false });
@@ -428,12 +567,18 @@ export class DonorRelationshipService {
   private async findInteractionById(id: number, user: CurrentUser) {
     const interaction = await this.interactionRepository.findOne({
       where: { id, is_archived: false },
-      relations: ["donor", "created_by", "assigned_to"],
+      relations: ["donor", "csr_donor", "csr_poc", "created_by", "assigned_to"],
     });
     if (!interaction) {
       throw new NotFoundException("Interaction not found");
     }
-    await this.assertDonorAccess(interaction.donor_id, user);
+    if (interaction.csr_donor_id) {
+      await this.assertCsrDonorAccess(interaction.csr_donor_id, user);
+    } else if (interaction.donor_id) {
+      await this.assertDonorAccess(interaction.donor_id, user);
+    } else {
+      throw new NotFoundException("Interaction not found");
+    }
     return interaction;
   }
 
@@ -450,12 +595,24 @@ export class DonorRelationshipService {
   private async loadFollowupForMutation(id: number, user: CurrentUser) {
     const followup = await this.followupRepository.findOne({
       where: { id, is_archived: false },
-      relations: ["donor", "donor.assigned_to", "interaction"],
+      relations: [
+        "donor",
+        "donor.assigned_to",
+        "csr_donor",
+        "csr_poc",
+        "interaction",
+      ],
     });
     if (!followup) {
       throw new NotFoundException("Follow-up not found");
     }
-    await this.assertDonorAccess(followup.donor_id, user);
+    if (followup.csr_donor_id) {
+      await this.assertCsrDonorAccess(followup.csr_donor_id, user);
+    } else if (followup.donor_id) {
+      await this.assertDonorAccess(followup.donor_id, user);
+    } else {
+      throw new NotFoundException("Follow-up not found");
+    }
     if (!(await this.canBypassDonorAssignment(user))) {
       if (Number(followup.assigned_to_user_id) !== Number(user.id)) {
         throw new ForbiddenException("This follow-up is not assigned to you");
@@ -500,6 +657,19 @@ export class DonorRelationshipService {
     }
 
     if (["completed", "closed"].includes(interaction.status)) {
+      return;
+    }
+
+    if (interaction.csr_donor_id) {
+      await this.createCsrFollowupFromInteraction(
+        interaction,
+        due,
+        interaction.assigned_to_user_id ?? user.id,
+      );
+      return;
+    }
+
+    if (!interaction.donor_id) {
       return;
     }
 
@@ -591,6 +761,45 @@ export class DonorRelationshipService {
     return this.followupRepository.save(followup);
   }
 
+  private async createCsrFollowupFromInteraction(
+    interaction: DonorInteraction,
+    due: Date,
+    assignedUserId: number,
+  ) {
+    const title =
+      interaction.next_action_text?.slice(0, 255) ||
+      `Follow-up: ${interaction.activity_type}`;
+
+    const followup = this.followupRepository.create({
+      donor_id: null,
+      csr_donor_id: interaction.csr_donor_id,
+      csr_poc_id: interaction.csr_poc_id ?? null,
+      interaction_id: interaction.id,
+      assigned_to_user_id: assignedUserId,
+      followup_title: title,
+      followup_reason: interaction.next_action_text || null,
+      due_datetime: due,
+      status: "pending",
+      created_by: { id: assignedUserId } as User,
+    });
+
+    return this.followupRepository.save(followup);
+  }
+
+  private async validateCsrPoc(csrDonorId: number, csrPocId?: number) {
+    if (!csrPocId) return;
+    const poc = await this.csrPocRepository.findOne({
+      where: {
+        id: csrPocId,
+        csr_donor_id: csrDonorId,
+        is_archived: false,
+      },
+    });
+    if (!poc) {
+      throw new BadRequestException("POC does not belong to this CSR donor");
+    }
+  }
+
   private getDonorAssignedUserId(donor: Donor): number | null {
     const assigned = donor.assigned_to as { id?: number } | number | null;
     if (assigned == null) return null;
@@ -615,6 +824,31 @@ export class DonorRelationshipService {
       );
     }
     return donor;
+  }
+
+  private async assertCsrDonorAccess(
+    csrDonorId: number,
+    user: CurrentUser,
+  ): Promise<Organization> {
+    const org = await this.organizationRepository.findOne({
+      where: { id: csrDonorId, is_archived: false },
+    });
+    if (!org) {
+      throw new NotFoundException("CSR donor not found");
+    }
+    if (await this.canBypassDonorAssignment(user)) {
+      return org;
+    }
+    const perms = await this.permissionsService.getUserPermissions(user.id);
+    if (
+      perms?.fund_raising?.organizations?.view ||
+      perms?.fund_raising?.csr_pocs?.view ||
+      perms?.fund_raising?.donor_relationship?.view ||
+      perms?.fund_raising?.donor_relationship?.list_view
+    ) {
+      return org;
+    }
+    throw new ForbiddenException("You do not have access to this CSR donor");
   }
 
   private async assertManagementAccess(user: CurrentUser) {

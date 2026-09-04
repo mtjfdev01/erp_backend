@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Injectable,
   Logger,
@@ -50,6 +51,7 @@ import {
 import axios from "axios";
 import { WhatsAppService } from "src/utils/services/whatsapp.service";
 import { Donor } from "src/dms/donor/entities/donor.entity";
+import { CsrPoc } from "../dms/organizations/entities/csr-poc.entity";
 import { RecurringDonationPlan } from "./recurring_donations/entities/recurring-donation-plan.entity";
 import { CampaignsService } from "../dms/campaigns/campaigns.service";
 import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
@@ -72,6 +74,7 @@ import {
   buildDonationStatusChange,
 } from "./audit/donation-audit.util";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../permissions/geographic-scope/geographic-scope.types";
@@ -126,6 +129,8 @@ export class DonationsService {
     private jazzcashService: JazzCashService,
     @InjectRepository(Donor)
     private donorRepository: Repository<Donor>,
+    @InjectRepository(CsrPoc)
+    private csrPocRepository: Repository<CsrPoc>,
     @InjectRepository(RecurringDonationPlan)
     private recurringDonationPlanRepository: Repository<RecurringDonationPlan>,
     private donorService: DonorService,
@@ -143,7 +148,49 @@ export class DonationsService {
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
     private readonly manualRecurringService: ManualRecurringService,
+    private readonly permissionsService: PermissionsService,
   ) {}
+
+  private async resolveCsrPocForDonation(
+    organizationId: number,
+    csrPocId: number,
+  ): Promise<CsrPoc> {
+    const poc = await this.csrPocRepository.findOne({
+      where: { id: csrPocId, csr_donor_id: organizationId },
+    });
+    if (!poc) {
+      throw new HttpException("CSR POC not found for this donor company", 400);
+    }
+    return poc;
+  }
+
+  private async isDonorCsrPocLegacyForOrg(
+    donorId: number,
+    organizationId: number,
+  ): Promise<boolean> {
+    const count = await this.csrPocRepository.count({
+      where: { legacy_donor_id: donorId, csr_donor_id: organizationId },
+    });
+    return count > 0;
+  }
+
+  private async enrichDonationCsrPocFromLegacyDonor(
+    donation: Donation,
+  ): Promise<Donation> {
+    if (donation?.csr_poc || !donation?.organization_id || !donation?.donor_id) {
+      return donation;
+    }
+    const inferredPoc = await this.csrPocRepository.findOne({
+      where: {
+        legacy_donor_id: donation.donor_id,
+        csr_donor_id: donation.organization_id,
+      },
+    });
+    if (inferredPoc) {
+      (donation as Donation & { csr_poc?: CsrPoc }).csr_poc = inferredPoc;
+    }
+    return donation;
+  }
 
   private async syncDonorLastDonationDate(
     donation?: Pick<Donation, "donor_id" | "date" | "created_at"> | null,
@@ -336,6 +383,58 @@ export class DonationsService {
     );
   }
 
+  /**
+   * CSR donor scope: organization_id match OR legacy POC donor rows.
+   * Filter key `_csr_donor_id` is stripped before applyCommonFilters.
+   */
+  private applyCsrDonorScopeFilter(
+    query: SelectQueryBuilder<Donation>,
+    csrDonorIdRaw: unknown,
+    paramSuffix = "",
+  ): void {
+    const csrDonorId = Number(csrDonorIdRaw);
+    if (!Number.isFinite(csrDonorId) || csrDonorId <= 0) return;
+
+    const orgKey = `csrDonorOrgId${paramSuffix}`;
+    const legacyKey = `csrDonorLegacyScope${paramSuffix}`;
+
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where(`donation.organization_id = :${orgKey}`, {
+          [orgKey]: csrDonorId,
+        }).orWhere(
+          `donation.donor_id IN (
+            SELECT poc.legacy_donor_id
+            FROM csr_pocs poc
+            WHERE poc.csr_donor_id = :${legacyKey}
+              AND poc.legacy_donor_id IS NOT NULL
+              AND poc.is_archived = false
+          )`,
+          { [legacyKey]: csrDonorId },
+        );
+      }),
+    );
+  }
+
+  /** All CSR-linked donations (any company or legacy POC donor). */
+  private applyCsrDonationsOnlyFilter(
+    query: SelectQueryBuilder<Donation>,
+    _paramSuffix = "",
+  ): void {
+    query.andWhere(
+      new Brackets((qb) => {
+        qb.where("donation.organization_id IS NOT NULL").orWhere(
+          `donation.donor_id IN (
+            SELECT poc.legacy_donor_id
+            FROM csr_pocs poc
+            WHERE poc.legacy_donor_id IS NOT NULL
+              AND poc.is_archived = false
+          )`,
+        );
+      }),
+    );
+  }
+
   // Dashboard aggregates were removed. Fundraising dashboard reads directly from main tables.
 
   /** Staff user id for created_by / updated_by; public website user (-1) → null. */
@@ -357,7 +456,29 @@ export class DonationsService {
     donor: { name?: string } | null | undefined,
     createDonationDto: CreateDonationDto,
   ): string {
-    return donor?.name || createDonationDto.donor_name || "Anonymous";
+    return donor?.name || createDonationDto?.donor_name || "Anonymous";
+  }
+
+  private hasDonorContactInfo(createDonationDto: CreateDonationDto): boolean {
+    const email = createDonationDto?.donor_email?.trim();
+    const phone = createDonationDto?.donor_phone?.trim();
+    return !!(email || phone);
+  }
+
+  private buildAutoRegisterDonationPayload(
+    createDonationDto: CreateDonationDto,
+  ) {
+    return {
+      donor_name: createDonationDto?.donor_name,
+      donor_email: createDonationDto?.donor_email,
+      donor_phone: createDonationDto?.donor_phone,
+      city: createDonationDto?.city,
+      country: createDonationDto?.country,
+      address: createDonationDto?.address,
+      notification_subscription: createDonationDto?.notification_subscription,
+      recurring: this.isDonationRecurring(createDonationDto),
+      recurring_consent: this.hasRecurringConsent(createDonationDto),
+    };
   }
 
   private withDonationId<T extends Record<string, unknown>>(
@@ -1191,16 +1312,13 @@ export class DonationsService {
     }
 
     const consent = this.hasRecurringConsent(createDonationDto);
-    const { startDateMode, startDate } =
-      this.resolveRecurringStartConfig(createDonationDto);
 
     if (createDonationDto.recurring?.interval) {
       return {
         interval: createDonationDto.recurring
           .interval as StripeRecurringParams["interval"],
         interval_count: createDonationDto.recurring.interval_count ?? 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1212,8 +1330,7 @@ export class DonationsService {
       return {
         interval: "week",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1221,8 +1338,7 @@ export class DonationsService {
       return {
         interval: "month",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1230,8 +1346,7 @@ export class DonationsService {
       return {
         interval: "day",
         interval_count: 1,
-        start_date_mode: startDateMode,
-        start_date: startDate ?? undefined,
+        start_date_mode: "same_date",
         consent,
       };
     }
@@ -1300,54 +1415,25 @@ export class DonationsService {
     createDonationDto: CreateDonationDto,
     donationId: number,
   ): Promise<Donor | null> {
-    if (createDonationDto.donor_id) {
+    if (createDonationDto?.donor_id) {
       return this.donorRepository.findOne({
         where: { id: createDonationDto.donor_id },
       });
     }
 
-    if (!createDonationDto.donor_email || !createDonationDto.donor_phone) {
+    if (!this.hasDonorContactInfo(createDonationDto)) {
       return null;
     }
 
-    let donor = await this.donorService.findByEmail(
-      createDonationDto.donor_email,
+    const donor = await this.donorService.autoRegisterFromDonation(
+      this.buildAutoRegisterDonationPayload(createDonationDto),
     );
 
-    if (donor) {
-      if (donor.is_archived === true) {
-        this.logger.warn(
-          `Post-create donor link skipped: archived donor ${donor.email} (donation ${donationId})`,
-        );
-        return null;
-      }
-      const alreadyMultiTimeDonor = donor.multi_time_donor || false;
-      if (!alreadyMultiTimeDonor) {
-        donor.multi_time_donor = true;
-      }
-      if (createDonationDto.notification_subscription !== undefined) {
-        donor.notification_subscription =
-          createDonationDto.notification_subscription;
-      }
-      donor = await this.donorRepository.save(donor);
-    } else {
-      donor = await this.donorService.autoRegisterFromDonation({
-        donor_name: createDonationDto.donor_name,
-        donor_email: createDonationDto.donor_email,
-        donor_phone: createDonationDto.donor_phone,
-        city: createDonationDto.city,
-        country: createDonationDto.country,
-        address: createDonationDto.address,
-        notification_subscription:
-          createDonationDto.notification_subscription,
-        recurring: this.isDonationRecurring(createDonationDto),
-        recurring_consent: this.hasRecurringConsent(createDonationDto),
-      });
-      if (!donor) {
-        donor = await this.donorService.findByEmail(
-          createDonationDto.donor_email,
-        );
-      }
+    if (donor?.is_archived === true) {
+      this.logger.warn(
+        `Post-create donor link skipped: archived donor (donation ${donationId})`,
+      );
+      return null;
     }
 
     if (!donor?.id) {
@@ -2806,10 +2892,38 @@ export class DonationsService {
       let donor: any;
       let savedDonation: any;
       let recurringRowId = 0;
+      const organizationId = createDonationDto.organization_id ?? null;
+      const csrPocId = createDonationDto.csr_poc_id ?? null;
+
+      if (organizationId && csrPocId) {
+        const csrPoc = await this.resolveCsrPocForDonation(
+          organizationId,
+          csrPocId,
+        );
+        if (!donorId && csrPoc.legacy_donor_id) {
+          donorId = csrPoc.legacy_donor_id;
+        }
+      }
 
       if (!createDonationDto?.previous_donation_id) {
-        if (Number(createDonationDto?.amount) < 50) {
+        if (
+          createDonationDto.donation_method !== "in_kind" &&
+          Number(createDonationDto?.amount) < 50
+        ) {
           throw new HttpException("Donation amount is less than 50 PKR", 400);
+        }
+
+        // In-kind gifts always start pending; amount = sum of line estimated values.
+        if (createDonationDto.donation_method === "in_kind") {
+          const items = Array.isArray(createDonationDto.in_kind_items)
+            ? createDonationDto.in_kind_items
+            : [];
+          const estimatedTotal = items.reduce((sum, item: any) => {
+            const value = Number(item?.estimated_value);
+            return sum + (Number.isFinite(value) ? value : 0);
+          }, 0);
+          createDonationDto.amount = estimatedTotal;
+          createDonationDto.status = "pending";
         }
 
         if (deferPostCreate) {
@@ -2820,48 +2934,29 @@ export class DonationsService {
           }
         } else if (donorId) {
           // Explicit donor_id (staff): use as-is only.
-        } else if (
-          createDonationDto.donor_email &&
-          createDonationDto.donor_phone
-        ) {
+        } else if (this.hasDonorContactInfo(createDonationDto)) {
           console.log(
-            `🔍 Checking if donor exists: ${createDonationDto.donor_email} / ${createDonationDto.donor_phone}`,
+            `🔍 Resolving donor from donation contact: ${createDonationDto?.donor_email || "—"} / ${createDonationDto?.donor_phone || "—"}`,
           );
 
-          donor = await this.donorService.findByEmail(
-            createDonationDto.donor_email,
+          donor = await this.donorService.autoRegisterFromDonation(
+            this.buildAutoRegisterDonationPayload(createDonationDto),
           );
 
-          if (donor) {
-            const alreadyMultiTimeDonor = donor?.multi_time_donor || false;
-            if (!alreadyMultiTimeDonor) {
-              donor.multi_time_donor = true;
-              await this.donorRepository.save(donor);
-            }
-            if (createDonationDto.notification_subscription !== undefined) {
-              donor.notification_subscription =
-                createDonationDto.notification_subscription;
-              await this.donorRepository.save(donor);
-            }
-            donorId = donor.id;
-            if (donor?.is_archived === true) {
-              throw new HttpException("Donor is archived", 400);
-            }
-          } else {
-            donor = await this.donorService.autoRegisterFromDonation({
-              donor_name: createDonationDto.donor_name,
-              donor_email: createDonationDto.donor_email,
-              donor_phone: createDonationDto.donor_phone,
-              city: createDonationDto.city,
-              country: createDonationDto.country,
-              address: createDonationDto?.address,
-              notification_subscription:
-                createDonationDto.notification_subscription,
-              recurring: this.isDonationRecurring(createDonationDto),
-              recurring_consent: this.hasRecurringConsent(createDonationDto),
-            });
-
-            if (donor) {
+          if (donor?.is_archived === true) {
+            throw new HttpException("Donor is archived", 400);
+          }
+          if (donor?.id) {
+            if (organizationId && !csrPocId) {
+              const isPocLegacy = await this.isDonorCsrPocLegacyForOrg(
+                donor.id,
+                organizationId,
+              );
+              donorId = isPocLegacy ? null : donor.id;
+              if (isPocLegacy) {
+                donor = null;
+              }
+            } else {
               donorId = donor.id;
             }
           }
@@ -3267,6 +3362,14 @@ export class DonationsService {
       if ((filters as Record<string, unknown>)._donation_source_not !== undefined) {
         delete (filters as Record<string, unknown>)._donation_source_not;
       }
+      const csrDonorScopeId = (filters as Record<string, unknown>)._csr_donor_id;
+      if ((filters as Record<string, unknown>)._csr_donor_id !== undefined) {
+        delete (filters as Record<string, unknown>)._csr_donor_id;
+      }
+      const csrDonationsOnly = (filters as Record<string, unknown>)._csr_donations_only;
+      if ((filters as Record<string, unknown>)._csr_donations_only !== undefined) {
+        delete (filters as Record<string, unknown>)._csr_donations_only;
+      }
       const donationListMode = this.resolveDonationListMode(
         filters,
         donationSourceNot as string | null | undefined,
@@ -3296,6 +3399,7 @@ export class DonationsService {
       const query = this.donationRepository
         .createQueryBuilder("donation")
         .leftJoin("donation.donor", "donor")
+        .leftJoinAndSelect("donation.organization", "organization")
         .where("donation.is_archived = false")
         .leftJoinAndMapOne(
           "donation.progress_tracker",
@@ -3321,6 +3425,10 @@ export class DonationsService {
         query,
         donationSourceNot as string | null | undefined,
       );
+      this.applyCsrDonorScopeFilter(query, csrDonorScopeId);
+      if (csrDonationsOnly === true || csrDonationsOnly === "true") {
+        this.applyCsrDonationsOnlyFilter(query);
+      }
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       applyHybridFilters(query, hybridFilters, "donation");
@@ -3463,6 +3571,7 @@ export class DonationsService {
         .createQueryBuilder("donation")
         .select("SUM(donation.amount)", "totalDonationAmount")
         .leftJoin("donation.donor", "donor")
+        .leftJoin("donation.organization", "organization")
         .leftJoin(
           ProgressTracker,
           "progress_tracker",
@@ -3475,6 +3584,10 @@ export class DonationsService {
         donationSourceNot as string | null | undefined,
         "Sum",
       );
+      this.applyCsrDonorScopeFilter(sumQuery, csrDonorScopeId, "Sum");
+      if (csrDonationsOnly === true || csrDonationsOnly === "true") {
+        this.applyCsrDonationsOnlyFilter(sumQuery, "Sum");
+      }
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
       applyHybridFilters(sumQuery, hybridFilters, "donation");
       applyRelationsSearch(
@@ -3580,6 +3693,8 @@ export class DonationsService {
       const donation = await this.donationRepository
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
+        .leftJoinAndSelect("donation.organization", "organization")
+        .leftJoinAndSelect("donation.csr_poc", "csr_poc")
         .leftJoinAndSelect("donation.created_by", "created_by")
         .leftJoinAndSelect("donation.attachments", "attachments")
         .where("donation.id = :id", { id })
@@ -3588,6 +3703,8 @@ export class DonationsService {
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
       }
+
+      await this.enrichDonationCsrPocFromLegacyDonor(donation);
 
       // if donation.donation_method is in_kind then get its all in kind items
       if (donation.donation_method === "in_kind") {
@@ -3710,6 +3827,29 @@ export class DonationsService {
       }
 
       const patch = this.buildDonationPatch(updateDonationDto);
+      const method = String(
+        patch.donation_method !== undefined
+          ? patch.donation_method
+          : donation.donation_method || "",
+      ).toLowerCase();
+      const isInKind = method === "in_kind";
+
+      // In-kind amount is derived from line items; never edit amount via PATCH.
+      if (isInKind && patch.amount !== undefined) {
+        delete patch.amount;
+      }
+
+      if (isInKind && patch.status !== undefined) {
+        const nextStatus = String(patch.status || "").toLowerCase();
+        const prevStatus = String(donation.status || "").toLowerCase();
+        const completing =
+          this.isSuccessfulDonationStatus(nextStatus) &&
+          !this.isSuccessfulDonationStatus(prevStatus);
+        if (completing) {
+          await this.assertCanCompleteInKindDonation(user);
+        }
+      }
+
       const geoTouched =
         patch.country !== undefined ||
         patch.city !== undefined ||
@@ -3764,11 +3904,46 @@ export class DonationsService {
       }
       return await this.findOne(id);
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       throw new Error(`Failed to update donation: ${error.message}`);
     }
+  }
+
+  /** Only Completing / FR manager / super admin can mark in-kind donations completed. */
+  private async assertCanCompleteInKindDonation(user?: any): Promise<void> {
+    const userId = Number(user?.id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new ForbiddenException(
+        "You do not have permission to complete in-kind donations",
+      );
+    }
+    if (userId === -1) return;
+
+    if (await this.permissionsService.hasPermission(userId, "super_admin")) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(userId, "fund_raising_manager")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.in_kind_donations.completing",
+      )
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      "You do not have permission to complete in-kind donations",
+    );
   }
 
   /** Whitelist fields for PATCH; in-kind rows are not updated here. */
@@ -3916,6 +4091,16 @@ export class DonationsService {
         };
       }
 
+      const isInKind =
+        String(donation.donation_method || "").toLowerCase() === "in_kind";
+      if (
+        isInKind &&
+        this.isSuccessfulDonationStatus(newStatus) &&
+        !this.isSuccessfulDonationStatus(donation.status)
+      ) {
+        await this.assertCanCompleteInKindDonation(user);
+      }
+
       const auditUserId = this.donationAuditUserId(user);
       const statusPatch: Record<string, unknown> = { status: newStatus };
       if (auditUserId != null) {
@@ -3961,7 +4146,10 @@ export class DonationsService {
         message: `Donation status updated successfully from "${donation.status}" to "${newStatus}"`,
       };
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException
+      ) {
         throw error;
       }
       throw new Error(`Failed to update donation status: ${error.message}`);

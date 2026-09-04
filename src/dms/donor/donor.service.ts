@@ -456,12 +456,9 @@ export class DonorService {
    */
   async register(createDonorDto: CreateDonorDto, user: any): Promise<Donor> {
     try {
-      if (
-        createDonorDto.donor_type === DonorType.CSR &&
-        !createDonorDto.organization_id
-      ) {
+      if (createDonorDto.donor_type === DonorType.CSR) {
         throw new BadRequestException(
-          "Organization is required for CSR donors",
+          "POC contacts belong on CSR Donors (csr_pocs), not in the donors module. Add them via CSR Donor view or POST /csr-donors/:id/pocs.",
         );
       }
 
@@ -1071,25 +1068,73 @@ export class DonorService {
         recurring_consent,
       } = donationData;
 
-      // Validate required fields
-      if (!donor_email || !donor_phone) {
-        console.warn("Cannot auto-register donor: missing email or phone");
+      let normalizedEmail: string | null;
+      let normalizedPhone: string | null;
+      try {
+        ({ email: normalizedEmail, phone: normalizedPhone } =
+          this.normalizeDonorContact(donor_email, donor_phone));
+      } catch {
+        console.warn(
+          "Cannot auto-register donor: at least one of email or phone is required",
+        );
         return null;
       }
 
-      // Create donor entity WITHOUT password
-      // Password will be set when they explicitly register/login (donor portal flow).
-      const donor = this.donorRepository.create({
+      let donor = await this.findByEmailOrPhone(
+        normalizedEmail ?? undefined,
+        normalizedPhone ?? undefined,
+      );
+
+      if (donor) {
+        if (donor?.is_archived === true) {
+          return donor;
+        }
+        if (!donor?.multi_time_donor) {
+          donor.multi_time_donor = true;
+        }
+        if (normalizedEmail && !donor?.email) {
+          donor.email = normalizedEmail;
+        }
+        if (normalizedPhone && !donor?.phone) {
+          donor.phone = normalizedPhone;
+        }
+        if (donor_name?.trim() && !donor?.name) {
+          donor.name = donor_name.trim();
+        }
+        if (city?.trim() && !donor?.city) {
+          donor.city = city.trim();
+        }
+        if (country?.trim() && !donor?.country) {
+          donor.country = country.trim();
+        }
+        if (address?.trim() && !donor?.address) {
+          donor.address = address.trim();
+        }
+        if (notification_subscription !== undefined) {
+          donor.notification_subscription = notification_subscription;
+        }
+        if (recurring === true) {
+          donor.recurring = true;
+        }
+        if (recurring_consent === true) {
+          donor.recurring_consent = true;
+          donor.recurring_consent_at = donor?.recurring_consent_at ?? new Date();
+        }
+        this.applyGeoSearchToDonor(donor);
+        return this.donorRepository.save(donor);
+      }
+
+      const donorRow = this.donorRepository.create({
         donor_type: DonorType.INDIVIDUAL,
-        email: donor_email,
-        password: null, // No password for auto-registered donors
+        email: normalizedEmail,
+        password: null,
         password_enc: null,
         password_enc_version: 0,
-        phone: donor_phone,
-        name: donor_name || "Anonymous Donor",
-        city: city || null,
-        country: country || null,
-        address: address || null,
+        phone: normalizedPhone,
+        name: donor_name?.trim() || "Anonymous Donor",
+        city: city?.trim() || null,
+        country: country?.trim() || null,
+        address: address?.trim() || null,
         is_active: true,
         notes: "Auto-registered from donation - Password not set",
         notification_subscription: notification_subscription !== false,
@@ -1099,20 +1144,19 @@ export class DonorService {
           recurring_consent === true ? new Date() : null,
       });
 
-      this.applyGeoSearchToDonor(donor);
+      this.applyGeoSearchToDonor(donorRow);
 
-      // Save and return
-      const savedDonor = await this.donorRepository.save(donor);
-
-      // Dashboard aggregates removed (fundraising dashboard reads directly from main tables)
+      const savedDonor = await this.donorRepository.save(donorRow);
 
       console.log(
-        `✅ Auto-registered donor WITHOUT password: ${donor_email} (ID: ${savedDonor.id})`,
+        `✅ Auto-registered donor WITHOUT password: ${normalizedEmail || normalizedPhone} (ID: ${savedDonor?.id})`,
       );
 
       return savedDonor;
     } catch (error) {
-      console.error("Error auto-registering donor:", error.message);
+      const message =
+        error instanceof Error ? error.message : String(error ?? "unknown");
+      console.error("Error auto-registering donor:", message);
       return null;
     }
   }
@@ -1640,6 +1684,16 @@ export class DonorService {
 
       if (!donor) {
         throw new NotFoundException(`Donor with ID ${id} not found`);
+      }
+
+      if (
+        (updateDonorDto as { donor_type?: DonorType }).donor_type ===
+          DonorType.CSR &&
+        donor.donor_type !== DonorType.CSR
+      ) {
+        throw new BadRequestException(
+          "POC contacts must be managed under CSR Donors (csr_pocs), not as donors.",
+        );
       }
 
       const auditUserId = this.donorAuditUserId(user?.id);

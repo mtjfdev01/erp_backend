@@ -82,7 +82,7 @@ export class CreateDonationBoxDto {
   box_type: BoxType;
 
   @IsEnum(BoxStatus, {
-    message: "Status must be active, inactive, maintenance, or retired",
+    message: "Status must be active, inactive, removed, broken, or snr",
   })
   @IsNotEmpty({ message: "Status is required" })
   status: BoxStatus;

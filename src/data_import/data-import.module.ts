@@ -6,6 +6,7 @@ import { DonorsImportHandler } from "./handlers/donors-import.handler";
 import { DonationBoxImportHandler } from "./handlers/donation-box-import.handler";
 import { DonationBoxDonationsImportHandler } from "./handlers/donation-box-donations-import.handler";
 import { VolunteersImportHandler } from "./handlers/volunteers-import.handler";
+import { CsrPocsImportHandler } from "./handlers/csr-pocs-import.handler";
 import { DonorModule } from "../dms/donor/donor.module";
 import { OrganizationsModule } from "../dms/organizations/organizations.module";
 import { VolunteerModule } from "../volunteer/volunteer.module";
@@ -33,6 +34,7 @@ import { PermissionsModule } from "../permissions/permissions.module";
     DonationBoxImportHandler,
     DonationBoxDonationsImportHandler,
     VolunteersImportHandler,
+    CsrPocsImportHandler,
   ],
   exports: [DataImportService],
 })

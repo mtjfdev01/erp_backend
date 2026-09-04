@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, IsNull } from "typeorm";
+import { Repository, IsNull, SelectQueryBuilder } from "typeorm";
 import { Organization } from "./entities/organization.entity";
 import { OrganizationBranch } from "./entities/organization-branch.entity";
 import {
@@ -17,6 +17,22 @@ import { CreateAffiliationDto } from "./dto/create-affiliation.dto";
 import { CreateOrganizationBranchDto } from "./dto/create-organization-branch.dto";
 import { UpdateOrganizationBranchDto } from "./dto/update-organization-branch.dto";
 import { Donor } from "../donor/entities/donor.entity";
+import { CsrPocsService, CsrPocListParams } from "./csr-pocs.service";
+import { CsrDonorPipelineStageHistory } from "./pipeline/entities/csr-donor-pipeline-stage-history.entity";
+import { ChangePipelineStageDto } from "../donor/dto/change-pipeline-stage.dto";
+import {
+  DonorPipelineStage,
+  resolveDonorPipelineStage,
+} from "../donor/pipeline/donor-pipeline.constants";
+import { CsrDonorAuditService } from "./audit/csr-donor-audit.service";
+import {
+  buildCsrDonorFieldChanges,
+  csrDonorAuditSnapshot,
+} from "./audit/csr-donor-audit.util";
+import { DonorAuditAction } from "../donor/audit/donor-audit-action.enum";
+import { DonorAuditSource } from "../donor/audit/donor-audit-source.enum";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 
 export type OrganizationBranchTreeNode = OrganizationBranch & {
   sub_branches: OrganizationBranch[];
@@ -33,7 +49,54 @@ export class OrganizationsService {
     private readonly affiliationRepo: Repository<DonorOrganizationAffiliation>,
     @InjectRepository(Donor)
     private readonly donorRepo: Repository<Donor>,
+    @InjectRepository(CsrDonorPipelineStageHistory)
+    private readonly pipelineHistoryRepo: Repository<CsrDonorPipelineStageHistory>,
+    private readonly csrPocsService: CsrPocsService,
+    private readonly csrDonorAuditService: CsrDonorAuditService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async resolveOrganizationScope(currentUser?: {
+    id?: number;
+    role?: string;
+    department?: string;
+  }): Promise<ResolvedDataScope> {
+    return this.dataScopeService.resolveScope(
+      currentUser?.id,
+      currentUser?.role,
+      currentUser?.department,
+      "fund_raising",
+      "organizations",
+    );
+  }
+
+  assertOrganizationRecordAccess(
+    scope: ResolvedDataScope,
+    record: Organization,
+  ): void {
+    this.dataScopeService.assertRecordAccess(scope, record);
+  }
+
+  private applyOrganizationListDataScope(
+    query: SelectQueryBuilder<Organization>,
+    dataScope: ResolvedDataScope | null,
+  ): void {
+    if (!dataScope) return;
+    this.dataScopeService.applyToQuery(query, "org", dataScope);
+  }
+
+  private auditUserId(userId?: number | null): number | null {
+    return userId && userId !== -1 ? userId : null;
+  }
+
+  private withEffectivePipelineStage<T extends Organization>(
+    org: T,
+  ): T & { effective_pipeline_stage: DonorPipelineStage } {
+    return {
+      ...org,
+      effective_pipeline_stage: resolveDonorPipelineStage(org.pipeline_stage),
+    };
+  }
 
   async create(dto: CreateOrganizationDto, user?: any): Promise<Organization> {
     const auditId = user?.id && user.id !== -1 ? user.id : null;
@@ -53,24 +116,49 @@ export class OrganizationsService {
     return this.orgRepo.save(org);
   }
 
-  async findAll(params: {
-    search?: string;
-    page?: number;
-    pageSize?: number;
-  }) {
+  async findAll(
+    params: {
+      search?: string;
+      page?: number;
+      pageSize?: number;
+      is_active?: boolean;
+      city?: string;
+    },
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
     const qb = this.orgRepo
       .createQueryBuilder("org")
+      .leftJoinAndSelect("org.created_by", "created_by")
       .where("org.is_archived = false")
       .orderBy("org.name", "ASC");
 
     if (params.search?.trim()) {
       const term = `%${params.search.trim()}%`;
       qb.andWhere(
-        "(LOWER(org.name) LIKE LOWER(:term) OR LOWER(COALESCE(org.registration_number, '')) LIKE LOWER(:term) OR LOWER(COALESCE(org.city, '')) LIKE LOWER(:term))",
+        `(LOWER(org.name) LIKE LOWER(:term)
+          OR LOWER(COALESCE(org.registration_number, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(org.city, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(org.email, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(org.phone, '')) LIKE LOWER(:term))`,
         { term },
       );
+    }
+
+    if (params.city?.trim()) {
+      qb.andWhere("LOWER(org.city) = LOWER(:city)", {
+        city: params.city.trim(),
+      });
+    }
+
+    if (params.is_active === true || params.is_active === false) {
+      qb.andWhere("org.is_active = :isActive", { isActive: params.is_active });
+    }
+
+    if (currentUser?.id) {
+      const scope = await this.resolveOrganizationScope(currentUser);
+      this.applyOrganizationListDataScope(qb, scope);
     }
 
     const [data, total] = await qb
@@ -111,16 +199,19 @@ export class OrganizationsService {
   > {
     const org = await this.orgRepo.findOne({
       where: { id, is_archived: false },
-      relations: ["branches", "parent_organization"],
+      relations: ["branches", "parent_organization", "created_by"],
     });
     if (!org) throw new NotFoundException(`Organization ${id} not found`);
 
     const branch_tree = this.buildBranchTree(org.branches || []);
-    return Object.assign(org, { branch_tree });
+    return this.withEffectivePipelineStage(
+      Object.assign(org, { branch_tree }),
+    );
   }
 
-  async update(id: number, dto: UpdateOrganizationDto): Promise<Organization> {
+  async update(id: number, dto: UpdateOrganizationDto, user?: any): Promise<Organization> {
     const org = await this.findOne(id);
+    const before = csrDonorAuditSnapshot(org as any);
     Object.assign(org, {
       ...(dto.name != null ? { name: dto.name.trim() } : {}),
       ...(dto.registration_number !== undefined
@@ -141,8 +232,26 @@ export class OrganizationsService {
         : {}),
       ...(dto.is_active !== undefined ? { is_active: dto.is_active } : {}),
     });
-    const { branch_tree: _t, ...toSave } = org as any;
-    return this.orgRepo.save(toSave);
+    const { branch_tree: _t, effective_pipeline_stage: _e, ...toSave } = org as any;
+    const saved = await this.orgRepo.save(toSave);
+    const patchForAudit: Record<string, unknown> = {};
+    for (const key of Object.keys(dto)) {
+      if (dto[key as keyof UpdateOrganizationDto] !== undefined) {
+        patchForAudit[key] = (saved as any)[key];
+      }
+    }
+    const auditUserId = this.auditUserId(user?.id);
+    const auditChanges = buildCsrDonorFieldChanges(before, patchForAudit);
+    if (auditChanges.length > 0) {
+      await this.csrDonorAuditService.log({
+        csrDonorId: id,
+        action: DonorAuditAction.UPDATED,
+        source: DonorAuditSource.STAFF_UI,
+        changes: auditChanges,
+        performedByUserId: auditUserId,
+      });
+    }
+    return this.findOne(id);
   }
 
   async softDelete(id: number): Promise<void> {
@@ -354,38 +463,24 @@ export class OrganizationsService {
   }
 
   /**
-   * People (donors/leads) linked to this organization via affiliations.
+   * POC contacts linked to this CSR donor (csr_pocs table).
    */
-  async listPeopleForOrganization(organizationId: number) {
+  async listPeopleForOrganization(
+    organizationId: number,
+    params: Omit<CsrPocListParams, "csr_donor_id"> = {},
+    currentUser?: { id?: number; role?: string; department?: string },
+  ) {
     await this.findOne(organizationId);
-    const rows = await this.affiliationRepo.find({
-      where: { organization_id: organizationId, is_archived: false },
-      relations: ["donor", "donor.assigned_to", "branch"],
-      order: { is_primary: "DESC", id: "DESC" },
-    });
-
-    return rows
-      .filter((row) => row.donor && !row.donor.is_archived)
-      .map((row) => {
-        const donor = row.donor as any;
-        if (donor?.password) delete donor.password;
-        if (donor?.password_enc) delete donor.password_enc;
-        return {
-          affiliation_id: row.id,
-          role: row.role,
-          is_primary: row.is_primary,
-          notes: row.notes,
-          branch_id: row.branch_id,
-          branch: row.branch
-            ? {
-                id: row.branch.id,
-                name: row.branch.name,
-                parent_branch_id: row.branch.parent_branch_id,
-              }
-            : null,
-          donor,
-        };
-      });
+    const result = await this.csrPocsService.findAll(
+      {
+        ...params,
+        csr_donor_id: organizationId,
+        page: params.page || 1,
+        pageSize: params.pageSize || 200,
+      },
+      currentUser,
+    );
+    return result.data.map((row) => this.csrPocsService.mapPocForPeopleList(row));
   }
 
   /**
@@ -419,5 +514,165 @@ export class OrganizationsService {
       city: fields.city,
       country: fields.country,
     });
+  }
+
+  async getPipelineHistory(csrDonorId: number) {
+    await this.findOne(csrDonorId);
+    return this.pipelineHistoryRepo.find({
+      where: { csr_donor_id: csrDonorId },
+      relations: ["changed_by"],
+      order: { created_at: "DESC", id: "DESC" },
+    });
+  }
+
+  async getAuditHistory(csrDonorId: number) {
+    await this.findOne(csrDonorId);
+    return this.csrDonorAuditService.findByCsrDonorId(csrDonorId);
+  }
+
+  async changePipelineStage(
+    id: number,
+    dto: ChangePipelineStageDto,
+    user?: any,
+  ) {
+    const reason = String(dto.reason || "").trim();
+    if (reason.length < 3) {
+      throw new BadRequestException("Reason must be at least 3 characters");
+    }
+
+    const org = await this.orgRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!org) {
+      throw new NotFoundException(`Organization ${id} not found`);
+    }
+
+    const fromStage = resolveDonorPipelineStage(org.pipeline_stage);
+    const toStage = dto.stage;
+    const isSame = fromStage === toStage;
+    const transitionType =
+      dto.transition_type || (isSame ? "noted" : "advanced");
+
+    if (transitionType === "advanced" && isSame) {
+      throw new BadRequestException(
+        "Stage is unchanged. Use transition_type=noted to log why the contact did not progress.",
+      );
+    }
+
+    const needsAmount =
+      (toStage === DonorPipelineStage.ASK ||
+        toStage === DonorPipelineStage.PLEDGE) &&
+      transitionType === "advanced";
+
+    const amountRaw = dto.amount;
+    const amountNum =
+      amountRaw === undefined || amountRaw === null || amountRaw === ("" as any)
+        ? null
+        : Number(amountRaw);
+
+    if (needsAmount) {
+      if (amountNum == null || !Number.isFinite(amountNum) || amountNum <= 0) {
+        throw new BadRequestException(
+          toStage === DonorPipelineStage.ASK
+            ? "Ask amount is required when moving to Ask"
+            : "Pledge amount is required when moving to Pledge",
+        );
+      }
+    }
+
+    const currency =
+      String(dto.currency || org.pipeline_amount_currency || "PKR")
+        .trim()
+        .toUpperCase()
+        .slice(0, 8) || "PKR";
+
+    const auditUserId = this.auditUserId(user?.id);
+    const before = csrDonorAuditSnapshot(org as any);
+    const patchForAudit: Record<string, unknown> = {};
+
+    if (transitionType === "advanced" || !org.pipeline_stage) {
+      org.pipeline_stage = toStage;
+      org.pipeline_stage_changed_at = new Date();
+      org.pipeline_stage_changed_by_id = auditUserId;
+      patchForAudit.pipeline_stage = toStage;
+
+      if (amountNum != null && Number.isFinite(amountNum) && amountNum > 0) {
+        org.pipeline_amount_currency = currency;
+        patchForAudit.pipeline_amount_currency = currency;
+        if (toStage === DonorPipelineStage.ASK) {
+          org.pipeline_ask_amount = amountNum as any;
+          patchForAudit.pipeline_ask_amount = amountNum;
+        }
+        if (toStage === DonorPipelineStage.PLEDGE) {
+          org.pipeline_pledge_amount = amountNum as any;
+          patchForAudit.pipeline_pledge_amount = amountNum;
+        }
+      }
+
+      if (auditUserId != null) {
+        org.updated_by = { id: auditUserId } as any;
+      }
+      await this.orgRepo.save(org);
+
+      const auditChanges = buildCsrDonorFieldChanges(before, patchForAudit);
+      if (auditChanges.length > 0) {
+        await this.csrDonorAuditService.log({
+          csrDonorId: id,
+          action: DonorAuditAction.UPDATED,
+          source: DonorAuditSource.STAFF_UI,
+          changes: auditChanges,
+          performedByUserId: auditUserId,
+          metadata: {
+            pipeline_reason: reason,
+            transition_type: transitionType,
+            amount: amountNum,
+            currency,
+          },
+        });
+      }
+    } else if (
+      amountNum != null &&
+      Number.isFinite(amountNum) &&
+      amountNum > 0 &&
+      (toStage === DonorPipelineStage.ASK ||
+        toStage === DonorPipelineStage.PLEDGE)
+    ) {
+      org.pipeline_amount_currency = currency;
+      if (toStage === DonorPipelineStage.ASK) {
+        org.pipeline_ask_amount = amountNum as any;
+      }
+      if (toStage === DonorPipelineStage.PLEDGE) {
+        org.pipeline_pledge_amount = amountNum as any;
+      }
+      if (auditUserId != null) {
+        org.updated_by = { id: auditUserId } as any;
+      }
+      await this.orgRepo.save(org);
+    }
+
+    const history = await this.pipelineHistoryRepo.save(
+      this.pipelineHistoryRepo.create({
+        csr_donor_id: id,
+        from_stage: fromStage,
+        to_stage: toStage,
+        reason,
+        transition_type: transitionType,
+        amount:
+          amountNum != null && Number.isFinite(amountNum) && amountNum > 0
+            ? (amountNum as any)
+            : null,
+        currency:
+          amountNum != null && Number.isFinite(amountNum) && amountNum > 0
+            ? currency
+            : null,
+        changed_by_id: auditUserId,
+      }),
+    );
+
+    const refreshed = await this.findOne(id);
+    return {
+      csr_donor: refreshed,
+      history_entry: history,
+    };
   }
 }

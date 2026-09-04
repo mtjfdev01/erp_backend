@@ -793,17 +793,7 @@ export class DonationBoxService {
 
       applyCommonFilters(query, filters, searchFields, "donation_box");
 
-      const regionId = Number(region_id);
-      if (Number.isFinite(regionId) && regionId > 0) {
-        query.andWhere("route.region_id = :filterRegionId", {
-          filterRegionId: regionId,
-        });
-      } else if (region && String(region).trim()) {
-        query.andWhere("LOWER(region.name) = LOWER(:filterRegionName)", {
-          filterRegionName: String(region).trim(),
-        });
-      }
-
+      // Boxes store city_id (not region_id). Region filter → cities in region → boxes.
       const cityId = Number(city_id);
       if (Number.isFinite(cityId) && cityId > 0) {
         query.andWhere("donation_box.city_id = :filterCityId", {
@@ -816,6 +806,39 @@ export class DonationBoxService {
           ))`,
           { filterCityName: String(city).trim() },
         );
+      } else {
+        const regionId = Number(region_id);
+        let regionCityIds: number[] | null = null;
+
+        if (Number.isFinite(regionId) && regionId > 0) {
+          const cityRows = await this.cityRepository.find({
+            where: { region_id: regionId, is_active: true },
+            select: ["id"],
+          });
+          regionCityIds = cityRows.map((c) => c.id);
+        } else if (region && String(region).trim()) {
+          const cityRows = await this.cityRepository
+            .createQueryBuilder("c")
+            .innerJoin("c.region", "r")
+            .select(["c.id"])
+            .where("c.is_active = true")
+            .andWhere("LOWER(r.name) = LOWER(:filterRegionName)", {
+              filterRegionName: String(region).trim(),
+            })
+            .getMany();
+          regionCityIds = cityRows.map((c) => c.id);
+        }
+
+        if (regionCityIds) {
+          if (!regionCityIds.length) {
+            query.andWhere("1 = 0");
+          } else {
+            query.andWhere(
+              "donation_box.city_id IN (:...filterRegionCityIds)",
+              { filterRegionCityIds: regionCityIds },
+            );
+          }
+        }
       }
 
       const routeId = Number(route_id);

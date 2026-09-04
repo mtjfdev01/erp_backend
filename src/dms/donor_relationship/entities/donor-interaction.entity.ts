@@ -1,16 +1,32 @@
 import { Column, Entity, JoinColumn, ManyToOne } from "typeorm";
 import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import { Donor } from "../../donor/entities/donor.entity";
+import { Organization } from "../../organizations/entities/organization.entity";
+import { CsrPoc } from "../../organizations/entities/csr-poc.entity";
 import { User } from "../../../users/user.entity";
 
 @Entity("donor_interactions")
 export class DonorInteraction extends BaseEntity {
-  @ManyToOne(() => Donor, { nullable: false, onDelete: "CASCADE" })
+  @ManyToOne(() => Donor, { nullable: true, onDelete: "CASCADE" })
   @JoinColumn({ name: "donor_id" })
-  donor: Donor;
+  donor: Donor | null;
 
-  @Column()
-  donor_id: number;
+  @Column({ type: "int", nullable: true, default: null })
+  donor_id: number | null;
+
+  @ManyToOne(() => Organization, { nullable: true, onDelete: "CASCADE" })
+  @JoinColumn({ name: "csr_donor_id" })
+  csr_donor: Organization | null;
+
+  @Column({ type: "int", nullable: true, default: null })
+  csr_donor_id: number | null;
+
+  @ManyToOne(() => CsrPoc, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "csr_poc_id" })
+  csr_poc: CsrPoc | null;
+
+  @Column({ type: "int", nullable: true, default: null })
+  csr_poc_id: number | null;
 
   @Column({ type: "varchar", length: 64 })
   activity_type: string;

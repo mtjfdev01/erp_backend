@@ -22,8 +22,9 @@ export enum BoxType {
 export enum BoxStatus {
   ACTIVE = "active",
   INACTIVE = "inactive",
-  MAINTENANCE = "maintenance",
-  RETIRED = "retired",
+  REMOVED = "removed",
+  BROKEN = "broken",
+  SNR = "snr",
 }
 
 export enum CollectionFrequency {

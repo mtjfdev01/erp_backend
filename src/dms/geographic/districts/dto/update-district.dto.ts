@@ -26,6 +26,10 @@ export class UpdateDistrictDto {
   @IsOptional()
   country_id?: number;
 
+  @IsNumber()
+  @IsOptional()
+  sub_region_id?: number | null;
+
   @IsBoolean()
   @IsOptional()
   is_active?: boolean;

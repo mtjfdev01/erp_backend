@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { CountriesModule } from "./countries/countries.module";
 import { RegionsModule } from "./regions/regions.module";
+import { SubRegionsModule } from "./sub-regions/sub-regions.module";
 import { DistrictsModule } from "./districts/districts.module";
 import { TehsilsModule } from "./tehsils/tehsils.module";
 import { CitiesModule } from "./cities/cities.module";
@@ -18,6 +19,7 @@ import { JwtModule } from "@nestjs/jwt";
     PermissionsModule,
     CountriesModule,
     RegionsModule,
+    SubRegionsModule,
     DistrictsModule,
     TehsilsModule,
     CitiesModule,
@@ -27,6 +29,7 @@ import { JwtModule } from "@nestjs/jwt";
   exports: [
     CountriesModule,
     RegionsModule,
+    SubRegionsModule,
     DistrictsModule,
     TehsilsModule,
     CitiesModule,

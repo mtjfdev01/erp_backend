@@ -114,37 +114,12 @@ export class StripeService {
       );
     }
 
-    const start_date_mode = this.normalizeStartDateMode(
-      recurring.start_date_mode,
-    );
-    const start_date = recurring.start_date
-      ? String(recurring.start_date).trim()
-      : undefined;
-
-    if (start_date_mode === "custom" && !start_date) {
-      throw new HttpException(
-        "recurring.start_date is required when start_date_mode is custom",
-        400,
-      );
-    }
-
-    if (start_date_mode === "day_of_month" && !start_date) {
-      throw new HttpException(
-        "recurring.start_date is required when start_date_mode is day_of_month",
-        400,
-      );
-    }
-
-    const billing_cycle_anchor =
-      recurring.billing_cycle_anchor ??
-      this.resolveBillingCycleAnchor(start_date_mode, start_date);
-
+    // Stripe always bills on the signup calendar date (charge now, renew same day each period).
+    // Website may send first_of_month / custom — those apply to non-Stripe ledger only.
     return {
       interval,
       interval_count,
-      start_date_mode,
-      start_date,
-      billing_cycle_anchor,
+      start_date_mode: "same_date",
       consent: recurring.consent,
     };
   }

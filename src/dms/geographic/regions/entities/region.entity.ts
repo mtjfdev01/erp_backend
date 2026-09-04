@@ -10,6 +10,7 @@ import { BaseEntity } from "../../../../utils/base_utils/entities/baseEntity";
 import { Country } from "../../countries/entities/country.entity";
 import { City } from "../../cities/entities/city.entity";
 import { District } from "../../districts/entities/district.entity";
+import { SubRegion } from "../../sub-regions/entities/sub-region.entity";
 
 @Entity("regions")
 @Index("idx_region_name", ["name"])
@@ -38,6 +39,11 @@ export class Region extends BaseEntity {
   })
   @JoinColumn({ name: "country_id" })
   country: Country;
+
+  @OneToMany(() => SubRegion, (subRegion) => subRegion.region, {
+    cascade: true,
+  })
+  sub_regions: SubRegion[];
 
   @OneToMany(() => District, (district) => district.region, { cascade: true })
   districts: District[];
