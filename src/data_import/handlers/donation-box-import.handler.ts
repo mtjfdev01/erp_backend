@@ -313,8 +313,8 @@ export class DonationBoxImportHandler implements EntityImportHandler {
     let successCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
-    /** Same shop + shopkeeper + phone in one file → skip after first. */
-    const seenIdentityInFile = new Map<string, number>();
+    /** Same box_id_no in one file → skip after first. Shop name may repeat. */
+    const seenBoxIdInFile = new Map<string, number>();
     const importYear =
       options?.year != null &&
       Number.isInteger(options.year) &&
@@ -421,18 +421,14 @@ export class DonationBoxImportHandler implements EntityImportHandler {
           payload.city_id = resolvedCityId;
         }
 
-        const shopkeeper = String(row.shopkeeper || "").trim();
-        const cellNo = String(row.cell_no || "").trim();
-        const identityKey = this.buildShopIdentityKey(
-          shopName,
-          shopkeeper,
-          cellNo,
-        );
-        if (identityKey) {
-          const seenId = seenIdentityInFile.get(identityKey);
+        const boxIdKey = boxIdNo
+          ? boxIdNo.trim().toLowerCase()
+          : null;
+        if (boxIdKey) {
+          const seenId = seenBoxIdInFile.get(boxIdKey);
           if (seenId) {
             skippedCount += 1;
-            const reason = `Duplicate in this CSV: same shop "${shopName}" + shopkeeper "${shopkeeper || "(empty)"}" + phone "${cellNo || "(empty)"}" already processed (kept id ${seenId}). box_id_no=${boxIdNo || "null"}, key_no=${keyNo || "null"}`;
+            const reason = `Duplicate in this CSV: same box_id_no "${boxIdNo}" already processed (kept id ${seenId})`;
             results.push({
               row: rowNumber,
               success: true,
@@ -451,8 +447,8 @@ export class DonationBoxImportHandler implements EntityImportHandler {
             payload,
           );
         if (existing) {
-          if (identityKey) {
-            seenIdentityInFile.set(identityKey, existing.box.id);
+          if (boxIdKey) {
+            seenBoxIdInFile.set(boxIdKey, existing.box.id);
           }
           skippedCount += 1;
           const reason = existing.reason;
@@ -470,8 +466,8 @@ export class DonationBoxImportHandler implements EntityImportHandler {
 
         const { box, skipped, skip_reason } =
           await this.donationBoxService.importDonationBoxRow(payload, user);
-        if (identityKey) {
-          seenIdentityInFile.set(identityKey, box.id);
+        if (boxIdKey) {
+          seenBoxIdInFile.set(boxIdKey, box.id);
         }
         if (skipped) {
           skippedCount += 1;
@@ -516,24 +512,5 @@ export class DonationBoxImportHandler implements EntityImportHandler {
       skipped_count: skippedCount,
       results,
     };
-  }
-
-  /** shop + shopkeeper + digits-only phone — same shop name alone is not a duplicate. */
-  private buildShopIdentityKey(
-    shopName: string,
-    shopkeeper: string,
-    cellNo: string,
-  ): string | null {
-    const shop = String(shopName || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ");
-    if (!shop) return null;
-    const keeper = String(shopkeeper || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ");
-    const phone = String(cellNo || "").replace(/\D/g, "");
-    return `${shop}|${keeper}|${phone}`;
   }
 }

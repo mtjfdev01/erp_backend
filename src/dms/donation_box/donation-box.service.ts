@@ -623,9 +623,8 @@ export class DonationBoxService {
   }
 
   /**
-   * Identity for import skip:
-   * 1) box_id_no when present
-   * 2) shop_name + shopkeeper + cell_no (same shop name alone is NOT a duplicate)
+   * Identity for import skip: only box_id_no when present.
+   * Same shop_name (even with same shopkeeper/phone) is allowed — multiple boxes per shop.
    */
   private async findExistingDonationBoxForImport(params: {
     box_id_no?: string | null;
@@ -638,60 +637,26 @@ export class DonationBoxService {
     const boxIdNo = String(params.box_id_no || "")
       .trim()
       .toLowerCase();
-    const shopName = this.normalizeName(params.shop_name);
-    const shopkeeper = this.normalizeName(params.shopkeeper);
-    const phone = this.normalizePhone(params.cell_no);
 
-    const baseQb = () =>
-      this.donationBoxRepository
-        .createQueryBuilder("b")
-        .where("b.is_archived = false");
-
-    if (boxIdNo) {
-      const byBoxId = await baseQb()
-        .andWhere("LOWER(TRIM(b.box_id_no)) = :boxIdNo", { boxIdNo })
-        .orderBy("b.id", "ASC")
-        .getOne();
-      if (byBoxId) {
-        return {
-          box: byBoxId,
-          reason: `Already in DB (matched box_id_no="${params.box_id_no}" → id ${byBoxId.id})`,
-        };
-      }
+    if (!boxIdNo) {
+      return null;
     }
 
-    // Same shop name alone is allowed; require shop + shopkeeper + phone combo.
-    if (shopName) {
-      const candidates = await baseQb()
-        .andWhere("LOWER(TRIM(b.shop_name)) = :shopName", { shopName })
-        .orderBy("b.id", "ASC")
-        .getMany();
+    const byBoxId = await this.donationBoxRepository
+      .createQueryBuilder("b")
+      .where("b.is_archived = false")
+      .andWhere("LOWER(TRIM(b.box_id_no)) = :boxIdNo", { boxIdNo })
+      .orderBy("b.id", "ASC")
+      .getOne();
 
-      for (const box of candidates) {
-        const boxKeeper = this.normalizeName(box.shopkeeper);
-        const boxPhone = this.normalizePhone(box.cell_no);
-        if (boxKeeper === shopkeeper && boxPhone === phone) {
-          return {
-            box,
-            reason: `Already in DB (matched shop="${params.shop_name}" + shopkeeper="${params.shopkeeper || ""}" + phone="${params.cell_no || ""}" → id ${box.id})`,
-          };
-        }
-      }
+    if (byBoxId) {
+      return {
+        box: byBoxId,
+        reason: `Already in DB (matched box_id_no="${params.box_id_no}" → id ${byBoxId.id})`,
+      };
     }
 
     return null;
-  }
-
-  private normalizeName(value: unknown): string {
-    return String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ");
-  }
-
-  /** Digits-only phone so 0301-6464990 matches 03016464990. */
-  private normalizePhone(value: unknown): string {
-    return String(value || "").replace(/\D/g, "");
   }
 
   private applyDonationBoxActiveSinceDateFilter(
