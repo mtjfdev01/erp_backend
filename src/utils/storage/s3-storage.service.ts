@@ -380,6 +380,18 @@ export class S3StorageService {
     return { url: result.url, key: result.key, bucket: result.bucket };
   }
 
+  /** Complaint attachments — uses profile `complaints` → keys under complaints/attachments/... */
+  async uploadComplaintAttachment(
+    file: Express.Multer.File,
+  ): Promise<{ url: string; key: string; bucket: string }> {
+    const result = await this.uploadFile(
+      S3_BUCKET_PROFILE.COMPLAINTS,
+      file,
+      ["attachments"],
+    );
+    return { url: result.url, key: result.key, bucket: result.bucket };
+  }
+
   /** Donation files — uses profile `donations` → keys under donations/attachments/... */
   async uploadDonationAttachment(
     file: Express.Multer.File,

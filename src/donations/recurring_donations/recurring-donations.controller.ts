@@ -2,10 +2,12 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   HttpStatus,
   Res,
+  Req,
   UseGuards,
 } from "@nestjs/common";
 import { Response } from "express";
@@ -16,7 +18,11 @@ import { RecurringDonationsLedgerService } from "./recurring-donations-ledger.se
 import {
   RECURRING_DONATION_LIST_VIEW_GUARD,
   RECURRING_DONATION_VIEW_GUARD,
+  RECURRING_DONATION_CREATE_GUARD,
+  RECURRING_DONATION_UPDATE_GUARD,
 } from "../../permissions/recurring-donations-permissions.constants";
+import { CreateRecurringDonationDto } from "./dto/create-recurring-donation.dto";
+import { UpdateRecurringDonationDto } from "./dto/update-recurring-donation.dto";
 
 @Controller("recurring-donations")
 @UseGuards(JwtGuard, PermissionsGuard)
@@ -46,6 +52,35 @@ export class RecurringDonationsController {
     }
   }
 
+  @Post()
+  @RequiredPermissions([...RECURRING_DONATION_CREATE_GUARD])
+  async create(
+    @Body() body: CreateRecurringDonationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const data = await this.ledgerService.createStaffSubscription(
+        body,
+        userId,
+      );
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "Recurring donation created successfully",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to create recurring donation",
+        data: null,
+      });
+    }
+  }
+
   @Get(":id")
   @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
   async findOne(@Param("id") id: string, @Res() res: Response) {
@@ -62,6 +97,37 @@ export class RecurringDonationsController {
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to fetch recurring donation",
+        data: null,
+      });
+    }
+  }
+
+  @Patch(":id")
+  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  async update(
+    @Param("id") id: string,
+    @Body() body: UpdateRecurringDonationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const data = await this.ledgerService.updateStaffSubscription(
+        +id,
+        body,
+        userId,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Recurring donation updated successfully",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to update recurring donation",
         data: null,
       });
     }

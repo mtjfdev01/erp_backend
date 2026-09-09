@@ -296,6 +296,296 @@ export class RecurringDonationsLedgerService {
   }
 
   /**
+   * Staff Add: create a non-Stripe subscription row on the Recurring Donations ledger.
+   * Stripe subscriptions continue to be created only via checkout/webhooks.
+   */
+  async createStaffSubscription(
+    dto: {
+      donor_id: number;
+      amount: number;
+      currency?: string;
+      billing_interval: "day" | "week" | "month" | "year";
+      billing_interval_count?: number;
+      start_date_mode?: string | null;
+      start_date?: string | null;
+      consent?: boolean | null;
+      donation_method?: string | null;
+      project_id?: string | null;
+      campaign_id?: number | null;
+      donation_type?: string | null;
+      prepaid_periods?: number | null;
+      initial_donation_id?: number | null;
+      status?: string;
+    },
+    userId?: number | null,
+  ): Promise<RecurringDonation> {
+    const donorId = Number(dto.donor_id);
+    if (!Number.isFinite(donorId) || donorId <= 0) {
+      throw new BadRequestException("donor_id is required");
+    }
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+    });
+    if (!donor) {
+      throw new BadRequestException("Donor not found");
+    }
+
+    const amount = Number(dto.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException("amount must be greater than 0");
+    }
+
+    const interval = String(dto.billing_interval || "").toLowerCase() as
+      | "day"
+      | "week"
+      | "month"
+      | "year";
+    if (!["day", "week", "month", "year"].includes(interval)) {
+      throw new BadRequestException("Invalid billing_interval");
+    }
+
+    let initialDonationId: number | null = null;
+    if (dto.initial_donation_id != null && dto.initial_donation_id !== undefined) {
+      const donationId = Number(dto.initial_donation_id);
+      if (!Number.isFinite(donationId) || donationId <= 0) {
+        throw new BadRequestException("Invalid initial_donation_id");
+      }
+      const donation = await this.donationRepository.findOne({
+        where: { id: donationId, is_archived: false },
+      });
+      if (!donation) {
+        throw new BadRequestException("Initial donation not found");
+      }
+      const existingForDonation = await this.recurringDonationRepo.findOne({
+        where: {
+          initial_donation_id: donationId,
+          record_type: "subscription",
+          is_archived: false,
+        },
+      });
+      if (existingForDonation) {
+        throw new BadRequestException(
+          "A recurring subscription already exists for this initial donation",
+        );
+      }
+      initialDonationId = donationId;
+    }
+
+    const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+      dto.prepaid_periods ?? null,
+      interval === "year" ? "month" : interval,
+    );
+
+    const row = this.recurringDonationRepo.create({
+      record_type: "subscription",
+      parent_id: null,
+      initial_donation_id: initialDonationId,
+      donor_id: donorId,
+      stripe_subscription_id: null,
+      stripe_customer_id: null,
+      billing_interval: interval,
+      billing_interval_count: dto.billing_interval_count ?? 1,
+      start_date_mode: dto.start_date_mode || "same_date",
+      start_date: dto.start_date || null,
+      consent: dto.consent ?? true,
+      consent_at: dto.consent === false ? null : new Date(),
+      amount,
+      currency: (dto.currency || "PKR").toUpperCase(),
+      status: dto.status || "active",
+      donation_method: dto.donation_method || "manual",
+      project_id: dto.project_id || null,
+      campaign_id: dto.campaign_id ?? null,
+      donation_type: dto.donation_type || null,
+      prepaid_months: prepaid.prepaidMonths,
+      prepaid_periods: prepaid.prepaidPeriods,
+      prepaid_start_period_key: prepaid.start,
+      prepaid_end_period_key: prepaid.end,
+      ...(userId && userId > 0
+        ? { created_by: { id: userId } as any, updated_by: { id: userId } as any }
+        : {}),
+    });
+
+    const saved = await this.recurringDonationRepo.save(row);
+
+    // Staff-created ledger subscription ⇒ donor is a recurring donor
+    await this.donorRepository.update(donorId, { recurring: true });
+
+    return saved;
+  }
+
+  /**
+   * Staff Update: edit ledger subscription fields.
+   * Stripe-backed rows: only status may be changed (charges stay in Stripe).
+   */
+  async updateStaffSubscription(
+    id: number,
+    dto: {
+      donor_id?: number;
+      amount?: number;
+      currency?: string;
+      billing_interval?: "day" | "week" | "month" | "year";
+      billing_interval_count?: number;
+      start_date_mode?: string | null;
+      start_date?: string | null;
+      consent?: boolean | null;
+      donation_method?: string | null;
+      project_id?: string | null;
+      campaign_id?: number | null;
+      donation_type?: string | null;
+      prepaid_periods?: number | null;
+      initial_donation_id?: number | null;
+      status?: string;
+    },
+    userId?: number | null,
+  ): Promise<RecurringDonation> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+
+    const isStripe = !!subscription.stripe_subscription_id;
+    const patch: Partial<RecurringDonation> = {};
+
+    if (isStripe) {
+      if (dto.status != null) {
+        const status = String(dto.status).toLowerCase();
+        if (!["active", "canceled", "past_due", "failed"].includes(status)) {
+          throw new BadRequestException("Invalid status");
+        }
+        patch.status = status;
+      }
+      const otherKeys = Object.keys(dto).filter((k) => k !== "status");
+      if (otherKeys.length > 0 && dto.status == null) {
+        throw new BadRequestException(
+          "Stripe subscriptions can only update status from this screen",
+        );
+      }
+      if (otherKeys.length > 0 && dto.status != null) {
+        // Ignore other fields silently when status is provided with extras
+      }
+    } else {
+      if (dto.donor_id != null) {
+        const donorId = Number(dto.donor_id);
+        if (!Number.isFinite(donorId) || donorId <= 0) {
+          throw new BadRequestException("Invalid donor_id");
+        }
+        const donor = await this.donorRepository.findOne({
+          where: { id: donorId, is_archived: false },
+        });
+        if (!donor) throw new BadRequestException("Donor not found");
+        patch.donor_id = donorId;
+      }
+      if (dto.amount != null) {
+        const amount = Number(dto.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new BadRequestException("amount must be greater than 0");
+        }
+        patch.amount = amount;
+      }
+      if (dto.currency != null) patch.currency = String(dto.currency).toUpperCase();
+      if (dto.billing_interval != null) {
+        const interval = String(dto.billing_interval).toLowerCase();
+        if (!["day", "week", "month", "year"].includes(interval)) {
+          throw new BadRequestException("Invalid billing_interval");
+        }
+        patch.billing_interval = interval;
+      }
+      if (dto.billing_interval_count != null) {
+        patch.billing_interval_count = Math.max(
+          1,
+          Number(dto.billing_interval_count) || 1,
+        );
+      }
+      if (dto.start_date_mode !== undefined) {
+        patch.start_date_mode = dto.start_date_mode || null;
+      }
+      if (dto.start_date !== undefined) {
+        patch.start_date = dto.start_date || null;
+      }
+      if (dto.consent !== undefined) {
+        patch.consent = dto.consent;
+        if (dto.consent === true) patch.consent_at = new Date();
+      }
+      if (dto.donation_method !== undefined) {
+        patch.donation_method = dto.donation_method || null;
+      }
+      if (dto.project_id !== undefined) {
+        patch.project_id = dto.project_id || null;
+      }
+      if (dto.campaign_id !== undefined) {
+        patch.campaign_id =
+          dto.campaign_id == null || dto.campaign_id === ("" as any)
+            ? null
+            : Number(dto.campaign_id);
+      }
+      if (dto.donation_type !== undefined) {
+        patch.donation_type = dto.donation_type || null;
+      }
+      if (dto.status != null) {
+        const status = String(dto.status).toLowerCase();
+        if (!["active", "canceled", "past_due", "failed"].includes(status)) {
+          throw new BadRequestException("Invalid status");
+        }
+        patch.status = status;
+      }
+      if (dto.prepaid_periods !== undefined) {
+        const interval = String(
+          patch.billing_interval || subscription.billing_interval || "month",
+        ).toLowerCase();
+        const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+          dto.prepaid_periods,
+          interval === "year" ? "month" : (interval as any),
+        );
+        patch.prepaid_months = prepaid.prepaidMonths;
+        patch.prepaid_periods = prepaid.prepaidPeriods;
+        patch.prepaid_start_period_key = prepaid.start;
+        patch.prepaid_end_period_key = prepaid.end;
+      }
+      if (dto.initial_donation_id !== undefined) {
+        if (dto.initial_donation_id == null) {
+          patch.initial_donation_id = null;
+        } else {
+          const donationId = Number(dto.initial_donation_id);
+          const donation = await this.donationRepository.findOne({
+            where: { id: donationId, is_archived: false },
+          });
+          if (!donation) {
+            throw new BadRequestException("Initial donation not found");
+          }
+          patch.initial_donation_id = donationId;
+        }
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return subscription;
+    }
+
+    if (userId && userId > 0) {
+      (patch as any).updated_by = { id: userId };
+    }
+
+    await this.recurringDonationRepo.update(id, patch);
+    const updated = await this.recurringDonationRepo.findOne({ where: { id } });
+    if (!updated) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+
+    const donorId = updated.donor_id;
+    if (donorId && updated.status === "active") {
+      await this.donorRepository.update(donorId, { recurring: true });
+    }
+
+    return updated;
+  }
+
+  /**
    * Non-Stripe recurring: same Recurring Donations list as Stripe.
    * Stripe auto-charges; these rows are reminded via cron.
    */
