@@ -16,6 +16,7 @@ export const S3_BUCKET_PROFILE = {
   APPEALS: "appeals",
   SOCIAL_MEDIA: "social_media",
   TASKING: "tasking",
+  COMPLAINTS: "complaints",
   DONATIONS: "donations",
 } as const;
 

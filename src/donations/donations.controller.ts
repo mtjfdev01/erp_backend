@@ -66,13 +66,14 @@ export class DonationsController {
   }
 
   /**
-   * Runtime permission check for online/offline donations.
-   * Checks: super_admin OR fund_raising_manager OR the specific online/offline permission.
+   * Runtime permission check for online/offline/in-kind donations.
+   * Checks: super_admin OR fund_raising_manager OR the matching submodule permission.
    */
   private async checkDonationPermission(
     userId: number,
     donationSource: string | null | undefined,
     action: string,
+    donationMethod?: string | null,
   ): Promise<void> {
     // Super admin and user id -1 bypass
     if (userId === -1) return;
@@ -88,6 +89,14 @@ export class DonationsController {
       "fund_raising_manager",
     );
     if (hasFundRaisingManager) return;
+
+    if (String(donationMethod || "").toLowerCase() === "in_kind") {
+      const hasInKind = await this.permissionsService.hasPermission(
+        userId,
+        `fund_raising.in_kind_donations.${action}`,
+      );
+      if (hasInKind) return;
+    }
 
     const submodule = this.isOnlineDonation(donationSource)
       ? "online_donations"
@@ -106,17 +115,22 @@ export class DonationsController {
   }
 
   /**
-   * Check if user has permission for at least one donation type (online or offline).
+   * Check if user has permission for at least one donation type (online, offline, or in-kind).
    * Returns which types the user can access.
    */
   private async assertDonationDataScope(
     user: { id?: number; role?: string; department?: string } | null,
-    donation: { donation_source?: string | null; created_by?: any },
+    donation: {
+      donation_source?: string | null;
+      donation_method?: string | null;
+      created_by?: any;
+    },
   ): Promise<void> {
     if (!user?.id) return;
     const scope = await this.donationsService.resolveDonationRecordScope(
       user,
       donation.donation_source,
+      donation.donation_method,
     );
     this.donationsService.assertDonationRecordAccess(scope, donation as any);
   }
@@ -124,20 +138,22 @@ export class DonationsController {
   private async getDonationSourceAccess(
     userId: number,
     action: string,
-  ): Promise<{ online: boolean; offline: boolean }> {
-    if (userId === -1) return { online: true, offline: true };
+  ): Promise<{ online: boolean; offline: boolean; inKind: boolean }> {
+    if (userId === -1) return { online: true, offline: true, inKind: true };
 
     const hasSuperAdmin = await this.permissionsService.hasPermission(
       userId,
       "super_admin",
     );
-    if (hasSuperAdmin) return { online: true, offline: true };
+    if (hasSuperAdmin) return { online: true, offline: true, inKind: true };
 
     const hasFundRaisingManager = await this.permissionsService.hasPermission(
       userId,
       "fund_raising_manager",
     );
-    if (hasFundRaisingManager) return { online: true, offline: true };
+    if (hasFundRaisingManager) {
+      return { online: true, offline: true, inKind: true };
+    }
 
     const hasOnline = await this.permissionsService.hasPermission(
       userId,
@@ -147,8 +163,12 @@ export class DonationsController {
       userId,
       `fund_raising.offline_donations.${action}`,
     );
+    const hasInKind = await this.permissionsService.hasPermission(
+      userId,
+      `fund_raising.in_kind_donations.${action}`,
+    );
 
-    return { online: hasOnline, offline: hasOffline };
+    return { online: hasOnline, offline: hasOffline, inKind: hasInKind };
   }
 
   /**
@@ -318,6 +338,7 @@ export class DonationsController {
           user.id,
           createDonationDto.donation_source,
           "create",
+          createDonationDto.donation_method,
         );
       }
 
@@ -398,10 +419,14 @@ export class DonationsController {
       const user = req?.user ?? null;
 
       // Determine which donation sources the user can view
-      let sourceAccess = { online: true, offline: true };
+      let sourceAccess = { online: true, offline: true, inKind: true };
       if (user?.id) {
         sourceAccess = await this.getDonationSourceAccess(user.id, "list_view");
-        if (!sourceAccess.online && !sourceAccess.offline) {
+        if (
+          !sourceAccess.online &&
+          !sourceAccess.offline &&
+          !sourceAccess.inKind
+        ) {
           return res.status(HttpStatus.FORBIDDEN).json({
             success: false,
             message: "Insufficient permissions to view donations",
@@ -424,14 +449,27 @@ export class DonationsController {
 
       // Extract filters
       const filters = payload.filters || {};
+      const methodFilter = String(filters.donation_method || "").toLowerCase();
+      const isInKindListRequest = methodFilter === "in_kind";
 
-      // Inject donation_source filter based on user permissions
-      if (!sourceAccess.online && sourceAccess.offline) {
-        // User can only see offline donations (everything except 'website')
-        filters._donation_source_not = "website";
-      } else if (sourceAccess.online && !sourceAccess.offline) {
-        // User can only see online donations
-        filters.donation_source = "website";
+      // In-kind-only users: lock list to in_kind method
+      if (
+        sourceAccess.inKind &&
+        !sourceAccess.online &&
+        !sourceAccess.offline
+      ) {
+        filters.donation_method = "in_kind";
+      }
+
+      // Inject donation_source filter based on user permissions (skip when listing in-kind hub)
+      if (!isInKindListRequest && filters.donation_method !== "in_kind") {
+        if (!sourceAccess.online && sourceAccess.offline) {
+          // User can only see offline donations (everything except 'website')
+          filters._donation_source_not = "website";
+        } else if (sourceAccess.online && !sourceAccess.offline) {
+          // User can only see online donations
+          filters.donation_source = "website";
+        }
       }
       // If both are true, no filter needed (user can see everything)
 
@@ -459,6 +497,11 @@ export class DonationsController {
         ? await this.donationsService.resolveDonationListScope(
             user,
             sourceAccess,
+            {
+              inKindList:
+                String(completeFilters.donation_method || "").toLowerCase() ===
+                "in_kind",
+            },
           )
         : null;
 
@@ -508,6 +551,7 @@ export class DonationsController {
           user.id,
           donation.donation_source,
           "view",
+          donation.donation_method,
         );
         await this.checkGeographicAccess(user.id, donation, user.role, user);
       }
@@ -550,6 +594,7 @@ export class DonationsController {
           user.id,
           existing.donation_source,
           "view",
+          existing.donation_method,
         );
         await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
@@ -592,6 +637,7 @@ export class DonationsController {
           user.id,
           result.donation_source,
           "view",
+          result.donation_method,
         );
         await this.checkGeographicAccess(user.id, result, user.role, user);
       }
@@ -650,6 +696,7 @@ export class DonationsController {
           req.user.id,
           donation.donation_source,
           "view",
+          donation.donation_method,
         );
         await this.checkGeographicAccess(req.user.id, donation, req.user.role, req.user);
         return res.status(HttpStatus.OK).json({
@@ -735,6 +782,7 @@ export class DonationsController {
           user.id,
           donation.donation_source,
           "view",
+          donation.donation_method,
         );
         await this.checkGeographicAccess(user.id, donation, user.role, user);
       }
@@ -782,6 +830,7 @@ export class DonationsController {
           user.id,
           existing.donation_source,
           "update",
+          existing.donation_method,
         );
         await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
@@ -829,6 +878,7 @@ export class DonationsController {
           user.id,
           existing.donation_source,
           "update",
+          existing.donation_method,
         );
         await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
@@ -871,6 +921,7 @@ export class DonationsController {
           user.id,
           existing.donation_source,
           "delete",
+          existing.donation_method,
         );
         await this.checkGeographicAccess(user.id, existing, user.role, user);
       }
@@ -941,6 +992,7 @@ export class DonationsController {
           user.id,
           existing.donation_source,
           "update",
+          existing.donation_method,
         );
         await this.checkGeographicAccess(user.id, existing, user.role, user);
       }

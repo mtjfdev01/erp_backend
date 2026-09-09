@@ -28,6 +28,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { QrCodeModule } from "./qr_code/qr_code.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { TasksModule } from "./tasks/tasks.module";
+import { ComplaintsModule } from "./complaints/complaints.module";
 import { ProgressTrackingModule } from "./progress_tracking/progress-tracking.module";
 import { NewDashboardModule } from "./new_dashboard/new_dashboard.module";
 import { DonorAuthModule } from "./donor_auth/donor-auth.module";
@@ -88,6 +89,7 @@ import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
     QrCodeModule,
     DashboardModule,
     TasksModule,
+    ComplaintsModule,
     ProgressTrackingModule,
     NewDashboardModule,
     DonorAuthModule,

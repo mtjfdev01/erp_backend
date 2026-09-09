@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { Resend } from "resend";
 import { ConfigService } from "@nestjs/config";
 import { generateTaskOverdueTemplate } from "./taskOverdueEmailTemplate";
+import { generateComplaintOverdueTemplate } from "./complaintOverdueEmailTemplate";
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -1731,6 +1732,298 @@ export class EmailService implements OnModuleInit {
       return success;
     } catch (error: any) {
       this.logger.error(`Task overdue email send failed: ${error?.message}`);
+      return false;
+    }
+  }
+
+  //  Complaints Section
+  async sendComplaintAssignmentEmail(
+    user: any,
+    complaint: any,
+    master?: any,
+  ): Promise<boolean> {
+    try {
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      let recurrenceInfo = "";
+      if (master && master.complaint_type === "recurring") {
+        const rule = master.recurrence_rule;
+        const endType = master.recurrence_end_type;
+        const endDate = master.recurrence_end_date
+          ? new Date(master.recurrence_end_date).toLocaleDateString()
+          : "";
+        const endOccurrences = master.recurrence_end_occurrences;
+        const currentOccurrence = master.recurrence_created_count;
+
+        let endMsg = "";
+        if (endType === "on_date") {
+          endMsg = `until ${endDate}`;
+        } else if (endType === "after_occurrences") {
+          endMsg = `for ${endOccurrences} total occurrences (This is #${currentOccurrence})`;
+        } else {
+          endMsg = `indefinitely`;
+        }
+        recurrenceInfo = `<p><strong>Note:</strong> This is a recurring complaint repeating every ${rule} ${endMsg}.</p>`;
+      }
+
+      const baseFrontendUrl = (
+        this.configService.get<string>("BASE_Frontend_URL") || ""
+      ).replace(/\/$/, "");
+      const complaintId = complaint?.id;
+      const complaintLink =
+        baseFrontendUrl && complaintId
+          ? `${baseFrontendUrl}/tickets/view/${complaintId}`
+          : null;
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `New Complaint Assigned: ${complaint.title}`,
+        html: `
+          <h1>New Complaint Assigned</h1>
+          <p>Hi ${user.first_name || user.email},</p>
+          <p>You have been assigned a new complaint: <strong>${complaint.title}</strong></p>
+          <p><strong>Priority:</strong> ${complaint.priority}</p>
+          <p><strong>Due Date:</strong> ${complaint.due_date ? new Date(complaint.due_date).toLocaleDateString() : "N/A"}</p>
+          ${recurrenceInfo}
+          ${
+            complaintLink
+              ? `<p><a href="${complaintLink}">View complaint in ERP</a></p>`
+              : "<p>Please log in to the ERP to view more details.</p>"
+          }
+        `,
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Complaint assignment email sent successfully to ${user.email} (id: ${result.data?.id})`,
+        );
+      } else if (result.error) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send complaint assignment email: ${e.message}`,
+      );
+      return false;
+    }
+  }
+
+  async sendComplaintCommentMentionEmail(
+    user: {
+      email?: string;
+      first_name?: string;
+      last_name?: string;
+    },
+    complaint: { id?: number; title?: string },
+    commentContent: string,
+    mentionedByName: string,
+  ): Promise<boolean> {
+    try {
+      if (!user?.email) return false;
+
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const baseFrontendUrl = (
+        this.configService.get<string>("BASE_Frontend_URL") || ""
+      ).replace(/\/$/, "");
+      const complaintTitle = complaint?.title || "Complaint";
+      const complaintId = complaint?.id;
+      const complaintLink =
+        baseFrontendUrl && complaintId
+          ? `${baseFrontendUrl}/tickets/view/${complaintId}`
+          : null;
+      const recipientName =
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.email;
+      const safeComment = String(commentContent || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>");
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `You were mentioned on complaint: ${complaintTitle}`,
+        html: `
+          <h1>You were mentioned in a complaint comment</h1>
+          <p>Hi ${recipientName},</p>
+          <p><strong>${mentionedByName}</strong> mentioned you in a comment on complaint: <strong>${complaintTitle}</strong></p>
+          <blockquote style="border-left:4px solid #ccc;margin:16px 0;padding:8px 16px;color:#333;">
+            ${safeComment}
+          </blockquote>
+          ${
+            complaintLink
+              ? `<p><a href="${complaintLink}">View complaint in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this complaint.</p>"
+          }
+        `,
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Complaint comment mention email sent to ${user.email} for complaint ${complaintId}`,
+        );
+      } else if (result.error) {
+        this.logger.warn(
+          `Resend error (complaint comment mention): ${JSON.stringify(result.error)}`,
+        );
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send complaint comment mention email: ${e?.message}`,
+      );
+      return false;
+    }
+  }
+
+  async sendComplaintDueReminderEmail(
+    user: {
+      email?: string;
+      first_name?: string;
+      last_name?: string;
+    },
+    complaint: { id?: number; title?: string },
+    offsetDays: number,
+    dueDateLabel: string,
+  ): Promise<boolean> {
+    try {
+      if (!user?.email) return false;
+
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const baseFrontendUrl = (
+        this.configService.get<string>("BASE_Frontend_URL") || ""
+      ).replace(/\/$/, "");
+      const complaintTitle = complaint?.title || "Complaint";
+      const complaintId = complaint?.id;
+      const complaintLink =
+        baseFrontendUrl && complaintId
+          ? `${baseFrontendUrl}/tickets/view/${complaintId}`
+          : null;
+      const recipientName =
+        `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+        user.email;
+
+      let duePhrase = `due in ${offsetDays} days`;
+      if (offsetDays === 0) duePhrase = "due today";
+      else if (offsetDays === 1) duePhrase = "due tomorrow";
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [user.email],
+        subject: `Complaint reminder: "${complaintTitle}" is ${duePhrase}`,
+        html: `
+          <h1>Complaint due date reminder</h1>
+          <p>Hi ${recipientName},</p>
+          <p>This is a reminder that your assigned complaint <strong>${complaintTitle}</strong> is <strong>${duePhrase}</strong>.</p>
+          <p><strong>Due date:</strong> ${dueDateLabel}</p>
+          ${
+            complaintLink
+              ? `<p><a href="${complaintLink}">View complaint in ERP</a></p>`
+              : "<p>Please log in to the ERP to view this complaint.</p>"
+          }
+        `,
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Complaint due reminder email sent to ${user.email} for complaint ${complaintId}`,
+        );
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send complaint due reminder email: ${e?.message}`,
+      );
+      return false;
+    }
+  }
+
+  async sendComplaintOverdueNotification(
+    toEmail: string,
+    complaint: any,
+    escalationLevel: number,
+  ): Promise<boolean> {
+    try {
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      const subject = `Urgent: Complaint Overdue Escalation (Level ${escalationLevel}) - ${complaint.title}`;
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [toEmail],
+        subject,
+        html: generateComplaintOverdueTemplate(complaint, escalationLevel),
+      });
+
+      const success = !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Sent complaint overdue notification via Resend to ${toEmail} (id: ${result.data?.id})`,
+        );
+      } else if (result.error) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
+      return success;
+    } catch (error: any) {
+      this.logger.error(
+        `Complaint overdue email send failed: ${error?.message}`,
+      );
       return false;
     }
   }

@@ -230,9 +230,23 @@ export class DonationsService {
 
   async resolveDonationListScope(
     user: { id?: number; role?: string; department?: string } | null | undefined,
-    sourceAccess: { online: boolean; offline: boolean },
+    sourceAccess: { online: boolean; offline: boolean; inKind?: boolean },
+    options?: { inKindList?: boolean },
   ): Promise<ResolvedDataScope | null> {
     if (!user?.id || user.id === -1) return null;
+
+    const inKindScope = await this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      "in_kind_donations",
+    );
+
+    // In Kind hub (or in-kind-only permission): use in_kind_donations scope / view_all
+    if (options?.inKindList || (sourceAccess.inKind && !sourceAccess.online && !sourceAccess.offline)) {
+      return inKindScope;
+    }
 
     const onlineScope = await this.dataScopeService.resolveScope(
       user.id,
@@ -254,14 +268,25 @@ export class DonationsService {
     }
     if (sourceAccess.online) return onlineScope;
     if (sourceAccess.offline) return offlineScope;
+    if (sourceAccess.inKind) return inKindScope;
     return onlineScope;
   }
 
   async resolveDonationRecordScope(
     user: { id?: number; role?: string; department?: string } | null | undefined,
     donationSource: string | null | undefined,
+    donationMethod?: string | null,
   ): Promise<ResolvedDataScope | null> {
     if (!user?.id || user.id === -1) return null;
+    if (String(donationMethod || "").toLowerCase() === "in_kind") {
+      return this.dataScopeService.resolveScope(
+        user.id,
+        user.role,
+        user.department,
+        "fund_raising",
+        "in_kind_donations",
+      );
+    }
     const module =
       donationSource === "website" ? "online_donations" : "offline_donations";
     return this.dataScopeService.resolveScope(
