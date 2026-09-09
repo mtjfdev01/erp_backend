@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { Repository, SelectQueryBuilder } from "typeorm";
 import { Donation } from "../donations/entities/donation.entity";
 import { Donor } from "../dms/donor/entities/donor.entity";
 import {
@@ -14,6 +14,23 @@ import { RecurringDonation } from "../donations/recurring_donations/entities/rec
 
 /** Donation status considered "COMPLETED" */
 const COMPLETED_STATUS = "completed";
+
+/** SQL fragment: donation is recurring-linked (donor flag, bank recurrence, intent, or ledger). */
+const RECURRING_DONATION_FILTER = `(
+  EXISTS (
+    SELECT 1 FROM donors donor
+    WHERE donor.id = {alias}.donor_id
+      AND donor.is_archived = false
+      AND donor.recurring = true
+  )
+  OR {alias}.recurrence_id IS NOT NULL
+  OR {alias}.manual_recurring_intent IS NOT NULL
+  OR EXISTS (
+    SELECT 1 FROM recurring_donations rd
+    WHERE rd.is_archived = false
+      AND rd.initial_donation_id = {alias}.id
+  )
+)`;
 
 @Injectable()
 export class DashboardAggregateService {
@@ -66,10 +83,21 @@ export class DashboardAggregateService {
     return { start, end };
   }
 
+  private applyRecurringDonationFilter(
+    qb: SelectQueryBuilder<Donation>,
+    alias = "d",
+  ): SelectQueryBuilder<Donation> {
+    return qb.andWhere(
+      RECURRING_DONATION_FILTER.replace(/\{alias\}/g, alias),
+    );
+  }
+
   /**
    * Fundraising overview: cards (totals by category), cumulative series, and raised-per-month for charts.
    * When donation-level filters are provided, computes directly from the donations table.
    * Otherwise uses precomputed aggregation tables for performance.
+   * Pass recurring_only=true to limit donation/donor aggregates to recurring activity
+   * (used by Recurring Performance dashboard; default false leaves existing behavior).
    */
   async getFundraisingOverview(query: {
     year?: number;
@@ -81,6 +109,7 @@ export class DashboardAggregateService {
     date?: string;
     start_date?: string;
     end_date?: string;
+    recurring_only?: boolean;
   }): Promise<{
     cards: {
       total_donations_amount: number;
@@ -132,6 +161,7 @@ export class DashboardAggregateService {
     ];
     const formatMonth = (d: Date) =>
       MONTH_NAMES[d.getUTCMonth()] + " " + d.getUTCFullYear();
+    const recurringOnly = query.recurring_only === true;
 
     // Date range behavior (simple):
     // - if `date` set: that day only
@@ -162,20 +192,26 @@ export class DashboardAggregateService {
     }
 
     // 1) donations: completed + not archived, filter by donation.date
-    const donationsAgg = await this.donationRepo
+    let donationsAggQb = this.donationRepo
       .createQueryBuilder("d")
       .select("COALESCE(SUM(d.amount), 0)", "amount_sum")
       .addSelect("COALESCE(COUNT(d.id), 0)", "count")
       .where("d.is_archived = false")
       .andWhere("LOWER(d.status) = :status", { status: COMPLETED_STATUS })
-      .andWhere("d.date BETWEEN :start AND :end", { start, end })
-      .getRawOne<{ amount_sum: string; count: string }>();
+      .andWhere("d.date BETWEEN :start AND :end", { start, end });
+    if (recurringOnly) {
+      donationsAggQb = this.applyRecurringDonationFilter(donationsAggQb);
+    }
+    const donationsAgg = await donationsAggQb.getRawOne<{
+      amount_sum: string;
+      count: string;
+    }>();
 
     const totalDonationsAmount = Number(donationsAgg?.amount_sum ?? 0);
     const totalDonationsCount = Number(donationsAgg?.count ?? 0);
 
     // Cumulative series by month (donations only)
-    const monthRows = await this.donationRepo
+    let monthRowsQb = this.donationRepo
       .createQueryBuilder("d")
       .select("DATE_TRUNC('month', d.date)", "month_start")
       .addSelect("COALESCE(SUM(d.amount), 0)", "month_total")
@@ -183,8 +219,14 @@ export class DashboardAggregateService {
       .andWhere("LOWER(d.status) = :status", { status: COMPLETED_STATUS })
       .andWhere("d.date BETWEEN :start AND :end", { start, end })
       .groupBy("month_start")
-      .orderBy("month_start", "ASC")
-      .getRawMany<{ month_start: Date; month_total: string }>();
+      .orderBy("month_start", "ASC");
+    if (recurringOnly) {
+      monthRowsQb = this.applyRecurringDonationFilter(monthRowsQb);
+    }
+    const monthRows = await monthRowsQb.getRawMany<{
+      month_start: Date;
+      month_total: string;
+    }>();
 
     let running = 0;
     const cumulative = monthRows.map((r) => {
@@ -199,7 +241,7 @@ export class DashboardAggregateService {
     });
 
     // 2) donors counts (individual / corporate / multi-time — global flags)
-    const donorCounts = await this.donorRepo
+    let donorCountsQb = this.donorRepo
       .createQueryBuilder("u")
       .select(
         "COALESCE(SUM(CASE WHEN u.donor_type = 'individual' THEN 1 ELSE 0 END), 0)",
@@ -213,12 +255,15 @@ export class DashboardAggregateService {
         "COALESCE(SUM(CASE WHEN u.multi_time_donor = true THEN 1 ELSE 0 END), 0)",
         "multi_time_donors_count",
       )
-      .where("u.is_archived = false")
-      .getRawOne<{
-        individual_donors_count: string;
-        corporate_donors_count: string;
-        multi_time_donors_count: string;
-      }>();
+      .where("u.is_archived = false");
+    if (recurringOnly) {
+      donorCountsQb = donorCountsQb.andWhere("u.recurring = true");
+    }
+    const donorCounts = await donorCountsQb.getRawOne<{
+      individual_donors_count: string;
+      corporate_donors_count: string;
+      multi_time_donors_count: string;
+    }>();
 
     // 2b) Recurring donors + installment donations — same date range as donations cards
     const recurringInstallmentsAgg = await this.recurringDonationRepo
@@ -365,25 +410,30 @@ export class DashboardAggregateService {
       };
     });
 
-    // 3) donation boxes active count
-    const activeDonationBoxesCount = await this.donationBoxRepo.count({
-      where: { is_archived: false, is_active: true, status: BoxStatus.ACTIVE },
-    });
+    // 3–5) Non-recurring KPIs: omit (zero) on recurring-only dashboard
+    let activeDonationBoxesCount = 0;
+    let donationBoxDonationsAmount = 0;
+    let eventsCount = 0;
+    let campaignsCount = 0;
 
-    // 4) donation box donations sum (non-archived)
-    const donationBoxAgg = await this.donationBoxDonationRepo
-      .createQueryBuilder("b")
-      .select("COALESCE(SUM(b.collection_amount), 0)", "amount_sum")
-      .where("b.is_archived = false")
-      .getRawOne<{ amount_sum: string }>();
+    if (!recurringOnly) {
+      activeDonationBoxesCount = await this.donationBoxRepo.count({
+        where: { is_archived: false, is_active: true, status: BoxStatus.ACTIVE },
+      });
 
-    const donationBoxDonationsAmount = Number(donationBoxAgg?.amount_sum ?? 0);
+      const donationBoxAgg = await this.donationBoxDonationRepo
+        .createQueryBuilder("b")
+        .select("COALESCE(SUM(b.collection_amount), 0)", "amount_sum")
+        .where("b.is_archived = false")
+        .getRawOne<{ amount_sum: string }>();
 
-    // 5) events + campaigns counts (non-archived)
-    const [eventsCount, campaignsCount] = await Promise.all([
-      this.eventRepo.count({ where: { is_archived: false } }),
-      this.campaignRepo.count({ where: { is_archived: false } }),
-    ]);
+      donationBoxDonationsAmount = Number(donationBoxAgg?.amount_sum ?? 0);
+
+      [eventsCount, campaignsCount] = await Promise.all([
+        this.eventRepo.count({ where: { is_archived: false } }),
+        this.campaignRepo.count({ where: { is_archived: false } }),
+      ]);
+    }
 
     const cards = {
       total_donations_amount: totalDonationsAmount,
