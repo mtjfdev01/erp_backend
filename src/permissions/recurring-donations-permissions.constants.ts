@@ -10,6 +10,14 @@ export const RECURRING_DONATION_VIEW_PERMISSIONS = [
   `${RECURRING}.view`,
 ] as const;
 
+export const RECURRING_DONATION_CREATE_PERMISSIONS = [
+  `${RECURRING}.create`,
+] as const;
+
+export const RECURRING_DONATION_UPDATE_PERMISSIONS = [
+  `${RECURRING}.update`,
+] as const;
+
 export const RECURRING_DONATION_LIST_VIEW_GUARD = [
   ...RECURRING_DONATION_LIST_VIEW_PERMISSIONS,
   "super_admin",
@@ -22,4 +30,16 @@ export const RECURRING_DONATION_VIEW_GUARD = [
   "super_admin",
   "fund_raising_manager",
   "fund_raising_user",
+] as const;
+
+export const RECURRING_DONATION_CREATE_GUARD = [
+  ...RECURRING_DONATION_CREATE_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
+] as const;
+
+export const RECURRING_DONATION_UPDATE_GUARD = [
+  ...RECURRING_DONATION_UPDATE_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
 ] as const;

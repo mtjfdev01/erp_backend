@@ -1602,13 +1602,53 @@ export class DonationsService {
     }
   }
 
+  /** Multiselect on `donation.project_id` (string slug); supports `__none__` for no project. */
+  private applyDonationProjectMultiselectFilter(
+    query: SelectQueryBuilder<Donation>,
+    projectIds: unknown[],
+  ): void {
+    if (!Array.isArray(projectIds) || projectIds.length === 0) return;
+
+    const includeNone = projectIds.some(
+      (v) => v === "__none__" || v === "none" || v === null || v === "",
+    );
+    const ids = projectIds
+      .map((v) => String(v ?? "").trim())
+      .filter(
+        (v) =>
+          v.length > 0 &&
+          v !== "__none__" &&
+          v !== "none",
+      );
+
+    if (includeNone && ids.length > 0) {
+      query.andWhere(
+        "(donation.project_id IS NULL OR donation.project_id = '' OR donation.project_id IN (:...projectFilterIds))",
+        { projectFilterIds: ids },
+      );
+      return;
+    }
+    if (includeNone) {
+      query.andWhere(
+        "(donation.project_id IS NULL OR donation.project_id = '')",
+      );
+      return;
+    }
+    if (ids.length > 0) {
+      query.andWhere("donation.project_id IN (:...projectFilterIds)", {
+        projectFilterIds: ids,
+      });
+    }
+  }
+
   private omitAppealIdFromMultiselect(
     multiselectFilters: Record<string, unknown> | null | undefined,
   ): Record<string, unknown> {
     if (!multiselectFilters || typeof multiselectFilters !== "object") {
       return {};
     }
-    const { appeal_id: _appealId, ...rest } = multiselectFilters;
+    const { appeal_id: _appealId, project_id: _projectId, ...rest } =
+      multiselectFilters;
     return rest;
   }
 
@@ -3515,7 +3555,7 @@ export class DonationsService {
         "donation",
       );
 
-      // 4) Multiselect filters (ref, appeal_id, …)
+      // 4) Multiselect filters (ref, appeal_id, project_id, …)
       const msFiltersRaw =
         multiselectFilters && typeof multiselectFilters === "object"
           ? { ...multiselectFilters }
@@ -3527,6 +3567,15 @@ export class DonationsService {
         this.applyDonationAppealMultiselectFilter(
           query,
           (msFiltersRaw as any).appeal_id,
+        );
+      }
+      if (
+        Array.isArray((msFiltersRaw as any).project_id) &&
+        (msFiltersRaw as any).project_id.length > 0
+      ) {
+        this.applyDonationProjectMultiselectFilter(
+          query,
+          (msFiltersRaw as any).project_id,
         );
       }
       const msFiltersRest = this.omitAppealIdFromMultiselect(msFiltersRaw);
@@ -3649,6 +3698,15 @@ export class DonationsService {
         this.applyDonationAppealMultiselectFilter(
           sumQuery,
           (sumMsRaw as any).appeal_id,
+        );
+      }
+      if (
+        Array.isArray((sumMsRaw as any).project_id) &&
+        (sumMsRaw as any).project_id.length > 0
+      ) {
+        this.applyDonationProjectMultiselectFilter(
+          sumQuery,
+          (sumMsRaw as any).project_id,
         );
       }
       const sumMsRest = this.omitAppealIdFromMultiselect(sumMsRaw);
