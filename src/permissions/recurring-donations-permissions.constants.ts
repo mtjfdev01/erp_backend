@@ -20,6 +20,9 @@ export const RECURRING_DONATION_UPDATE_PERMISSIONS = [
 
 export const RECURRING_DONATION_LIST_VIEW_GUARD = [
   ...RECURRING_DONATION_LIST_VIEW_PERMISSIONS,
+  // Recurring Donors module may also list via the same search endpoint
+  "fund_raising.recurring_donors.list_view",
+  "fund_raising.recurring_donors.view",
   "super_admin",
   "fund_raising_manager",
   "fund_raising_user",
@@ -27,6 +30,8 @@ export const RECURRING_DONATION_LIST_VIEW_GUARD = [
 
 export const RECURRING_DONATION_VIEW_GUARD = [
   ...RECURRING_DONATION_VIEW_PERMISSIONS,
+  "fund_raising.recurring_donors.view",
+  "fund_raising.recurring_donors.list_view",
   "super_admin",
   "fund_raising_manager",
   "fund_raising_user",
