@@ -281,31 +281,34 @@ export class DashboardAggregateService {
       })
       .getRawOne<{ amount_sum: string; count: string }>();
 
-    const recurringDonorRows = await this.recurringDonationRepo
+    // Recurring donors card = same population as Recurring Donors list
+    // filter "Has paid installments": non-archived subscriptions that have
+    // at least one completed/paid/success installment (list pagination.total).
+    const recurringDonorsAgg = await this.recurringDonationRepo
       .createQueryBuilder("rd")
-      .select("DISTINCT rd.donor_id", "donor_id")
+      .select("COALESCE(COUNT(rd.id), 0)", "subscription_count")
       .where("rd.is_archived = false")
-      .andWhere("rd.donor_id IS NOT NULL")
+      .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
       .andWhere(
-        `(
-          (rd.record_type = 'installment'
-            AND LOWER(COALESCE(rd.status, '')) IN ('completed', 'paid', 'success')
-            AND COALESCE(rd.paid_at, rd.created_at) BETWEEN :start AND :end)
-          OR
-          (rd.record_type = 'subscription'
-            AND rd.created_at BETWEEN :start AND :end)
+        `EXISTS (
+          SELECT 1 FROM recurring_donations inst
+          WHERE inst.parent_id = rd.id
+            AND inst.record_type = 'installment'
+            AND inst.is_archived = false
+            AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
         )`,
-        { start, end },
       )
-      .getRawMany<{ donor_id: string }>();
+      .getRawOne<{ subscription_count: string }>();
 
-    const recurringDonorsCount = recurringDonorRows.length;
+    // Both Recurring Donors and Recurring Donations (count) match list
+    // filter "Has paid installments" (subscription rows with ≥1 paid installment).
+    const recurringDonorsCount = Number(
+      recurringDonorsAgg?.subscription_count ?? 0,
+    );
     const recurringDonationsAmount = Number(
       recurringInstallmentsAgg?.amount_sum ?? 0,
     );
-    const recurringDonationsCount = Number(
-      recurringInstallmentsAgg?.count ?? 0,
-    );
+    const recurringDonationsCount = recurringDonorsCount;
     // Alias: total collected via completed recurring installments in range
     const totalRecurringCollection = recurringDonationsAmount;
 
@@ -369,30 +372,24 @@ export class DashboardAggregateService {
       };
     });
 
-    // 2d) Recurring donors monthly series (distinct donors active that month)
+    // 2d) Recurring donors monthly series — paid installments only
     const recurringDonorMonthRows = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .select(
-        `DATE_TRUNC('month', CASE
-          WHEN rd.record_type = 'installment' THEN COALESCE(rd.paid_at, rd.created_at)
-          ELSE rd.created_at
-        END)`,
+        "DATE_TRUNC('month', COALESCE(rd.paid_at, rd.created_at))",
         "month_start",
       )
       .addSelect("COALESCE(COUNT(DISTINCT rd.donor_id), 0)", "donors_count")
       .where("rd.is_archived = false")
       .andWhere("rd.donor_id IS NOT NULL")
-      .andWhere(
-        `(
-          (rd.record_type = 'installment'
-            AND LOWER(COALESCE(rd.status, '')) IN ('completed', 'paid', 'success')
-            AND COALESCE(rd.paid_at, rd.created_at) BETWEEN :start AND :end)
-          OR
-          (rd.record_type = 'subscription'
-            AND rd.created_at BETWEEN :start AND :end)
-        )`,
-        { start, end },
-      )
+      .andWhere("rd.record_type = :installment", { installment: "installment" })
+      .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...statuses)", {
+        statuses: ["completed", "paid", "success"],
+      })
+      .andWhere("COALESCE(rd.paid_at, rd.created_at) BETWEEN :start AND :end", {
+        start,
+        end,
+      })
       .groupBy("month_start")
       .orderBy("month_start", "ASC")
       .getRawMany<{ month_start: Date; donors_count: string }>();

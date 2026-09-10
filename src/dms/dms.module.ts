@@ -32,6 +32,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { AidModule } from './aid/aid.module';
 import { WebsiteDonationProjectsModule } from './website_donation_projects/website-donation-projects.module';
 import { WebsiteHomeHeroModule } from './website_home_hero/website-home-hero.module';
+import { EventPledgesModule } from './event_pledges/event-pledges.module';
 
 @Module({
   controllers: [DmsController],
@@ -71,6 +72,7 @@ import { WebsiteHomeHeroModule } from './website_home_hero/website-home-hero.mod
     DmsTodosModule,
     WebsiteDonationProjectsModule,
     WebsiteHomeHeroModule,
+    EventPledgesModule,
   ],
 })
 export class DmsModule {}
