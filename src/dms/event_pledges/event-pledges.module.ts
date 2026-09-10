@@ -5,6 +5,7 @@ import { PermissionsModule } from "src/permissions";
 import { EventPledge } from "./entities/event-pledge.entity";
 import { EventPledgesService } from "./event-pledges.service";
 import { EventPledgesController } from "./event-pledges.controller";
+import { PublicEventPledgesController } from "./public-event-pledges.controller";
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { EventPledgesController } from "./event-pledges.controller";
     }),
     PermissionsModule,
   ],
-  controllers: [EventPledgesController],
+  controllers: [EventPledgesController, PublicEventPledgesController],
   providers: [EventPledgesService],
   exports: [EventPledgesService],
 })
