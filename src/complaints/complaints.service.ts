@@ -974,7 +974,7 @@ export class ComplaintsService {
         qb.andWhere("complaint.created_at <= :end_date", { end_date: endDate });
       }
       if (exactDate) {
-        qb.andWhere("DATE(task.created_at) = :exact_date", {
+        qb.andWhere("DATE(complaint.created_at) = :exact_date", {
           exact_date: exactDate,
         });
       }
@@ -1033,19 +1033,19 @@ export class ComplaintsService {
       if (searchTerm && searchTerm.trim() !== "") {
         qb.andWhere(
           new Brackets((searchQb) => {
-            // Search in task fields
-            searchQb.where("LOWER(task.title) LIKE :searchTerm", {
+            // Search in complaint fields
+            searchQb.where("LOWER(complaint.title) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
-            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", {
+            searchQb.orWhere("LOWER(complaint.description) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
-            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
+            searchQb.orWhere("LOWER(complaint.project_name) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
             // Search in assigned user names from assigned_users_meta
             searchQb.orWhere(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(complaint.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
               { searchTerm: `%${searchTerm.toLowerCase()}%` },
             );
           }),
@@ -1060,7 +1060,7 @@ export class ComplaintsService {
         const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
 
         qb.andWhere(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(complaint.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
           { userName: userSearchTerm },
         );
       }
@@ -1127,7 +1127,7 @@ export class ComplaintsService {
         countQb.andWhere("complaint.created_at <= :end_date", { end_date: endDate });
       }
       if (exactDate) {
-        countQb.andWhere("DATE(task.created_at) = :exact_date", {
+        countQb.andWhere("DATE(complaint.created_at) = :exact_date", {
           exact_date: exactDate,
         });
       }
@@ -1156,17 +1156,17 @@ export class ComplaintsService {
       if (searchTerm && searchTerm.trim() !== "") {
         countQb.andWhere(
           new Brackets((searchQb) => {
-            searchQb.where("LOWER(task.title) LIKE :searchTerm", {
+            searchQb.where("LOWER(complaint.title) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
-            searchQb.orWhere("LOWER(task.description) LIKE :searchTerm", {
+            searchQb.orWhere("LOWER(complaint.description) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
-            searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
+            searchQb.orWhere("LOWER(complaint.project_name) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
             searchQb.orWhere(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(complaint.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
               { searchTerm: `%${searchTerm.toLowerCase()}%` },
             );
           }),
@@ -1177,7 +1177,7 @@ export class ComplaintsService {
       if (userNameFilter && userNameFilter.trim() !== "") {
         const userSearchTerm = `%${userNameFilter.toLowerCase()}%`;
         countQb.andWhere(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements(complaint.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :userName)",
           { userName: userSearchTerm },
         );
       }
@@ -1202,7 +1202,7 @@ export class ComplaintsService {
               currentUserId: currentUser.id,
             });
             dqb.orWhere(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId)",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(complaint.assigned_users_meta) AS assignee WHERE (assignee->>'user_id')::int = :currentUserId)",
               { currentUserId: currentUser.id },
             );
           }),
