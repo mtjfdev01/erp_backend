@@ -126,6 +126,16 @@ export class DashboardAggregateService {
       donation_box_donations_amount: number;
       events_count: number;
       campaigns_count: number;
+      /** All ledger subscriptions (same as Recurring Donors list total) */
+      registered_recurring_donors_count: number;
+      /** Subscriptions with no paid installment (list "pending") */
+      outstanding_donors_count: number;
+      /** Sum of active subscription pledge amounts */
+      committed_amount: number;
+      /** Active subscriptions normalized to monthly run-rate */
+      committed_monthly_amount: number;
+      /** Completed recurring installments in the current calendar month */
+      this_month_recurring_collection: number;
     };
     cumulative: Array<{
       month: string;
@@ -338,6 +348,107 @@ export class DashboardAggregateService {
       pendingInstallmentsAgg?.amount_sum ?? 0,
     );
 
+    // --- Additive Recurring Performance KPIs (do not replace existing cards) ---
+
+    // Same as Recurring Donors list with no installment filter (all ledger subscriptions)
+    const registeredRecurringDonorsCount = await this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .where("rd.is_archived = false")
+      .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .getCount();
+
+    // Same as list filter "Pending installments (none paid)" — subscription rows
+    const outstandingDonorsAgg = await this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .select("COALESCE(COUNT(rd.id), 0)", "count")
+      .where("rd.is_archived = false")
+      .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .andWhere(
+        `NOT EXISTS (
+          SELECT 1 FROM recurring_donations inst
+          WHERE inst.parent_id = rd.id
+            AND inst.record_type = 'installment'
+            AND inst.is_archived = false
+            AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
+        )`,
+      )
+      .getRawOne<{ count: string }>();
+
+    const outstandingDonorsCount = Number(outstandingDonorsAgg?.count ?? 0);
+
+    // Committed Amount: sum of active subscription pledge amounts
+    const committedAmountAgg = await this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .select("COALESCE(SUM(rd.amount), 0)", "amount_sum")
+      .where("rd.is_archived = false")
+      .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...activeStatuses)", {
+        activeStatuses: ["active", "past_due", "trialing"],
+      })
+      .getRawOne<{ amount_sum: string }>();
+
+    const committedAmount = Number(committedAmountAgg?.amount_sum ?? 0);
+
+    // Committed Monthly: normalize each active subscription to a monthly run-rate
+    const committedMonthlyAgg = await this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .select(
+        `COALESCE(SUM(
+          CASE
+            WHEN LOWER(COALESCE(rd.billing_interval, 'month')) = 'day'
+              THEN (COALESCE(rd.amount, 0)::numeric * 30.0)
+                   / GREATEST(COALESCE(rd.billing_interval_count, 1), 1)
+            WHEN LOWER(COALESCE(rd.billing_interval, 'month')) = 'week'
+              THEN (COALESCE(rd.amount, 0)::numeric * (52.0 / 12.0))
+                   / GREATEST(COALESCE(rd.billing_interval_count, 1), 1)
+            WHEN LOWER(COALESCE(rd.billing_interval, 'month')) = 'year'
+              THEN (COALESCE(rd.amount, 0)::numeric / 12.0)
+                   / GREATEST(COALESCE(rd.billing_interval_count, 1), 1)
+            ELSE
+              COALESCE(rd.amount, 0)::numeric
+                / GREATEST(COALESCE(rd.billing_interval_count, 1), 1)
+          END
+        ), 0)`,
+        "amount_sum",
+      )
+      .where("rd.is_archived = false")
+      .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...activeStatuses)", {
+        activeStatuses: ["active", "past_due", "trialing"],
+      })
+      .getRawOne<{ amount_sum: string }>();
+
+    const committedMonthlyAmount = Math.round(
+      Number(committedMonthlyAgg?.amount_sum ?? 0),
+    );
+
+    // This month collection: completed installments in the current calendar month
+    const now = new Date();
+    const thisMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
+    );
+    const thisMonthEnd = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+    );
+
+    const thisMonthCollectionAgg = await this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .select("COALESCE(SUM(rd.amount), 0)", "amount_sum")
+      .where("rd.is_archived = false")
+      .andWhere("rd.record_type = :installment", { installment: "installment" })
+      .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...statuses)", {
+        statuses: ["completed", "paid", "success"],
+      })
+      .andWhere(
+        "COALESCE(rd.paid_at, rd.created_at) BETWEEN :thisMonthStart AND :thisMonthEnd",
+        { thisMonthStart, thisMonthEnd },
+      )
+      .getRawOne<{ amount_sum: string }>();
+
+    const thisMonthRecurringCollection = Number(
+      thisMonthCollectionAgg?.amount_sum ?? 0,
+    );
+
     // 2c) Recurring donations monthly series (installment amounts)
     const recurringDonationMonthRows = await this.recurringDonationRepo
       .createQueryBuilder("rd")
@@ -451,6 +562,11 @@ export class DashboardAggregateService {
       donation_box_donations_amount: donationBoxDonationsAmount,
       events_count: Number(eventsCount ?? 0),
       campaigns_count: Number(campaignsCount ?? 0),
+      registered_recurring_donors_count: registeredRecurringDonorsCount,
+      outstanding_donors_count: outstandingDonorsCount,
+      committed_amount: committedAmount,
+      committed_monthly_amount: committedMonthlyAmount,
+      this_month_recurring_collection: thisMonthRecurringCollection,
     };
 
     return {
