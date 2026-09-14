@@ -63,6 +63,29 @@ export enum RecurrenceEndType {
   AFTER_OCCURRENCES = "after_occurrences",
 }
 
+/** Standard grievance categories (type = complaint, general workflow). */
+export enum ComplaintCategory {
+  HARASSMENT = "harassment",
+  MISCONDUCT = "misconduct",
+  CORRUPTION = "corruption",
+  DISCRIMINATION = "discrimination",
+  NEGLIGENCE = "negligence",
+  SERVICE_FAILURE = "service_failure",
+  BEHAVIOR = "behavior",
+  WORKPLACE_SAFETY = "workplace_safety",
+  FRAUD = "fraud",
+  OTHER = "other",
+}
+
+/** Grievance workflow columns — only for type = complaint (general case). */
+export enum ComplaintWorkflowStatus {
+  SUBMITTED = "submitted",
+  UNDER_INVESTIGATION = "under_investigation",
+  RESOLVED = "resolved",
+  DISMISSED = "dismissed",
+  CLOSED = "closed",
+}
+
 @Entity("complaints")
 export class Complaint {
   @PrimaryGeneratedColumn("increment")
@@ -228,9 +251,60 @@ export class Complaint {
   @UpdateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   updated_at: Date;
 
-   @Column({ type: "varchar", nullable: true })
+  @Column({ type: "varchar", nullable: true })
   source: string; // e.g., "ceo_note"
 
   @Column({ type: "int", nullable: true })
   source_id: number; // The ID of the source entity
+
+  /** Grievance-only fields (type = complaint, general workflow). Issues ignore these. */
+
+  @Column({ type: "varchar", length: 32, nullable: true, unique: true })
+  complaint_code: string;
+
+  @Column({
+    type: "enum",
+    enum: ComplaintCategory,
+    nullable: true,
+  })
+  complaint_category: ComplaintCategory;
+
+  @Column({ type: "varchar", nullable: true })
+  complaint_category_custom: string;
+
+  @Column({
+    type: "enum",
+    enum: ComplaintWorkflowStatus,
+    nullable: true,
+  })
+  complaint_workflow_status: ComplaintWorkflowStatus;
+
+  @Column({
+    type: "enum",
+    enum: Department,
+    array: true,
+    nullable: true,
+  })
+  nominated_departments: Department[];
+
+  @Column({ type: "int", array: true, nullable: true })
+  nominated_user_ids: number[];
+
+  @Column({ type: "int", array: true, nullable: true })
+  investigator_ids: number[];
+
+  @Column({ type: "int", nullable: true })
+  related_issue_id: number;
+
+  @Column({ type: "text", nullable: true })
+  complainer_narrative: string;
+
+  @Column({ type: "text", nullable: true })
+  accused_narrative: string;
+
+  @Column({ type: "text", nullable: true })
+  resolution_summary: string;
+
+  @Column({ type: "varchar", nullable: true, default: "internal" })
+  submission_channel: string;
 }

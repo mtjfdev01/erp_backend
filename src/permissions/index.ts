@@ -95,6 +95,18 @@ export {
   TICKET_DASHBOARD_GUARD,
 } from "./complaint-permissions.constants";
 
+export {
+  COMPLAINT_CASE_CREATE_GUARD,
+  COMPLAINT_CASE_LIST_VIEW_GUARD,
+  COMPLAINT_CASE_VIEW_GUARD,
+  COMPLAINT_CASE_INVESTIGATE_GUARD,
+  COMPLAINT_CASE_UPDATE_STATUS_GUARD,
+  COMPLAINT_CASE_MANAGE_NOMINEES_GUARD,
+  COMPLAINT_CASE_VIEW_NOMINEES_GUARD,
+  COMPLAINT_CASE_SCHEDULE_MEETINGS_GUARD,
+  COMPLAINT_CASE_ADD_NARRATIVE_GUARD,
+} from "./complaint-case-permissions.constants";
+
 // Export entities
 export { PermissionsEntity } from "./entities/permissions.entity";
 
