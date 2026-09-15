@@ -137,22 +137,24 @@ export class JazzCashService {
     const pp_TxnExpiryDateTime = this.formatPktDateTime(expiry);
 
     const payload: Record<string, string> = {
-      pp_Amount: this.toGatewayAmount(params.amount),
-      pp_BankID: "",
-      pp_BillReference,
-      pp_CNIC: cnic,
-      pp_Description: (params.description || "Donation").slice(0, 200),
+      pp_Version: "2.0",
+      pp_TxnType: "MWALLET",
       pp_Language: "EN",
       pp_MerchantID: creds.merchantId,
-      pp_MobileNumber: mobile,
-      pp_Password: creds.password,
-      pp_ProductID: "",
       pp_SubMerchantID: "",
-      pp_SubMerchantName: creds.subMerchantName,
+      pp_Password: creds.password,
+      pp_BankID: "",
+      pp_ProductID: "",
+      pp_TxnRefNo,
+      pp_MobileNumber: mobile,
+      pp_CNIC: cnic,
+      pp_Amount: this.toGatewayAmount(params.amount),
+      pp_DiscountedAmount: "",
       pp_TxnCurrency: "PKR",
       pp_TxnDateTime,
+      pp_BillReference,
+      pp_Description: (params.description || "Donation").slice(0, 200),
       pp_TxnExpiryDateTime,
-      pp_TxnRefNo,
       ppmpf_1: "",
       ppmpf_2: "",
       ppmpf_3: "",
@@ -220,6 +222,7 @@ export class JazzCashService {
   }> {
     const creds = this.getCredentials();
     const payload: Record<string, string> = {
+      pp_Version: "2.0",
       pp_TxnRefNo,
       pp_MerchantID: creds.merchantId,
       pp_Password: creds.password,
@@ -260,10 +263,22 @@ export class JazzCashService {
 
   /** Merchant IPN acknowledgement body */
   buildIpnAcknowledgement(): Record<string, string> {
+    return this.buildIpnResponseBody("000", "IPN received successfully");
+  }
+
+  /** IPN error acknowledgement — must include a valid pp_SecureHash. */
+  buildIpnErrorAcknowledgement(message: string): Record<string, string> {
+    return this.buildIpnResponseBody("999", message || "IPN processing error");
+  }
+
+  private buildIpnResponseBody(
+    pp_ResponseCode: string,
+    pp_ResponseMessage: string,
+  ): Record<string, string> {
     const creds = this.getCredentials();
     const body: Record<string, string> = {
-      pp_ResponseCode: "000",
-      pp_ResponseMessage: "IPN received successfully",
+      pp_ResponseCode,
+      pp_ResponseMessage,
     };
     body.pp_SecureHash = buildJazzCashSecureHash(body, creds.integritySalt);
     this.logger.log(

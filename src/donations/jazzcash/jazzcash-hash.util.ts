@@ -1,8 +1,13 @@
 import * as crypto from "crypto";
 
+/** JazzCash hash includes only `pp_*` fields (not ppmpf_*), excluding pp_SecureHash. */
+function isJazzCashHashField(key: string): boolean {
+  return key !== "pp_SecureHash" && /^pp_/i.test(key);
+}
+
 /**
- * JazzCash HMAC-SHA256 (2026):
- * - Include all non-empty fields except pp_SecureHash
+ * JazzCash HMAC-SHA256:
+ * - Include all non-empty pp_* fields except pp_SecureHash
  * - Sort keys ascending (ASCII)
  * - Join values with &
  * - Prepend integrity salt: `{salt}&{values...}`
@@ -13,7 +18,7 @@ export function buildJazzCashSecureHash(
   integritySalt: string,
 ): string {
   const sortedKeys = Object.keys(fields)
-    .filter((k) => k !== "pp_SecureHash")
+    .filter(isJazzCashHashField)
     .sort((a, b) => a.localeCompare(b));
 
   const values: string[] = [];

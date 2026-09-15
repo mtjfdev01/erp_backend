@@ -5,10 +5,21 @@ export interface JazzCashCredentials {
   merchantId: string;
   password: string;
   integritySalt: string;
-  subMerchantName: string;
   mwalletUrl: string;
   statusInquiryUrl: string;
   ipnUrl: string;
+}
+
+/** Strip wrapping quotes from .env values (e.g. 'value' or "value"). */
+function trimEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 export function getJazzCashEnvMode(): JazzCashEnvMode {
@@ -33,10 +44,13 @@ const PRODUCTION_STATUS_INQUIRY_URL =
 
 export function resolveJazzCashCredentials(): JazzCashCredentials {
   const env = getJazzCashEnvMode();
-  const merchantId = process.env.JAZZCASH_MERCHANT_ID || "";
-  const password = process.env.JAZZCASH_PASSWORD || "";
-  const integritySalt =
-    process.env.JAZZCASH_INTEGRITY_SALT || process.env.JAZZCASH_HASH_KEY || "";
+  const merchantId = trimEnvValue(process.env.JAZZCASH_MERCHANT_ID || "");
+  const password = trimEnvValue(process.env.JAZZCASH_PASSWORD || "");
+  const integritySalt = trimEnvValue(
+    process.env.JAZZCASH_INTEGRITY_SALT ||
+      process.env.JAZZCASH_HASH_KEY ||
+      "",
+  );
 
   if (!merchantId || !password || !integritySalt) {
     throw new Error(
@@ -65,9 +79,6 @@ export function resolveJazzCashCredentials(): JazzCashCredentials {
     merchantId,
     password,
     integritySalt,
-    subMerchantName:
-      process.env.JAZZCASH_SUB_MERCHANT_NAME ||
-      "MOLANA TARIQ JAMIL FOUNDATION",
     mwalletUrl: process.env.JAZZCASH_MWALLET_URL || defaultMwalletUrl,
     statusInquiryUrl:
       process.env.JAZZCASH_STATUS_INQUIRY_URL || defaultStatusInquiryUrl,

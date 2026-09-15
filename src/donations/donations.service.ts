@@ -5198,6 +5198,10 @@ export class DonationsService {
     return this.jazzcashService.buildIpnAcknowledgement();
   }
 
+  buildJazzCashIpnErrorAcknowledgement(message: string): Record<string, string> {
+    return this.jazzcashService.buildIpnErrorAcknowledgement(message);
+  }
+
   /**
    * APG card — server handshake (HS/HS/HS) then SSO form for browser POST.
    */

@@ -156,11 +156,9 @@ export class PublicDonationsController {
       );
       return res.status(HttpStatus.OK).json(ack);
     } catch (error) {
-      const errorBody = {
-        pp_ResponseCode: "999",
-        pp_ResponseMessage: error.message || "IPN processing error",
-        pp_SecureHash: "",
-      };
+      const errorBody = this.donationsService.buildJazzCashIpnErrorAcknowledgement(
+        error.message || "IPN processing error",
+      );
       this.logger.error(
         `JazzCash IPN failure at=${new Date().toISOString()} ` +
           `message=${error?.message || error} stack=${error?.stack || "n/a"} ` +
