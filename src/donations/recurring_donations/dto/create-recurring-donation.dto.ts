@@ -77,4 +77,9 @@ export class CreateRecurringDonationDto {
   @IsOptional()
   @IsIn(["active", "canceled", "past_due", "failed"])
   status?: string;
+
+  /** Status for the auto-created first installment (staff create only). */
+  @IsOptional()
+  @IsIn(["pending", "completed", "failed"])
+  installment_status?: string;
 }

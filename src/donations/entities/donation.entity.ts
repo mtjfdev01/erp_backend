@@ -9,6 +9,20 @@ import { User } from "../../users/user.entity";
 //nullabe true to all column
 @Entity("donations")
 export class Donation extends BaseEntity {
+  /**
+   * Opaque public id (12-char hex). Not the PK — internal `id` stays for ERP/FKs.
+   * Used later for website / public URLs so sequential ids are not enumerable.
+   */
+  @Index({ unique: true })
+  @Column({
+    name: "donation_public_id",
+    type: "varchar",
+    length: 12,
+    nullable: true,
+    default: null,
+  })
+  donation_public_id: string | null;
+
   // Foreign key relationship to Donor
   @ManyToOne(() => Donor, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "donor_id" })

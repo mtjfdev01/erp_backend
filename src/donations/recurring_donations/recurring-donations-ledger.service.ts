@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
@@ -6,6 +7,7 @@ import { Donation } from "../entities/donation.entity";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
+import { DonationsService } from "../donations.service";
 import {
   billingIntervalToFrequency,
   getPeriodKeyForFrequency,
@@ -24,6 +26,7 @@ import {
   resolvePrepaidPeriodCount,
   resolveSubscriptionPrepaidPeriodKeys,
 } from "./recurring-prepaid.util";
+import { resolveRecurringStartDateForStorage } from "./recurring-billing-date.util";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -48,6 +51,7 @@ export class RecurringDonationsLedgerService {
     private readonly donorRepository: Repository<Donor>,
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async search(payload: Record<string, any>) {
@@ -316,6 +320,7 @@ export class RecurringDonationsLedgerService {
       prepaid_periods?: number | null;
       initial_donation_id?: number | null;
       status?: string;
+      installment_status?: string;
     },
     userId?: number | null,
   ): Promise<RecurringDonation> {
@@ -376,6 +381,12 @@ export class RecurringDonationsLedgerService {
       interval === "year" ? "month" : interval,
     );
 
+    // Empty start mode / start date → same_date + today (PKT)
+    const resolvedStart = resolveRecurringStartDateForStorage({
+      startDateMode: dto.start_date_mode || "same_date",
+      startDate: dto.start_date || null,
+    });
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
@@ -385,8 +396,8 @@ export class RecurringDonationsLedgerService {
       stripe_customer_id: null,
       billing_interval: interval,
       billing_interval_count: dto.billing_interval_count ?? 1,
-      start_date_mode: dto.start_date_mode || "same_date",
-      start_date: dto.start_date || null,
+      start_date_mode: resolvedStart.startDateMode,
+      start_date: resolvedStart.startDate,
       consent: dto.consent ?? true,
       consent_at: dto.consent === false ? null : new Date(),
       amount,
@@ -410,7 +421,146 @@ export class RecurringDonationsLedgerService {
     // Staff-created ledger subscription ⇒ donor is a recurring donor
     await this.donorRepository.update(donorId, { recurring: true });
 
+    // Auto-create first installment (subscription row stays record_type=subscription)
+    await this.createFirstInstallmentForStaffSubscription(
+      saved,
+      dto.installment_status,
+    );
+
     return saved;
+  }
+
+  /**
+   * Ensures the current-period installment exists, then applies staff-chosen status.
+   * When installment_status is completed, donor gets thanks WhatsApp + email.
+   */
+  private async createFirstInstallmentForStaffSubscription(
+    subscription: RecurringDonation,
+    installmentStatusRaw?: string | null,
+  ): Promise<void> {
+    if (!subscription?.id || subscription.stripe_subscription_id) return;
+
+    await this.ensurePeriodDuesForSubscription(subscription);
+
+    const statusRaw = String(installmentStatusRaw || "pending")
+      .trim()
+      .toLowerCase();
+    const installmentStatus = ["pending", "completed", "failed"].includes(
+      statusRaw,
+    )
+      ? statusRaw
+      : "pending";
+
+    let first = await this.recurringDonationRepo.findOne({
+      where: {
+        parent_id: subscription.id,
+        record_type: "installment",
+        is_archived: false,
+      },
+      order: { id: "ASC" },
+    });
+
+    if (!first) {
+      const frequency = billingIntervalToFrequency(
+        subscription.billing_interval,
+      );
+      const periodKey = frequency
+        ? getPeriodKeyForFrequency(frequency, new Date())
+        : null;
+      first = await this.recurringDonationRepo.save(
+        this.recurringDonationRepo.create({
+          record_type: "installment",
+          parent_id: subscription.id,
+          initial_donation_id: subscription.initial_donation_id,
+          donor_id: subscription.donor_id,
+          stripe_subscription_id: null,
+          stripe_invoice_id: null,
+          billing_interval: subscription.billing_interval,
+          billing_interval_count: subscription.billing_interval_count,
+          amount: subscription.amount,
+          currency: subscription.currency || "PKR",
+          status: installmentStatus,
+          donation_method: subscription.donation_method,
+          project_id: subscription.project_id,
+          campaign_id: subscription.campaign_id,
+          donation_type: subscription.donation_type,
+          paid_at: installmentStatus === "completed" ? new Date() : null,
+          period_key: periodKey,
+          stripe_billing_reason: "period_due",
+        }),
+      );
+    } else if (
+      String(first.status || "").toLowerCase() !== installmentStatus
+    ) {
+      await this.recurringDonationRepo.update(first.id, {
+        status: installmentStatus,
+        paid_at: installmentStatus === "completed" ? new Date() : null,
+      });
+    }
+
+    if (installmentStatus === "completed") {
+      await this.sendThanksForCompletedStaffInstallment(subscription);
+    }
+  }
+
+  /** Ensure a completed donation exists, then reuse DonationsService.sendDonationThanksOnce. */
+  private async sendThanksForCompletedStaffInstallment(
+    subscription: RecurringDonation,
+  ): Promise<void> {
+    if (!subscription?.donor_id) return;
+
+    let donationId = subscription.initial_donation_id ?? null;
+    if (donationId) {
+      const existing = await this.donationRepository.findOne({
+        where: { id: donationId, is_archived: false },
+      });
+      if (existing) {
+        const st = String(existing.status || "").toLowerCase();
+        if (!["completed", "paid", "success"].includes(st)) {
+          await this.donationRepository.update(existing.id, {
+            status: "completed",
+          });
+        }
+      } else {
+        donationId = null;
+      }
+    }
+
+    if (!donationId) {
+      const created = await this.donationRepository.save(
+        this.donationRepository.create({
+          donor_id: subscription.donor_id,
+          campaign_id: subscription.campaign_id ?? null,
+          project_id: subscription.project_id ?? null,
+          amount: Number(subscription.amount) || 0,
+          currency: subscription.currency || "PKR",
+          donation_type: subscription.donation_type || "general",
+          donation_method: subscription.donation_method || "manual",
+          donation_source: "recurring_staff_create",
+          status: "completed",
+          note: `First installment for subscription #${subscription.id}`,
+          manual_recurring_intent: {
+            recurring_subscription_id: subscription.id,
+            staff_first_installment: true,
+          },
+        }),
+      );
+      donationId = created.id;
+      await this.recurringDonationRepo.update(subscription.id, {
+        initial_donation_id: donationId,
+      });
+    }
+
+    try {
+      const donationsService = this.moduleRef.get(DonationsService, {
+        strict: false,
+      });
+      await donationsService.sendDonationThanksOnce(donationId);
+    } catch (err: any) {
+      this.logger.warn(
+        `Staff recurring thanks failed donation=${donationId}: ${err?.message || err}`,
+      );
+    }
   }
 
   /**

@@ -1064,7 +1064,7 @@ export class DonationsService {
    * Single thanks path for a completed donation (email + WhatsApp).
    * Idempotent via message_sent / email_sent claim — never double-sends a channel.
    */
-  private async sendDonationThanksOnce(donationId: number): Promise<void> {
+  async sendDonationThanksOnce(donationId: number): Promise<void> {
     if (!donationId) return;
 
     const donation = await this.donationRepository.findOne({
