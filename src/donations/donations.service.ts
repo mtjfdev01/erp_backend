@@ -492,6 +492,7 @@ export class DonationsService {
 
   private buildAutoRegisterDonationPayload(
     createDonationDto: CreateDonationDto,
+    referrerUserId?: number | null,
   ) {
     return {
       donor_name: createDonationDto?.donor_name,
@@ -503,7 +504,39 @@ export class DonationsService {
       notification_subscription: createDonationDto?.notification_subscription,
       recurring: this.isDonationRecurring(createDonationDto),
       recurring_consent: this.hasRecurringConsent(createDonationDto),
+      referrer_user_id: referrerUserId ?? null,
     };
+  }
+
+  private async resolveReferrerFromReferralCode(
+    referralCode?: string | null,
+  ): Promise<User | null> {
+    const normalized = String(referralCode || "")
+      .trim()
+      .toUpperCase();
+    if (!normalized) return null;
+    return this.userRepository.findOne({
+      where: {
+        referral_code: normalized,
+        isActive: true,
+        is_archived: false,
+      },
+    });
+  }
+
+  /** Set donor.referred_by only when currently empty. */
+  private async applyReferrerToDonorIfEmpty(
+    donorId: number | null | undefined,
+    referrer: User | null,
+  ): Promise<void> {
+    if (!donorId || !referrer?.id) return;
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId },
+      relations: ["referred_by"],
+    });
+    if (!donor || donor.referred_by) return;
+    donor.referred_by = referrer;
+    await this.donorRepository.save(donor);
   }
 
   private withDonationId<T extends Record<string, unknown>>(
@@ -1451,7 +1484,14 @@ export class DonationsService {
     }
 
     const donor = await this.donorService.autoRegisterFromDonation(
-      this.buildAutoRegisterDonationPayload(createDonationDto),
+      this.buildAutoRegisterDonationPayload(
+        createDonationDto,
+        (
+          await this.resolveReferrerFromReferralCode(
+            createDonationDto.referral_code,
+          )
+        )?.id ?? null,
+      ),
     );
 
     if (donor?.is_archived === true) {
@@ -2953,6 +2993,10 @@ export class DonationsService {
 
       await this.applyQurbaniProgressTemplateFromPayload(createDonationDto);
 
+      const referrerUser = await this.resolveReferrerFromReferralCode(
+        createDonationDto.referral_code,
+      );
+
       let donorId: number | null = createDonationDto.donor_id || null;
       let donor: any;
       let savedDonation: any;
@@ -3005,7 +3049,10 @@ export class DonationsService {
           );
 
           donor = await this.donorService.autoRegisterFromDonation(
-            this.buildAutoRegisterDonationPayload(createDonationDto),
+            this.buildAutoRegisterDonationPayload(
+              createDonationDto,
+              referrerUser?.id ?? null,
+            ),
           );
 
           if (donor?.is_archived === true) {
@@ -3071,6 +3118,7 @@ export class DonationsService {
           recurring_consent: _recurringConsent,
           donation_items: _donationItems,
           in_kind_items: _inKindItems,
+          referral_code: _referralCode,
           ...donationColumns
         } = createDonationDto as CreateDonationDto & Record<string, unknown>;
 
@@ -3083,11 +3131,20 @@ export class DonationsService {
           recurrence_id: recurringRowId,
           // Intent stored + activated while pending (for now)
           manual_recurring_intent: manualRecurringIntent,
+          ...(referrerUser ? { referred_by: referrerUser } : {}),
         });
         savedDonation = await this.donationRepository.save(donation);
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
+        if (referrerUser?.id) {
+          // Force FK write — create()+save can omit relation column in some TypeORM paths.
+          await this.donationRepository.query(
+            `UPDATE "donations" SET "referred_by" = $1 WHERE "id" = $2`,
+            [referrerUser.id, savedDonation.id],
+          );
+          await this.applyReferrerToDonorIfEmpty(donorId, referrerUser);
+        }
         await this.syncDonorLastDonationDate(savedDonation);
         if (this.isSuccessfulDonationStatus(savedDonation.status)) {
           await this.advanceDonorPipelineIfDonationCompleted(savedDonation.id);
@@ -3776,9 +3833,11 @@ export class DonationsService {
       const donation = await this.donationRepository
         .createQueryBuilder("donation")
         .leftJoinAndSelect("donation.donor", "donor")
+        .leftJoinAndSelect("donor.referred_by", "donor_referred_by")
         .leftJoinAndSelect("donation.organization", "organization")
         .leftJoinAndSelect("donation.csr_poc", "csr_poc")
         .leftJoinAndSelect("donation.created_by", "created_by")
+        .leftJoinAndSelect("donation.referred_by", "referred_by")
         .leftJoinAndSelect("donation.attachments", "attachments")
         .where("donation.id = :id", { id })
         .getOne();
@@ -3788,6 +3847,11 @@ export class DonationsService {
       }
 
       await this.enrichDonationCsrPocFromLegacyDonor(donation);
+
+      // Prefer donation-level referrer; fall back to donor.referred_by for older rows.
+      if (!donation.referred_by && donation.donor?.referred_by) {
+        (donation as any).referred_by = donation.donor.referred_by;
+      }
 
       // if donation.donation_method is in_kind then get its all in kind items
       if (donation.donation_method === "in_kind") {

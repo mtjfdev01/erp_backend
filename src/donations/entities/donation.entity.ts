@@ -4,6 +4,7 @@ import { Donor } from "../../dms/donor/entities/donor.entity";
 import { DonationAttachment } from "./donation-attachment.entity";
 import { Organization } from "../../dms/organizations/entities/organization.entity";
 import { CsrPoc } from "../../dms/organizations/entities/csr-poc.entity";
+import { User } from "../../users/user.entity";
 
 //nullabe true to all column
 @Entity("donations")
@@ -74,6 +75,18 @@ export class Donation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   donation_source: string;
+
+  /**
+   * Staff who referred this gift (from website ?referral_code=).
+   * Separate from agency `ref` and from created_by.
+   */
+  @ManyToOne(() => User, (user) => user.id, {
+    nullable: true,
+    eager: false,
+    onDelete: "SET NULL",
+  })
+  @JoinColumn({ name: "referred_by" })
+  referred_by: User | null;
 
   @Column({ type: "varchar", nullable: true, default: null })
   country: string;

@@ -14,6 +14,7 @@ import { Request, Response } from "express";
 import { DonationsService } from "./donations.service";
 import { DonorService } from "src/dms/donor/donor.service";
 import { renderApgAutoPostHtml } from "./alfalah/apg-gateway-html.util";
+import { DashboardAggregateService } from "../dashboard/dashboard-aggregate.service";
 
 @Controller("donations/public")
 export class PublicDonationsController {
@@ -22,7 +23,34 @@ export class PublicDonationsController {
   constructor(
     private readonly donationsService: DonationsService,
     private readonly donorService: DonorService,
+    private readonly dashboardAggregateService: DashboardAggregateService,
   ) {}
+
+  /**
+   * Public recurring-donor KPIs for website progress bars.
+   * GET /donations/public/recurring-donors-counts
+   */
+  @Get("recurring-donors-counts")
+  async getRecurringDonorsCounts(@Res() res: Response) {
+    try {
+      const data =
+        await this.dashboardAggregateService.getRecurringDonorsCounts();
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Recurring donors counts retrieved",
+        data,
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `recurring-donors-counts failed: ${error?.message || error}`,
+      );
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Failed to load recurring donors counts",
+        data: null,
+      });
+    }
+  }
 
   // Public endpoint for uptime monitoring - NO GUARDS
   @Get("get-donation-apistatus")

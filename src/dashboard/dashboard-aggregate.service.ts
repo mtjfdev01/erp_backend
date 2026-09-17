@@ -576,4 +576,50 @@ export class DashboardAggregateService {
       recurring_donors_series,
     };
   }
+
+  /**
+   * Lightweight public/website stats: only the two recurring-donor KPIs.
+   * Same definitions as fundraising-overview cards.
+   */
+  async getRecurringDonorsCounts(): Promise<{
+    registered_recurring_donors_count: number;
+    recurring_donors_count: number;
+  }> {
+    const [registeredRecurringDonorsCount, recurringDonorsAgg] =
+      await Promise.all([
+        this.recurringDonationRepo
+          .createQueryBuilder("rd")
+          .where("rd.is_archived = false")
+          .andWhere("rd.record_type = :subscription", {
+            subscription: "subscription",
+          })
+          .getCount(),
+        this.recurringDonationRepo
+          .createQueryBuilder("rd")
+          .select("COALESCE(COUNT(rd.id), 0)", "subscription_count")
+          .where("rd.is_archived = false")
+          .andWhere("rd.record_type = :subscription", {
+            subscription: "subscription",
+          })
+          .andWhere(
+            `EXISTS (
+              SELECT 1 FROM recurring_donations inst
+              WHERE inst.parent_id = rd.id
+                AND inst.record_type = 'installment'
+                AND inst.is_archived = false
+                AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
+            )`,
+          )
+          .getRawOne<{ subscription_count: string }>(),
+      ]);
+
+    return {
+      registered_recurring_donors_count: Number(
+        registeredRecurringDonorsCount ?? 0,
+      ),
+      recurring_donors_count: Number(
+        recurringDonorsAgg?.subscription_count ?? 0,
+      ),
+    };
+  }
 }

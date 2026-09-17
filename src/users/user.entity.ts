@@ -240,4 +240,18 @@ export class User {
 
   @Column({ name: "is_archived", type: "boolean", default: false })
   is_archived: boolean;
+
+  /**
+   * Staff referral code for website donate links:
+   * mtjfoundation.org/donate?referral_code=XXXX
+   */
+  @Column({
+    name: "referral_code",
+    type: "varchar",
+    length: 32,
+    unique: true,
+    nullable: true,
+    default: null,
+  })
+  referral_code: string | null;
 }

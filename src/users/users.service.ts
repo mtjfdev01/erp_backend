@@ -5,6 +5,7 @@ import {
   Logger,
   HttpException,
   HttpStatus,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository } from "typeorm";
@@ -43,7 +44,7 @@ interface PaginationOptions {
 }
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit {
   private readonly logger = new Logger(UsersService.name);
   // Define searchable columns for user search
   private readonly searchableColumns = ["first_name", "last_name", "email"];
@@ -57,6 +58,68 @@ export class UsersService {
     private readonly emailService: EmailService,
     private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async onModuleInit() {
+    // Non-blocking backfill so existing staff get referral links without a migration.
+    void this.ensureReferralCodesForExistingUsers().catch((err) => {
+      this.logger.warn(
+        `Referral code backfill skipped: ${err?.message || err}`,
+      );
+    });
+  }
+
+  /** Random unique staff referral code (uppercase hex, 8 chars). */
+  async generateUniqueReferralCode(): Promise<string> {
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+      const exists = await this.userRepository.findOne({
+        where: { referral_code: code },
+        select: ["id"],
+      });
+      if (!exists) return code;
+    }
+    throw new Error("Failed to generate unique referral_code");
+  }
+
+  async ensureUserReferralCode(user: User): Promise<User> {
+    if (user?.referral_code) return user;
+    if (!user?.id) return user;
+    user.referral_code = await this.generateUniqueReferralCode();
+    return this.userRepository.save(user);
+  }
+
+  async ensureReferralCodesForExistingUsers(): Promise<void> {
+    const missing = await this.userRepository
+      .createQueryBuilder("user")
+      .select(["user.id"])
+      .where("user.referral_code IS NULL")
+      .andWhere("user.is_archived = false")
+      .getMany();
+
+    if (!missing.length) return;
+
+    this.logger.log(
+      `Backfilling referral_code for ${missing.length} user(s)`,
+    );
+    for (const row of missing) {
+      const code = await this.generateUniqueReferralCode();
+      await this.userRepository.update(row.id, { referral_code: code });
+    }
+  }
+
+  async findByReferralCode(code: string): Promise<User | null> {
+    const normalized = String(code || "")
+      .trim()
+      .toUpperCase();
+    if (!normalized) return null;
+    return this.userRepository.findOne({
+      where: {
+        referral_code: normalized,
+        isActive: true,
+        is_archived: false,
+      },
+    });
+  }
 
   pickGeographicContext(
     user: Pick<
@@ -118,6 +181,7 @@ export class UsersService {
       password_enc_version: enc.version,
       department,
       role,
+      referral_code: await this.generateUniqueReferralCode(),
     });
 
     return await this.userRepository.save(user);
@@ -329,6 +393,7 @@ export class UsersService {
       ...passwordFields,
       manager_id: managerIdList[0] ?? null,
       managers,
+      referral_code: await this.generateUniqueReferralCode(),
     });
     return await this.userRepository.save(user);
   }
@@ -458,13 +523,15 @@ export class UsersService {
   }
 
   async findOneForView(id: number) {
-    const user = await this.userRepository.findOne({
+    let user = await this.userRepository.findOne({
       where: { id },
       relations: ["permissions", "manager", "managers"],
     });
     if (!user) {
       throw new NotFoundException("User not found");
     }
+
+    user = await this.ensureUserReferralCode(user);
 
     const {
       password: _password,
@@ -477,7 +544,7 @@ export class UsersService {
       manager,
       managers,
       ...safeUser
-    } = user;
+    } = user as User & Record<string, unknown>;
 
     const managersSummary = this.summarizeManagers(managers);
     const managerSummary =

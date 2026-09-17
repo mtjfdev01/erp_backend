@@ -83,6 +83,14 @@ export class CreateDonationDto {
   @IsString()
   ref?: string;
 
+  /**
+   * Staff referral code from website (?referral_code=).
+   * Resolved to user and stored as donation.referred_by / donor.referred_by.
+   */
+  @IsOptional()
+  @IsString()
+  referral_code?: string;
+
   @IsOptional()
   @IsString()
   country?: string;

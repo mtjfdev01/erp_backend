@@ -1054,6 +1054,8 @@ export class DonorService {
     notification_subscription?: boolean;
     recurring?: boolean;
     recurring_consent?: boolean;
+    /** Optional staff referrer from website referral_code */
+    referrer_user_id?: number | null;
   }): Promise<Donor | null> {
     try {
       const {
@@ -1066,6 +1068,7 @@ export class DonorService {
         notification_subscription,
         recurring,
         recurring_consent,
+        referrer_user_id,
       } = donationData;
 
       let normalizedEmail: string | null;
@@ -1078,6 +1081,13 @@ export class DonorService {
           "Cannot auto-register donor: at least one of email or phone is required",
         );
         return null;
+      }
+
+      let referrerUser: User | null = null;
+      if (referrer_user_id) {
+        referrerUser = await this.userRepository.findOne({
+          where: { id: Number(referrer_user_id), is_archived: false },
+        });
       }
 
       let donor = await this.findByEmailOrPhone(
@@ -1120,6 +1130,16 @@ export class DonorService {
           donor.recurring_consent = true;
           donor.recurring_consent_at = donor?.recurring_consent_at ?? new Date();
         }
+        // Only set referrer if donor has none yet (do not overwrite existing)
+        if (referrerUser) {
+          const withRef = await this.donorRepository.findOne({
+            where: { id: donor.id },
+            relations: ["referred_by"],
+          });
+          if (withRef && !withRef.referred_by) {
+            donor.referred_by = referrerUser;
+          }
+        }
         this.applyGeoSearchToDonor(donor);
         return this.donorRepository.save(donor);
       }
@@ -1142,6 +1162,7 @@ export class DonorService {
         recurring_consent: recurring_consent === true,
         recurring_consent_at:
           recurring_consent === true ? new Date() : null,
+        ...(referrerUser ? { referred_by: referrerUser } : {}),
       });
 
       this.applyGeoSearchToDonor(donorRow);
