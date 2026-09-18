@@ -143,6 +143,7 @@ export class WhatsAppService implements OnModuleInit {
     phoneNumber: string;
     userName: string;
     amount: string | number;
+    /** Opaque donation_public_id for WhatsApp URL button (not numeric id). */
     donationId: string | number;
   }): Promise<boolean> {
     try {
@@ -160,11 +161,8 @@ export class WhatsAppService implements OnModuleInit {
       const amountString =
         typeof data.amount === "number" ? data.amount.toString() : data.amount;
 
-      // Format donation ID as string
-      const donationIdString =
-        typeof data.donationId === "number"
-          ? data.donationId.toString()
-          : data.donationId;
+      // URL button suffix — must be donation_public_id (template: …/checkout?donation_public_id=)
+      const donationIdString = String(data.donationId || "").trim();
 
       const payload = {
         phone_number: formattedPhone,
@@ -255,13 +253,18 @@ export class WhatsAppService implements OnModuleInit {
   async sendRecurringPaymentReminder(data: {
     phoneNumber: string;
     amount: string | number;
+    /** Opaque donation_public_id (preferred) or legacy numeric — URL always uses public id when provided as donationPublicId. */
     donationId: string | number;
+    donationPublicId?: string | null;
     donationUrl?: string;
   }): Promise<boolean> {
     const amountString =
       typeof data.amount === "number" ? data.amount.toString() : data.amount;
+    const publicId = String(
+      data.donationPublicId || data.donationId || "",
+    ).trim();
     const donationUrl =
-      data.donationUrl || this.buildDonationCheckoutUrl(data.donationId);
+      data.donationUrl || this.buildDonationCheckoutUrl(publicId);
     return this.sendV2Template(
       data.phoneNumber,
       "donation_payment_reminder_new",
@@ -314,12 +317,13 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
-  private buildDonationCheckoutUrl(donationId: string | number): string {
+  private buildDonationCheckoutUrl(donationPublicId: string | number): string {
     const base = (
       this.configService.get<string>("BASE_Frontend_URL") ||
       "https://mtjfoundation.org"
     ).replace(/\/$/, "");
-    return `${base}/checkout?donationId=${donationId}`;
+    const id = String(donationPublicId || "").trim();
+    return `${base}/checkout?donation_public_id=${encodeURIComponent(id)}`;
   }
 
   private async sendV2Template(

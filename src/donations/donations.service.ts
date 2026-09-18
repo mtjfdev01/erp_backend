@@ -2694,6 +2694,34 @@ export class DonationsService {
     return donation;
   }
 
+  /** Public checkout / retry lookup by opaque donation_public_id. */
+  async findOneByDonationPublicId(publicId: string): Promise<Donation> {
+    const normalized = String(publicId || "")
+      .trim()
+      .toLowerCase();
+    if (!/^[0-9a-f]{12}$/.test(normalized)) {
+      throw new BadRequestException("Invalid donation_public_id");
+    }
+    const donation = await this.donationRepository.findOne({
+      where: { donation_public_id: normalized },
+      relations: [
+        "donor",
+        "donor.referred_by",
+        "organization",
+        "csr_poc",
+        "created_by",
+        "referred_by",
+        "attachments",
+      ],
+    });
+    if (!donation) {
+      throw new NotFoundException(
+        `Donation with donation_public_id ${normalized} not found`,
+      );
+    }
+    return this.enrichDonationCsrPocFromLegacyDonor(donation);
+  }
+
   /**
    * Get PayFast access token - Reusable helper method
    * @param basketId - Basket ID (usually donation ID)
@@ -3177,18 +3205,18 @@ export class DonationsService {
           );
         }
       } else {
-        // Website payment retry: reuse existing donation row (e.g. pending Payfast) — do not create a duplicate.
-        const prevRaw = createDonationDto.previous_donation_id;
-        const prevId =
-          typeof prevRaw === "string"
-            ? parseInt(String(prevRaw).trim(), 10)
-            : Number(prevRaw);
-        if (!Number.isFinite(prevId) || prevId <= 0) {
-          throw new BadRequestException("Invalid previous_donation_id");
+        // Website payment retry: reuse existing donation by donation_public_id
+        const prevRaw = String(createDonationDto.previous_donation_id || "")
+          .trim()
+          .toLowerCase();
+        if (!/^[0-9a-f]{12}$/.test(prevRaw)) {
+          throw new BadRequestException(
+            "Invalid previous_donation_id (expected donation_public_id)",
+          );
         }
 
         savedDonation = await this.donationRepository.findOne({
-          where: { id: prevId },
+          where: { donation_public_id: prevRaw },
           relations: ["donor"],
         });
         if (!savedDonation) {
@@ -3231,9 +3259,9 @@ export class DonationsService {
 
         if (Object.keys(updatePatch).length > 0) {
           updatePatch.updated_by = this.donationAuditUserId(user);
-          await this.donationRepository.update(prevId, updatePatch as any);
+          await this.donationRepository.update(savedDonation.id, updatePatch as any);
           savedDonation = await this.donationRepository.findOne({
-            where: { id: prevId },
+            where: { id: savedDonation.id },
             relations: ["donor"],
           });
           if (!savedDonation) {
@@ -4585,7 +4613,7 @@ export class DonationsService {
               phoneNumber: donation.donor.phone,
               userName: donation.donor.name,
               amount: donation.amount,
-              donationId: basket_id,
+              donationId: donation.donation_public_id || String(donation.id),
             });
             message_sent = true;
           } catch (err: any) {
@@ -4959,7 +4987,7 @@ export class DonationsService {
               phoneNumber: donation.donor.phone,
               userName: donation.donor.name,
               amount: donation.amount,
-              donationId: invoice_number,
+              donationId: donation.donation_public_id || String(donation.id),
             });
             message_sent = true;
           } catch (err: any) {
@@ -5529,7 +5557,7 @@ export class DonationsService {
             phoneNumber: donation.donor.phone,
             userName: donation.donor.name,
             amount: donation.amount,
-            donationId: orderRef,
+            donationId: donation.donation_public_id || String(donation.id),
           });
           message_sent = true;
         } catch (err: any) {

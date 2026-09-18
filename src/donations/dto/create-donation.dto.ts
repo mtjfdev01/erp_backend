@@ -195,6 +195,7 @@ export class CreateDonationDto {
     notes?: string;
   }>;
 
+  /** Opaque donation_public_id of a pending/failed donation to retry (not numeric id). */
   @IsOptional()
   @IsString()
   previous_donation_id?: string;

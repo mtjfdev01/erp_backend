@@ -223,10 +223,15 @@ export class CommunicationController {
       const currency = donation.currency || "PKR";
       const donationType = donation.donation_type || "general";
 
-      // Generate payment URL
+      // Generate payment URL (opaque donation_public_id only)
       const baseUrl =
         process.env.BASE_Frontend_URL || "https://mtjfoundation.org";
-      const paymentUrl = `${baseUrl}/checkout?donationId=${id}`;
+      const publicId = String(
+        (donation as any).donation_public_id || "",
+      ).trim();
+      const paymentUrl = publicId
+        ? `${baseUrl.replace(/\/$/, "")}/checkout?donation_public_id=${encodeURIComponent(publicId)}`
+        : `${baseUrl.replace(/\/$/, "")}/checkout`;
 
       // Prepare results
       const results = {
@@ -265,11 +270,14 @@ export class CommunicationController {
       if (shouldSendWhatsApp) {
         if (donorPhone) {
           try {
+            if (!publicId) {
+              throw new Error("donation_public_id missing for payment link");
+            }
             const whatsappSent = await this.whatsAppService.sendAbandonMessage({
               phoneNumber: donorPhone,
               userName: donorName,
               amount: amount.toString(),
-              donationId: id,
+              donationId: publicId,
             });
 
             results.whatsapp.sent = whatsappSent;

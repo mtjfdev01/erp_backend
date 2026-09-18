@@ -15,7 +15,7 @@ export const MIN_DONATION_FOLLOW_UP_AMOUNT = 1000;
 
 export const DONATION_PENDING_MOV_ITEMS = [
   "Contacted Donor",
-  "Not Contacted Donor",
+  "Prove Attached",
 ] as const;
 
 /** Website donations in these statuses may trigger a call-center follow-up task. */

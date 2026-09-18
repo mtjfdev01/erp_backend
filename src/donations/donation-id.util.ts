@@ -13,5 +13,19 @@ export function generateDonationPublicIdCandidate(): string {
 
 export function isValidDonationPublicId(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  return /^[0-9a-f]{12}$/.test(value);
+  return /^[0-9a-f]{12}$/.test(value.trim().toLowerCase());
+}
+
+/** Website checkout URL — only donation_public_id (never numeric id). */
+export function buildWebsiteCheckoutUrl(
+  donationPublicId: string,
+  baseUrl?: string | null,
+): string {
+  const base = String(
+    baseUrl || process.env.BASE_Frontend_URL || "https://mtjfoundation.org",
+  ).replace(/\/$/, "");
+  const id = String(donationPublicId || "")
+    .trim()
+    .toLowerCase();
+  return `${base}/checkout?donation_public_id=${encodeURIComponent(id)}`;
 }

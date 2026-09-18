@@ -301,11 +301,15 @@ export class PublicDonationsController {
     }
   }
 
-  // Public endpoint to get failed transaction with donor information - NO GUARDS
-  @Get("failed-transaction/:id")
-  async getFailedTransaction(@Param("id") id: string, @Res() res: Response) {
+  // Public endpoint — lookup by donation_public_id only (opaque hex)
+  @Get("failed-transaction/:publicId")
+  async getFailedTransaction(
+    @Param("publicId") publicId: string,
+    @Res() res: Response,
+  ) {
     try {
-      const donation = await this.donationsService.findOne(+id);
+      const donation =
+        await this.donationsService.findOneByDonationPublicId(publicId);
 
       return res.status(HttpStatus.OK).json({
         success: true,

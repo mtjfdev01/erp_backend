@@ -970,7 +970,8 @@ export class ManualRecurringReminderService {
           const ok = await this.whatsAppService.sendRecurringPaymentReminder({
             phoneNumber: donor.phone,
             amount: String(amount),
-            donationId: donation.id,
+            donationId: donation.donation_public_id || donation.id,
+            donationPublicId: donation.donation_public_id,
           });
           if (ok) sent += 1;
           else {
@@ -1529,7 +1530,8 @@ export class ManualRecurringReminderService {
               const wa = await this.whatsAppService.sendRecurringPaymentReminder({
                 phoneNumber: donor.phone,
                 amount: String(amount),
-                donationId: donation.id,
+                donationId: donation.donation_public_id || donation.id,
+                donationPublicId: donation.donation_public_id,
               });
               sentOk = wa || sentOk;
             }

@@ -485,12 +485,14 @@ export class EmailService implements OnModuleInit {
 
       const amount = donation.amount ?? donation.paid_amount ?? 0;
       const currency = donation.currency || "PKR";
-      const donationId = donation.id;
+      const publicId = String(donation.donation_public_id || "").trim();
       const base = (
         this.configService.get<string>("BASE_Frontend_URL") ||
         "https://www.mtjfoundation.org"
       ).replace(/\/$/, "");
-      const paymentLink = `${base}/checkout?donationId=${donationId}`;
+      const paymentLink = publicId
+        ? `${base}/checkout?donation_public_id=${encodeURIComponent(publicId)}`
+        : `${base}/checkout`;
 
       const result = await this.resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
@@ -657,7 +659,14 @@ export class EmailService implements OnModuleInit {
   }
 
   private generateDonationFailureTemplate(donation: any): string {
-    const donationURl = `https://mtjfoundation.org/checkout?donationId=${donation?.id}`;
+    const publicId = String(donation?.donation_public_id || "").trim();
+    const base = (
+      this.configService.get<string>("BASE_Frontend_URL") ||
+      "https://mtjfoundation.org"
+    ).replace(/\/$/, "");
+    const donationURl = publicId
+      ? `${base}/checkout?donation_public_id=${encodeURIComponent(publicId)}`
+      : `${base}/checkout`;
     return `
       <!DOCTYPE html>
       <html>

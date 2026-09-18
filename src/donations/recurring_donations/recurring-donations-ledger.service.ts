@@ -1521,7 +1521,8 @@ export class RecurringDonationsLedgerService {
         whatsapp_sent = !!(await this.whatsAppService.sendRecurringPaymentReminder({
           phoneNumber: donor.phone,
           amount: String(amount),
-          donationId: donation.id,
+          donationId: donation.donation_public_id || donation.id,
+          donationPublicId: donation.donation_public_id,
         }));
         if (!whatsapp_sent) errors.push("Payment link WhatsApp failed");
       } catch (err: any) {
