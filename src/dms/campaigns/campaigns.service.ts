@@ -57,6 +57,16 @@ export class CampaignsService {
     private subprogramRepo: Repository<ProgramSubprogram>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   private toProgramSummary(program: ProgramEntity | null | undefined): ProgramSummary | null {
     if (!program) return null;
     return { id: program.id, key: program.key, label: program.label };
@@ -380,9 +390,16 @@ export class CampaignsService {
   }
 
   async findOne(id: number): Promise<CampaignWithProgram> {
-    const campaign = await this.campaignRepo.findOne({ where: { id } });
+    const campaign = await this.campaignRepo.findOne({
+      where: { id },
+      relations: ["created_by"],
+    });
     if (!campaign) throw new NotFoundException(`Campaign #${id} not found`);
-    return this.enrichCampaign(campaign);
+    const enriched = await this.enrichCampaign(campaign);
+    return {
+      ...enriched,
+      created_by: this.pickAuditActor((campaign as any).created_by),
+    } as CampaignWithProgram;
   }
 
   async findBySlug(slug: string): Promise<CampaignWithProgram> {

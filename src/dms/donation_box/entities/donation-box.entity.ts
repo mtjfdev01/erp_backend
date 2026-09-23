@@ -117,6 +117,30 @@ export class DonationBox extends BaseEntity {
   @Column({ default: true })
   is_active: boolean;
 
+  /** Registered shop GPS — optional. When set, collection GPS check applies. */
+  @Column({ type: "numeric", precision: 10, scale: 7, nullable: true, default: null })
+  registration_latitude: number | null;
+
+  @Column({ type: "numeric", precision: 10, scale: 7, nullable: true, default: null })
+  registration_longitude: number | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  registration_location_name: string | null;
+
+  @Column({ type: "json", nullable: true, default: null })
+  registration_location_details: Record<string, unknown> | null;
+
+  /** Allowed distance from registered pin for on-site collection (meters). */
+  @Column({ type: "int", nullable: true, default: 100 })
+  location_radius_meters: number | null;
+
+  /**
+   * When true, collectors should verify device GPS against registration coords.
+   * Kept in sync with whether registration lat/lng are saved.
+   */
+  @Column({ default: false })
+  require_collection_location: boolean;
+
   // Relationships
   @ManyToOne(() => Route, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "route_id" })

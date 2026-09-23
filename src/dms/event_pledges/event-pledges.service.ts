@@ -12,6 +12,16 @@ export class EventPledgesService {
     private readonly pledgeRepo: Repository<EventPledge>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   async create(
     dto: CreateEventPledgeDto,
     userId?: number | null,
@@ -98,10 +108,12 @@ export class EventPledgesService {
   async findOne(id: number): Promise<EventPledge> {
     const row = await this.pledgeRepo.findOne({
       where: { id, is_archived: false },
+      relations: ["created_by"],
     });
     if (!row) {
       throw new NotFoundException("Event pledge not found");
     }
+    (row as any).created_by = this.pickAuditActor((row as any).created_by);
     return row;
   }
 

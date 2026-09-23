@@ -18,6 +18,10 @@ export const RECURRING_DONATION_UPDATE_PERMISSIONS = [
   `${RECURRING}.update`,
 ] as const;
 
+export const RECURRING_DONATION_DELETE_PERMISSIONS = [
+  `${RECURRING}.delete`,
+] as const;
+
 export const RECURRING_DONATION_LIST_VIEW_GUARD = [
   ...RECURRING_DONATION_LIST_VIEW_PERMISSIONS,
   // Recurring Donors module may also list via the same search endpoint
@@ -45,6 +49,12 @@ export const RECURRING_DONATION_CREATE_GUARD = [
 
 export const RECURRING_DONATION_UPDATE_GUARD = [
   ...RECURRING_DONATION_UPDATE_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
+] as const;
+
+export const RECURRING_DONATION_DELETE_GUARD = [
+  ...RECURRING_DONATION_DELETE_PERMISSIONS,
   "super_admin",
   "fund_raising_manager",
 ] as const;

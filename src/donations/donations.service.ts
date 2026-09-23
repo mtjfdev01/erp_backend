@@ -3881,6 +3881,18 @@ export class DonationsService {
         (donation as any).referred_by = donation.donor.referred_by;
       }
 
+      const pickActor = (user: any) => {
+        if (!user || typeof user !== "object") return null;
+        return {
+          id: user.id,
+          first_name: user.first_name || null,
+          last_name: user.last_name || null,
+          email: user.email || null,
+        };
+      };
+      (donation as any).created_by = pickActor((donation as any).created_by);
+      (donation as any).referred_by = pickActor((donation as any).referred_by);
+
       // if donation.donation_method is in_kind then get its all in kind items
       if (donation.donation_method === "in_kind") {
         const inKindItems = await this.findInKindByDonationId(id);

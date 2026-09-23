@@ -39,6 +39,16 @@ export class AidPeopleService {
     private readonly applicationRepo: Repository<AidApplication>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   normalizeCnic(cnic?: string | null): string | null {
     if (cnic == null) return null;
     const digits = String(cnic).replace(/\D/g, "");
@@ -143,8 +153,10 @@ export class AidPeopleService {
   async findOne(id: number) {
     const person = await this.personRepo.findOne({
       where: { id, is_archived: false },
+      relations: ["created_by"],
     });
     if (!person) throw new NotFoundException(`Person #${id} not found`);
+    (person as any).created_by = this.pickAuditActor((person as any).created_by);
     return person;
   }
 

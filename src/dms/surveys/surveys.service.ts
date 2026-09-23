@@ -40,6 +40,16 @@ export class SurveysService {
     private questionReportRepo: Repository<SurveyQuestionReport>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   async create(dto: CreateSurveyDto, createdBy: number): Promise<Survey> {
     const survey = this.surveyRepo.create({
       title: dto.title,
@@ -62,9 +72,10 @@ export class SurveysService {
   async findOne(id: number): Promise<Survey> {
     const survey = await this.surveyRepo.findOne({
       where: { id },
-      relations: ["questions", "questions.options"],
+      relations: ["questions", "questions.options", "created_by"],
     });
     if (!survey) throw new NotFoundException(`Survey #${id} not found`);
+    (survey as any).created_by = this.pickAuditActor((survey as any).created_by);
     return survey;
   }
 

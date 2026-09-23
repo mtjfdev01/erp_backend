@@ -33,11 +33,22 @@ export class DonationInKindItemsService {
     private readonly procurementsService: ProcurementsService,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   /**
    * Create a new donation in kind item
    */
   async create(
     createDonationInKindItemDto: CreateDonationInKindItemDto,
+    userId?: number | null,
   ): Promise<DonationInKindItem> {
     try {
       // Check if item code already exists
@@ -60,9 +71,15 @@ export class DonationInKindItemsService {
       }
 
       // Create the item
-      const item = this.donationInKindItemRepository.create(
-        createDonationInKindItemDto,
-      );
+      const item = this.donationInKindItemRepository.create({
+        ...createDonationInKindItemDto,
+        ...(userId && userId > 0
+          ? {
+              created_by: { id: userId } as any,
+              updated_by: { id: userId } as any,
+            }
+          : {}),
+      });
 
       const savedItem = await this.donationInKindItemRepository.save(item);
 
@@ -88,10 +105,7 @@ export class DonationInKindItemsService {
         }
       }
 
-      // Return the created item
-      return await this.donationInKindItemRepository.findOne({
-        where: { id: savedItem.id },
-      });
+      return this.findOne(savedItem.id);
     } catch (error) {
       if (
         error instanceof ConflictException ||
@@ -189,6 +203,7 @@ export class DonationInKindItemsService {
     try {
       const item = await this.donationInKindItemRepository.findOne({
         where: { id },
+        relations: ["created_by"],
       });
 
       if (!item) {
@@ -197,6 +212,7 @@ export class DonationInKindItemsService {
         );
       }
 
+      (item as any).created_by = this.pickAuditActor((item as any).created_by);
       return item;
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -214,10 +230,12 @@ export class DonationInKindItemsService {
   async update(
     id: number,
     updateDonationInKindItemDto: UpdateDonationInKindItemDto,
+    userId?: number | null,
   ): Promise<DonationInKindItem> {
     try {
       const item = await this.donationInKindItemRepository.findOne({
         where: { id },
+        relations: ["created_by"],
       });
 
       if (!item) {
@@ -250,16 +268,16 @@ export class DonationInKindItemsService {
         throw new BadRequestException("Estimated value cannot be negative");
       }
 
-      // Update the entity
-      await this.donationInKindItemRepository.update(
-        id,
-        updateDonationInKindItemDto,
-      );
+      Object.assign(item, updateDonationInKindItemDto);
+      if (userId && userId > 0) {
+        (item as any).updated_by = { id: userId };
+        if (!(item as any).created_by?.id) {
+          (item as any).created_by = { id: userId };
+        }
+      }
 
-      // Return updated entity
-      return await this.donationInKindItemRepository.findOne({
-        where: { id },
-      });
+      await this.donationInKindItemRepository.save(item);
+      return this.findOne(id);
     } catch (error) {
       if (
         error instanceof NotFoundException ||

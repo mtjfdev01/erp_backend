@@ -236,6 +236,12 @@ export class DonationBoxService {
       "notes",
       "is_active",
       "is_archived",
+      "registration_latitude",
+      "registration_longitude",
+      "registration_location_name",
+      "registration_location_details",
+      "location_radius_meters",
+      "require_collection_location",
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -310,12 +316,16 @@ export class DonationBoxService {
       const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
       const normalizedBoxIdNo = this.normalizeOptionalText(boxData.box_id_no);
       const normalizedKeyNo = this.normalizeOptionalText(boxData.key_no);
+      const hasGps =
+        boxData.registration_latitude != null &&
+        boxData.registration_longitude != null;
       const donationBox = this.donationBoxRepository.create({
         ...boxData,
         box_id_no: normalizedBoxIdNo,
         key_no: normalizedKeyNo,
         route_id: boxData.route_id ?? null,
         city_id: boxData.city_id ?? null,
+        require_collection_location: hasGps,
         ...(auditUserId != null
           ? { created_by: { id: auditUserId } as any }
           : {}),
@@ -1036,6 +1046,71 @@ export class DonationBoxService {
       console.error("Error updating donation box:", error.message);
       throw new Error(`Failed to update donation box: ${error.message}`);
     }
+  }
+
+  /**
+   * Relocate box to a new shop (optional GPS). Logs shop_relocated audit entry.
+   */
+  async relocate(
+    id: number,
+    dto: Record<string, unknown>,
+    currentUser?: any,
+  ): Promise<DonationBox> {
+    const existing = await this.donationBoxRepository.findOne({
+      where: { id, is_archived: false },
+      relations: ["route", "city"],
+    });
+    if (!existing) {
+      throw new NotFoundException(`Donation box with ID ${id} not found`);
+    }
+
+    const previous_shop = {
+      shop_name: existing.shop_name,
+      shopkeeper: existing.shopkeeper,
+      route_name: existing.route?.name ?? null,
+      city_name:
+        existing.city?.name ??
+        (await this.resolveCityName(existing.city_id)),
+    };
+
+    const { relocation_note, ...updateDto } = dto;
+    if (!updateDto.shop_name || !String(updateDto.shop_name).trim()) {
+      throw new Error("Shop name is required to relocate the box");
+    }
+
+    await this.update(id, updateDto, currentUser);
+    const updated = await this.findOne(id);
+
+    const new_shop = {
+      shop_name: updated.shop_name,
+      shopkeeper: updated.shopkeeper,
+      route_name: updated.route?.name ?? null,
+      city_name:
+        updated.city?.name ?? (await this.resolveCityName(updated.city_id)),
+    };
+
+    await this.donationBoxAuditService.log({
+      donationBoxId: id,
+      action: DonationBoxAuditAction.SHOP_RELOCATED,
+      source: DonationBoxAuditSource.STAFF_UI,
+      changes: [
+        {
+          field: "shop_name",
+          old_value: previous_shop.shop_name ?? null,
+          new_value: new_shop.shop_name ?? null,
+        },
+      ],
+      performedByUserId: this.donationBoxAuditUserId(currentUser?.id),
+      metadata: {
+        previous_shop,
+        new_shop,
+        relocation_note: relocation_note
+          ? String(relocation_note).trim() || null
+          : null,
+      },
+    });
+
+    return updated;
   }
 
   /**

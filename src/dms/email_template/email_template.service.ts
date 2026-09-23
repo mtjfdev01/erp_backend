@@ -879,11 +879,23 @@ export class EmailTemplateService {
   async findBatchOne(id: number) {
     const batch = await this.batchRepository.findOne({
       where: { id, is_archived: false },
-      relations: ["template", "sent_by"],
+      relations: ["template", "sent_by", "created_by"],
     });
     if (!batch) {
       throw new NotFoundException(`Communication batch ${id} not found`);
     }
+
+    const pickActor = (user: any) => {
+      if (!user || typeof user !== "object") return null;
+      return {
+        id: user.id,
+        first_name: user.first_name || null,
+        last_name: user.last_name || null,
+        email: user.email || null,
+      };
+    };
+    (batch as any).sent_by = pickActor((batch as any).sent_by);
+    (batch as any).created_by = pickActor((batch as any).created_by);
 
     const logs = await this.logRepository.find({
       where: { batch_id: id, is_archived: false },

@@ -56,6 +56,16 @@ export class OrganizationsService {
     private readonly dataScopeService: DataScopeService,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   async resolveOrganizationScope(currentUser?: {
     id?: number;
     role?: string;
@@ -204,9 +214,11 @@ export class OrganizationsService {
     if (!org) throw new NotFoundException(`Organization ${id} not found`);
 
     const branch_tree = this.buildBranchTree(org.branches || []);
-    return this.withEffectivePipelineStage(
+    const result = this.withEffectivePipelineStage(
       Object.assign(org, { branch_tree }),
     );
+    (result as any).created_by = this.pickAuditActor((result as any).created_by);
+    return result;
   }
 
   async update(id: number, dto: UpdateOrganizationDto, user?: any): Promise<Organization> {

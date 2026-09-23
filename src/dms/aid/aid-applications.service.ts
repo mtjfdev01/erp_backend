@@ -52,6 +52,16 @@ export class AidApplicationsService {
     private readonly s3: S3StorageService,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   private async nextApplicationNo(): Promise<string> {
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const prefix = `AID-${day}-`;
@@ -183,6 +193,7 @@ export class AidApplicationsService {
         "ceo_decided_by",
         "delivered_by",
         "leakage_override_by",
+        "created_by",
       ],
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
@@ -195,6 +206,7 @@ export class AidApplicationsService {
     const aid_history = await this.buildAidHistory(app);
     return {
       ...app,
+      created_by: this.pickAuditActor((app as any).created_by),
       attachments,
       duplicate_flags,
       aid_history,

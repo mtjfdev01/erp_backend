@@ -8,6 +8,7 @@ import {
   Delete,
   HttpStatus,
   Res,
+  Req,
   UseGuards,
   Query,
 } from "@nestjs/common";
@@ -34,11 +35,14 @@ export class DonationInKindItemsController {
   ])
   async create(
     @Body() createDonationInKindItemDto: CreateDonationInKindItemDto,
+    @Req() req: any,
     @Res() res: Response,
   ) {
     try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
       const result = await this.donationInKindItemsService.create(
         createDonationInKindItemDto,
+        userId,
       );
       return res.status(HttpStatus.CREATED).json({
         success: true,
@@ -182,12 +186,15 @@ export class DonationInKindItemsController {
   async update(
     @Param("id") id: string,
     @Body() updateDonationInKindItemDto: UpdateDonationInKindItemDto,
+    @Req() req: any,
     @Res() res: Response,
   ) {
     try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
       const result = await this.donationInKindItemsService.update(
         +id,
         updateDonationInKindItemDto,
+        userId,
       );
       return res.status(HttpStatus.OK).json({
         success: true,

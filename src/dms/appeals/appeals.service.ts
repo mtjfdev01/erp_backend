@@ -40,6 +40,16 @@ export class AppealsService {
     private readonly appealMediaService: AppealMediaService,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   private generateSlug(title: string): string {
     return title
       .toLowerCase()
@@ -261,10 +271,13 @@ export class AppealsService {
     const appeal = await this.appealRepo.findOne({
       where: { id },
       relations: withRelations
-        ? ["beneficiary", "updates", "media"]
+        ? ["beneficiary", "updates", "media", "created_by"]
         : undefined,
     });
     if (!appeal) throw new NotFoundException(`Appeal #${id} not found`);
+    if (withRelations) {
+      (appeal as any).created_by = this.pickAuditActor((appeal as any).created_by);
+    }
     return appeal;
   }
 

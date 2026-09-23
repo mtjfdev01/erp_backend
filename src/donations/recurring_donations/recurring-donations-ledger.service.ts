@@ -225,6 +225,7 @@ export class RecurringDonationsLedgerService {
         record_type: "subscription",
         is_archived: false,
       },
+      relations: ["created_by"],
     });
 
     if (!subscription) {
@@ -243,6 +244,7 @@ export class RecurringDonationsLedgerService {
           record_type: "installment",
           is_archived: false,
         },
+        relations: ["created_by"],
         order: { period_key: "ASC", created_at: "ASC", id: "ASC" },
       }),
       subscription.initial_donation_id
@@ -284,9 +286,25 @@ export class RecurringDonationsLedgerService {
       0,
     );
 
+    const pickActor = (user: any) => {
+      if (!user || typeof user !== "object") return null;
+      return {
+        id: user.id,
+        first_name: user.first_name || null,
+        last_name: user.last_name || null,
+        email: user.email || null,
+      };
+    };
+
     return {
-      subscription,
-      installments,
+      subscription: {
+        ...subscription,
+        created_by: pickActor(subscription.created_by),
+      },
+      installments: installments.map((row) => ({
+        ...row,
+        created_by: pickActor(row.created_by),
+      })),
       initial_donation: initialDonation,
       donor,
       summary: {
@@ -1652,6 +1670,184 @@ export class RecurringDonationsLedgerService {
       installment_ids: pendingRows.map((r) => r.id),
       pending_remaining,
     };
+  }
+
+  /**
+   * Staff: edit one installment on a subscription (status / amount / period_key).
+   * Non-Stripe only. Does not create or delete donations.
+   */
+  async updateStaffInstallment(
+    subscriptionId: number,
+    installmentId: number,
+    dto: {
+      status?: string;
+      amount?: number;
+      period_key?: string | null;
+      note?: string | null;
+    },
+  ): Promise<RecurringDonation> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+    if (subscription.stripe_subscription_id) {
+      throw new BadRequestException(
+        "Stripe installments are managed via Stripe — edit is blocked",
+      );
+    }
+
+    const installment = await this.recurringDonationRepo.findOne({
+      where: {
+        id: installmentId,
+        parent_id: subscriptionId,
+        record_type: "installment",
+        is_archived: false,
+      },
+    });
+    if (!installment) {
+      throw new NotFoundException("Installment not found for this subscription");
+    }
+
+    const patch: Partial<RecurringDonation> = {};
+
+    if (dto.status != null) {
+      const status = String(dto.status).trim().toLowerCase();
+      if (!["pending", "completed", "failed"].includes(status)) {
+        throw new BadRequestException(
+          "Installment status must be pending, completed, or failed",
+        );
+      }
+      patch.status = status;
+      if (status === "completed") {
+        patch.paid_at = installment.paid_at || new Date();
+        if (!installment.stripe_billing_reason) {
+          patch.stripe_billing_reason = "staff_installment_edit";
+        }
+      } else {
+        patch.paid_at = null;
+      }
+    }
+
+    if (dto.amount != null) {
+      const amount = Number(dto.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new BadRequestException("amount must be greater than 0");
+      }
+      patch.amount = amount;
+    }
+
+    if (dto.period_key !== undefined) {
+      const key = dto.period_key == null ? null : String(dto.period_key).trim();
+      patch.period_key = key || null;
+    }
+
+    if (dto.note != null && String(dto.note).trim()) {
+      patch.stripe_billing_reason = `staff_edit:${String(dto.note)
+        .trim()
+        .slice(0, 100)}`;
+    }
+
+    if (!Object.keys(patch).length) {
+      throw new BadRequestException("No installment fields to update");
+    }
+
+    await this.recurringDonationRepo.update(installmentId, patch);
+    const updated = await this.recurringDonationRepo.findOne({
+      where: { id: installmentId },
+    });
+    if (!updated) {
+      throw new NotFoundException("Installment not found after update");
+    }
+
+    if (
+      String(updated.status || "").toLowerCase() === "completed" &&
+      subscription.donor_id
+    ) {
+      await this.resetUnpaidPaymentReminderCount(subscriptionId);
+    }
+
+    return updated;
+  }
+
+  /**
+   * Soft-archive a subscription and its installment rows (staff delete).
+   * Does not delete donors or donation records.
+   */
+  async archiveStaffSubscription(
+    subscriptionId: number,
+    userId?: number | null,
+  ): Promise<{ id: number; archived_installments: number }> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+
+    const patch: Partial<RecurringDonation> = { is_archived: true };
+    if (userId && userId > 0) {
+      (patch as any).updated_by = { id: userId };
+    }
+
+    await this.recurringDonationRepo.update(subscriptionId, patch);
+    const childResult = await this.recurringDonationRepo.update(
+      {
+        parent_id: subscriptionId,
+        record_type: "installment" as const,
+        is_archived: false,
+      },
+      { is_archived: true },
+    );
+
+    return {
+      id: subscriptionId,
+      archived_installments: childResult?.affected || 0,
+    };
+  }
+
+  /**
+   * Soft-archive one installment row (staff delete). Does not touch donors/donations.
+   */
+  async archiveStaffInstallment(
+    subscriptionId: number,
+    installmentId: number,
+    userId?: number | null,
+  ): Promise<RecurringDonation> {
+    const installment = await this.recurringDonationRepo.findOne({
+      where: {
+        id: installmentId,
+        parent_id: subscriptionId,
+        record_type: "installment",
+        is_archived: false,
+      },
+    });
+    if (!installment) {
+      throw new NotFoundException("Installment not found for this subscription");
+    }
+
+    const patch: Partial<RecurringDonation> = { is_archived: true };
+    if (userId && userId > 0) {
+      (patch as any).updated_by = { id: userId };
+    }
+    await this.recurringDonationRepo.update(installmentId, patch);
+
+    const updated = await this.recurringDonationRepo.findOne({
+      where: { id: installmentId },
+    });
+    if (!updated) {
+      throw new NotFoundException("Installment not found after archive");
+    }
+    return updated;
   }
 
   /**

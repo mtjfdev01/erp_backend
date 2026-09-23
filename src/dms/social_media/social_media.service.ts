@@ -29,6 +29,16 @@ export class SocialMediaService {
     private readonly bufferClient: BufferClient,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   async search(payload: Record<string, any>) {
     const pagination = payload.pagination || {};
     const page = Math.max(1, Number(pagination.page) || 1);
@@ -90,10 +100,12 @@ export class SocialMediaService {
   async findOne(id: number): Promise<SocialPost> {
     const row = await this.socialPostRepo.findOne({
       where: { id, is_archived: false },
+      relations: ["created_by"],
     });
     if (!row) {
       throw new NotFoundException("Social post not found");
     }
+    (row as any).created_by = this.pickAuditActor((row as any).created_by);
     return row;
   }
 

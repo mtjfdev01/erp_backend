@@ -20,6 +20,16 @@ export class VolunteerService {
     private readonly volunteerRepository: Repository<Volunteer>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   // ─── Public (website) — unchanged ────────────────────────────
   async create(createVolunteerDto: CreateVolunteerDto): Promise<Volunteer> {
     const volunteer = this.volunteerRepository.create(createVolunteerDto);
@@ -199,10 +209,14 @@ export class VolunteerService {
   async findOne(id: number): Promise<Volunteer> {
     const volunteer = await this.volunteerRepository.findOne({
       where: { id, is_archived: false },
+      relations: ["created_by"],
     });
     if (!volunteer) {
       throw new NotFoundException(`Volunteer with ID ${id} not found`);
     }
+    (volunteer as any).created_by = this.pickAuditActor(
+      (volunteer as any).created_by,
+    );
     return volunteer;
   }
 

@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsNumber,
   IsArray,
+  IsBoolean,
 } from "class-validator";
 import { Transform } from "class-transformer";
 import {
@@ -101,6 +102,29 @@ export class CreateDonationBoxDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsNumber()
+  @IsOptional()
+  registration_latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  registration_longitude?: number;
+
+  @IsString()
+  @IsOptional()
+  registration_location_name?: string;
+
+  @IsOptional()
+  registration_location_details?: Record<string, unknown>;
+
+  @IsNumber()
+  @IsOptional()
+  location_radius_meters?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  require_collection_location?: boolean;
 
   // User Assignment (Optional)
   @IsArray()

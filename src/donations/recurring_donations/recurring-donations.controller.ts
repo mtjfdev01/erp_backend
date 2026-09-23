@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   HttpStatus,
@@ -20,6 +21,7 @@ import {
   RECURRING_DONATION_VIEW_GUARD,
   RECURRING_DONATION_CREATE_GUARD,
   RECURRING_DONATION_UPDATE_GUARD,
+  RECURRING_DONATION_DELETE_GUARD,
 } from "../../permissions/recurring-donations-permissions.constants";
 import { CreateRecurringDonationDto } from "./dto/create-recurring-donation.dto";
 import { UpdateRecurringDonationDto } from "./dto/update-recurring-donation.dto";
@@ -179,6 +181,105 @@ export class RecurringDonationsController {
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to mark installments as paid",
+        data: null,
+      });
+    }
+  }
+
+  /** Soft-archive subscription + its installments (does not delete donors/donations). */
+  @Delete(":id")
+  @RequiredPermissions([...RECURRING_DONATION_DELETE_GUARD])
+  async remove(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const data = await this.ledgerService.archiveStaffSubscription(
+        +id,
+        userId,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Recurring donation deleted",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to delete recurring donation",
+        data: null,
+      });
+    }
+  }
+
+  /** Staff: edit one installment (status / amount / period). Non-Stripe only. */
+  @Patch(":id/installments/:installmentId")
+  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  async updateInstallment(
+    @Param("id") id: string,
+    @Param("installmentId") installmentId: string,
+    @Body()
+    body: {
+      status?: string;
+      amount?: number;
+      period_key?: string | null;
+      note?: string | null;
+    },
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.ledgerService.updateStaffInstallment(
+        +id,
+        +installmentId,
+        body || {},
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Installment updated",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to update installment",
+        data: null,
+      });
+    }
+  }
+
+  /** Soft-archive one installment row. */
+  @Delete(":id/installments/:installmentId")
+  @RequiredPermissions([...RECURRING_DONATION_DELETE_GUARD])
+  async removeInstallment(
+    @Param("id") id: string,
+    @Param("installmentId") installmentId: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const data = await this.ledgerService.archiveStaffInstallment(
+        +id,
+        +installmentId,
+        userId,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Installment deleted",
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to delete installment",
         data: null,
       });
     }

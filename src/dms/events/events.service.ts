@@ -26,6 +26,16 @@ export class EventsService {
     private donationRepo: Repository<Donation>,
   ) {}
 
+  private pickAuditActor(user: any) {
+    if (!user || typeof user !== "object") return null;
+    return {
+      id: user.id,
+      first_name: user.first_name || null,
+      last_name: user.last_name || null,
+      email: user.email || null,
+    };
+  }
+
   private generateSlug(title: string): string {
     return title
       .toLowerCase()
@@ -110,9 +120,15 @@ export class EventsService {
   }
 
   async findOne(id: number): Promise<Event> {
-    const event = await this.eventRepo.findOne({ where: { id } });
+    const event = await this.eventRepo.findOne({
+      where: { id },
+      relations: ["created_by"],
+    });
     if (!event) throw new NotFoundException(`Event #${id} not found`);
-    return event;
+    return {
+      ...event,
+      created_by: this.pickAuditActor((event as any).created_by),
+    } as Event;
   }
 
   async findBySlug(slug: string): Promise<Event> {

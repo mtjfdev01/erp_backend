@@ -367,6 +367,79 @@ export class DonationBoxController {
     }
   }
 
+  @Patch(":id/relocate")
+  @RequiredPermissions([
+    "fund_raising.donation_box.update",
+    "super_admin",
+    "fund_raising_manager",
+  ])
+  async relocate(
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+    @Res() res: Response,
+    @CurrentUser() currentUser?: any,
+  ) {
+    try {
+      const existingBox = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      const geoScope = currentUser?.id
+        ? await this.geographicScopeService.resolveForUser(
+            currentUser.id,
+            currentUser.role,
+            currentUser,
+          )
+        : null;
+      this.donationBoxService.assertDonationBoxViewAccess(
+        scope,
+        existingBox,
+        geoScope,
+      );
+
+      if (body?.city_id || body?.route_id) {
+        await this.checkGeographicAccess(
+          currentUser.id,
+          {
+            city_id: (body.city_id as number) ?? existingBox.city_id,
+            route_id: (body.route_id as number) ?? existingBox.route_id,
+            landmark_marketplace:
+              (body.landmark_marketplace as string) ??
+              existingBox.landmark_marketplace,
+          },
+          currentUser.role,
+          currentUser,
+        );
+      }
+
+      const result = await this.donationBoxService.relocate(
+        +id,
+        body,
+        currentUser,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donation box relocated successfully",
+        data: result,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Patch(":id")
   @RequiredPermissions([
     "fund_raising.donation_box.update",
