@@ -955,6 +955,7 @@ export class UsersService implements OnModuleInit {
 
   /**
    * Hierarchy options for list Team filters (Me / Direct / Entire / pick person).
+   * Super admins get every active user for the person picker.
    */
   async getTeamFilterOptions(currentUserId: number, search?: string) {
     const selfId = Number(currentUserId);
@@ -971,6 +972,43 @@ export class UsersService implements OnModuleInit {
     const me = await this.userRepository.findOne({
       where: { id: selfId, is_archived: false },
     });
+
+    const q = (search || "").trim().toLowerCase();
+    const permsRow = await this.permissionsRepository.findOne({
+      where: { user_id: selfId },
+    });
+    const isSuperAdmin = this.dataScopeService.isSuperAdmin(
+      me?.role,
+      permsRow?.permissions || {},
+    );
+
+    if (isSuperAdmin) {
+      const qb = this.userRepository
+        .createQueryBuilder("user")
+        .where("user.is_archived = :archived", { archived: false })
+        .orderBy("user.first_name", "ASC")
+        .addOrderBy("user.last_name", "ASC");
+
+      if (q) {
+        qb.andWhere(
+          `(LOWER(COALESCE(user.first_name, '')) LIKE :q
+            OR LOWER(COALESCE(user.last_name, '')) LIKE :q
+            OR LOWER(COALESCE(user.email, '')) LIKE :q
+            OR LOWER(CONCAT(COALESCE(user.first_name, ''), ' ', COALESCE(user.last_name, ''))) LIKE :q)`,
+          { q: `%${q}%` },
+        );
+      }
+
+      const allUsers = await qb.getMany();
+      const entire_team = allUsers.map((u) => this.toTeamFilterUser(u));
+      return {
+        me: me ? this.toTeamFilterUser(me) : null,
+        direct_reports: entire_team,
+        entire_team,
+        has_direct_reports: entire_team.length > 0,
+        has_team: entire_team.length > 0,
+      };
+    }
 
     const directIds = await this.dataScopeService.getDirectReportIds(selfId);
     const entireIds = await this.dataScopeService.getAllReportIds(selfId);
@@ -990,7 +1028,6 @@ export class UsersService implements OnModuleInit {
     let direct_reports = await loadByIds(directIds);
     let entire_team = await loadByIds(entireIds);
 
-    const q = (search || "").trim().toLowerCase();
     if (q) {
       const match = (u: {
         full_name: string;

@@ -197,12 +197,17 @@ export class DataScopeService {
       if (!pick) {
         return { ...scope, bypass: false, allowedUserIds: [] };
       }
-      const tree = new Set<number>([
-        selfId,
-        ...(await this.getAllReportIds(selfId)),
-      ]);
-      // Person picker is limited to self + reporting tree
-      candidateIds = tree.has(pick) ? [pick] : [];
+      // Super admin / org-wide scope: any user is selectable
+      if (scope.bypass || scope.type === "org" || scope.allowedUserIds == null) {
+        candidateIds = [pick];
+      } else {
+        const tree = new Set<number>([
+          selfId,
+          ...(await this.getAllReportIds(selfId)),
+        ]);
+        // Person picker is limited to self + reporting tree
+        candidateIds = tree.has(pick) ? [pick] : [];
+      }
     }
 
     const intersect = (ids: number[]): number[] => {
