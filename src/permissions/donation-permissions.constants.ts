@@ -68,6 +68,19 @@ export const DONATION_DELETE_GUARD = [
   "fund_raising_manager",
 ] as const;
 
+/** Staff who may set donation status to anything other than pending. */
+export const DONATION_RECONCILER_PERMISSIONS = [
+  `${ONLINE}.reconciler`,
+  `${OFFLINE}.reconciler`,
+  `${IN_KIND}.reconciler`,
+] as const;
+
+export const DONATION_RECONCILER_GUARD = [
+  ...DONATION_RECONCILER_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
+] as const;
+
 /** Filter dropdowns on donation lists — list_view or view on online/offline/in-kind donations. */
 export const DONATION_FILTER_OPTIONS_GUARD = [
   ...DONATION_LIST_VIEW_PERMISSIONS,

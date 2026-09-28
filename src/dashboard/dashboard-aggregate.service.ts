@@ -291,9 +291,7 @@ export class DashboardAggregateService {
       })
       .getRawOne<{ amount_sum: string; count: string }>();
 
-    // Recurring donors card = same population as Recurring Donors list
-    // filter "Has paid installments": non-archived subscriptions that have
-    // at least one completed/paid/success installment (list pagination.total).
+    // Recurring donors card = subscriptions with ≥1 completed installment in range
     const recurringDonorsAgg = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .select("COALESCE(COUNT(rd.id), 0)", "subscription_count")
@@ -306,7 +304,9 @@ export class DashboardAggregateService {
             AND inst.record_type = 'installment'
             AND inst.is_archived = false
             AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')
+            AND COALESCE(inst.paid_at, inst.created_at) BETWEEN :start AND :end
         )`,
+        { start, end },
       )
       .getRawOne<{ subscription_count: string }>();
 
@@ -350,19 +350,21 @@ export class DashboardAggregateService {
 
     // --- Additive Recurring Performance KPIs (do not replace existing cards) ---
 
-    // Same as Recurring Donors list with no installment filter (all ledger subscriptions)
+    // Subscriptions registered in the selected date range
     const registeredRecurringDonorsCount = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .where("rd.is_archived = false")
       .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .andWhere("rd.created_at BETWEEN :start AND :end", { start, end })
       .getCount();
 
-    // Same as list filter "Pending installments (none paid)" — subscription rows
+    // Due donors registered in range with no paid installment yet
     const outstandingDonorsAgg = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .select("COALESCE(COUNT(rd.id), 0)", "count")
       .where("rd.is_archived = false")
       .andWhere("rd.record_type = :subscription", { subscription: "subscription" })
+      .andWhere("rd.created_at BETWEEN :start AND :end", { start, end })
       .andWhere(
         `NOT EXISTS (
           SELECT 1 FROM recurring_donations inst
@@ -376,7 +378,7 @@ export class DashboardAggregateService {
 
     const outstandingDonorsCount = Number(outstandingDonorsAgg?.count ?? 0);
 
-    // Committed Amount: sum of active subscription pledge amounts
+    // Committed Amount: active subscription pledges registered in range
     const committedAmountAgg = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .select("COALESCE(SUM(rd.amount), 0)", "amount_sum")
@@ -385,11 +387,12 @@ export class DashboardAggregateService {
       .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...activeStatuses)", {
         activeStatuses: ["active", "past_due", "trialing"],
       })
+      .andWhere("rd.created_at BETWEEN :start AND :end", { start, end })
       .getRawOne<{ amount_sum: string }>();
 
     const committedAmount = Number(committedAmountAgg?.amount_sum ?? 0);
 
-    // Committed Monthly: normalize each active subscription to a monthly run-rate
+    // Committed Monthly: normalize each active subscription (in range) to a monthly run-rate
     const committedMonthlyAgg = await this.recurringDonationRepo
       .createQueryBuilder("rd")
       .select(
@@ -416,38 +419,45 @@ export class DashboardAggregateService {
       .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...activeStatuses)", {
         activeStatuses: ["active", "past_due", "trialing"],
       })
+      .andWhere("rd.created_at BETWEEN :start AND :end", { start, end })
       .getRawOne<{ amount_sum: string }>();
 
     const committedMonthlyAmount = Math.round(
       Number(committedMonthlyAgg?.amount_sum ?? 0),
     );
 
-    // This month collection: completed installments in the current calendar month
+    // This month collection: current calendar month ∩ selected date range
     const now = new Date();
-    const thisMonthStart = new Date(
+    const calendarMonthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
     );
-    const thisMonthEnd = new Date(
+    const calendarMonthEnd = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
     );
+    const thisMonthStart =
+      start > calendarMonthStart ? start : calendarMonthStart;
+    const thisMonthEnd = end < calendarMonthEnd ? end : calendarMonthEnd;
 
-    const thisMonthCollectionAgg = await this.recurringDonationRepo
-      .createQueryBuilder("rd")
-      .select("COALESCE(SUM(rd.amount), 0)", "amount_sum")
-      .where("rd.is_archived = false")
-      .andWhere("rd.record_type = :installment", { installment: "installment" })
-      .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...statuses)", {
-        statuses: ["completed", "paid", "success"],
-      })
-      .andWhere(
-        "COALESCE(rd.paid_at, rd.created_at) BETWEEN :thisMonthStart AND :thisMonthEnd",
-        { thisMonthStart, thisMonthEnd },
-      )
-      .getRawOne<{ amount_sum: string }>();
+    let thisMonthRecurringCollection = 0;
+    if (thisMonthStart <= thisMonthEnd) {
+      const thisMonthCollectionAgg = await this.recurringDonationRepo
+        .createQueryBuilder("rd")
+        .select("COALESCE(SUM(rd.amount), 0)", "amount_sum")
+        .where("rd.is_archived = false")
+        .andWhere("rd.record_type = :installment", { installment: "installment" })
+        .andWhere("LOWER(COALESCE(rd.status, '')) IN (:...statuses)", {
+          statuses: ["completed", "paid", "success"],
+        })
+        .andWhere(
+          "COALESCE(rd.paid_at, rd.created_at) BETWEEN :thisMonthStart AND :thisMonthEnd",
+          { thisMonthStart, thisMonthEnd },
+        )
+        .getRawOne<{ amount_sum: string }>();
 
-    const thisMonthRecurringCollection = Number(
-      thisMonthCollectionAgg?.amount_sum ?? 0,
-    );
+      thisMonthRecurringCollection = Number(
+        thisMonthCollectionAgg?.amount_sum ?? 0,
+      );
+    }
 
     // 2c) Recurring donations monthly series (installment amounts)
     const recurringDonationMonthRows = await this.recurringDonationRepo

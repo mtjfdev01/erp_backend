@@ -75,6 +75,7 @@ import {
 } from "./audit/donation-audit.util";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 import { PermissionsService } from "../permissions/permissions.service";
+import { assertDonationReconciler } from "../permissions/reconciler-permissions";
 import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../permissions/geographic-scope/geographic-scope.types";
@@ -3050,7 +3051,8 @@ export class DonationsService {
           throw new HttpException("Donation amount is less than 50 PKR", 400);
         }
 
-        // In-kind gifts always start pending; amount = sum of line estimated values.
+        // In-kind gifts: amount = sum of line estimated values.
+        // Status: pending unless reconciler sets otherwise.
         if (createDonationDto.donation_method === "in_kind") {
           const items = Array.isArray(createDonationDto.in_kind_items)
             ? createDonationDto.in_kind_items
@@ -3060,8 +3062,21 @@ export class DonationsService {
             return sum + (Number.isFinite(value) ? value : 0);
           }, 0);
           createDonationDto.amount = estimatedTotal;
-          createDonationDto.status = "pending";
         }
+
+        // Non-reconciler staff may only create as pending
+        await assertDonationReconciler(
+          this.permissionsService,
+          user,
+          createDonationDto.status || "pending",
+          undefined,
+          String(createDonationDto.donation_method || "").toLowerCase() ===
+            "in_kind",
+          {
+            donation_method: createDonationDto.donation_method,
+            donation_source: createDonationDto.donation_source,
+          },
+        );
 
         if (deferPostCreate) {
           if (createDonationDto.donor_email) {
@@ -3468,6 +3483,14 @@ export class DonationsService {
       return { data, donationId, deferPostCreate };
     } catch (error) {
       console.log(error?.message);
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof HttpException ||
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
       throw new Error(`Failed to create donation: ${error.message}`);
     }
   }
@@ -4029,12 +4052,29 @@ export class DonationsService {
       if (isInKind && patch.status !== undefined) {
         const nextStatus = String(patch.status || "").toLowerCase();
         const prevStatus = String(donation.status || "").toLowerCase();
-        const completing =
-          this.isSuccessfulDonationStatus(nextStatus) &&
-          !this.isSuccessfulDonationStatus(prevStatus);
-        if (completing) {
-          await this.assertCanCompleteInKindDonation(user);
-        }
+        await assertDonationReconciler(
+          this.permissionsService,
+          user,
+          nextStatus,
+          prevStatus,
+          true,
+          {
+            donation_method: donation.donation_method,
+            donation_source: donation.donation_source,
+          },
+        );
+      } else if (patch.status !== undefined) {
+        await assertDonationReconciler(
+          this.permissionsService,
+          user,
+          patch.status,
+          donation.status,
+          false,
+          {
+            donation_method: donation.donation_method,
+            donation_source: donation.donation_source,
+          },
+        );
       }
 
       const geoTouched =
@@ -4079,6 +4119,14 @@ export class DonationsService {
           source: DonationAuditSource.STAFF_UI,
           changes: auditChanges,
           performedByUserId: auditUserId,
+          metadata: auditChanges.some((c) => c.field === "status")
+            ? {
+                verified_by_id: auditUserId,
+                verified_at: new Date().toISOString(),
+                previous_status: donation.status,
+                new_status: patch.status,
+              }
+            : undefined,
         });
       }
       const nextStatus =
@@ -4102,7 +4150,7 @@ export class DonationsService {
     }
   }
 
-  /** Only Completing / FR manager / super admin can mark in-kind donations completed. */
+  /** Completing / in-kind reconciler / FR manager / super admin can mark in-kind completed. */
   private async assertCanCompleteInKindDonation(user?: any): Promise<void> {
     const userId = Number(user?.id);
     if (!Number.isFinite(userId) || userId <= 0) {
@@ -4124,6 +4172,14 @@ export class DonationsService {
       await this.permissionsService.hasPermission(
         userId,
         "fund_raising.in_kind_donations.completing",
+      )
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        userId,
+        "fund_raising.in_kind_donations.reconciler",
       )
     ) {
       return;
@@ -4280,13 +4336,17 @@ export class DonationsService {
 
       const isInKind =
         String(donation.donation_method || "").toLowerCase() === "in_kind";
-      if (
-        isInKind &&
-        this.isSuccessfulDonationStatus(newStatus) &&
-        !this.isSuccessfulDonationStatus(donation.status)
-      ) {
-        await this.assertCanCompleteInKindDonation(user);
-      }
+      await assertDonationReconciler(
+        this.permissionsService,
+        user,
+        newStatus,
+        donation.status,
+        isInKind,
+        {
+          donation_method: donation.donation_method,
+          donation_source: donation.donation_source,
+        },
+      );
 
       const auditUserId = this.donationAuditUserId(user);
       const statusPatch: Record<string, unknown> = { status: newStatus };
@@ -4302,6 +4362,18 @@ export class DonationsService {
           source: DonationAuditSource.STAFF_UI,
           changes: auditChanges,
           performedByUserId: auditUserId,
+          metadata: {
+            verified_by_id: auditUserId,
+            verified_at: new Date().toISOString(),
+            previous_status: donation.status,
+            new_status: newStatus,
+            review_action:
+              String(newStatus).toLowerCase() === "completed"
+                ? "approve"
+                : String(newStatus).toLowerCase() === "failed"
+                  ? "reject"
+                  : "status_change",
+          },
         });
       }
 

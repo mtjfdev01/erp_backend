@@ -74,7 +74,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to create recurring donation",
@@ -163,13 +167,19 @@ export class RecurringDonationsController {
   async markInstallmentsPaid(
     @Param("id") id: string,
     @Body() body: { installment_ids?: number[]; note?: string },
+    @Req() req: any,
     @Res() res: Response,
   ) {
     try {
-      const data = await this.ledgerService.markInstallmentsPaid(+id, {
-        installmentIds: body?.installment_ids || [],
-        note: body?.note,
-      });
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const data = await this.ledgerService.markInstallmentsPaid(
+        +id,
+        {
+          installmentIds: body?.installment_ids || [],
+          note: body?.note,
+        },
+        userId,
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
         message: `Marked ${data.marked} installment(s) as paid`,
@@ -177,7 +187,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to mark installments as paid",
@@ -229,13 +243,16 @@ export class RecurringDonationsController {
       period_key?: string | null;
       note?: string | null;
     },
+    @Req() req: any,
     @Res() res: Response,
   ) {
     try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
       const data = await this.ledgerService.updateStaffInstallment(
         +id,
         +installmentId,
         body || {},
+        userId,
       );
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -244,7 +261,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to update installment",

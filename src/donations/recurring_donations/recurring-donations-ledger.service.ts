@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -8,6 +8,8 @@ import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { DonationsService } from "../donations.service";
+import { PermissionsService } from "../../permissions/permissions.service";
+import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
 import {
   billingIntervalToFrequency,
   getPeriodKeyForFrequency,
@@ -52,6 +54,7 @@ export class RecurringDonationsLedgerService {
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
     private readonly moduleRef: ModuleRef,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async search(payload: Record<string, any>) {
@@ -443,6 +446,7 @@ export class RecurringDonationsLedgerService {
     await this.createFirstInstallmentForStaffSubscription(
       saved,
       dto.installment_status,
+      userId,
     );
 
     return saved;
@@ -455,6 +459,7 @@ export class RecurringDonationsLedgerService {
   private async createFirstInstallmentForStaffSubscription(
     subscription: RecurringDonation,
     installmentStatusRaw?: string | null,
+    userId?: number | null,
   ): Promise<void> {
     if (!subscription?.id || subscription.stripe_subscription_id) return;
 
@@ -468,6 +473,12 @@ export class RecurringDonationsLedgerService {
     )
       ? statusRaw
       : "pending";
+
+    await assertRecurringReconciler(
+      this.permissionsService,
+      { id: userId },
+      installmentStatus,
+    );
 
     let first = await this.recurringDonationRepo.findOne({
       where: {
@@ -1574,11 +1585,18 @@ export class RecurringDonationsLedgerService {
   async markInstallmentsPaid(
     subscriptionId: number,
     opts: { installmentIds: number[]; note?: string },
+    userId?: number | null,
   ): Promise<{
     marked: number;
     installment_ids: number[];
     pending_remaining: number;
   }> {
+    await assertRecurringReconciler(
+      this.permissionsService,
+      { id: userId },
+      "completed",
+    );
+
     const ids = [
       ...new Set(
         (opts.installmentIds || [])
@@ -1685,6 +1703,7 @@ export class RecurringDonationsLedgerService {
       period_key?: string | null;
       note?: string | null;
     },
+    userId?: number | null,
   ): Promise<RecurringDonation> {
     const subscription = await this.recurringDonationRepo.findOne({
       where: {
@@ -1723,6 +1742,12 @@ export class RecurringDonationsLedgerService {
           "Installment status must be pending, completed, or failed",
         );
       }
+      await assertRecurringReconciler(
+        this.permissionsService,
+        { id: userId },
+        status,
+        installment.status,
+      );
       patch.status = status;
       if (status === "completed") {
         patch.paid_at = installment.paid_at || new Date();
