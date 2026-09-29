@@ -37,6 +37,7 @@ import { DataImportModule } from "./data_import/data-import.module";
 import { S3StorageModule } from "./utils/storage/s3-storage.module";
 import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
 import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
+import { ExternalModule } from "./external/external.module";
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
     DataImportModule,
     KnowledgeBaseModule,
     CeoOfficeModule,
+    ExternalModule,
   ],
   controllers: [AppController],
   providers: [AppService],

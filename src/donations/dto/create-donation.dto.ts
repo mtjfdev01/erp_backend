@@ -275,4 +275,12 @@ export class CreateDonationDto {
   @IsInt()
   @Type(() => Number)
   prepaid_periods?: number;
+
+  /**
+   * When true (default), online gateways create payment invoices/sessions.
+   * Set false to persist the donation row only (no Meezan/Blinq/Stripe/etc. invoice).
+   */
+  @IsOptional()
+  @IsBoolean()
+  create_invoice?: boolean;
 }

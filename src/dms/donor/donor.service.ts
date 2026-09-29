@@ -1838,6 +1838,22 @@ export class DonorService {
 
       const patch = this.buildDonorPatch(dto as UpdateDonorDto);
 
+      // Keep consent timestamp in sync when staff toggles recurring_consent
+      if (dto.recurring_consent === true) {
+        patch.recurring_consent = true;
+        if (!donor.recurring_consent_at) {
+          patch.recurring_consent_at = new Date();
+        }
+      } else if (dto.recurring_consent === false) {
+        patch.recurring_consent = false;
+        patch.recurring_consent_at = null;
+      }
+      if (dto.recurring === true) {
+        patch.recurring = true;
+      } else if (dto.recurring === false) {
+        patch.recurring = false;
+      }
+
       if (dto.assigned_to_user_id !== undefined) {
         const assignedId =
           dto.assigned_to_user_id === null || dto.assigned_to_user_id === ""

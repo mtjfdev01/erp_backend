@@ -3162,6 +3162,7 @@ export class DonationsService {
           donation_items: _donationItems,
           in_kind_items: _inKindItems,
           referral_code: _referralCode,
+          create_invoice: _createInvoice,
           ...donationColumns
         } = createDonationDto as CreateDonationDto & Record<string, unknown>;
 
@@ -3304,7 +3305,10 @@ export class DonationsService {
       const donationId = savedDonation.id;
       let data: any;
 
-      if (createDonationDto.donation_method === "meezan") {
+      // Default true: omit/undefined keeps existing gateway invoice behavior.
+      const createInvoice = createDonationDto.create_invoice !== false;
+
+      if (createInvoice && createDonationDto.donation_method === "meezan") {
         const meezanResult = await this.createMeezanInvoice(
           savedDonation.id,
           savedDonation.amount,
@@ -3314,7 +3318,7 @@ export class DonationsService {
           { paymentUrl: meezanResult.paymentUrl },
           donationId,
         );
-      } else if (createDonationDto.donation_method === "blinq") {
+      } else if (createInvoice && createDonationDto.donation_method === "blinq") {
         try {
           const blinqResult = await this.generateBlinqInvoice(
             savedDonation.id.toString(),
@@ -3334,7 +3338,7 @@ export class DonationsService {
           );
           throw e;
         }
-      } else if (createDonationDto.donation_method === "payfast") {
+      } else if (createInvoice && createDonationDto.donation_method === "payfast") {
         try {
           const payfastResponse = await this.payfastService.getAccessToken(
             savedDonation.id.toString(),
@@ -3355,7 +3359,7 @@ export class DonationsService {
           );
           throw e;
         }
-      } else if (createDonationDto.donation_method === "jazzcash") {
+      } else if (createInvoice && createDonationDto.donation_method === "jazzcash") {
         try {
           data = await this.startJazzCashPayment(savedDonation, createDonationDto);
         } catch (e) {
@@ -3365,7 +3369,7 @@ export class DonationsService {
           );
           throw e;
         }
-      } else if (createDonationDto.donation_method === "alfalah") {
+      } else if (createInvoice && createDonationDto.donation_method === "alfalah") {
         try {
           data = await this.startAlfalahPayment(savedDonation);
         } catch (e) {
@@ -3375,7 +3379,7 @@ export class DonationsService {
           );
           throw e;
         }
-      } else if (createDonationDto.donation_method === "stripe") {
+      } else if (createInvoice && createDonationDto.donation_method === "stripe") {
         try {
           const baseFrontendUrl = process.env.BASE_Frontend_URL || "";
           const stripeRecurring = this.resolveStripeRecurring(createDonationDto);
@@ -3402,7 +3406,10 @@ export class DonationsService {
           );
           throw e;
         }
-      } else if (createDonationDto.donation_method === "stripe_embed") {
+      } else if (
+        createInvoice &&
+        createDonationDto.donation_method === "stripe_embed"
+      ) {
         try {
           const stripeRecurring = this.resolveStripeRecurring(createDonationDto);
           const embedResult =
@@ -3433,9 +3440,14 @@ export class DonationsService {
           throw e;
         }
       } else if (
+        !createInvoice ||
         manualDonationMethodOptions.includes(createDonationDto.donation_method)
       ) {
-        console.log("Created manually");
+        console.log(
+          createInvoice
+            ? "Created manually"
+            : "Created without gateway invoice (create_invoice=false)",
+        );
         if (createDonationDto.donation_method === "in_kind") {
           if (
             createDonationDto.in_kind_items &&

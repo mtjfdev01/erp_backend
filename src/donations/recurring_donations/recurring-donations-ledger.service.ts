@@ -454,8 +454,16 @@ export class RecurringDonationsLedgerService {
 
     const saved = await this.recurringDonationRepo.save(row);
 
-    // Staff-created ledger subscription ⇒ donor is a recurring donor
-    await this.donorRepository.update(donorId, { recurring: true });
+    // Staff-created ledger subscription ⇒ mark donor as recurring (if not already)
+    const donorPatch: Record<string, unknown> = { recurring: true };
+    const consented = dto.consent !== false;
+    if (consented) {
+      donorPatch.recurring_consent = true;
+      if (!donor.recurring_consent_at) {
+        donorPatch.recurring_consent_at = new Date();
+      }
+    }
+    await this.donorRepository.update(donorId, donorPatch);
 
     // Auto-create first installment (subscription row stays record_type=subscription)
     await this.createFirstInstallmentForStaffSubscription(
