@@ -89,6 +89,21 @@ export class RecurringDonationsLedgerService {
         billingInterval: filters.billing_interval,
       });
     }
+    // Online = Stripe / website; Offline = staff/manual (no website/stripe signal)
+    const sourceFilter = String(filters.source || "")
+      .trim()
+      .toLowerCase();
+    const isOnlineSql = `(
+      rd.stripe_subscription_id IS NOT NULL
+      OR LOWER(COALESCE(rd.donation_method, '')) IN ('online', 'stripe', 'stripe_embed')
+      OR LOWER(COALESCE(d.donation_source, '')) = 'website'
+      OR LOWER(COALESCE(donor.source, '')) = 'website'
+    )`;
+    if (sourceFilter === "online") {
+      qb.andWhere(isOnlineSql);
+    } else if (sourceFilter === "offline") {
+      qb.andWhere(`NOT ${isOnlineSql}`);
+    }
     if (filters.donor_id) {
       qb.andWhere("rd.donor_id = :donorId", {
         donorId: Number(filters.donor_id),

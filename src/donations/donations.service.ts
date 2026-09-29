@@ -3558,6 +3558,51 @@ export class DonationsService {
       if ((filters as any)?.team_filter_user_id !== undefined) {
         delete (filters as any).team_filter_user_id;
       }
+
+      const referrerUserIdRaw = (filters as any)?.referrer_user_id;
+      const referrerUserIdsRaw = (filters as any)?.referrer_user_ids;
+      const referrerAnyRaw = (filters as any)?.referrer_any;
+      if ((filters as any)?.referrer_user_id !== undefined) {
+        delete (filters as any).referrer_user_id;
+      }
+      if ((filters as any)?.referrer_user_ids !== undefined) {
+        delete (filters as any).referrer_user_ids;
+      }
+      if ((filters as any)?.referrer_any !== undefined) {
+        delete (filters as any).referrer_any;
+      }
+
+      const referrerFilterAny =
+        String(referrerAnyRaw || "").toLowerCase() === "true" ||
+        ["any", "all", "__all__"].includes(
+          String(referrerUserIdRaw || "")
+            .trim()
+            .toLowerCase(),
+        );
+
+      const parseReferrerIds = (raw: unknown): number[] => {
+        if (Array.isArray(raw)) {
+          return raw
+            .map((v) => Number(v))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        }
+        if (raw == null || raw === "") return [];
+        return String(raw)
+          .split(",")
+          .map((v) => Number(v.trim()))
+          .filter((n) => Number.isFinite(n) && n > 0);
+      };
+
+      let referrerUserIds = parseReferrerIds(referrerUserIdsRaw);
+      if (!referrerUserIds.length && referrerUserIdRaw != null && referrerUserIdRaw !== "") {
+        const token = String(referrerUserIdRaw).trim().toLowerCase();
+        if (token === "me" && user?.id && Number(user.id) > 0) {
+          referrerUserIds = [Number(user.id)];
+        } else if (!["any", "all", "__all__", "me"].includes(token)) {
+          referrerUserIds = parseReferrerIds(referrerUserIdRaw);
+        }
+      }
+
       const teamFilterActive = !!(teamFilter && teamFilter.mode && teamFilter.mode !== "all");
       let effectiveDataScope = dataScope;
       if (dataScope && teamFilterActive) {
@@ -3605,6 +3650,18 @@ export class DonationsService {
       // 1) Main entity search/equality/date/range
       applyCommonFilters(query, filters, entitySearchFields, "donation");
       applyHybridFilters(query, hybridFilters, "donation");
+
+      // Staff referral link: donation.referred_by, else donor.referred_by (legacy)
+      if (referrerFilterAny) {
+        query.andWhere(
+          `(donation.referred_by IS NOT NULL OR donor.referred_by IS NOT NULL)`,
+        );
+      } else if (referrerUserIds.length > 0) {
+        query.andWhere(
+          `(donation.referred_by IN (:...referrerUserIds) OR (donation.referred_by IS NULL AND donor.referred_by IN (:...referrerUserIds)))`,
+          { referrerUserIds },
+        );
+      }
 
       // 1b) Progress tracking filter: any non-archived tracker for this template
       if (
@@ -3772,6 +3829,16 @@ export class DonationsService {
       }
       applyCommonFilters(sumQuery, filters, entitySearchFields, "donation");
       applyHybridFilters(sumQuery, hybridFilters, "donation");
+      if (referrerFilterAny) {
+        sumQuery.andWhere(
+          `(donation.referred_by IS NOT NULL OR donor.referred_by IS NOT NULL)`,
+        );
+      } else if (referrerUserIds.length > 0) {
+        sumQuery.andWhere(
+          `(donation.referred_by IN (:...referrerUserIds) OR (donation.referred_by IS NULL AND donor.referred_by IN (:...referrerUserIds)))`,
+          { referrerUserIds },
+        );
+      }
       applyRelationsSearch(
         sumQuery,
         filters.search as any,

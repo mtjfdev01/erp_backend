@@ -787,6 +787,68 @@ export class DonorService {
         }
       }
 
+      const referrerAny =
+        String(options?.referrer_any || "").toLowerCase() === "true";
+      const parseReferrerIds = (raw: unknown): number[] => {
+        if (Array.isArray(raw)) {
+          return raw
+            .map((v) => Number(v))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        }
+        if (raw == null || raw === "") return [];
+        return String(raw)
+          .split(",")
+          .map((v) => Number(v.trim()))
+          .filter((n) => Number.isFinite(n) && n > 0);
+      };
+      let referrerUserIds = parseReferrerIds(options?.referrer_user_ids);
+      if (!referrerUserIds.length && options?.referrer_user_id) {
+        const token = String(options.referrer_user_id).trim().toLowerCase();
+        if (token === "me" && currentUser?.id) {
+          referrerUserIds = [Number(currentUser.id)];
+        } else if (token === "any" || token === "all" || token === "__all__") {
+          // handled via referrerAny below
+        } else {
+          referrerUserIds = parseReferrerIds(options.referrer_user_id);
+        }
+      }
+      const referrerFilterAny =
+        referrerAny ||
+        ["any", "all", "__all__"].includes(
+          String(options?.referrer_user_id || "")
+            .trim()
+            .toLowerCase(),
+        );
+
+      if (referrerFilterAny) {
+        queryBuilder.andWhere("donor.referred_by IS NOT NULL");
+      } else if (referrerUserIds.length > 0) {
+        queryBuilder.andWhere("donor.referred_by IN (:...referrerUserIds)", {
+          referrerUserIds,
+        });
+      }
+
+      const assignedToUserIdRaw = options?.assigned_to_user_id;
+      if (
+        assignedToUserIdRaw !== undefined &&
+        assignedToUserIdRaw !== null &&
+        assignedToUserIdRaw !== ""
+      ) {
+        const assignedVal = String(assignedToUserIdRaw).trim().toLowerCase();
+        if (assignedVal === "me" && currentUser?.id) {
+          queryBuilder.andWhere("donor.assigned_to = :assignedToMe", {
+            assignedToMe: currentUser.id,
+          });
+        } else {
+          const assignedToUserId = Number(assignedToUserIdRaw);
+          if (Number.isFinite(assignedToUserId) && assignedToUserId > 0) {
+            queryBuilder.andWhere("donor.assigned_to = :assignedToUserId", {
+              assignedToUserId,
+            });
+          }
+        }
+      }
+
       if (geoScope) {
         this.geographicScopeService.applyToQuery(
           queryBuilder,
@@ -952,6 +1014,9 @@ export class DonorService {
             : undefined,
       source: filters.source || "",
       assigned_to_user_id: filters.assigned_to_user_id ?? "",
+      referrer_user_id: filters.referrer_user_id ?? "",
+      referrer_user_ids: filters.referrer_user_ids ?? "",
+      referrer_any: filters.referrer_any ?? "",
       donated_amount: filters.donated_amount || "",
       donated_amount_operator: filters.donated_amount_operator || "",
     };
