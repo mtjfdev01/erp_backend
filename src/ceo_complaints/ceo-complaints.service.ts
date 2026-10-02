@@ -257,4 +257,29 @@ export class CeoComplaintsService {
       data: row,
     };
   }
+
+  async updateStatus(
+    id: number,
+    status: CeoComplaintStatus,
+    user?: User | null,
+  ) {
+    const row = await this.repo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!row) {
+      throw new NotFoundException("Complaint not found");
+    }
+
+    row.status = status;
+    if (user?.id && user.id > 0) {
+      row.updated_by = { id: user.id } as any;
+    }
+
+    const saved = await this.repo.save(row);
+    return {
+      success: true,
+      message: "Status updated successfully",
+      data: saved,
+    };
+  }
 }

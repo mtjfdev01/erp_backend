@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   HttpStatus,
@@ -15,6 +16,7 @@ import {
 import { Response } from "express";
 import { CeoComplaintsService } from "./ceo-complaints.service";
 import { CreateCeoComplaintDto } from "./dto/create-ceo-complaint.dto";
+import { UpdateCeoComplaintStatusDto } from "./dto/update-ceo-complaint-status.dto";
 import { JwtGuard } from "src/auth/jwt.guard";
 import { PermissionsGuard } from "src/permissions/guards/permissions.guard";
 import { RequiredPermissions } from "src/permissions";
@@ -73,6 +75,32 @@ export class CeoComplaintsController {
         message: error?.message || "Failed to fetch complaints",
         data: [],
         pagination: null,
+      });
+    }
+  }
+
+  @Patch(":id/status")
+  @RequiredPermissions([
+    "ceo_office.ceo_complaints.update",
+    "super_admin",
+  ])
+  @UsePipes(dtoPipe)
+  async updateStatus(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: UpdateCeoComplaintStatusDto,
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.service.updateStatus(id, dto.status, req?.user);
+      return res.status(HttpStatus.OK).json(result);
+    } catch (error: any) {
+      const status =
+        error?.status || error?.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to update status",
+        data: null,
       });
     }
   }
