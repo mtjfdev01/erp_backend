@@ -38,9 +38,13 @@ export class RecurringDonationsController {
 
   @Post("search")
   @RequiredPermissions([...RECURRING_DONATION_LIST_VIEW_GUARD])
-  async search(@Body() payload: Record<string, any>, @Res() res: Response) {
+  async search(
+    @Body() payload: Record<string, any>,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
-      const result = await this.ledgerService.search(payload);
+      const result = await this.ledgerService.search(payload, req?.user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Recurring donations fetched successfully",

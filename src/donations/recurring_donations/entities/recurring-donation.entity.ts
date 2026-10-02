@@ -20,6 +20,14 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "int", nullable: true, default: null })
   donor_id: number | null;
 
+  /**
+   * Staff user (users.id) who referred this subscription (website ?referral_code=).
+   * Plain int (no FK) — copied from initial donation / donor at create time.
+   */
+  @Index()
+  @Column({ name: "referred_by", type: "int", nullable: true, default: null })
+  referred_by: number | null;
+
   @Index()
   @Column({ type: "varchar", nullable: true, default: null })
   stripe_subscription_id: string | null;

@@ -12,10 +12,11 @@ import { JwtModule } from "@nestjs/jwt";
 import { EmailModule } from "../../email/email.module";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { DonorModule } from "src/dms/donor/donor.module";
+import { User } from "src/users/user.entity";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RecurringDonation, Donation, Donor]),
+    TypeOrmModule.forFeature([RecurringDonation, Donation, Donor, User]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },

@@ -29,6 +29,8 @@ import {
   resolveSubscriptionPrepaidPeriodKeys,
 } from "./recurring-prepaid.util";
 import { resolveRecurringStartDateForStorage } from "./recurring-billing-date.util";
+import { resolveRecurringReferrerUserId } from "./recurring-referrer.util";
+import { User } from "src/users/user.entity";
 import {
   LOOKUP_PROFILES,
   listEntityLookup,
@@ -50,6 +52,10 @@ const SORTABLE_FIELDS = new Set([
 export class RecurringDonationsLedgerService {
   private readonly logger = new Logger(RecurringDonationsLedgerService.name);
 
+  /** Effective referrer for list queries (aliases: rd, d = initial donation, donor). */
+  private static readonly REFERRER_ID_SQL =
+    `COALESCE(rd.referred_by, d.referred_by, donor.referred_by)`;
+
   constructor(
     @InjectRepository(RecurringDonation)
     private readonly recurringDonationRepo: Repository<RecurringDonation>,
@@ -57,13 +63,15 @@ export class RecurringDonationsLedgerService {
     private readonly donationRepository: Repository<Donation>,
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
     private readonly moduleRef: ModuleRef,
     private readonly permissionsService: PermissionsService,
   ) {}
 
-  async search(payload: Record<string, any>) {
+  async search(payload: Record<string, any>, user?: { id?: number } | null) {
     const pagination = payload.pagination || {};
     const page = Math.max(1, Number(pagination.page) || 1);
     let pageSize = Number(pagination.pageSize);
@@ -84,8 +92,50 @@ export class RecurringDonationsLedgerService {
       .createQueryBuilder("rd")
       .leftJoin(Donation, "d", "d.id = rd.initial_donation_id")
       .leftJoin(Donor, "donor", "donor.id = rd.donor_id")
+      .leftJoin(
+        User,
+        "ref_user",
+        `ref_user.id = ${RecurringDonationsLedgerService.REFERRER_ID_SQL}`,
+      )
       .where("rd.record_type = :recordType", { recordType: "subscription" })
       .andWhere("rd.is_archived = false");
+
+    // Referrer: subscription.referred_by → initial donation → donor (legacy rows)
+    const referrerUserIdRaw = filters.referrer_user_id;
+    const referrerFilterAny =
+      String(filters.referrer_any || "").toLowerCase() === "true" ||
+      ["any", "all", "__all__"].includes(
+        String(referrerUserIdRaw || "").trim().toLowerCase(),
+      );
+    const parseReferrerIds = (raw: unknown): number[] => {
+      if (Array.isArray(raw)) {
+        return raw
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n) && n > 0);
+      }
+      if (raw == null || raw === "") return [];
+      return String(raw)
+        .split(",")
+        .map((v) => Number(v.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+    };
+    let referrerUserIds = parseReferrerIds(filters.referrer_user_ids);
+    if (!referrerUserIds.length && referrerUserIdRaw != null && referrerUserIdRaw !== "") {
+      const token = String(referrerUserIdRaw).trim().toLowerCase();
+      if (token === "me" && Number(user?.id) > 0) {
+        referrerUserIds = [Number(user!.id)];
+      } else if (!["any", "all", "__all__", "me"].includes(token)) {
+        referrerUserIds = parseReferrerIds(referrerUserIdRaw);
+      }
+    }
+    if (referrerFilterAny) {
+      qb.andWhere(`${RecurringDonationsLedgerService.REFERRER_ID_SQL} IS NOT NULL`);
+    } else if (referrerUserIds.length > 0) {
+      qb.andWhere(
+        `${RecurringDonationsLedgerService.REFERRER_ID_SQL} IN (:...referrerUserIds)`,
+        { referrerUserIds },
+      );
+    }
 
     if (filters.status) {
       qb.andWhere("rd.status = :status", { status: filters.status });
@@ -207,6 +257,11 @@ export class RecurringDonationsLedgerService {
       "d.status AS initial_donation_status",
       "donor.name AS donor_name",
       "donor.email AS donor_email",
+      "ref_user.id AS referrer_user_id",
+      "ref_user.first_name AS referrer_first_name",
+      "ref_user.last_name AS referrer_last_name",
+      "ref_user.email AS referrer_email",
+      "ref_user.referral_code AS referrer_code",
     ])
       .addSelect(
         `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false)`,
@@ -261,7 +316,14 @@ export class RecurringDonationsLedgerService {
       await this.ensurePeriodDuesForSubscription(subscription);
     }
 
-    const [installments, initialDonation, donor] = await Promise.all([
+    const referrerUserId =
+      subscription.referred_by ??
+      (await resolveRecurringReferrerUserId(this.donationRepository, {
+        donationId: subscription.initial_donation_id,
+        donorId: subscription.donor_id,
+      }));
+
+    const [installments, initialDonation, donor, referrer] = await Promise.all([
       this.recurringDonationRepo.find({
         where: {
           parent_id: id,
@@ -289,6 +351,12 @@ export class RecurringDonationsLedgerService {
         ? this.donorRepository.findOne({
             where: { id: subscription.donor_id },
             select: ["id", "name", "first_name", "last_name", "email", "phone"],
+          })
+        : null,
+      referrerUserId
+        ? this.userRepository.findOne({
+            where: { id: referrerUserId },
+            select: ["id", "first_name", "last_name", "email", "referral_code"],
           })
         : null,
     ]);
@@ -331,6 +399,15 @@ export class RecurringDonationsLedgerService {
       })),
       initial_donation: initialDonation,
       donor,
+      referred_by: referrer
+        ? {
+            id: referrer.id,
+            first_name: referrer.first_name || null,
+            last_name: referrer.last_name || null,
+            email: referrer.email || null,
+            referral_code: referrer.referral_code || null,
+          }
+        : null,
       summary: {
         installment_count: installments.length,
         completed_installment_count: completed.length,
@@ -430,11 +507,17 @@ export class RecurringDonationsLedgerService {
       startDate: dto.start_date || null,
     });
 
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId: initialDonationId, donorId },
+    );
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: initialDonationId,
       donor_id: donorId,
+      referred_by: referredBy,
       stripe_subscription_id: null,
       stripe_customer_id: null,
       billing_interval: interval,
@@ -612,6 +695,7 @@ export class RecurringDonationsLedgerService {
       await this.recurringDonationRepo.update(subscription.id, {
         initial_donation_id: donationId,
       });
+      await this.applySubscriptionReferrerToDonation(subscription, donationId);
     }
 
     try {
@@ -779,6 +863,20 @@ export class RecurringDonationsLedgerService {
           patch.initial_donation_id = donationId;
         }
       }
+      if (
+        !subscription.referred_by &&
+        (patch.initial_donation_id || patch.donor_id)
+      ) {
+        const referredBy = await resolveRecurringReferrerUserId(
+          this.donationRepository,
+          {
+            donationId:
+              patch.initial_donation_id ?? subscription.initial_donation_id,
+            donorId: patch.donor_id ?? subscription.donor_id,
+          },
+        );
+        if (referredBy) patch.referred_by = referredBy;
+      }
     }
 
     if (Object.keys(patch).length === 0) {
@@ -835,6 +933,16 @@ export class RecurringDonationsLedgerService {
     if (existing) {
       const patch: Partial<RecurringDonation> = {};
       if (params.donorId && !existing.donor_id) patch.donor_id = params.donorId;
+      if (!existing.referred_by) {
+        const referredBy = await resolveRecurringReferrerUserId(
+          this.donationRepository,
+          {
+            donationId: params.donationId,
+            donorId: params.donorId ?? existing.donor_id,
+          },
+        );
+        if (referredBy) patch.referred_by = referredBy;
+      }
       if (params.consent === true && existing.consent !== true) {
         patch.consent = true;
         patch.consent_at = new Date();
@@ -865,11 +973,17 @@ export class RecurringDonationsLedgerService {
       params.billingInterval,
     );
 
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId: params.donationId, donorId: params.donorId },
+    );
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: params.donationId,
       donor_id: params.donorId,
+      referred_by: referredBy,
       stripe_subscription_id: null,
       stripe_customer_id: null,
       billing_interval: params.billingInterval,
@@ -1985,8 +2099,41 @@ export class RecurringDonationsLedgerService {
       },
     });
     const saved = await this.donationRepository.save(created);
+    await this.applySubscriptionReferrerToDonation(subscription, saved.id);
     if (donorRow) saved.donor = donorRow;
     return saved;
+  }
+
+  /**
+   * Copy the subscription referrer onto a ledger-created donation (never overwrites).
+   * Backfills subscription.referred_by for legacy rows that predate the column.
+   */
+  private async applySubscriptionReferrerToDonation(
+    subscription: RecurringDonation,
+    donationId: number,
+  ): Promise<void> {
+    if (!donationId) return;
+    let referredBy = subscription.referred_by ?? null;
+    if (!referredBy) {
+      referredBy = await resolveRecurringReferrerUserId(
+        this.donationRepository,
+        {
+          donationId: subscription.initial_donation_id,
+          donorId: subscription.donor_id,
+        },
+      );
+      if (referredBy && subscription.id) {
+        await this.recurringDonationRepo.update(subscription.id, {
+          referred_by: referredBy,
+        });
+        subscription.referred_by = referredBy;
+      }
+    }
+    if (!referredBy) return;
+    await this.donationRepository.query(
+      `UPDATE "donations" SET "referred_by" = $1 WHERE "id" = $2 AND "referred_by" IS NULL`,
+      [referredBy, donationId],
+    );
   }
 
   async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
