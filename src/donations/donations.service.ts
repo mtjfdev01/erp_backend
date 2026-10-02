@@ -3085,7 +3085,12 @@ export class DonationsService {
             );
           }
         } else if (donorId) {
-          // Explicit donor_id (staff): use as-is only.
+          // Explicit donor_id (staff): enforce donor ownership/assignment/geo scope
+          donor = await this.donorService.assertStaffCanLinkDonor(
+            user,
+            Number(donorId),
+          );
+          donorId = donor.id;
         } else if (this.hasDonorContactInfo(createDonationDto)) {
           console.log(
             `🔍 Resolving donor from donation contact: ${createDonationDto?.donor_email || "—"} / ${createDonationDto?.donor_phone || "—"}`,
@@ -4156,6 +4161,17 @@ export class DonationsService {
         );
       }
 
+      const previousDonorId = donation.donor_id ?? null;
+
+      if (patch.donor_id !== undefined) {
+        const nextDonorId = Number(patch.donor_id);
+        if (!Number.isFinite(nextDonorId) || nextDonorId <= 0) {
+          throw new BadRequestException("Invalid donor_id");
+        }
+        await this.donorService.assertStaffCanLinkDonor(user, nextDonorId);
+        patch.donor_id = nextDonorId;
+      }
+
       const geoTouched =
         patch.country !== undefined ||
         patch.city !== undefined ||
@@ -4216,6 +4232,17 @@ export class DonationsService {
       ) {
         await this.advanceDonorPipelineIfDonationCompleted(id);
       }
+
+      if (
+        patch.donor_id !== undefined &&
+        Number(patch.donor_id) !== Number(previousDonorId)
+      ) {
+        if (previousDonorId) {
+          await this.refreshDonorDonationStats(Number(previousDonorId));
+        }
+        await this.refreshDonorDonationStats(Number(patch.donor_id));
+      }
+
       return await this.findOne(id);
     } catch (error) {
       if (
@@ -4294,6 +4321,7 @@ export class DonationsService {
       "transaction_id",
       "ref",
       "on_behalf_names",
+      "donor_id",
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -4307,7 +4335,7 @@ export class DonationsService {
         patch[key] = null;
         continue;
       }
-      if (key === "amount" || key === "paid_amount") {
+      if (key === "amount" || key === "paid_amount" || key === "donor_id") {
         const n = Number(d[key]);
         if (!Number.isNaN(n)) patch[key] = Math.round(n);
         continue;

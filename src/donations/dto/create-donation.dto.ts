@@ -240,7 +240,7 @@ export class CreateDonationDto {
   @IsInt()
   progress_batch_parts_requested?: number;
 
-  /** Qurbani: optional on-behalf name(s), free text. */
+  /** Optional on-behalf name(s), free text. */
   @IsOptional()
   @IsString()
   on_behalf_names?: string;

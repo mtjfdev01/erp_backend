@@ -24,6 +24,12 @@ import {
 } from "./utils/campaign-recurring.util";
 import { ProgramEntity } from "../../program/programs/entities/program.entity";
 import { ProgramSubprogram } from "../../program/subprograms/entities/subprogram.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 type ProgramSummary = { id: number; key: string; label: string };
 type SubProgramSummary = {
@@ -65,6 +71,18 @@ export class CampaignsService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.campaignRepo,
+      {
+        profile: LOOKUP_PROFILES.campaigns,
+        searchFields: ["title", "slug"],
+        labelFallback: (row) => `Campaign #${row.id}`,
+      },
+      params,
+    );
   }
 
   private toProgramSummary(program: ProgramEntity | null | undefined): ProgramSummary | null {

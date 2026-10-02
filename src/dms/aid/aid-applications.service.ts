@@ -36,6 +36,12 @@ import { AidApplication } from "./entities/aid-application.entity";
 import { AidAttachment } from "./entities/aid-attachment.entity";
 import { AidHouseholdMember } from "./entities/aid-household-member.entity";
 import { AidPerson } from "./entities/aid-person.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class AidApplicationsService {
@@ -746,5 +752,17 @@ export class AidApplicationsService {
       relations: ["uploaded_by"],
       order: { created_at: "DESC" },
     });
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.appRepo,
+      {
+        profile: LOOKUP_PROFILES.aid_applications,
+        searchFields: ["application_no", "title"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

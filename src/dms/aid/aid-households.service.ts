@@ -15,6 +15,12 @@ import {
 import { AidHouseholdMember } from "./entities/aid-household-member.entity";
 import { AidHousehold } from "./entities/aid-household.entity";
 import { AidPeopleService } from "./aid-people.service";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class AidHouseholdsService {
@@ -169,5 +175,17 @@ export class AidHouseholdsService {
     household.is_archived = true;
     household.updated_by = user || null;
     return this.householdRepo.save(household);
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.householdRepo,
+      {
+        profile: LOOKUP_PROFILES.aid_households,
+        searchFields: ["label", "code"],
+        labelFallback: (row) => row.code ? String(row.code) : `Household #${row.id}`,
+      },
+      params,
+    );
   }
 }

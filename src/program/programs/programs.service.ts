@@ -4,6 +4,12 @@ import { Repository } from "typeorm";
 import { ProgramEntity } from "./entities/program.entity";
 import { CreateProgramDto } from "./dto/create-program.dto";
 import { UpdateProgramDto } from "./dto/update-program.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class ProgramsService {
@@ -272,5 +278,17 @@ export class ProgramsService {
 
     await this.programsRepository.update(id, { is_archived: true });
     return { success: true, message: "Program deleted successfully" };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.programsRepository,
+      {
+        profile: LOOKUP_PROFILES.programs,
+        searchFields: ["label", "key"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

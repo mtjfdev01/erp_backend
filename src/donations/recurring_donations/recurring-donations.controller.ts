@@ -10,6 +10,7 @@ import {
   Res,
   Req,
   UseGuards,
+  Query,
 } from "@nestjs/common";
 import { Response } from "express";
 import { JwtGuard } from "src/auth/jwt.guard";
@@ -25,12 +26,14 @@ import {
 } from "../../permissions/recurring-donations-permissions.constants";
 import { CreateRecurringDonationDto } from "./dto/create-recurring-donation.dto";
 import { UpdateRecurringDonationDto } from "./dto/update-recurring-donation.dto";
+import { DonorService } from "src/dms/donor/donor.service";
 
 @Controller("recurring-donations")
 @UseGuards(JwtGuard, PermissionsGuard)
 export class RecurringDonationsController {
   constructor(
     private readonly ledgerService: RecurringDonationsLedgerService,
+    private readonly donorService: DonorService,
   ) {}
 
   @Post("search")
@@ -62,7 +65,14 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
-      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const user = req?.user ?? null;
+      if (body?.donor_id) {
+        await this.donorService.assertStaffCanLinkDonor(
+          user,
+          Number(body.donor_id),
+        );
+      }
+      const userId = user?.id > 0 ? user.id : null;
       const data = await this.ledgerService.createStaffSubscription(
         body,
         userId,
@@ -83,6 +93,39 @@ export class RecurringDonationsController {
         success: false,
         message: error?.message || "Failed to create recurring donation",
         data: null,
+      });
+    }
+  }
+
+  @Get("lookup")
+  @RequiredPermissions([...RECURRING_DONATION_LIST_VIEW_GUARD])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.ledgerService.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
       });
     }
   }
@@ -117,7 +160,11 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
-      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const user = req?.user ?? null;
+      if (body?.donor_id != null) {
+        await this.donorService.assertStaffCanLinkDonor(user, Number(body.donor_id));
+      }
+      const userId = user?.id > 0 ? user.id : null;
       const data = await this.ledgerService.updateStaffSubscription(
         +id,
         body,
@@ -130,7 +177,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to update recurring donation",

@@ -63,6 +63,10 @@ export class CreateRecurringDonationDto {
   donation_type?: string;
 
   @IsOptional()
+  @IsString()
+  on_behalf_names?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

@@ -17,6 +17,12 @@ import { UpdateCsrPocDto } from "./dto/update-csr-poc.dto";
 import { OrganizationAffiliationRole } from "./entities/donor-organization-affiliation.entity";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 export interface CsrPocListParams {
   csr_donor_id?: number;
@@ -46,6 +52,19 @@ export class CsrPocsService implements OnModuleInit {
     private readonly donorRepo: Repository<Donor>,
     private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.pocRepo,
+      {
+        profile: LOOKUP_PROFILES.csr_pocs,
+        searchFields: ["name", "email", "phone"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `POC #${row.id}`,
+      },
+      params,
+    );
+  }
 
   async resolveOrganizationScope(currentUser?: {
     id?: number;

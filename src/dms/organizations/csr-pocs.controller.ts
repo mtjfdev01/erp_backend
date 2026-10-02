@@ -24,6 +24,7 @@ import { RequiredPermissions } from "../../permissions/decorators/require-permis
 import {
   CSR_POC_CREATE_GUARD,
   CSR_POC_DELETE_GUARD,
+  CSR_POC_LIST_GUARD,
   CSR_POC_UPDATE_GUARD,
   CSR_POC_VIEW_GUARD,
 } from "../../permissions/csr-poc-permissions.constants";
@@ -32,6 +33,39 @@ import {
 @UseGuards(JwtGuard, PermissionsGuard)
 export class CsrPocsController {
   constructor(private readonly csrPocsService: CsrPocsService) {}
+
+  @Get("lookup")
+  @RequiredPermissions([...CSR_POC_LIST_GUARD])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.csrPocsService.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      });
+    }
+  }
 
   @Get()
   @RequiredPermissions([...CSR_POC_VIEW_GUARD])

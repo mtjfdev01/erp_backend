@@ -103,6 +103,49 @@ export class DonationBoxController {
     }
   }
 
+  @Get("lookup")
+  @UseGuards(JwtGuard)
+  async lookup(
+    @Query("active") activeOnly?: string,
+    @Query("status") status?: string,
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnlyParam?: string,
+    @CurrentUser() currentUser?: any,
+  ) {
+    const geoScope = currentUser?.id
+      ? await this.geographicScopeService.resolveForUser(
+          currentUser.id,
+          currentUser.role,
+          currentUser,
+        )
+      : null;
+    const rows = await this.donationBoxService.getDonationBoxListForDropdown(
+      {
+        activeOnly:
+          activeOnly === "true" ||
+          activeOnlyParam === "true" ||
+          activeOnlyParam === "1",
+        status: status || undefined,
+      },
+      geoScope,
+    );
+    let data = (rows || []).map((r: any) => ({
+      value: String(r.id),
+      label: r.shop_name
+        ? String(r.shop_name)
+        : r.box_id_no || r.key_no || `Box #${r.id}`,
+    }));
+    if (search?.trim()) {
+      const q = search.trim().toLowerCase();
+      data = data.filter(
+        (o) => o.label.toLowerCase().includes(q) || o.value.includes(q),
+      );
+    }
+    if (limit) data = data.slice(0, Math.max(1, parseInt(limit, 10) || 200));
+    return { success: true, message: "Lookup retrieved successfully", data };
+  }
+
   @Get("options")
   @UseGuards(JwtGuard)
   async getDonationBoxOptions(

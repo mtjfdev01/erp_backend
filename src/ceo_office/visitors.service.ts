@@ -19,6 +19,12 @@ import { CreateTaskDto } from "../tasks/dto/create-task.dto";
 import { CeoNotesService } from "./ceo-notes.service";
 import { CeoNoteCategory } from "./entities/ceo-note.entity";
 import { ConvertToTaskDto } from "./dto/convert-to-task.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class VisitorsService {
@@ -523,5 +529,19 @@ export class VisitorsService {
     }
 
     return updated;
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.visitorRepository,
+      {
+        profile: LOOKUP_PROFILES.visitors,
+        searchFields: ["visitor_name", "organization"],
+        excludeArchived: false,
+        orderBy: "visitor_name",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

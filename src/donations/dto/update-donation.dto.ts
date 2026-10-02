@@ -90,6 +90,10 @@ export class UpdateDonationDto {
   ref?: string;
 
   @IsOptional()
+  @IsNumber()
+  donor_id?: number;
+
+  @IsOptional()
   @IsString()
   on_behalf_names?: string | null;
 }

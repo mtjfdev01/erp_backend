@@ -127,4 +127,16 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   geographic_off?: boolean;
+
+  /** Nested ACL JSON (same shape as user_permissions.permissions). */
+  @IsOptional()
+  permissions?: Record<string, any>;
+
+  /**
+   * Optional permission template id. Used when `permissions` is omitted/empty
+   * to seed ACL from permission_roles. Does not lock later edits.
+   */
+  @IsOptional()
+  @IsNumber()
+  permission_role_id?: number | null;
 }

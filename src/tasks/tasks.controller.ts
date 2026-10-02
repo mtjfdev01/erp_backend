@@ -78,6 +78,39 @@ export class TasksController {
     return res.status(HttpStatus.OK).json({ success: true, ...result });
   }
 
+  @Get("lookup")
+  @RequiredPermissions(["tasking.tasks.list_view", "tasks.list_view", "tasking.tasks.view", "tasks.view", "super_admin"])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.tasksService.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      });
+    }
+  }
+
   @Get("list")
   @RequiredPermissions([
     "tasking.tasks.list_view",

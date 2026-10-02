@@ -19,6 +19,12 @@ import {
 } from "../tasks/entities/task.entity";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class ProjectCommandSheetsService {
@@ -351,5 +357,18 @@ export class ProjectCommandSheetsService {
     }
 
     return updated;
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.projectCommandSheetRepository,
+      {
+        profile: LOOKUP_PROFILES.project_command_sheets,
+        searchFields: ["project_name"],
+        excludeArchived: false,
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

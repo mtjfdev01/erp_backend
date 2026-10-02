@@ -34,6 +34,29 @@ export class VisitorsController {
     return this.visitorsService.findAll(payload);
   }
 
+  @Get("lookup")
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+  ) {
+    const data = await this.visitorsService.listForLookup({
+      search,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      activeOnly:
+        activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+    });
+    return {
+      success: true,
+      message: "Lookup retrieved successfully",
+      data,
+    };
+  }
+
   @Get(":id")
   findOne(@Param("id", ParseIntPipe) id: number, @Query("type") type: string | undefined) {
     return this.visitorsService.findOne(id, type);

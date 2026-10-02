@@ -51,6 +51,12 @@ import {
   getPktHour,
   isReminderSlotInPast,
 } from "./utils/complaint-reminder-pkt.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class ComplaintsService {
@@ -4032,5 +4038,17 @@ export class ComplaintsService {
     } catch (e) {
       throw e;
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.complaintRepo,
+      {
+        profile: LOOKUP_PROFILES.tickets,
+        searchFields: ["title"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -10,6 +10,12 @@ import { WebsiteDonationInitiative } from "./entities/website-donation-initiativ
 import { CreateWebsiteDonationProjectDto } from "./dto/create-website-donation-project.dto";
 import { UpdateWebsiteDonationProjectDto } from "./dto/update-website-donation-project.dto";
 import { WEBSITE_DONATION_CATALOG_SEED } from "./website-donation-catalog.seed";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class WebsiteDonationProjectsService {
@@ -19,6 +25,19 @@ export class WebsiteDonationProjectsService {
     @InjectRepository(WebsiteDonationInitiative)
     private readonly initiativeRepo: Repository<WebsiteDonationInitiative>,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.projectRepo,
+      {
+        profile: LOOKUP_PROFILES.website_donation_projects,
+        searchFields: ["title", "slug"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `Project #${row.id}`,
+      },
+      params,
+    );
+  }
 
   async seedIfEmpty(): Promise<void> {
     const count = await this.projectRepo.count({

@@ -4,6 +4,12 @@ import { Repository } from "typeorm";
 import { ProgramSubprogram } from "./entities/subprogram.entity";
 import { CreateSubprogramDto } from "./dto/create-subprogram.dto";
 import { UpdateSubprogramDto } from "./dto/update-subprogram.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class SubprogramsService {
@@ -358,5 +364,17 @@ export class SubprogramsService {
 
     await this.subprogramsRepository.update(id, { is_archived: true });
     return { success: true, message: "Subprogram deleted successfully" };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.subprogramsRepository,
+      {
+        profile: LOOKUP_PROFILES.subprograms,
+        searchFields: ["label", "key"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -234,6 +234,13 @@ export class User {
   @OneToOne(() => PermissionsEntity, (permissions) => permissions.user)
   permissions: PermissionsEntity;
 
+  /**
+   * Optional audit: which permission template was selected at create.
+   * Not used for runtime auth — user_permissions JSON is source of truth.
+   */
+  @Column({ name: "permission_role_id", type: "int", nullable: true, default: null })
+  permission_role_id: number | null;
+
   // Many-to-Many relationship with donation boxes
   @ManyToMany(() => DonationBox, (donationBox) => donationBox.assignedUsers)
   donationBoxes: DonationBox[];

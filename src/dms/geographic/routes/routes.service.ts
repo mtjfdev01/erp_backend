@@ -11,6 +11,12 @@ import { Route } from "./entities/route.entity";
 import { City } from "../cities/entities/city.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 @Injectable()
 export class RoutesService {
@@ -278,5 +284,18 @@ export class RoutesService {
       }
       throw new Error(`Failed to deactivate route: ${error.message}`);
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.routeRepository,
+      {
+        profile: LOOKUP_PROFILES.routes,
+        searchFields: ["name", "code"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -17,4 +17,10 @@ export const APPEALS_OPTIONS_GUARD = [
   "fund_raising_user",
 ] as const;
 
+/**
+ * Soft lookup guard: any authenticated staff with module list_view (or super_admin).
+ * Controllers may widen/narrow; prefer module list_view + super_admin at minimum.
+ */
+export const LOOKUP_SUPER_ADMIN = ["super_admin"] as const;
+
 export { DONATION_FILTER_OPTIONS_GUARD };

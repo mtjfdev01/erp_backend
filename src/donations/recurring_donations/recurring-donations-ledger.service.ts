@@ -29,6 +29,12 @@ import {
   resolveSubscriptionPrepaidPeriodKeys,
 } from "./recurring-prepaid.util";
 import { resolveRecurringStartDateForStorage } from "./recurring-billing-date.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -353,6 +359,7 @@ export class RecurringDonationsLedgerService {
       project_id?: string | null;
       campaign_id?: number | null;
       donation_type?: string | null;
+      on_behalf_names?: string | null;
       prepaid_periods?: number | null;
       initial_donation_id?: number | null;
       status?: string;
@@ -443,6 +450,9 @@ export class RecurringDonationsLedgerService {
       project_id: dto.project_id || null,
       campaign_id: dto.campaign_id ?? null,
       donation_type: dto.donation_type || null,
+      on_behalf_names: dto.on_behalf_names
+        ? String(dto.on_behalf_names).trim() || null
+        : null,
       prepaid_months: prepaid.prepaidMonths,
       prepaid_periods: prepaid.prepaidPeriods,
       prepaid_start_period_key: prepaid.start,
@@ -590,6 +600,7 @@ export class RecurringDonationsLedgerService {
           donation_method: subscription.donation_method || "manual",
           donation_source: "recurring_staff_create",
           status: "completed",
+          on_behalf_names: subscription.on_behalf_names || null,
           note: `First installment for subscription #${subscription.id}`,
           manual_recurring_intent: {
             recurring_subscription_id: subscription.id,
@@ -634,6 +645,7 @@ export class RecurringDonationsLedgerService {
       project_id?: string | null;
       campaign_id?: number | null;
       donation_type?: string | null;
+      on_behalf_names?: string | null;
       prepaid_periods?: number | null;
       initial_donation_id?: number | null;
       status?: string;
@@ -728,6 +740,10 @@ export class RecurringDonationsLedgerService {
       }
       if (dto.donation_type !== undefined) {
         patch.donation_type = dto.donation_type || null;
+      }
+      if (dto.on_behalf_names !== undefined) {
+        const names = String(dto.on_behalf_names || "").trim();
+        patch.on_behalf_names = names || null;
       }
       if (dto.status != null) {
         const status = String(dto.status).toLowerCase();
@@ -1961,6 +1977,7 @@ export class RecurringDonationsLedgerService {
       donation_method: subscription.donation_method || "online",
       donation_source: "recurring_ledger_reminder",
       status: "pending",
+      on_behalf_names: subscription.on_behalf_names || null,
       note: `Installment payment link for ${marker}`,
       manual_recurring_intent: {
         recurring_subscription_id: subscription.id,
@@ -1970,5 +1987,21 @@ export class RecurringDonationsLedgerService {
     const saved = await this.donationRepository.save(created);
     if (donorRow) saved.donor = donorRow;
     return saved;
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.recurringDonationRepo,
+      {
+        profile: LOOKUP_PROFILES.recurring_donations,
+        searchFields: ["stripe_subscription_id", "status"],
+        orderBy: "id",
+        labelFallback: (row) =>
+          row.stripe_subscription_id
+            ? String(row.stripe_subscription_id)
+            : `Recurring #${row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -10,6 +10,12 @@ import { UpdateSubRegionDto } from "./dto/update-sub-region.dto";
 import { SubRegion } from "./entities/sub-region.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 @Injectable()
 export class SubRegionsService {
@@ -148,5 +154,18 @@ export class SubRegionsService {
     }
     await this.subRegionRepository.update(id, { is_active: false });
     return { message: "Sub region deactivated successfully" };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.subRegionRepository,
+      {
+        profile: LOOKUP_PROFILES.sub_regions,
+        searchFields: ["name", "code"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

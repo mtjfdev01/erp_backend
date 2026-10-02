@@ -18,6 +18,12 @@ import { AidApplication } from "./entities/aid-application.entity";
 import { AidHouseholdMember } from "./entities/aid-household-member.entity";
 import { AidKinshipEdge } from "./entities/aid-kinship-edge.entity";
 import { AidPerson } from "./entities/aid-person.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 type FamilyMemberRow = {
   edge_id: number;
@@ -455,5 +461,18 @@ export class AidPeopleService {
     edge.is_archived = true;
     edge.updated_by = user || null;
     return this.kinshipRepo.save(edge);
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.personRepo,
+      {
+        profile: LOOKUP_PROFILES.aid_people,
+        searchFields: ["full_name", "cnic", "phone"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

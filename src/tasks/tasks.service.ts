@@ -49,6 +49,12 @@ import {
   getPktHour,
   isReminderSlotInPast,
 } from "./utils/task-reminder-pkt.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class TasksService {
@@ -4087,5 +4093,17 @@ export class TasksService {
     } catch (e) {
       throw e;
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.taskRepo,
+      {
+        profile: LOOKUP_PROFILES.tasks,
+        searchFields: ["title"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

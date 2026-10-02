@@ -44,6 +44,38 @@ export class ManualRecurringController {
     }
   }
 
+  @Get("lookup")
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.manualRecurringService.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      });
+    }
+  }
+
   @Get()
   async findAll(
     @Query() filters: ManualRecurringPledgeFiltersDto,

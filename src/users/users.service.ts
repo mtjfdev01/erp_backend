@@ -31,6 +31,7 @@ import {
 } from "../utils/crypto/donor-password-vault";
 import { EmailService } from "../email/email.service";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
+import { PermissionRolesService } from "../permissions/permission-roles.service";
 
 interface PaginationOptions {
   page: number;
@@ -57,6 +58,7 @@ export class UsersService implements OnModuleInit {
     private readonly geographicAssignmentService: GeographicAssignmentService,
     private readonly emailService: EmailService,
     private readonly dataScopeService: DataScopeService,
+    private readonly permissionRolesService: PermissionRolesService,
   ) {}
 
   async onModuleInit() {
@@ -382,9 +384,28 @@ export class UsersService implements OnModuleInit {
     const plainPassword = createUserDto.password || "defaultPassword123";
     const passwordFields = await this.buildPasswordFields(plainPassword);
 
-    const { manager_ids, manager_id, ...rest } = createUserDto;
+    const {
+      manager_ids,
+      manager_id,
+      permissions: permissionsPayload,
+      permission_role_id,
+      ...rest
+    } = createUserDto;
     const managerIdList = this.normalizeManagerIds(manager_ids, manager_id);
     const managers = await this.loadManagersByIds(managerIdList);
+
+    let acl: Record<string, any> = {};
+    if (
+      permissionsPayload &&
+      typeof permissionsPayload === "object" &&
+      Object.keys(permissionsPayload).length > 0
+    ) {
+      acl = JSON.parse(JSON.stringify(permissionsPayload));
+    } else if (permission_role_id) {
+      acl = await this.permissionRolesService.getPermissionsClone(
+        Number(permission_role_id),
+      );
+    }
 
     const user = this.userRepository.create({
       ...rest,
@@ -394,8 +415,22 @@ export class UsersService implements OnModuleInit {
       manager_id: managerIdList[0] ?? null,
       managers,
       referral_code: await this.generateUniqueReferralCode(),
+      permission_role_id: permission_role_id
+        ? Number(permission_role_id)
+        : null,
     });
-    return await this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+
+    const permsRow = this.permissionsRepository.create({
+      user_id: saved.id,
+      permissions: acl,
+    });
+    await this.permissionsRepository.save(permsRow);
+
+    return this.userRepository.findOne({
+      where: { id: saved.id },
+      relations: ["permissions", "managers", "manager"],
+    });
   }
 
   async findAll(options: PaginationOptions) {

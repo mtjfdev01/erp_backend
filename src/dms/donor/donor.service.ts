@@ -270,16 +270,119 @@ export class DonorService {
   }
 
   /**
-   * View access: geographic territory when active, plus ownership/assignment
-   * for offline (non-website) donors. Website donors skip created_by checks
-   * (same pattern as online donations).
+   * Staff may pick any non-archived donor via /donors/lookup, but linking that
+   * donor on create/update (donations, recurring, etc.) still requires
+   * ownership/assignment access. Geographic scope is skipped when the donor is
+   * assigned to any user. Applies to online and offline donors alike.
+   * Public/website callers (no staff user / id=-1) skip this check.
+   */
+  async assertStaffCanLinkDonor(
+    currentUser:
+      | {
+          id?: number;
+          role?: string;
+          department?: string;
+          assigned_countries?: number[] | null;
+          assigned_regions?: number[] | null;
+          assigned_districts?: number[] | null;
+          assigned_tehsils?: number[] | null;
+          assigned_cities?: number[] | null;
+          assigned_routes?: number[] | null;
+          geographic_off?: boolean;
+        }
+      | null
+      | undefined,
+    donorId: number,
+  ): Promise<Donor> {
+    if (!currentUser?.id || currentUser.id === -1) {
+      const donor = await this.donorRepository.findOne({
+        where: { id: donorId, is_archived: false },
+      });
+      if (!donor) {
+        throw new NotFoundException(`Donor with ID ${donorId} not found`);
+      }
+      return donor;
+    }
+
+    const donor = await this.donorRepository.findOne({
+      where: { id: donorId, is_archived: false },
+      relations: ["created_by", "assigned_to"],
+    });
+    if (!donor) {
+      throw new NotFoundException(`Donor with ID ${donorId} not found`);
+    }
+
+    const geoScope = await this.geographicScopeService.resolveForUser(
+      currentUser.id,
+      currentUser.role,
+      currentUser as any,
+    );
+    const scope = await this.resolveDonorScope(currentUser, donor.source);
+    this.assertDonorLinkAccess(scope, donor, geoScope);
+    return donor;
+  }
+
+  /**
+   * Access for linking a donor on staff donation flows (online + offline +
+   * in-kind + recurring). Same rules for all donor sources — offline donors
+   * are not excluded.
+   * - Skip geographic check when donor.assigned_to is set (any user).
+   * - Always enforce created_by / assigned_to data scope when the donor has an
+   *   owner; unassigned website donors remain linkable (system records).
+   */
+  assertDonorLinkAccess(
+    dataScope: ResolvedDataScope,
+    donor: Donor,
+    geoScope?: ResolvedGeographicScope | null,
+  ): void {
+    const assignedToId = this.getDonorAssignedToUserId(donor);
+    const createdById = this.getDonorCreatedByUserId(donor);
+    const skipGeoBecauseAssigned = assignedToId != null;
+
+    if (
+      !skipGeoBecauseAssigned &&
+      geoScope &&
+      this.geographicScopeService.isGeographicFilterActive(geoScope)
+    ) {
+      if (
+        !this.geographicScopeService.recordMatches(
+          geoScope,
+          "donors",
+          this.toDonorGeoRecord(donor),
+        )
+      ) {
+        throw new ForbiddenException(
+          "You do not have geographic access to this record",
+        );
+      }
+    }
+
+    // Unassigned website donors: no staff owner to match against
+    if (assignedToId == null && createdById == null && donor.source === "website") {
+      return;
+    }
+
+    this.assertDonorRecordAccess(dataScope, donor);
+  }
+
+  /**
+   * View access: geographic territory when active (skipped if donor is assigned
+   * to any user), plus ownership/assignment for offline (non-website) donors.
+   * Website donors skip created_by checks (same pattern as online donations).
    */
   assertDonorViewAccess(
     dataScope: ResolvedDataScope,
     donor: Donor,
     geoScope?: ResolvedGeographicScope | null,
   ): void {
-    if (geoScope && this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+    const assignedToId = this.getDonorAssignedToUserId(donor);
+    const skipGeoBecauseAssigned = assignedToId != null;
+
+    if (
+      !skipGeoBecauseAssigned &&
+      geoScope &&
+      this.geographicScopeService.isGeographicFilterActive(geoScope)
+    ) {
       if (
         !this.geographicScopeService.recordMatches(
           geoScope,
@@ -298,6 +401,30 @@ export class DonorService {
     }
 
     this.assertDonorRecordAccess(dataScope, donor);
+  }
+
+  private getDonorAssignedToUserId(donor: Donor): number | null {
+    const assigned = donor.assigned_to as
+      | { id?: number }
+      | number
+      | null
+      | undefined;
+    if (assigned == null) return null;
+    const id = typeof assigned === "object" ? assigned.id : assigned;
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  private getDonorCreatedByUserId(donor: Donor): number | null {
+    const created = donor.created_by as
+      | { id?: number }
+      | number
+      | null
+      | undefined;
+    if (created == null) return null;
+    const id = typeof created === "object" ? created.id : created;
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 ? n : null;
   }
 
   private toDonorGeoRecord(donor: Donor) {
@@ -1052,6 +1179,90 @@ export class DonorService {
       console.error("Error finding donor by email and phone:", error);
       return null;
     }
+  }
+
+  /**
+   * Unscoped donor picker/search for forms & autocomplete.
+   * Skips geo, assignment scope, and online/offline permission filters.
+   * Always excludes archived donors. Returns a minimal payload (no password).
+   */
+  async pickerSearch(options: {
+    search?: string;
+    donor_type?: string;
+    recurring?: boolean;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    data: Array<Partial<Donor>>;
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    const page = Math.max(1, Number(options.page) || 1);
+    const pageSize = Math.min(
+      50,
+      Math.max(1, Number(options.pageSize) || 20),
+    );
+    const search = String(options.search || "").trim();
+
+    const qb = this.donorRepository
+      .createQueryBuilder("donor")
+      .select([
+        "donor.id",
+        "donor.name",
+        "donor.first_name",
+        "donor.last_name",
+        "donor.email",
+        "donor.phone",
+        "donor.donor_type",
+        "donor.source",
+        "donor.recurring",
+        "donor.city",
+        "donor.country",
+        "donor.is_active",
+      ])
+      .where("donor.is_archived = :is_archived", { is_archived: false });
+
+    if (search) {
+      applyCommonFilters(
+        qb,
+        { search },
+        ["name", "first_name", "last_name", "email", "phone"],
+        "donor",
+      );
+    }
+
+    if (options.donor_type) {
+      qb.andWhere("donor.donor_type = :donor_type", {
+        donor_type: options.donor_type,
+      });
+    }
+
+    if (options.recurring === true) {
+      qb.andWhere("donor.recurring = :recurring", { recurring: true });
+    } else if (options.recurring === false) {
+      qb.andWhere(
+        "(donor.recurring = :recurring OR donor.recurring IS NULL)",
+        { recurring: false },
+      );
+    }
+
+    qb.orderBy("donor.name", "ASC").skip((page - 1) * pageSize).take(pageSize);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return {
+      data,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize) || 0,
+      },
+    };
   }
 
   /**

@@ -79,6 +79,10 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "varchar", nullable: true, default: null })
   donation_type: string | null;
 
+  /** Optional on-behalf name(s), free text. */
+  @Column({ type: "text", nullable: true, default: null })
+  on_behalf_names: string | null;
+
   /** Months paid upfront on initial donation; reminders skipped until coverage ends. */
   @Column({ type: "int", nullable: true, default: null })
   prepaid_months: number | null;

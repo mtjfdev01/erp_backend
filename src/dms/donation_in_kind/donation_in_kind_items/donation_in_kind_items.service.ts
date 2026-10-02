@@ -11,6 +11,12 @@ import { CreateDonationInKindItemDto } from "./dto/create-donation_in_kind_item.
 import { UpdateDonationInKindItemDto } from "./dto/update-donation_in_kind_item.dto";
 import { ProcurementsService } from "src/procurements/services/procurements.service";
 import { CreateProcurementsDto } from "src/procurements/dto/create-procurements.dto/create-procurements.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 interface PaginationOptions {
   page: number;
@@ -41,6 +47,18 @@ export class DonationInKindItemsService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.donationInKindItemRepository,
+      {
+        profile: LOOKUP_PROFILES.in_kind_items,
+        searchFields: ["name", "category"],
+        labelFallback: (row) => `Item #${row.id}`,
+      },
+      params,
+    );
   }
 
   /**

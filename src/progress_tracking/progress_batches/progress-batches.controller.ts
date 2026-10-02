@@ -53,6 +53,31 @@ export class ProgressBatchesController {
     });
   }
 
+  @Get("lookup")
+  @RequiredPermissions([...DONATION_VIEW_GUARD])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    const data = await this.service.listForLookup({
+      search,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      activeOnly:
+        activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+    });
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Lookup retrieved successfully",
+      data,
+    });
+  }
+
   @Patch(":id")
   @RequiredPermissions([...DONATION_UPDATE_GUARD])
   async updateBatch(

@@ -38,6 +38,12 @@ import { PermissionsService } from "../permissions/permissions.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
 import { generateComplaintCode } from "./utils/complaint-code.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class ComplaintCaseService {
@@ -918,5 +924,17 @@ export class ComplaintCaseService {
       value,
       label: value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
     }));
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.complaintRepo,
+      {
+        profile: LOOKUP_PROFILES.complaint_cases,
+        searchFields: ["title"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

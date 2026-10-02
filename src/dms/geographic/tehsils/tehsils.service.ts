@@ -11,6 +11,12 @@ import { Tehsil } from "./entities/tehsil.entity";
 import { District } from "../districts/entities/district.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 @Injectable()
 export class TehsilsService {
@@ -255,5 +261,18 @@ export class TehsilsService {
       }
       throw new Error(`Failed to deactivate tehsil: ${error.message}`);
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.tehsilRepository,
+      {
+        profile: LOOKUP_PROFILES.tehsils,
+        searchFields: ["name", "code"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

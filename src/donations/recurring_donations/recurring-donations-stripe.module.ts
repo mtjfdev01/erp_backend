@@ -11,6 +11,7 @@ import { PermissionsModule } from "src/permissions";
 import { JwtModule } from "@nestjs/jwt";
 import { EmailModule } from "../../email/email.module";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
+import { DonorModule } from "src/dms/donor/donor.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { WhatsAppService } from "../../utils/services/whatsapp.service";
     }),
     PermissionsModule,
     EmailModule,
+    DonorModule,
   ],
   controllers: [RecurringDonationsController],
   providers: [
