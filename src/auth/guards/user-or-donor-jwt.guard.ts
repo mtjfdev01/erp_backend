@@ -52,15 +52,27 @@ export class UserOrDonorJwtGuard implements CanActivate {
           secret: process.env.JWT_SECRET || "your-secret-key",
         });
         if (payload?.role !== "donor" || !payload?.donor_id) {
-          throw new UnauthorizedException("Invalid donor token");
+          throw new UnauthorizedException({
+            statusCode: 401,
+            message: "Invalid donor token",
+            code: "SESSION_EXPIRED",
+          });
         }
         (req as any).donor = payload;
         return true;
       } catch {
-        throw new UnauthorizedException("Invalid donor token");
+        throw new UnauthorizedException({
+          statusCode: 401,
+          message: "Invalid donor token",
+          code: "SESSION_EXPIRED",
+        });
       }
     }
 
-    throw new UnauthorizedException("No token provided");
+    throw new UnauthorizedException({
+      statusCode: 401,
+      message: "No token provided",
+      code: "SESSION_EXPIRED",
+    });
   }
 }

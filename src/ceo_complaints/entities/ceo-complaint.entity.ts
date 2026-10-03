@@ -6,7 +6,9 @@ import {
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
 import {
   CeoComplaintCategory,
+  CeoComplaintDepartment,
   CeoComplaintOrganization,
+  CeoComplaintPriority,
   CeoComplaintStatus,
   CeoComplaintSubmissionChannel,
   CeoComplainantType,
@@ -17,6 +19,9 @@ import {
   unique: true,
 })
 @Index("idx_ceo_complaints_organization", ["organization"])
+@Index("idx_ceo_complaints_department", ["department"])
+@Index("idx_ceo_complaints_category", ["category"])
+@Index("idx_ceo_complaints_priority", ["priority"])
 @Index("idx_ceo_complaints_status", ["status"])
 @Index("idx_ceo_complaints_created_at", ["created_at"])
 export class CeoComplaint extends BaseEntity {
@@ -39,8 +44,17 @@ export class CeoComplaint extends BaseEntity {
   @Column({ type: "varchar", length: 40, nullable: true, default: null })
   contact_number: string | null;
 
+  /** Department the complaint relates to. */
+  @Column({ type: "varchar", length: 40, nullable: true, default: null })
+  department: CeoComplaintDepartment | null;
+
+  /** Complaint type (کمپلینٹ ٹائپ). */
   @Column({ type: "varchar", length: 60 })
   category: CeoComplaintCategory;
+
+  /** Preferential priority / ترجیح — derived from category. */
+  @Column({ type: "varchar", length: 40, nullable: true, default: null })
+  priority: CeoComplaintPriority | null;
 
   @Column({ type: "varchar", length: 255, nullable: true, default: null })
   category_other: string | null;

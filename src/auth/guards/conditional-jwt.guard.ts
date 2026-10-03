@@ -55,7 +55,11 @@ export class ConditionalJwtGuard implements CanActivate {
     const token = extractJwtFromCookie(request);
 
     if (!token) {
-      throw new UnauthorizedException("No token provided");
+      throw new UnauthorizedException({
+        statusCode: 401,
+        message: "No token provided",
+        code: "SESSION_EXPIRED",
+      });
     }
 
     try {
@@ -67,7 +71,11 @@ export class ConditionalJwtGuard implements CanActivate {
       );
       return true;
     } catch {
-      throw new UnauthorizedException("Invalid token");
+      throw new UnauthorizedException({
+        statusCode: 401,
+        message: "Invalid token",
+        code: "SESSION_EXPIRED",
+      });
     }
   }
 }

@@ -8,6 +8,7 @@ import {
 } from "class-validator";
 import {
   CeoComplaintCategory,
+  CeoComplaintDepartment,
   CeoComplaintOrganization,
   CeoComplaintStatus,
   CeoComplainantType,
@@ -26,22 +27,24 @@ export class CreateCeoComplaintDto {
   @IsEnum(CeoComplainantType)
   complainant_type: CeoComplainantType;
 
-  @IsOptional()
   @IsString()
+  @MinLength(2)
   @MaxLength(255)
-  complainant_name?: string;
+  complainant_name: string;
 
-  @IsOptional()
   @IsString()
+  @MinLength(7)
   @MaxLength(40)
-  contact_number?: string;
+  contact_number: string;
+
+  @IsEnum(CeoComplaintDepartment)
+  department: CeoComplaintDepartment;
 
   @IsEnum(CeoComplaintCategory)
   category: CeoComplaintCategory;
 
-  @ValidateIf((o) => o.category === CeoComplaintCategory.OTHER)
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(255)
   category_other?: string;
 

@@ -9,7 +9,7 @@ import { CeoComplaint } from "./entities/ceo-complaint.entity";
 import { CreateCeoComplaintDto } from "./dto/create-ceo-complaint.dto";
 import {
   ASLAB_BRANCHES,
-  CeoComplaintCategory,
+  CATEGORY_PRIORITY_MAP,
   CeoComplaintOrganization,
   CeoComplaintStatus,
   CeoComplaintSubmissionChannel,
@@ -36,14 +36,13 @@ export class CeoComplaintsService {
       }
     }
 
-    if (dto.category === CeoComplaintCategory.OTHER) {
-      const other = String(dto.category_other || "").trim();
-      if (!other) {
-        throw new BadRequestException(
-          "Please describe the category when Other is selected",
-        );
-      }
+    if (!CATEGORY_PRIORITY_MAP[dto.category]) {
+      throw new BadRequestException("Invalid complaint type");
     }
+  }
+
+  private resolvePriority(category: CreateCeoComplaintDto["category"]) {
+    return CATEGORY_PRIORITY_MAP[category];
   }
 
   private async createUniqueNumber(): Promise<string> {
@@ -72,11 +71,10 @@ export class CeoComplaintsService {
       complainant_type: dto.complainant_type,
       complainant_name: dto.complainant_name?.trim() || null,
       contact_number: dto.contact_number?.trim() || null,
+      department: dto.department,
       category: dto.category,
-      category_other:
-        dto.category === CeoComplaintCategory.OTHER
-          ? String(dto.category_other).trim()
-          : null,
+      priority: this.resolvePriority(dto.category),
+      category_other: dto.category_other?.trim() || null,
       details: dto.details.trim(),
       status: CeoComplaintStatus.SUBMITTED,
       submission_channel: CeoComplaintSubmissionChannel.WEBSITE,
@@ -100,11 +98,10 @@ export class CeoComplaintsService {
       complainant_type: dto.complainant_type,
       complainant_name: dto.complainant_name?.trim() || null,
       contact_number: dto.contact_number?.trim() || null,
+      department: dto.department,
       category: dto.category,
-      category_other:
-        dto.category === CeoComplaintCategory.OTHER
-          ? String(dto.category_other).trim()
-          : null,
+      priority: this.resolvePriority(dto.category),
+      category_other: dto.category_other?.trim() || null,
       details: dto.details.trim(),
       status: dto.status || CeoComplaintStatus.SUBMITTED,
       submission_channel: CeoComplaintSubmissionChannel.DMS,
@@ -193,8 +190,16 @@ export class CeoComplaintsService {
         complainant_type: filters.complainant_type,
       });
     }
+    if (filters.department) {
+      qb.andWhere("c.department = :department", {
+        department: filters.department,
+      });
+    }
     if (filters.category) {
       qb.andWhere("c.category = :category", { category: filters.category });
+    }
+    if (filters.priority) {
+      qb.andWhere("c.priority = :priority", { priority: filters.priority });
     }
     if (filters.status) {
       qb.andWhere("c.status = :status", { status: filters.status });
