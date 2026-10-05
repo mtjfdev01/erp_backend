@@ -274,9 +274,10 @@ export class Complaint {
   @Column({ type: "varchar", nullable: true })
   complaint_category_custom: string;
 
+  /** Stored as varchar so workflow values can evolve without Postgres enum cast failures. */
   @Column({
-    type: "enum",
-    enum: ComplaintWorkflowStatus,
+    type: "varchar",
+    length: 64,
     nullable: true,
   })
   complaint_workflow_status: ComplaintWorkflowStatus;

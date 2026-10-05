@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Logger,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, Brackets, In } from "typeorm";
@@ -33,7 +34,10 @@ import { UpdateComplaintNarrativesDto } from "./dto/update-complaint-narratives.
 import { CreateComplaintMeetingDto } from "./dto/create-complaint-meeting.dto";
 import { UpdateComplaintMeetingDto } from "./dto/update-complaint-meeting.dto";
 import { AddInvestigationLogDto } from "./dto/add-investigation-log.dto";
-import { COMPLAINT_WORKFLOW_STATUS_OPTIONS } from "./complaint-case.constants";
+import {
+  COMPLAINT_WORKFLOW_STATUS_OPTIONS,
+  LEGACY_COMPLAINT_WORKFLOW_STATUS_MAP,
+} from "./complaint-case.constants";
 import { User, UserRole } from "../users/user.entity";
 import { PermissionsService } from "../permissions/permissions.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -47,7 +51,7 @@ import {
 } from "../utils/lookup";
 
 @Injectable()
-export class ComplaintCaseService {
+export class ComplaintCaseService implements OnModuleInit {
   private readonly logger = new Logger(ComplaintCaseService.name);
 
   constructor(
@@ -64,6 +68,31 @@ export class ComplaintCaseService {
     private readonly permissionsService: PermissionsService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  /** Remap legacy workflow values so old rows keep working after status rename. */
+  async onModuleInit() {
+    try {
+      for (const [from, to] of Object.entries(LEGACY_COMPLAINT_WORKFLOW_STATUS_MAP)) {
+        const result = await this.complaintRepo
+          .createQueryBuilder()
+          .update(Complaint)
+          .set({ complaint_workflow_status: to })
+          .where("complaint_workflow_status = :from", { from })
+          .execute();
+        if (result.affected) {
+          this.logger.log(
+            `Remapped complaint_workflow_status ${from} → ${to} (${result.affected} row(s))`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not remap legacy complaint_workflow_status values: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+  }
 
   private normalizeIds(ids?: number[] | null): number[] {
     return [
