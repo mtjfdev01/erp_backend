@@ -16,6 +16,7 @@ import { EmailTemplateModule } from "../email_template/email_template.module";
 import { EmailModule } from "../../email/email.module";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { RecurringDonationsStripeModule } from "../../donations/recurring_donations/recurring-donations-stripe.module";
+import { RecurringReminderLogsModule } from "../recurring_reminder_logs/recurring-reminder-logs.module";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { RecurringDonationsStripeModule } from "../../donations/recurring_donati
     EmailTemplateModule,
     EmailModule,
     RecurringDonationsStripeModule,
+    RecurringReminderLogsModule,
     TypeOrmModule.forFeature([
       ManualRecurringPledge,
       ManualRecurringPledgeLine,

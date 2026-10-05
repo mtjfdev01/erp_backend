@@ -27,6 +27,7 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { DonorRelationshipModule } from './donor_relationship/donor-relationship.module';
 import { CommunicationModule } from './communication/communication.module';
 import { ManualRecurringModule } from './manual_recurring/manual-recurring.module';
+import { RecurringReminderLogsModule } from './recurring_reminder_logs/recurring-reminder-logs.module';
 import { DmsTodosModule } from './todos/dms-todos.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AidModule } from './aid/aid.module';
@@ -69,6 +70,7 @@ import { EventPledgesModule } from './event_pledges/event-pledges.module';
     DonorRelationshipModule,
     CommunicationModule,
     ManualRecurringModule,
+    RecurringReminderLogsModule,
     DmsTodosModule,
     WebsiteDonationProjectsModule,
     WebsiteHomeHeroModule,
