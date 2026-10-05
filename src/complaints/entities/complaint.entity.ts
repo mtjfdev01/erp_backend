@@ -77,13 +77,15 @@ export enum ComplaintCategory {
   OTHER = "other",
 }
 
-/** Grievance workflow columns — only for type = complaint (general case). */
+/** Grievance workflow — only for type = complaint (general case). */
 export enum ComplaintWorkflowStatus {
-  SUBMITTED = "submitted",
-  UNDER_INVESTIGATION = "under_investigation",
+  ACKNOWLEDGED = "acknowledged",
+  UNDER_REVIEW = "under_review",
+  INVESTIGATING = "investigating",
+  PENDING_INFORMATION = "pending_information",
+  ESCALATED = "escalated",
   RESOLVED = "resolved",
-  DISMISSED = "dismissed",
-  CLOSED = "closed",
+  CLOSED_REJECTED = "closed_rejected",
 }
 
 @Entity("complaints")
