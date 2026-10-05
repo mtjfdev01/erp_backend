@@ -11,9 +11,16 @@ import {
   Req,
   UseGuards,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { Response } from "express";
 import { JwtGuard } from "src/auth/jwt.guard";
+import { CurrentUser } from "src/auth/current-user.decorator";
+import { S3StorageService } from "src/utils/storage/s3-storage.service";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { RecurringDonationsLedgerService } from "./recurring-donations-ledger.service";
@@ -28,12 +35,18 @@ import { CreateRecurringDonationDto } from "./dto/create-recurring-donation.dto"
 import { UpdateRecurringDonationDto } from "./dto/update-recurring-donation.dto";
 import { DonorService } from "src/dms/donor/donor.service";
 
+const recurringDonationFileUploadOptions = {
+  storage: memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+};
+
 @Controller("recurring-donations")
 @UseGuards(JwtGuard, PermissionsGuard)
 export class RecurringDonationsController {
   constructor(
     private readonly ledgerService: RecurringDonationsLedgerService,
     private readonly donorService: DonorService,
+    private readonly s3Storage: S3StorageService,
   ) {}
 
   @Post("search")
@@ -324,6 +337,78 @@ export class RecurringDonationsController {
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to update installment",
+        data: null,
+      });
+    }
+  }
+
+  @Post(":id/attachments/upload")
+  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  @UseInterceptors(FileInterceptor("file", recurringDonationFileUploadOptions))
+  async uploadAttachment(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body("description") description: string,
+    @Body("name") name: string,
+    @CurrentUser() user: any,
+    @Res() res: Response,
+  ) {
+    try {
+      if (!file) {
+        throw new BadRequestException("File is required");
+      }
+      const uploaded = await this.s3Storage.uploadDonationAttachment(file);
+      const attachmentName =
+        String(description || name || "").trim() || undefined;
+      const result = await this.ledgerService.addAttachment(
+        +id,
+        {
+          file_name: file.originalname,
+          file_url: uploaded.url,
+          file_type: file.mimetype,
+          description: attachmentName,
+        },
+        user,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Attachment uploaded successfully",
+        data: result,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Delete(":id/attachments/:attachmentId")
+  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  async removeAttachment(
+    @Param("id") id: string,
+    @Param("attachmentId") attachmentId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.ledgerService.removeAttachment(
+        +id,
+        +attachmentId,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Attachment removed",
+        data: result,
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
         data: null,
       });
     }

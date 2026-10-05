@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
+import { RecurringDonationAttachment } from "./entities/recurring-donation-attachment.entity";
+import { S3StorageModule } from "src/utils/storage/s3-storage.module";
 import { RecurringDonationsStripeService } from "./recurring-donations-stripe.service";
 import { RecurringDonationsLedgerService } from "./recurring-donations-ledger.service";
 import { RecurringDonationsController } from "./recurring-donations.controller";
@@ -16,7 +18,14 @@ import { User } from "src/users/user.entity";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RecurringDonation, Donation, Donor, User]),
+    TypeOrmModule.forFeature([
+      RecurringDonation,
+      RecurringDonationAttachment,
+      Donation,
+      Donor,
+      User,
+    ]),
+    S3StorageModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
       signOptions: { expiresIn: "24h" },

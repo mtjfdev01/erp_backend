@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
+import { RecurringDonationAttachment } from "./entities/recurring-donation-attachment.entity";
+import { AddRecurringDonationAttachmentDto } from "./dto/add-recurring-donation-attachment.dto";
 import { Donation } from "../entities/donation.entity";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
@@ -65,6 +67,8 @@ export class RecurringDonationsLedgerService {
     private readonly donorRepository: Repository<Donor>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(RecurringDonationAttachment)
+    private readonly recurringDonationAttachmentRepo: Repository<RecurringDonationAttachment>,
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
     private readonly moduleRef: ModuleRef,
@@ -388,14 +392,31 @@ export class RecurringDonationsLedgerService {
       };
     };
 
+    const attachmentMap = await this.loadAttachmentsGroupedByRecurringId([
+      id,
+      ...installments.map((row) => row.id),
+    ]);
+
+    const mapAttachment = (attachment: RecurringDonationAttachment) => ({
+      id: attachment.id,
+      file_name: attachment.file_name,
+      file_url: attachment.file_url,
+      file_type: attachment.file_type,
+      description: attachment.description,
+      created_at: attachment.created_at,
+      uploaded_by: pickActor(attachment.uploaded_by),
+    });
+
     return {
       subscription: {
         ...subscription,
         created_by: pickActor(subscription.created_by),
+        attachments: (attachmentMap.get(id) || []).map(mapAttachment),
       },
       installments: installments.map((row) => ({
         ...row,
         created_by: pickActor(row.created_by),
+        attachments: (attachmentMap.get(row.id) || []).map(mapAttachment),
       })),
       initial_donation: initialDonation,
       donor,
@@ -2150,5 +2171,79 @@ export class RecurringDonationsLedgerService {
       },
       params,
     );
+  }
+
+  private async loadAttachmentsGroupedByRecurringId(ids: number[]) {
+    const uniqueIds = [
+      ...new Set(
+        ids.filter((value) => Number.isFinite(value) && value > 0),
+      ),
+    ];
+    const map = new Map<number, RecurringDonationAttachment[]>();
+    if (!uniqueIds.length) return map;
+
+    const rows = await this.recurringDonationAttachmentRepo.find({
+      where: { recurring_donation: { id: In(uniqueIds) } },
+      relations: ["uploaded_by", "recurring_donation"],
+      order: { created_at: "DESC" },
+    });
+
+    for (const row of rows) {
+      const recurringId = Number(row.recurring_donation?.id);
+      if (!recurringId) continue;
+      const bucket = map.get(recurringId) || [];
+      bucket.push(row);
+      map.set(recurringId, bucket);
+    }
+
+    return map;
+  }
+
+  async addAttachment(
+    recurringDonationId: number,
+    dto: AddRecurringDonationAttachmentDto,
+    currentUser?: User | null,
+  ): Promise<RecurringDonationAttachment> {
+    const recurringDonation = await this.recurringDonationRepo.findOne({
+      where: { id: recurringDonationId, is_archived: false },
+    });
+    if (!recurringDonation) {
+      throw new NotFoundException(
+        `Recurring donation with ID ${recurringDonationId} not found`,
+      );
+    }
+
+    const attachment = this.recurringDonationAttachmentRepo.create({
+      recurring_donation: recurringDonation,
+      file_name: dto.file_name,
+      file_url: dto.file_url,
+      file_type: dto.file_type,
+      description: dto.description || null,
+      uploaded_by: currentUser || null,
+    });
+    return this.recurringDonationAttachmentRepo.save(attachment);
+  }
+
+  async removeAttachment(
+    recurringDonationId: number,
+    attachmentId: number,
+  ): Promise<{ deleted: boolean }> {
+    const attachment = await this.recurringDonationAttachmentRepo.findOne({
+      where: { id: attachmentId },
+      relations: ["recurring_donation"],
+    });
+
+    if (
+      !attachment ||
+      !attachment.recurring_donation ||
+      Number(attachment.recurring_donation.id) !== Number(recurringDonationId)
+    ) {
+      throw new NotFoundException(
+        "Attachment not found for this recurring donation",
+      );
+    }
+
+    await this.recurringDonationAttachmentRepo.remove(attachment);
+    return { deleted: true };
   }
 }

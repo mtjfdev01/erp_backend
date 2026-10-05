@@ -1,5 +1,6 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
-import { Column, Entity, Index } from "typeorm";
+import { Column, Entity, Index, OneToMany } from "typeorm";
+import { RecurringDonationAttachment } from "./recurring-donation-attachment.entity";
 
 /** Master subscription row vs each paid billing cycle. */
 export type RecurringDonationRecordType = "subscription" | "installment";
@@ -134,4 +135,10 @@ export class RecurringDonation extends BaseEntity {
   @Index()
   @Column({ type: "varchar", length: 40, nullable: true, default: null })
   period_key: string | null;
+
+  @OneToMany(
+    () => RecurringDonationAttachment,
+    (attachment) => attachment.recurring_donation,
+  )
+  attachments: RecurringDonationAttachment[];
 }
