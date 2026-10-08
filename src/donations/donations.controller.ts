@@ -382,6 +382,35 @@ export class DonationsController {
     }
   }
 
+  @Get("lookup")
+  @UseGuards(JwtGuard)
+  async lookup(
+    @Query("status") status?: string,
+    @Query("payment_method") paymentMethod?: string,
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+  ) {
+    const rows = await this.donationsService.getDonationListForDropdown({
+      status: status || undefined,
+      paymentMethod: paymentMethod || undefined,
+    });
+    let data = (rows || []).map((r: any) => ({
+      value: String(r.id),
+      label:
+        r.donor_name
+          ? `#${r.id} — ${r.donor_name} (${r.amount ?? ""})`
+          : `#${r.id} (${r.amount ?? ""} / ${r.status ?? ""})`,
+    }));
+    if (search?.trim()) {
+      const q = search.trim().toLowerCase();
+      data = data.filter(
+        (o) => o.label.toLowerCase().includes(q) || o.value.includes(q),
+      );
+    }
+    if (limit) data = data.slice(0, Math.max(1, parseInt(limit, 10) || 200));
+    return { success: true, message: "Lookup retrieved successfully", data };
+  }
+
   @Get("options")
   @UseGuards(JwtGuard)
   async getDonationOptions(

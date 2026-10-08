@@ -10,6 +10,12 @@ import { CreateRegionDto } from "./dto/create-region.dto";
 import { UpdateRegionDto } from "./dto/update-region.dto";
 import { Region } from "./entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 @Injectable()
 export class RegionsService {
@@ -174,5 +180,18 @@ export class RegionsService {
       }
       throw new Error(`Failed to deactivate region: ${error.message}`);
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.regionRepository,
+      {
+        profile: LOOKUP_PROFILES.regions,
+        searchFields: ["name", "code"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

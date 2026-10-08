@@ -11,6 +11,12 @@ import { District } from "./entities/district.entity";
 import { Region } from "../regions/entities/region.entity";
 import { Country } from "../countries/entities/country.entity";
 import { SubRegion } from "../sub-regions/entities/sub-region.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../../utils/lookup";
 
 @Injectable()
 export class DistrictsService {
@@ -266,5 +272,18 @@ export class DistrictsService {
       }
       throw new Error(`Failed to deactivate district: ${error.message}`);
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.districtRepository,
+      {
+        profile: LOOKUP_PROFILES.districts,
+        searchFields: ["name", "code"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

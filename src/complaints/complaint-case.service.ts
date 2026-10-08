@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Logger,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, Brackets, In } from "typeorm";
@@ -33,14 +34,24 @@ import { UpdateComplaintNarrativesDto } from "./dto/update-complaint-narratives.
 import { CreateComplaintMeetingDto } from "./dto/create-complaint-meeting.dto";
 import { UpdateComplaintMeetingDto } from "./dto/update-complaint-meeting.dto";
 import { AddInvestigationLogDto } from "./dto/add-investigation-log.dto";
+import {
+  COMPLAINT_WORKFLOW_STATUS_OPTIONS,
+  LEGACY_COMPLAINT_WORKFLOW_STATUS_MAP,
+} from "./complaint-case.constants";
 import { User, UserRole } from "../users/user.entity";
 import { PermissionsService } from "../permissions/permissions.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationType } from "../notifications/entities/notification.entity";
 import { generateComplaintCode } from "./utils/complaint-code.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
-export class ComplaintCaseService {
+export class ComplaintCaseService implements OnModuleInit {
   private readonly logger = new Logger(ComplaintCaseService.name);
 
   constructor(
@@ -57,6 +68,31 @@ export class ComplaintCaseService {
     private readonly permissionsService: PermissionsService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  /** Remap legacy workflow values so old rows keep working after status rename. */
+  async onModuleInit() {
+    try {
+      for (const [from, to] of Object.entries(LEGACY_COMPLAINT_WORKFLOW_STATUS_MAP)) {
+        const result = await this.complaintRepo
+          .createQueryBuilder()
+          .update(Complaint)
+          .set({ complaint_workflow_status: to })
+          .where("complaint_workflow_status = :from", { from })
+          .execute();
+        if (result.affected) {
+          this.logger.log(
+            `Remapped complaint_workflow_status ${from} → ${to} (${result.affected} row(s))`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not remap legacy complaint_workflow_status values: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+  }
 
   private normalizeIds(ids?: number[] | null): number[] {
     return [
@@ -330,7 +366,7 @@ export class ComplaintCaseService {
       scope: dto.scope || ComplaintScope.INTERNAL,
       complaint_type: ComplaintType.ONE_TIME,
       status: ComplaintStatus.OPEN,
-      complaint_workflow_status: ComplaintWorkflowStatus.SUBMITTED,
+      complaint_workflow_status: ComplaintWorkflowStatus.ACKNOWLEDGED,
       complaint_code: code,
       complaint_category: dto.complaint_category,
       complaint_category_custom:
@@ -356,7 +392,7 @@ export class ComplaintCaseService {
       user,
       ComplaintInvestigationAction.STATUS_CHANGE,
       "Complaint submitted",
-      { status: ComplaintWorkflowStatus.SUBMITTED },
+      { status: ComplaintWorkflowStatus.ACKNOWLEDGED },
     );
 
     if (nominatedUsers.length) {
@@ -585,12 +621,19 @@ export class ComplaintCaseService {
 
     if (
       dto.status === ComplaintWorkflowStatus.RESOLVED ||
-      dto.status === ComplaintWorkflowStatus.CLOSED
+      dto.status === ComplaintWorkflowStatus.CLOSED_REJECTED
     ) {
       complaint!.status = ComplaintStatus.CLOSED;
       complaint!.completed_date = new Date();
-    } else if (dto.status === ComplaintWorkflowStatus.UNDER_INVESTIGATION) {
+    } else if (
+      dto.status === ComplaintWorkflowStatus.UNDER_REVIEW ||
+      dto.status === ComplaintWorkflowStatus.INVESTIGATING ||
+      dto.status === ComplaintWorkflowStatus.PENDING_INFORMATION ||
+      dto.status === ComplaintWorkflowStatus.ESCALATED
+    ) {
       complaint!.status = ComplaintStatus.IN_PROGRESS;
+    } else if (dto.status === ComplaintWorkflowStatus.ACKNOWLEDGED) {
+      complaint!.status = ComplaintStatus.OPEN;
     }
 
     await this.complaintRepo.save(complaint!);
@@ -914,9 +957,18 @@ export class ComplaintCaseService {
   }
 
   getWorkflowStatuses() {
-    return Object.values(ComplaintWorkflowStatus).map((value) => ({
-      value,
-      label: value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    }));
+    return COMPLAINT_WORKFLOW_STATUS_OPTIONS;
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.complaintRepo,
+      {
+        profile: LOOKUP_PROFILES.complaint_cases,
+        searchFields: ["title"],
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -187,6 +187,34 @@ export class AppealsController {
     }
   }
 
+  /** Alias of GET /appeals/options (shared slim lookup shape). */
+  @Get("lookup")
+  @UseGuards(JwtGuard, PermissionsGuard)
+  @RequiredPermissions([...APPEALS_OPTIONS_GUARD])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.appealsService.listForOptions({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      });
+    }
+  }
+
   @Get()
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
   @RequiredPermissions(["dms.appeals.list_view", "fund_raising.appeals.list_view", "super_admin"])

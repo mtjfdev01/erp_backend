@@ -12,6 +12,12 @@ import {
 import { CreateSocialPostDto } from "./dto/create-social-post.dto";
 import { UpdateSocialPostDto } from "./dto/update-social-post.dto";
 import { BufferClient, BufferPostStatus } from "./buffer.client";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 const SORTABLE = new Set([
   "id",
@@ -37,6 +43,24 @@ export class SocialMediaService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    const options = await listEntityLookup(
+      this.socialPostRepo,
+      {
+        profile: LOOKUP_PROFILES.social_posts,
+        searchFields: ["post_text", "buffer_channel_name"],
+        orderBy: "id",
+        labelFallback: (row) => `Post #${row.id}`,
+      },
+      params,
+    );
+    return options.map((opt) => ({
+      ...opt,
+      label:
+        opt.label.length > 80 ? `${opt.label.slice(0, 77)}...` : opt.label,
+    }));
   }
 
   async search(payload: Record<string, any>) {

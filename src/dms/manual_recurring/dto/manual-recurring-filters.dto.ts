@@ -78,4 +78,9 @@ export class ProcessManualRecurringRemindersDto {
   @IsBoolean()
   @Type(() => Boolean)
   include_details?: boolean;
+
+  /** Optional batch id for reminder log rows (cron generates one if omitted). */
+  @IsOptional()
+  @IsString()
+  run_id?: string;
 }

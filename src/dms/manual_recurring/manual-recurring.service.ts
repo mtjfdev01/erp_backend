@@ -24,6 +24,12 @@ import {
   computeTotalPledgedAmount,
   resolvePrepaidPeriodKeys,
 } from "./utils/manual-recurring-pledge.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class ManualRecurringService {
@@ -39,6 +45,20 @@ export class ManualRecurringService {
     @InjectRepository(Campaign)
     private readonly campaignRepo: Repository<Campaign>,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.pledgeRepo,
+      {
+        profile: LOOKUP_PROFILES.manual_recurring,
+        searchFields: ["status"],
+        orderBy: "id",
+        labelFallback: (row) =>
+          `Pledge #${row.id}${row.donor_id ? ` (donor ${row.donor_id})` : ""}`,
+      },
+      params,
+    );
+  }
 
   private async assertRecurringCampaign(campaignId: number): Promise<Campaign> {
     const campaign = await this.campaignRepo.findOne({

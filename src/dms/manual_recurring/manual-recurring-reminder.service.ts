@@ -47,6 +47,10 @@ import {
   resolveMonthlyPeriodKeyForBillingYmd,
 } from "../../donations/recurring_donations/recurring-billing-date.util";
 import { isSubscriptionPrepaidPeriodCovered } from "../../donations/recurring_donations/recurring-prepaid.util";
+import { RecurringReminderLogsService } from "../recurring_reminder_logs/recurring-reminder-logs.service";
+import {
+  RecurringReminderChannelStatus,
+} from "../recurring_reminder_logs/entities/recurring-reminder-log.entity";
 
 export interface ManualRecurringReminderDetail {
   pledge_id: number;
@@ -120,6 +124,7 @@ export class ManualRecurringReminderService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly recurringLedgerService: RecurringDonationsLedgerService,
+    private readonly reminderLogsService: RecurringReminderLogsService,
   ) {}
 
   /**
@@ -148,13 +153,15 @@ export class ManualRecurringReminderService {
   async processDueReminders(
     options: ProcessManualRecurringRemindersDto = {},
   ): Promise<ManualRecurringReminderBatchResult> {
+    const runId = options.run_id || this.reminderLogsService.createRunId();
+    const jobOptions = { ...options, run_id: runId };
     const frequencies = getDueReminderFrequencies();
     const runs: ManualRecurringReminderResult[] = [];
     for (const frequency of frequencies) {
-      runs.push(await this.processRemindersForFrequency(frequency, options));
+      runs.push(await this.processRemindersForFrequency(frequency, jobOptions));
     }
     try {
-      await this.processNonStripeLedgerReminders(options);
+      await this.processNonStripeLedgerReminders(jobOptions);
     } catch (err: any) {
       this.logger.error(
         `Non-Stripe ledger reminders failed: ${err?.message || err}`,
@@ -176,6 +183,7 @@ export class ManualRecurringReminderService {
     const chunkDelayMs = resolveChunkDelayMs(this.configService);
     const includeDetails = options.include_details === true;
     const maxDetails = resolveMaxDetails(includeDetails, this.configService);
+    const runId = options.run_id || this.reminderLogsService.createRunId();
 
     const periodBounds = options.period_key
       ? this.resolvePeriodBoundsFromKey(frequency, options.period_key)
@@ -265,6 +273,7 @@ export class ManualRecurringReminderService {
           stripeAutoDonorIds,
           donatedLookup,
           purposeFallbackCache,
+          runId,
         });
 
         result.skipped_donated += outcome.skipped_donated;
@@ -411,6 +420,7 @@ export class ManualRecurringReminderService {
     stripeAutoDonorIds: Set<number>;
     donatedLookup: Map<number, Set<number>>;
     purposeFallbackCache: Map<string, number | null>;
+    runId: string;
   }) {
     const {
       pledge,
@@ -424,6 +434,7 @@ export class ManualRecurringReminderService {
       stripeAutoDonorIds,
       donatedLookup,
       purposeFallbackCache,
+      runId,
     } = params;
 
     const campaign = pledge.campaign;
@@ -525,6 +536,8 @@ export class ManualRecurringReminderService {
         force,
         baseDetail,
         purposeFallbackCache,
+        frequency,
+        runId,
       });
     }
 
@@ -538,6 +551,8 @@ export class ManualRecurringReminderService {
       force,
       baseDetail,
       purposeFallbackCache,
+      frequency,
+      runId,
     });
   }
 
@@ -552,6 +567,8 @@ export class ManualRecurringReminderService {
     force: boolean;
     baseDetail: Omit<ManualRecurringReminderDetail, "action">;
     purposeFallbackCache: Map<string, number | null>;
+    frequency: CampaignTargetFrequency;
+    runId: string;
   }) {
     const zero = {
       skipped_donated: 1,
@@ -635,6 +652,19 @@ export class ManualRecurringReminderService {
           purposeFallbackCache: params.purposeFallbackCache,
         });
 
+    await this.logCampaignSend({
+      runId: params.runId,
+      actionType: "thanks",
+      frequency: params.frequency,
+      periodKey: params.periodKey,
+      pledge: params.pledge,
+      campaign: params.campaign,
+      donor: params.donor,
+      channels,
+      sendResult,
+      dryRun: false,
+    });
+
     if (sendResult.sent > 0) {
       return {
         ...zero,
@@ -674,6 +704,8 @@ export class ManualRecurringReminderService {
     force: boolean;
     baseDetail: Omit<ManualRecurringReminderDetail, "action">;
     purposeFallbackCache: Map<string, number | null>;
+    frequency: CampaignTargetFrequency;
+    runId: string;
   }) {
     const zero = {
       skipped_donated: 0,
@@ -737,6 +769,19 @@ export class ManualRecurringReminderService {
       campaign: params.campaign,
       donor: params.donor,
       channels,
+    });
+
+    await this.logCampaignSend({
+      runId: params.runId,
+      actionType: "reminder",
+      frequency: params.frequency,
+      periodKey: params.periodKey,
+      pledge: params.pledge,
+      campaign: params.campaign,
+      donor: params.donor,
+      channels,
+      sendResult,
+      dryRun: false,
     });
 
     if (sendResult.sent > 0) {
@@ -823,10 +868,19 @@ export class ManualRecurringReminderService {
     channels: ("email" | "whatsapp")[];
     periodStart: Date;
     periodEnd: Date;
-  }): Promise<{ sent: number; failed: number; errors: string[] }> {
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+    email_status: RecurringReminderChannelStatus;
+    wa_status: RecurringReminderChannelStatus;
+    donation_id: number | null;
+  }> {
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
+    let emailStatus: RecurringReminderChannelStatus = "n_a";
+    let waStatus: RecurringReminderChannelStatus = "n_a";
 
     const donation = await this.findPaidDonationForPeriod(
       params.pledge,
@@ -839,6 +893,9 @@ export class ManualRecurringReminderService {
         sent: 0,
         failed: params.channels.length,
         errors: ["No paid donation found in period for default thanks"],
+        email_status: params.channels.includes("email") ? "not_sent" : "n_a",
+        wa_status: params.channels.includes("whatsapp") ? "not_sent" : "n_a",
+        donation_id: null,
       };
     }
 
@@ -855,11 +912,13 @@ export class ManualRecurringReminderService {
           if (!donor?.email) {
             errors.push("No donor email for thanks");
             failed += 1;
+            emailStatus = "not_sent";
             continue;
           }
           // Already thanked on payment — do not send again
           if (donation.email_sent === true) {
             sent += 1;
+            emailStatus = "sent";
             continue;
           }
           const ok = await this.emailService.sendDonationSuccessEmail(
@@ -869,20 +928,24 @@ export class ManualRecurringReminderService {
           );
           if (ok) {
             sent += 1;
+            emailStatus = "sent";
             await this.donationRepo.update(donation.id, { email_sent: true });
             donation.email_sent = true;
           } else {
             failed += 1;
+            emailStatus = "not_sent";
             errors.push("Thanks email failed");
           }
         } else {
           if (!donor?.phone) {
             errors.push("No donor phone for thanks");
             failed += 1;
+            waStatus = "not_sent";
             continue;
           }
           if (donation.message_sent === true) {
             sent += 1;
+            waStatus = "sent";
             continue;
           }
           const ok = await this.whatsAppService.sendRecurringConfirmation({
@@ -891,20 +954,31 @@ export class ManualRecurringReminderService {
           });
           if (ok) {
             sent += 1;
+            waStatus = "sent";
             await this.donationRepo.update(donation.id, { message_sent: true });
             donation.message_sent = true;
           } else {
             failed += 1;
+            waStatus = "not_sent";
             errors.push("Thanks WhatsApp failed");
           }
         }
       } catch (err: any) {
         failed += 1;
+        if (channel === "email") emailStatus = "not_sent";
+        else waStatus = "not_sent";
         errors.push(err?.message || `Thanks ${channel} failed`);
       }
     }
 
-    return { sent, failed, errors };
+    return {
+      sent,
+      failed,
+      errors,
+      email_status: emailStatus,
+      wa_status: waStatus,
+      donation_id: donation.id,
+    };
   }
 
   /**
@@ -916,10 +990,19 @@ export class ManualRecurringReminderService {
     campaign?: Campaign | null;
     donor: ManualRecurringPledge["donor"];
     channels: ("email" | "whatsapp")[];
-  }): Promise<{ sent: number; failed: number; errors: string[] }> {
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+    email_status: RecurringReminderChannelStatus;
+    wa_status: RecurringReminderChannelStatus;
+    donation_id: number | null;
+  }> {
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
+    let emailStatus: RecurringReminderChannelStatus = "n_a";
+    let waStatus: RecurringReminderChannelStatus = "n_a";
 
     const donation = await this.resolveOrCreatePendingDonation(
       params.pledge,
@@ -931,6 +1014,9 @@ export class ManualRecurringReminderService {
         sent: 0,
         failed: params.channels.length,
         errors: ["Could not resolve pending donation for payment link"],
+        email_status: params.channels.includes("email") ? "not_sent" : "n_a",
+        wa_status: params.channels.includes("whatsapp") ? "not_sent" : "n_a",
+        donation_id: null,
       };
     }
 
@@ -949,6 +1035,7 @@ export class ManualRecurringReminderService {
           if (!donor?.email) {
             errors.push("No donor email for payment link");
             failed += 1;
+            emailStatus = "not_sent";
             continue;
           }
           const ok =
@@ -956,15 +1043,19 @@ export class ManualRecurringReminderService {
               donation,
               donor.email,
             );
-          if (ok) sent += 1;
-          else {
+          if (ok) {
+            sent += 1;
+            emailStatus = "sent";
+          } else {
             failed += 1;
+            emailStatus = "not_sent";
             errors.push("Payment link email failed");
           }
         } else {
           if (!donor?.phone) {
             errors.push("No donor phone for payment link");
             failed += 1;
+            waStatus = "not_sent";
             continue;
           }
           const ok = await this.whatsAppService.sendRecurringPaymentReminder({
@@ -973,19 +1064,31 @@ export class ManualRecurringReminderService {
             donationId: donation.donation_public_id || donation.id,
             donationPublicId: donation.donation_public_id,
           });
-          if (ok) sent += 1;
-          else {
+          if (ok) {
+            sent += 1;
+            waStatus = "sent";
+          } else {
             failed += 1;
+            waStatus = "not_sent";
             errors.push("Payment link WhatsApp failed");
           }
         }
       } catch (err: any) {
         failed += 1;
+        if (channel === "email") emailStatus = "not_sent";
+        else waStatus = "not_sent";
         errors.push(err?.message || `Payment link ${channel} failed`);
       }
     }
 
-    return { sent, failed, errors };
+    return {
+      sent,
+      failed,
+      errors,
+      email_status: emailStatus,
+      wa_status: waStatus,
+      donation_id: donation.id,
+    };
   }
 
   private async findPaidDonationForPeriod(
@@ -1084,7 +1187,14 @@ export class ManualRecurringReminderService {
     channels: ("email" | "whatsapp")[];
     periodKey: string;
     purposeFallbackCache: Map<string, number | null>;
-  }): Promise<{ sent: number; failed: number; errors: string[] }> {
+  }): Promise<{
+    sent: number;
+    failed: number;
+    errors: string[];
+    email_status: RecurringReminderChannelStatus;
+    wa_status: RecurringReminderChannelStatus;
+    donation_id: number | null;
+  }> {
     const overrides = await this.buildTemplateOverrides(
       params.pledge,
       params.campaign,
@@ -1093,6 +1203,8 @@ export class ManualRecurringReminderService {
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
+    let emailStatus: RecurringReminderChannelStatus = "n_a";
+    let waStatus: RecurringReminderChannelStatus = "n_a";
 
     for (const channel of params.channels) {
       const templateId = await this.resolveTemplateId(
@@ -1104,6 +1216,8 @@ export class ManualRecurringReminderService {
       if (!templateId) {
         errors.push(`No ${params.slot} ${channel} template on campaign`);
         failed += 1;
+        if (channel === "email") emailStatus = "not_sent";
+        else waStatus = "not_sent";
         continue;
       }
 
@@ -1122,14 +1236,75 @@ export class ManualRecurringReminderService {
         },
       });
 
-      if (sendResult.success) sent += 1;
-      else {
+      if (sendResult.success) {
+        sent += 1;
+        if (channel === "email") emailStatus = "sent";
+        else waStatus = "sent";
+      } else {
         failed += 1;
+        if (channel === "email") emailStatus = "not_sent";
+        else waStatus = "not_sent";
         if (sendResult.error) errors.push(sendResult.error);
       }
     }
 
-    return { sent, failed, errors };
+    return {
+      sent,
+      failed,
+      errors,
+      email_status: emailStatus,
+      wa_status: waStatus,
+      donation_id: null,
+    };
+  }
+
+  private async logCampaignSend(params: {
+    runId: string;
+    actionType: "reminder" | "thanks";
+    frequency: CampaignTargetFrequency | string;
+    periodKey: string;
+    pledge: ManualRecurringPledge;
+    campaign?: Campaign | null;
+    donor: ManualRecurringPledge["donor"];
+    channels: ("email" | "whatsapp")[];
+    sendResult: {
+      sent: number;
+      failed: number;
+      errors: string[];
+      email_status?: RecurringReminderChannelStatus;
+      wa_status?: RecurringReminderChannelStatus;
+      donation_id?: number | null;
+    };
+    dryRun: boolean;
+  }) {
+    if (params.dryRun) return;
+    const donor = params.donor;
+    await this.reminderLogsService.createLog({
+      run_id: params.runId,
+      source: "campaign_pledge",
+      action_type: params.actionType,
+      frequency: String(params.frequency || ""),
+      period_key: params.periodKey,
+      donor_id: params.pledge.donor_id,
+      donor_name:
+        donor?.name || donor?.email || `Donor #${params.pledge.donor_id}`,
+      donor_email: donor?.email || null,
+      donor_phone: donor?.phone || null,
+      mail_status:
+        params.sendResult.email_status ||
+        (params.channels.includes("email") ? "not_sent" : "n_a"),
+      wa_status:
+        params.sendResult.wa_status ||
+        (params.channels.includes("whatsapp") ? "not_sent" : "n_a"),
+      pledge_id: params.pledge.id,
+      campaign_id: params.campaign?.id ?? params.pledge.campaign_id ?? null,
+      campaign_title: params.campaign?.title || null,
+      donation_id: params.sendResult.donation_id ?? null,
+      dry_run: false,
+      error_message: params.sendResult.errors.join("; ") || null,
+      amount: this.pledgeAmountInt(params.pledge, params.campaign),
+      currency: params.pledge.currency || params.campaign?.currency || "PKR",
+    });
   }
 
   private hasDonatedForCampaign(
@@ -1242,6 +1417,7 @@ export class ManualRecurringReminderService {
   }> {
     const dryRun = options.dry_run === true;
     const force = options.force === true;
+    const runId = options.run_id || this.reminderLogsService.createRunId();
     const frequencies = options.frequency
       ? [options.frequency as CampaignTargetFrequency]
       : getDueReminderFrequencies();
@@ -1476,6 +1652,16 @@ export class ManualRecurringReminderService {
 
             let emailJustSent = false;
             let messageJustSent = false;
+            let emailStatus: RecurringReminderChannelStatus = alreadyEmailed
+              ? "sent"
+              : donor?.email
+                ? "n_a"
+                : "n_a";
+            let waStatus: RecurringReminderChannelStatus = alreadyMessaged
+              ? "sent"
+              : donor?.phone
+                ? "n_a"
+                : "n_a";
             if (donor?.email && !alreadyEmailed) {
               emailJustSent =
                 !!(await this.emailService.sendDonationSuccessEmail(
@@ -1483,6 +1669,7 @@ export class ManualRecurringReminderService {
                   donor,
                   donor.email,
                 ));
+              emailStatus = emailJustSent ? "sent" : "not_sent";
               sentOk = emailJustSent || sentOk;
             }
             if (donor?.phone && !alreadyMessaged) {
@@ -1490,6 +1677,7 @@ export class ManualRecurringReminderService {
                 phoneNumber: donor.phone,
                 amount: String(amount),
               }));
+              waStatus = messageJustSent ? "sent" : "not_sent";
               sentOk = messageJustSent || sentOk;
             }
 
@@ -1497,6 +1685,27 @@ export class ManualRecurringReminderService {
               await this.donationRepo.update(paidDonation.id, {
                 ...(emailJustSent ? { email_sent: true } : {}),
                 ...(messageJustSent ? { message_sent: true } : {}),
+              });
+            }
+
+            if (emailJustSent || messageJustSent || alreadyEmailed || alreadyMessaged) {
+              await this.reminderLogsService.createLog({
+                run_id: runId,
+                source: "ledger_subscription",
+                action_type: "thanks",
+                frequency: billingInterval,
+                period_key: periodKey,
+                donor_id: row.donor_id,
+                donor_name: donorName,
+                donor_email: donor?.email || null,
+                donor_phone: donor?.phone || null,
+                mail_status: emailStatus,
+                wa_status: waStatus,
+                recurring_donation_id: row.id,
+                donation_id: paidDonation.id,
+                dry_run: false,
+                amount: Number(amount) || null,
+                currency: row.currency || paidDonation.currency || "PKR",
               });
             }
 
@@ -1519,12 +1728,18 @@ export class ManualRecurringReminderService {
               skipped += 1;
               continue;
             }
+            let emailStatus: RecurringReminderChannelStatus = "n_a";
+            let waStatus: RecurringReminderChannelStatus = "n_a";
+            const errors: string[] = [];
             if (donor?.email) {
-              sentOk =
-                (await this.emailService.sendRecurringPaymentReminderEmail(
+              const emailOk =
+                await this.emailService.sendRecurringPaymentReminderEmail(
                   donation,
                   donor.email,
-                )) || sentOk;
+                );
+              emailStatus = emailOk ? "sent" : "not_sent";
+              sentOk = emailOk || sentOk;
+              if (!emailOk) errors.push("Payment link email failed");
             }
             if (donor?.phone) {
               const wa = await this.whatsAppService.sendRecurringPaymentReminder({
@@ -1533,8 +1748,30 @@ export class ManualRecurringReminderService {
                 donationId: donation.donation_public_id || donation.id,
                 donationPublicId: donation.donation_public_id,
               });
+              waStatus = wa ? "sent" : "not_sent";
               sentOk = wa || sentOk;
+              if (!wa) errors.push("Payment link WhatsApp failed");
             }
+
+            await this.reminderLogsService.createLog({
+              run_id: runId,
+              source: "ledger_subscription",
+              action_type: "reminder",
+              frequency: billingInterval,
+              period_key: periodKey,
+              donor_id: row.donor_id,
+              donor_name: donorName,
+              donor_email: donor?.email || null,
+              donor_phone: donor?.phone || null,
+              mail_status: emailStatus,
+              wa_status: waStatus,
+              recurring_donation_id: row.id,
+              donation_id: donation.id,
+              dry_run: false,
+              error_message: errors.join("; ") || null,
+              amount: Number(row.amount) || Number(donation.amount) || null,
+              currency: row.currency || donation.currency || "PKR",
+            });
 
             if (sentOk) {
               await this.stripeRecurringRepo.update(row.id, {

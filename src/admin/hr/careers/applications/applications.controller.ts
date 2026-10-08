@@ -12,8 +12,12 @@ import {
   UseInterceptors,
   UploadedFile,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
+  BadRequestException,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { ApplicationsService } from "./applications.service";
 import { CreateApplicationDto } from "./dto/create-application.dto";
 import { UpdateApplicationDto } from "./dto/update-application.dto";
@@ -21,33 +25,45 @@ import { ConditionalJwtGuard } from "../../../../auth/guards/conditional-jwt.gua
 import { PermissionsGuard } from "../../../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../../../permissions";
 
+const resumeUploadOptions = {
+  storage: memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+};
+
+const dtoPipe = new ValidationPipe({
+  transform: true,
+  whitelist: true,
+  forbidNonWhitelisted: false,
+});
+
 @Controller("job_applications")
 export class ApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 
+  /** Public job application submit (website careers Apply tab). */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UseInterceptors(FileInterceptor("cvResume"))
+  @UsePipes(dtoPipe)
+  @UseInterceptors(FileInterceptor("cvResume", resumeUploadOptions))
   async create(
     @Body() createApplicationDto: CreateApplicationDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     try {
-      // For now, ignore the file since we're using dummy URL
-      // File will be handled when Google Drive is implemented
-      const application =
-        await this.applicationsService.create(createApplicationDto);
+      const application = await this.applicationsService.create(
+        createApplicationDto,
+        file,
+      );
       return {
         success: true,
         message: "Application submitted successfully",
         data: application,
       };
-    } catch (error) {
-      return {
-        success: false,
-        message: "Failed to submit application",
-        error: error.message,
-      };
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException(
+        error?.message || "Failed to submit application",
+      );
     }
   }
 
@@ -60,18 +76,37 @@ export class ApplicationsController {
     @Query("sortField") sortField: string = "created_at",
     @Query("sortOrder") sortOrder: "ASC" | "DESC" = "DESC",
     @Query("job_id") job_id?: string,
+    @Query("status") status?: string,
+    @Query("search") search?: string,
+    @Query("gender") gender?: string,
+    @Query("city") city?: string,
+    @Query("country") country?: string,
+    @Query("cnic") cnic?: string,
+    @Query("has_work_experience") has_work_experience?: string,
+    @Query("from_date") from_date?: string,
+    @Query("to_date") to_date?: string,
   ) {
-    const pageNum = parseInt(page, 10) || 1;
-    const pageSizeNum = parseInt(pageSize, 10) || 10;
-    const jobId = job_id ? parseInt(job_id, 10) : undefined;
-
-    return this.applicationsService.findAll(
-      pageNum,
-      pageSizeNum,
+    return this.applicationsService.findAll({
+      page: parseInt(page, 10) || 1,
+      pageSize: parseInt(pageSize, 10) || 10,
       sortField,
       sortOrder,
-      jobId,
-    );
+      job_id: job_id ? parseInt(job_id, 10) : undefined,
+      status,
+      search,
+      gender,
+      city,
+      country,
+      cnic,
+      has_work_experience:
+        has_work_experience === "true" || has_work_experience === "1"
+          ? true
+          : has_work_experience === "false" || has_work_experience === "0"
+            ? false
+            : undefined,
+      from_date,
+      to_date,
+    });
   }
 
   @Get(":id")
@@ -85,23 +120,12 @@ export class ApplicationsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
   @RequiredPermissions(["hr.applications.update", "super_admin"])
+  @UsePipes(dtoPipe)
   async update(
     @Param("id") id: string,
     @Body() updateApplicationDto: UpdateApplicationDto,
   ) {
-    try {
-      const result = await this.applicationsService.update(
-        +id,
-        updateApplicationDto,
-      );
-      return result;
-    } catch (error) {
-      return {
-        success: false,
-        message: "Failed to update application",
-        error: error.message,
-      };
-    }
+    return this.applicationsService.update(+id, updateApplicationDto);
   }
 
   @Delete(":id")
@@ -109,15 +133,6 @@ export class ApplicationsController {
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
   @RequiredPermissions(["hr.applications.delete", "super_admin"])
   async remove(@Param("id") id: string) {
-    try {
-      const result = await this.applicationsService.remove(+id);
-      return result;
-    } catch (error) {
-      return {
-        success: false,
-        message: "Failed to delete application",
-        error: error.message,
-      };
-    }
+    return this.applicationsService.remove(+id);
   }
 }

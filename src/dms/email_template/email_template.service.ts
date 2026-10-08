@@ -40,6 +40,12 @@ import {
   TEMPLATE_PURPOSES,
   TEMPLATE_STATUSES,
 } from "./utils/template-variables.constants";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class EmailTemplateService {
@@ -65,6 +71,19 @@ export class EmailTemplateService {
     private readonly configService: ConfigService,
     private readonly donorService: DonorService,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.repository,
+      {
+        profile: LOOKUP_PROFILES.email_templates,
+        searchFields: ["name", "subject", "category"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `Template #${row.id}`,
+      },
+      params,
+    );
+  }
 
   getMetadata() {
     return {

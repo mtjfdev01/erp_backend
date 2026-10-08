@@ -15,10 +15,18 @@ export class CreateRecurringDonationDto {
   @Min(1)
   donor_id: number;
 
+  /** Per-installment amount. */
   @Type(() => Number)
   @IsNumber()
   @Min(1)
   amount: number;
+
+  /** Optional total paid (staff prepaid). Online omits this. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  total_amount?: number | null;
 
   @IsOptional()
   @IsString()
@@ -61,6 +69,10 @@ export class CreateRecurringDonationDto {
   @IsOptional()
   @IsString()
   donation_type?: string;
+
+  @IsOptional()
+  @IsString()
+  on_behalf_names?: string;
 
   @IsOptional()
   @Type(() => Number)

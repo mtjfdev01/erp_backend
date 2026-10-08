@@ -208,6 +208,10 @@ export class DonorController {
     @Query("pipeline_stage") pipeline_stage?: string,
     @Query("team_filter") team_filter?: string,
     @Query("team_filter_user_id") team_filter_user_id?: string,
+    @Query("referrer_user_id") referrer_user_id?: string,
+    @Query("referrer_user_ids") referrer_user_ids?: string,
+    @Query("referrer_any") referrer_any?: string,
+    @Query("assigned_to_user_id") assigned_to_user_id?: string,
     @Req() req?: any,
     @Res() res?: Response,
   ) {
@@ -302,6 +306,10 @@ export class DonorController {
               : undefined,
           team_filter,
           team_filter_user_id,
+          referrer_user_id,
+          referrer_user_ids,
+          referrer_any,
+          assigned_to_user_id,
         },
         geoScope,
         sourceAccess,
@@ -371,39 +379,97 @@ export class DonorController {
     }
   }
 
+  /**
+   * Unscoped donor lookup:
+   * - `search` → typeahead list (forms / pickers)
+   * - `email` / `phone` → exact match (register "check existing")
+   * No geo, assignment scope, or online/offline permission filters.
+   * Always excludes archived donors.
+   */
   @Get("lookup")
-  async findByEmailOrPhone(
+  async lookup(
+    @Query("search") search?: string,
     @Query("email") email?: string,
     @Query("phone") phone?: string,
-    @Req() req?: any,
+    @Query("donor_type") donor_type?: string,
+    @Query("recurring") recurring?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
     @Res() res?: Response,
   ) {
     try {
-      const result = await this.donorService.findByEmailOrPhone(email, phone);
-      if (result && req?.user?.id) {
-        await this.checkDonorPermission(req.user.id, result.source, "view");
-        const geoScope = await this.resolveGeoScope(req.user);
-        const scope = await this.donorService.resolveDonorScope(
-          req.user,
-          result.source,
-        );
-        this.donorService.assertDonorViewAccess(scope, result, geoScope);
+      const searchTerm = String(search || "").trim();
+      if (searchTerm) {
+        const result = await this.donorService.pickerSearch({
+          search: searchTerm,
+          donor_type,
+          recurring:
+            recurring === "true"
+              ? true
+              : recurring === "false"
+                ? false
+                : undefined,
+          page: page ? parseInt(page, 10) : 1,
+          pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+        });
+        return res.status(HttpStatus.OK).json({
+          success: true,
+          message: "Donors retrieved successfully",
+          ...result,
+        });
       }
+
+      const result = await this.donorService.findByEmailOrPhone(email, phone);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: result ? "Donor retrieved successfully" : "No donor found",
         data: result,
       });
     } catch (error) {
-      if (error instanceof ForbiddenException) {
-        return res
-          .status(HttpStatus.FORBIDDEN)
-          .json({ success: false, message: error.message, data: null });
-      }
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,
         data: null,
+      });
+    }
+  }
+
+  /**
+   * Alias of unscoped typeahead search (same as GET /donors/lookup?search=…).
+   */
+  @Get("picker")
+  async picker(
+    @Query("search") search?: string,
+    @Query("donor_type") donor_type?: string,
+    @Query("recurring") recurring?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const result = await this.donorService.pickerSearch({
+        search,
+        donor_type,
+        recurring:
+          recurring === "true"
+            ? true
+            : recurring === "false"
+              ? false
+              : undefined,
+        page: page ? parseInt(page, 10) : 1,
+        pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Donors retrieved successfully",
+        ...result,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: [],
+        pagination: null,
       });
     }
   }

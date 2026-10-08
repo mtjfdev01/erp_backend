@@ -4,6 +4,12 @@ import { Repository } from "typeorm";
 import { EventPledge } from "./entities/event-pledge.entity";
 import { CreateEventPledgeDto } from "./dto/create-event-pledge.dto";
 import { UpdateEventPledgeDto } from "./dto/update-event-pledge.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class EventPledgesService {
@@ -20,6 +26,18 @@ export class EventPledgesService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.pledgeRepo,
+      {
+        profile: LOOKUP_PROFILES.event_pledges,
+        searchFields: ["donor_name", "contact_number", "care_of_representative"],
+        labelFallback: (row) => `Pledge #${row.id}`,
+      },
+      params,
+    );
   }
 
   async create(

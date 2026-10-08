@@ -32,6 +32,8 @@ import { ResolvedDataScope } from "../../../permissions/data-scope/data-scope.ty
 import { GeographicScopeService } from "../../../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../../permissions/geographic-scope/geographic-scope.types";
+import { PermissionsService } from "../../../permissions/permissions.service";
+import { assertBoxCollectionReconciler } from "../../../permissions/reconciler-permissions";
 
 interface PaginationOptions {
   page: number;
@@ -70,6 +72,7 @@ export class DonationBoxDonationService {
     private readonly donationBoxDonationAuditService: DonationBoxDonationAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async resolveCollectionScope(currentUser?: {
@@ -242,6 +245,16 @@ export class DonationBoxDonationService {
         createDonationBoxDonationDto.collected_by_id = auditUserId;
       }
 
+      const requestedStatus =
+        createDonationBoxDonationDto.status || CollectionStatus.PENDING;
+      await assertBoxCollectionReconciler(
+        this.permissionsService,
+        { id: currentUserId },
+        requestedStatus,
+      );
+      createDonationBoxDonationDto.status =
+        createDonationBoxDonationDto.status || CollectionStatus.PENDING;
+
       const collection = this.donationBoxDonationRepository.create({
         ...createDonationBoxDonationDto,
         ...(auditUserId != null
@@ -280,7 +293,8 @@ export class DonationBoxDonationService {
       console.log("error", error);
       if (
         error instanceof NotFoundException ||
-        error instanceof BadRequestException
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
       ) {
         throw error;
       }
@@ -708,6 +722,19 @@ export class DonationBoxDonationService {
       const patch = this.buildDonationBoxDonationPatch(
         updateDonationBoxDonationDto,
       );
+      if (patch.status !== undefined) {
+        await assertBoxCollectionReconciler(
+          this.permissionsService,
+          { id: currentUserId },
+          patch.status,
+          collection.status,
+        );
+        const nextStatus = String(patch.status || "").toLowerCase();
+        if (nextStatus !== "pending" && auditUserId) {
+          patch.verified_by_id = auditUserId;
+          patch.verified_at = new Date();
+        }
+      }
       if (auditUserId != null) {
         patch.updated_by = auditUserId;
       }
@@ -731,6 +758,14 @@ export class DonationBoxDonationService {
           source: DonationBoxDonationAuditSource.STAFF_UI,
           changes: auditChanges,
           performedByUserId: auditUserId,
+          metadata: auditChanges.some((c) => c.field === "status")
+            ? {
+                verified_by_id: auditUserId,
+                verified_at: new Date().toISOString(),
+                previous_status: collection.status,
+                new_status: patch.status,
+              }
+            : undefined,
         });
       }
 
@@ -746,7 +781,11 @@ export class DonationBoxDonationService {
       });
     } catch (error) {
       console.log("error", error);
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       throw new Error(`Failed to update collection record: ${error.message}`);

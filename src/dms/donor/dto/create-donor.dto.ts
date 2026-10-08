@@ -126,4 +126,9 @@ export class CreateDonorDto {
   @IsOptional()
   @IsEnum(DonorPipelineStage)
   pipeline_stage?: DonorPipelineStage;
+
+  /** Staff-flagged recurring donor (same person as a normal donor). */
+  @IsOptional()
+  @IsBoolean()
+  recurring?: boolean;
 }

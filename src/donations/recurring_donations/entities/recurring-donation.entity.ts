@@ -1,5 +1,6 @@
 import { BaseEntity } from "src/utils/base_utils/entities/baseEntity";
-import { Column, Entity, Index } from "typeorm";
+import { Column, Entity, Index, OneToMany } from "typeorm";
+import { RecurringDonationAttachment } from "./recurring-donation-attachment.entity";
 
 /** Master subscription row vs each paid billing cycle. */
 export type RecurringDonationRecordType = "subscription" | "installment";
@@ -19,6 +20,14 @@ export class RecurringDonation extends BaseEntity {
 
   @Column({ type: "int", nullable: true, default: null })
   donor_id: number | null;
+
+  /**
+   * Staff user (users.id) who referred this subscription (website ?referral_code=).
+   * Plain int (no FK) — copied from initial donation / donor at create time.
+   */
+  @Index()
+  @Column({ name: "referred_by", type: "int", nullable: true, default: null })
+  referred_by: number | null;
 
   @Index()
   @Column({ type: "varchar", nullable: true, default: null })
@@ -58,8 +67,16 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "timestamp", nullable: true, default: null })
   consent_at: Date | null;
 
+  /** Per-period / installment amount (online + staff). */
   @Column({ type: "int", nullable: true, default: null })
   amount: number | null;
+
+  /**
+   * Optional lump-sum total paid (staff prepaid). Null for online/Stripe —
+   * online only sends `amount`.
+   */
+  @Column({ type: "int", nullable: true, default: null })
+  total_amount: number | null;
 
   @Column({ type: "varchar", nullable: true, default: null })
   currency: string | null;
@@ -78,6 +95,10 @@ export class RecurringDonation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   donation_type: string | null;
+
+  /** Optional on-behalf name(s), free text. */
+  @Column({ type: "text", nullable: true, default: null })
+  on_behalf_names: string | null;
 
   /** Months paid upfront on initial donation; reminders skipped until coverage ends. */
   @Column({ type: "int", nullable: true, default: null })
@@ -122,4 +143,10 @@ export class RecurringDonation extends BaseEntity {
   @Index()
   @Column({ type: "varchar", length: 40, nullable: true, default: null })
   period_key: string | null;
+
+  @OneToMany(
+    () => RecurringDonationAttachment,
+    (attachment) => attachment.recurring_donation,
+  )
+  attachments: RecurringDonationAttachment[];
 }

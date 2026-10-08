@@ -14,7 +14,8 @@ import { ReorderTemplateStepsDto } from "./dto/reorder-template-steps.dto";
 import {
   clampLookupLimit,
   LOOKUP_PROFILES,
-  LookupOption,
+  type EntityLookupParams,
+  type LookupOption,
   selectEntityFields,
   toLookupOptions,
 } from "../../utils/lookup";
@@ -307,5 +308,9 @@ export class ProgressWorkflowTemplatesService {
       } as any);
     }
     return this.findOne(templateId);
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return this.listForOptions(params);
   }
 }

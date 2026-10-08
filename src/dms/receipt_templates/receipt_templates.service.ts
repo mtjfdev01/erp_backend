@@ -6,6 +6,12 @@ import { UpdateReceiptTemplateDto } from "./dto/update-receipt_template.dto";
 import { ReceiptTemplate } from "./entities/receipt_template.entity";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class ReceiptTemplatesService {
@@ -14,6 +20,18 @@ export class ReceiptTemplatesService {
     private readonly repository: Repository<ReceiptTemplate>,
     private readonly dataScopeService: DataScopeService,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.repository,
+      {
+        profile: LOOKUP_PROFILES.receipt_templates,
+        searchFields: ["name"],
+        labelFallback: (row) => `Receipt template #${row.id}`,
+      },
+      params,
+    );
+  }
 
   async resolveReceiptTemplateScope(currentUser?: {
     id?: number;

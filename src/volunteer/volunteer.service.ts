@@ -12,6 +12,12 @@ import {
   applyCommonFilters,
   FilterPayload,
 } from "../utils/filters/common-filter.util";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class VolunteerService {
@@ -28,6 +34,18 @@ export class VolunteerService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.volunteerRepository,
+      {
+        profile: LOOKUP_PROFILES.volunteers,
+        searchFields: ["name", "email", "phone"],
+        labelFallback: (row) => `Volunteer #${row.id}`,
+      },
+      params,
+    );
   }
 
   // ─── Public (website) — unchanged ────────────────────────────

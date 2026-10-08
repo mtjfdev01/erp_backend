@@ -107,6 +107,7 @@ async function bootstrap() {
       "Origin",
       "X-Requested-With",
       "Cookie",
+      "X-Api-Key",
     ],
     exposedHeaders: ["Set-Cookie", "Authorization"],
     preflightContinue: false,

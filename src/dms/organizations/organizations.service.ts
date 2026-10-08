@@ -33,6 +33,12 @@ import { DonorAuditAction } from "../donor/audit/donor-audit-action.enum";
 import { DonorAuditSource } from "../donor/audit/donor-audit-source.enum";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 export type OrganizationBranchTreeNode = OrganizationBranch & {
   sub_branches: OrganizationBranch[];
@@ -64,6 +70,19 @@ export class OrganizationsService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.orgRepo,
+      {
+        profile: LOOKUP_PROFILES.organizations,
+        searchFields: ["name", "email", "phone"],
+        activeColumn: "is_active",
+        labelFallback: (row) => `Organization #${row.id}`,
+      },
+      params,
+    );
   }
 
   async resolveOrganizationScope(currentUser?: {

@@ -37,6 +37,9 @@ import { DataImportModule } from "./data_import/data-import.module";
 import { S3StorageModule } from "./utils/storage/s3-storage.module";
 import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
 import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
+import { CeoComplaintsModule } from "./ceo_complaints/ceo-complaints.module";
+import { ExternalModule } from "./external/external.module";
+import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.bootstrap";
 
 @Module({
   imports: [
@@ -97,8 +100,10 @@ import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
     DataImportModule,
     KnowledgeBaseModule,
     CeoOfficeModule,
+    CeoComplaintsModule,
+    ExternalModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, PreventHardDeleteBootstrap],
 })
 export class AppModule {}

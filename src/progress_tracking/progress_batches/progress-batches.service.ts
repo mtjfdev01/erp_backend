@@ -6,6 +6,12 @@ import { ProgressWorkflowBatch } from "./progress_workflow_batch.entity";
 import { DonationBatchAllocation } from "./donation_batch_allocation.entity";
 import { ProgressTracker } from "../progress_trackers/progress_tracker.entity";
 import { TrackerOverallStatus } from "../common/progress-tracking.enum";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class ProgressBatchesService {
@@ -388,5 +394,20 @@ export class ProgressBatchesService {
     } finally {
       await qr.release();
     }
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.batchesRepo,
+      {
+        profile: LOOKUP_PROFILES.progress_batches,
+        searchFields: ["tag_name", "tag_number"],
+        labelFallback: (row) =>
+          row.tag_name
+            ? String(row.tag_name)
+            : `Batch #${row.batch_number ?? row.id}`,
+      },
+      params,
+    );
   }
 }

@@ -27,6 +27,12 @@ import { ProgressBatchStepEvidence } from "../progress_batches/progress_batch_st
 import { ProgressWorkflowBatch } from "../progress_batches/progress_workflow_batch.entity";
 import { DonationBatchAllocation } from "../progress_batches/donation_batch_allocation.entity";
 import { ProgressBatchesService } from "../progress_batches/progress-batches.service";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class ProgressTrackersService {
@@ -1088,5 +1094,18 @@ export class ProgressTrackersService {
 
     await this.attachBatchEvidenceIfApplicable(tracker as any);
     return tracker;
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.trackersRepo,
+      {
+        profile: LOOKUP_PROFILES.progress_trackers,
+        searchFields: ["id"],
+        orderBy: "id",
+        labelFallback: (row) => `Tracker #${row.id}`,
+      },
+      params,
+    );
   }
 }

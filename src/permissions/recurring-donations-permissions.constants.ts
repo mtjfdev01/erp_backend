@@ -58,3 +58,14 @@ export const RECURRING_DONATION_DELETE_GUARD = [
   "super_admin",
   "fund_raising_manager",
 ] as const;
+
+/** Staff who may set installment status to completed/failed (not pending-only). */
+export const RECURRING_DONATION_RECONCILER_PERMISSIONS = [
+  `${RECURRING}.reconciler`,
+] as const;
+
+export const RECURRING_DONATION_RECONCILER_GUARD = [
+  ...RECURRING_DONATION_RECONCILER_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
+] as const;

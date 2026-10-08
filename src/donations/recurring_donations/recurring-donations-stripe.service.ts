@@ -8,6 +8,7 @@ import {
 } from "./entities/recurring-donation.entity";
 import { Donation } from "../entities/donation.entity";
 import { StripeService } from "../stripe.service";
+import { resolveRecurringReferrerUserId } from "./recurring-referrer.util";
 
 export interface RecurringDonationWebhookResult {
   handled: boolean;
@@ -129,11 +130,17 @@ export class RecurringDonationsStripeService {
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
     const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
 
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId, donorId: donation?.donor_id ?? null },
+    );
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: donationId,
       donor_id: donation?.donor_id ?? null,
+      referred_by: referredBy,
       stripe_subscription_id: subscriptionId,
       stripe_customer_id:
         typeof session.customer === "string"
@@ -198,11 +205,16 @@ export class RecurringDonationsStripeService {
 
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
     const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId, donorId: donation.donor_id ?? null },
+    );
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: donationId,
       donor_id: donation.donor_id ?? null,
+      referred_by: referredBy,
       stripe_subscription_id: subscriptionId,
       stripe_customer_id:
         typeof pi.customer === "string" ? pi.customer : pi.customer?.id ?? null,
@@ -410,11 +422,16 @@ export class RecurringDonationsStripeService {
     if (!donation) return;
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
     const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId, donorId: donation.donor_id ?? null },
+    );
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: donationId,
       donor_id: donation.donor_id ?? null,
+      referred_by: referredBy,
       stripe_subscription_id: subscriptionId,
       stripe_customer_id:
         typeof invoice.customer === "string"

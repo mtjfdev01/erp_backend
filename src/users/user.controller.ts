@@ -79,6 +79,32 @@ export class UsersController {
     });
   }
 
+  @Get("lookup")
+  @UseGuards(JwtGuard)
+  async lookup(
+    @Query("active") activeOnly?: string,
+    @Query("activeOnly") activeOnlyParam?: string,
+    @Query("department") department?: string,
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+  ) {
+    const rows = await this.usersService.getUserListForDropdown({
+      activeOnly: activeOnly === "true" || activeOnlyParam === "true",
+      department: department || undefined,
+      search: search || undefined,
+    });
+    let data = (rows || []).map((r: any) => ({
+      value: String(r.id),
+      label:
+        r.full_name ||
+        `${r.first_name || ""} ${r.last_name || ""}`.trim() ||
+        r.email ||
+        `User #${r.id}`,
+    }));
+    if (limit) data = data.slice(0, Math.max(1, parseInt(limit, 10) || 200));
+    return { success: true, message: "Lookup retrieved successfully", data };
+  }
+
   @Get("options")
   @UseGuards(JwtGuard)
   async getUserOptions(

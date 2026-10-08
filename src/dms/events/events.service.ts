@@ -14,6 +14,12 @@ import { UpdateEventDto } from "./dto/update-event.dto";
 import { EventFiltersDto } from "./dto/event-filters.dto";
 import { ScanPassDto } from "./dto/scan-pass.dto";
 import { PassesQueryDto } from "./dto/passes-query.dto";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 @Injectable()
 export class EventsService {
@@ -34,6 +40,18 @@ export class EventsService {
       last_name: user.last_name || null,
       email: user.email || null,
     };
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.eventRepo,
+      {
+        profile: LOOKUP_PROFILES.events,
+        searchFields: ["title", "slug"],
+        labelFallback: (row) => `Event #${row.id}`,
+      },
+      params,
+    );
   }
 
   private generateSlug(title: string): string {

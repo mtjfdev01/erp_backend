@@ -71,6 +71,37 @@ export class WebsiteDonationProjectsController {
     return { success: true, data };
   }
 
+  @Get("lookup")
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+  ) {
+    try {
+      const data = await this.service.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return {
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      };
+    }
+  }
+
   @Get()
   async findAll(
     @Query("page") page?: number,

@@ -113,6 +113,39 @@ export class OrganizationsController {
     });
   }
 
+  @Get("lookup")
+  @RequiredPermissions([...ORGANIZATION_LIST_GUARD])
+  async lookup(
+    @Query("search") search?: string,
+    @Query("limit") limit?: string,
+    @Query("activeOnly") activeOnly?: string,
+    @Res() res?: Response,
+  ) {
+    try {
+      const data = await this.organizationsService.listForLookup({
+        search,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        activeOnly:
+          activeOnly === "true" || activeOnly === "1"
+            ? true
+            : activeOnly === "false" || activeOnly === "0"
+              ? false
+              : undefined,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Lookup retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error?.message || "Lookup failed",
+        data: [],
+      });
+    }
+  }
+
   @Post("affiliations")
   @RequiredPermissions([...ORGANIZATION_CREATE_GUARD, ...ORGANIZATION_UPDATE_GUARD])
   async createAffiliation(

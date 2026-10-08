@@ -41,6 +41,12 @@ import { CeoNoteApprovalService } from "./ceo-note-approval.service";
 import { CeoNoteConversionService } from "./ceo-note-conversion.service";
 import { CeoNoteDashboardService } from "./ceo-note-dashboard.service";
 import { CeoNoteReportService, ReportType } from "./ceo-note-report.service";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../utils/lookup";
 
 @Injectable()
 export class CeoNotesService {
@@ -917,5 +923,18 @@ export class CeoNotesService {
 
   async generateReport(type: ReportType, startDate?: string, endDate?: string) {
     return this.reportService.generateReport(type, startDate, endDate);
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.ceoNoteRepository,
+      {
+        profile: LOOKUP_PROFILES.ceo_notes,
+        searchFields: ["title"],
+        excludeArchived: false,
+        labelFallback: (row) => `#${row.id}`,
+      },
+      params,
+    );
   }
 }

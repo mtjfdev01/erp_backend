@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from "class-validator";
+import { IsOptional, IsString, IsBoolean } from "class-validator";
 
 export class UpdateDonorDto {
   @IsString()
@@ -12,4 +12,12 @@ export class UpdateDonorDto {
   @IsString()
   @IsOptional()
   area_of_interest?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  recurring?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  recurring_consent?: boolean;
 }

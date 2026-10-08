@@ -17,6 +17,12 @@ import { CreateDmsTodoDto } from "./dto/create-dms-todo.dto";
 import { UpdateDmsTodoDto } from "./dto/update-dms-todo.dto";
 import { DonationBox } from "../donation_box/entities/donation-box.entity";
 import { User } from "../../users/user.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 interface ListOptions {
   page: number;
@@ -46,6 +52,18 @@ export class DmsTodosService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) {}
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.todoRepository,
+      {
+        profile: LOOKUP_PROFILES.dms_todos,
+        searchFields: ["title"],
+        labelFallback: (row) => `Todo #${row.id}`,
+      },
+      params,
+    );
+  }
 
   getNextOccurrence(date: Date, rule: string): Date {
     const next = new Date(date);

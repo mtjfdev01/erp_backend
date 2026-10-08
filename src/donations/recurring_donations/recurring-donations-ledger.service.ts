@@ -1,13 +1,17 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
+import { RecurringDonationAttachment } from "./entities/recurring-donation-attachment.entity";
+import { AddRecurringDonationAttachmentDto } from "./dto/add-recurring-donation-attachment.dto";
 import { Donation } from "../entities/donation.entity";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { DonationsService } from "../donations.service";
+import { PermissionsService } from "../../permissions/permissions.service";
+import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
 import {
   billingIntervalToFrequency,
   getPeriodKeyForFrequency,
@@ -27,6 +31,14 @@ import {
   resolveSubscriptionPrepaidPeriodKeys,
 } from "./recurring-prepaid.util";
 import { resolveRecurringStartDateForStorage } from "./recurring-billing-date.util";
+import { resolveRecurringReferrerUserId } from "./recurring-referrer.util";
+import { User } from "src/users/user.entity";
+import {
+  LOOKUP_PROFILES,
+  listEntityLookup,
+  type EntityLookupParams,
+  type LookupOption,
+} from "../../utils/lookup";
 
 const SORTABLE_FIELDS = new Set([
   "id",
@@ -42,6 +54,10 @@ const SORTABLE_FIELDS = new Set([
 export class RecurringDonationsLedgerService {
   private readonly logger = new Logger(RecurringDonationsLedgerService.name);
 
+  /** Effective referrer for list queries (aliases: rd, d = initial donation, donor). */
+  private static readonly REFERRER_ID_SQL =
+    `COALESCE(rd.referred_by, d.referred_by, donor.referred_by)`;
+
   constructor(
     @InjectRepository(RecurringDonation)
     private readonly recurringDonationRepo: Repository<RecurringDonation>,
@@ -49,12 +65,17 @@ export class RecurringDonationsLedgerService {
     private readonly donationRepository: Repository<Donation>,
     @InjectRepository(Donor)
     private readonly donorRepository: Repository<Donor>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(RecurringDonationAttachment)
+    private readonly recurringDonationAttachmentRepo: Repository<RecurringDonationAttachment>,
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
     private readonly moduleRef: ModuleRef,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
-  async search(payload: Record<string, any>) {
+  async search(payload: Record<string, any>, user?: { id?: number } | null) {
     const pagination = payload.pagination || {};
     const page = Math.max(1, Number(pagination.page) || 1);
     let pageSize = Number(pagination.pageSize);
@@ -75,8 +96,50 @@ export class RecurringDonationsLedgerService {
       .createQueryBuilder("rd")
       .leftJoin(Donation, "d", "d.id = rd.initial_donation_id")
       .leftJoin(Donor, "donor", "donor.id = rd.donor_id")
+      .leftJoin(
+        User,
+        "ref_user",
+        `ref_user.id = ${RecurringDonationsLedgerService.REFERRER_ID_SQL}`,
+      )
       .where("rd.record_type = :recordType", { recordType: "subscription" })
       .andWhere("rd.is_archived = false");
+
+    // Referrer: subscription.referred_by → initial donation → donor (legacy rows)
+    const referrerUserIdRaw = filters.referrer_user_id;
+    const referrerFilterAny =
+      String(filters.referrer_any || "").toLowerCase() === "true" ||
+      ["any", "all", "__all__"].includes(
+        String(referrerUserIdRaw || "").trim().toLowerCase(),
+      );
+    const parseReferrerIds = (raw: unknown): number[] => {
+      if (Array.isArray(raw)) {
+        return raw
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n) && n > 0);
+      }
+      if (raw == null || raw === "") return [];
+      return String(raw)
+        .split(",")
+        .map((v) => Number(v.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+    };
+    let referrerUserIds = parseReferrerIds(filters.referrer_user_ids);
+    if (!referrerUserIds.length && referrerUserIdRaw != null && referrerUserIdRaw !== "") {
+      const token = String(referrerUserIdRaw).trim().toLowerCase();
+      if (token === "me" && Number(user?.id) > 0) {
+        referrerUserIds = [Number(user!.id)];
+      } else if (!["any", "all", "__all__", "me"].includes(token)) {
+        referrerUserIds = parseReferrerIds(referrerUserIdRaw);
+      }
+    }
+    if (referrerFilterAny) {
+      qb.andWhere(`${RecurringDonationsLedgerService.REFERRER_ID_SQL} IS NOT NULL`);
+    } else if (referrerUserIds.length > 0) {
+      qb.andWhere(
+        `${RecurringDonationsLedgerService.REFERRER_ID_SQL} IN (:...referrerUserIds)`,
+        { referrerUserIds },
+      );
+    }
 
     if (filters.status) {
       qb.andWhere("rd.status = :status", { status: filters.status });
@@ -85,6 +148,21 @@ export class RecurringDonationsLedgerService {
       qb.andWhere("rd.billing_interval = :billingInterval", {
         billingInterval: filters.billing_interval,
       });
+    }
+    // Online = Stripe / website; Offline = staff/manual (no website/stripe signal)
+    const sourceFilter = String(filters.source || "")
+      .trim()
+      .toLowerCase();
+    const isOnlineSql = `(
+      rd.stripe_subscription_id IS NOT NULL
+      OR LOWER(COALESCE(rd.donation_method, '')) IN ('online', 'stripe', 'stripe_embed')
+      OR LOWER(COALESCE(d.donation_source, '')) = 'website'
+      OR LOWER(COALESCE(donor.source, '')) = 'website'
+    )`;
+    if (sourceFilter === "online") {
+      qb.andWhere(isOnlineSql);
+    } else if (sourceFilter === "offline") {
+      qb.andWhere(`NOT ${isOnlineSql}`);
     }
     if (filters.donor_id) {
       qb.andWhere("rd.donor_id = :donorId", {
@@ -99,31 +177,45 @@ export class RecurringDonationsLedgerService {
       );
     }
 
-    // Created-at date filters (same keys as donations listing)
+    // Date filters:
+    // - With Installments / Paid / Pending DD → dates apply to installment due date
+    // - Otherwise → created_at (same keys as donations listing)
     const exactDate = String(filters.date || "").trim();
     const rangeStart = String(filters.start_date || "").trim();
     const rangeEnd = String(filters.end_date || "").trim();
-    if (rangeStart && rangeEnd) {
-      qb.andWhere(`DATE(rd.created_at) BETWEEN :rangeStart AND :rangeEnd`, {
-        rangeStart,
-        rangeEnd,
-      });
-    } else if (rangeStart) {
-      qb.andWhere(`DATE(rd.created_at) >= :rangeStart`, { rangeStart });
-    } else if (rangeEnd) {
-      qb.andWhere(`DATE(rd.created_at) <= :rangeEnd`, { rangeEnd });
-    } else if (exactDate) {
-      qb.andWhere(`DATE(rd.created_at) = :exactDate`, { exactDate });
-    }
-
-    // Payment / installment collection filters (subscription list):
-    // - pending: has open period dues OR no completed installment yet
-    // - pending_dues: at least one pending period due
-    // - pending_initial: initial donation still pending/failed
-    // - completed: at least one completed installment
     const installmentStatus = String(filters.installment_status || "")
       .trim()
       .toLowerCase();
+    const datewiseInstallmentModes = new Set([
+      "installments",
+      "paid_installments",
+      "pending_installments",
+    ]);
+    const isDatewiseInstallmentFilter =
+      datewiseInstallmentModes.has(installmentStatus);
+
+    if (!isDatewiseInstallmentFilter) {
+      if (rangeStart && rangeEnd) {
+        qb.andWhere(`DATE(rd.created_at) BETWEEN :rangeStart AND :rangeEnd`, {
+          rangeStart,
+          rangeEnd,
+        });
+      } else if (rangeStart) {
+        qb.andWhere(`DATE(rd.created_at) >= :rangeStart`, { rangeStart });
+      } else if (rangeEnd) {
+        qb.andWhere(`DATE(rd.created_at) <= :rangeEnd`, { rangeEnd });
+      } else if (exactDate) {
+        qb.andWhere(`DATE(rd.created_at) = :exactDate`, { exactDate });
+      }
+    }
+
+    // Payment / installment collection filters (subscription list):
+    // Datewise (with Date / Date Range):
+    // - installments: any installment due on selected date(s)
+    // - paid_installments: paid/completed for that date
+    // - pending_installments: pending for that date
+    // Legacy (no datewise meaning):
+    // - pending / pending_dues / pending_initial / completed
     const hasCompletedInstallmentSql = `EXISTS (
       SELECT 1 FROM recurring_donations inst
       WHERE inst.parent_id = rd.id
@@ -138,15 +230,111 @@ export class RecurringDonationsLedgerService {
         AND inst.is_archived = false
         AND LOWER(COALESCE(inst.status, '')) = 'pending'
     )`;
-    if (installmentStatus === "pending_dues" || installmentStatus === "arrears") {
+
+    if (isDatewiseInstallmentFilter) {
+      const statusSql =
+        installmentStatus === "paid_installments"
+          ? `AND LOWER(COALESCE(inst.status, '')) IN ('completed', 'paid', 'success')`
+          : installmentStatus === "pending_installments"
+            ? `AND LOWER(COALESCE(inst.status, '')) = 'pending'`
+            : "";
+
+      // Reconstruct installment due date from period_key + subscription billing day
+      const installmentDueDateSql = `CASE
+        WHEN inst.period_key ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN inst.period_key::date
+        WHEN inst.period_key ~ '^[0-9]{4}-[0-9]{2}$' THEN make_date(
+          split_part(inst.period_key, '-', 1)::int,
+          split_part(inst.period_key, '-', 2)::int,
+          LEAST(
+            COALESCE(
+              EXTRACT(DAY FROM rd.start_date::timestamp)::int,
+              EXTRACT(DAY FROM rd.created_at)::int,
+              1
+            ),
+            EXTRACT(DAY FROM (
+              date_trunc('month', to_date(inst.period_key || '-01', 'YYYY-MM-DD'))
+              + interval '1 month - 1 day'
+            ))::int
+          )
+        )
+        WHEN inst.period_key ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          THEN split_part(inst.period_key, '_', 1)::date
+        ELSE DATE(COALESCE(inst.paid_at, inst.created_at))
+      END`;
+
+      const isWeeklyKeySql = `inst.period_key ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
+      const weekStartSql = `split_part(inst.period_key, '_', 1)::date`;
+      const weekEndSql = `split_part(inst.period_key, '_', 2)::date`;
+
+      let dateMatchSql = "TRUE";
+      const dateParams: Record<string, string> = {};
+
+      if (rangeStart && rangeEnd) {
+        dateMatchSql = `(
+          (${installmentDueDateSql}) BETWEEN :instDateStart::date AND :instDateEnd::date
+          OR (
+            ${isWeeklyKeySql}
+            AND ${weekStartSql} <= :instDateEnd::date
+            AND ${weekEndSql} >= :instDateStart::date
+          )
+        )`;
+        dateParams.instDateStart = rangeStart;
+        dateParams.instDateEnd = rangeEnd;
+      } else if (rangeStart) {
+        dateMatchSql = `(
+          (${installmentDueDateSql}) >= :instDateStart::date
+          OR (
+            ${isWeeklyKeySql}
+            AND ${weekEndSql} >= :instDateStart::date
+          )
+        )`;
+        dateParams.instDateStart = rangeStart;
+      } else if (rangeEnd) {
+        dateMatchSql = `(
+          (${installmentDueDateSql}) <= :instDateEnd::date
+          OR (
+            ${isWeeklyKeySql}
+            AND ${weekStartSql} <= :instDateEnd::date
+          )
+        )`;
+        dateParams.instDateEnd = rangeEnd;
+      } else if (exactDate) {
+        dateMatchSql = `(
+          (${installmentDueDateSql}) = :instDateExact::date
+          OR (
+            ${isWeeklyKeySql}
+            AND :instDateExact::date BETWEEN ${weekStartSql} AND ${weekEndSql}
+          )
+        )`;
+        dateParams.instDateExact = exactDate;
+      }
+
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM recurring_donations inst
+          WHERE inst.parent_id = rd.id
+            AND inst.record_type = 'installment'
+            AND inst.is_archived = false
+            ${statusSql}
+            AND (${dateMatchSql})
+        )`,
+        dateParams,
+      );
+    } else if (
+      installmentStatus === "pending_dues" ||
+      installmentStatus === "arrears"
+    ) {
       qb.andWhere(hasPendingDueSql);
     } else if (installmentStatus === "pending") {
       qb.andWhere(`(NOT ${hasCompletedInstallmentSql} OR ${hasPendingDueSql})`);
     } else if (installmentStatus === "pending_initial") {
       qb.andWhere("rd.initial_donation_id IS NOT NULL");
-      qb.andWhere("LOWER(COALESCE(d.status, '')) IN (:...pendingDonationStatuses)", {
-        pendingDonationStatuses: ["pending", "failed"],
-      });
+      qb.andWhere(
+        "LOWER(COALESCE(d.status, '')) IN (:...pendingDonationStatuses)",
+        {
+          pendingDonationStatuses: ["pending", "failed"],
+        },
+      );
     } else if (installmentStatus === "completed") {
       qb.andWhere(hasCompletedInstallmentSql);
     }
@@ -166,6 +354,7 @@ export class RecurringDonationsLedgerService {
       "rd.consent AS consent",
       "rd.consent_at AS consent_at",
       "rd.amount AS amount",
+      "rd.total_amount AS total_amount",
       "rd.currency AS currency",
       "rd.status AS status",
       "rd.donation_method AS donation_method",
@@ -183,6 +372,11 @@ export class RecurringDonationsLedgerService {
       "d.status AS initial_donation_status",
       "donor.name AS donor_name",
       "donor.email AS donor_email",
+      "ref_user.id AS referrer_user_id",
+      "ref_user.first_name AS referrer_first_name",
+      "ref_user.last_name AS referrer_last_name",
+      "ref_user.email AS referrer_email",
+      "ref_user.referral_code AS referrer_code",
     ])
       .addSelect(
         `(SELECT COUNT(*)::int FROM recurring_donations inst WHERE inst.parent_id = rd.id AND inst.record_type = 'installment' AND inst.is_archived = false)`,
@@ -237,7 +431,14 @@ export class RecurringDonationsLedgerService {
       await this.ensurePeriodDuesForSubscription(subscription);
     }
 
-    const [installments, initialDonation, donor] = await Promise.all([
+    const referrerUserId =
+      subscription.referred_by ??
+      (await resolveRecurringReferrerUserId(this.donationRepository, {
+        donationId: subscription.initial_donation_id,
+        donorId: subscription.donor_id,
+      }));
+
+    const [installments, initialDonation, donor, referrer] = await Promise.all([
       this.recurringDonationRepo.find({
         where: {
           parent_id: id,
@@ -265,6 +466,12 @@ export class RecurringDonationsLedgerService {
         ? this.donorRepository.findOne({
             where: { id: subscription.donor_id },
             select: ["id", "name", "first_name", "last_name", "email", "phone"],
+          })
+        : null,
+      referrerUserId
+        ? this.userRepository.findOne({
+            where: { id: referrerUserId },
+            select: ["id", "first_name", "last_name", "email", "referral_code"],
           })
         : null,
     ]);
@@ -296,17 +503,43 @@ export class RecurringDonationsLedgerService {
       };
     };
 
+    const attachmentMap = await this.loadAttachmentsGroupedByRecurringId([
+      id,
+      ...installments.map((row) => row.id),
+    ]);
+
+    const mapAttachment = (attachment: RecurringDonationAttachment) => ({
+      id: attachment.id,
+      file_name: attachment.file_name,
+      file_url: attachment.file_url,
+      file_type: attachment.file_type,
+      description: attachment.description,
+      created_at: attachment.created_at,
+      uploaded_by: pickActor(attachment.uploaded_by),
+    });
+
     return {
       subscription: {
         ...subscription,
         created_by: pickActor(subscription.created_by),
+        attachments: (attachmentMap.get(id) || []).map(mapAttachment),
       },
       installments: installments.map((row) => ({
         ...row,
         created_by: pickActor(row.created_by),
+        attachments: (attachmentMap.get(row.id) || []).map(mapAttachment),
       })),
       initial_donation: initialDonation,
       donor,
+      referred_by: referrer
+        ? {
+            id: referrer.id,
+            first_name: referrer.first_name || null,
+            last_name: referrer.last_name || null,
+            email: referrer.email || null,
+            referral_code: referrer.referral_code || null,
+          }
+        : null,
       summary: {
         installment_count: installments.length,
         completed_installment_count: completed.length,
@@ -325,6 +558,7 @@ export class RecurringDonationsLedgerService {
     dto: {
       donor_id: number;
       amount: number;
+      total_amount?: number | null;
       currency?: string;
       billing_interval: "day" | "week" | "month" | "year";
       billing_interval_count?: number;
@@ -335,6 +569,7 @@ export class RecurringDonationsLedgerService {
       project_id?: string | null;
       campaign_id?: number | null;
       donation_type?: string | null;
+      on_behalf_names?: string | null;
       prepaid_periods?: number | null;
       initial_donation_id?: number | null;
       status?: string;
@@ -394,37 +629,68 @@ export class RecurringDonationsLedgerService {
       initialDonationId = donationId;
     }
 
-    const prepaid = resolveSubscriptionPrepaidPeriodKeys(
-      dto.prepaid_periods ?? null,
-      interval === "year" ? "month" : interval,
-    );
-
     // Empty start mode / start date → same_date + today (PKT)
     const resolvedStart = resolveRecurringStartDateForStorage({
       startDateMode: dto.start_date_mode || "same_date",
       startDate: dto.start_date || null,
     });
 
+    const prepaidCount = this.resolveStaffPrepaidInstallmentCount({
+      prepaid_periods: dto.prepaid_periods,
+      billing_interval_count: dto.billing_interval_count,
+    });
+    const startRef = resolvedStart.startDate
+      ? new Date(`${resolvedStart.startDate}T12:00:00`)
+      : new Date();
+    const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+      prepaidCount,
+      interval === "year" ? "month" : interval,
+      Number.isNaN(startRef.getTime()) ? new Date() : startRef,
+    );
+
+    // amount = installment amount; total_amount optional (staff prepaid only)
+    const totalAmountRaw =
+      dto.total_amount != null && dto.total_amount !== undefined
+        ? Number(dto.total_amount)
+        : NaN;
+    let totalAmount: number | null = null;
+    if (Number.isFinite(totalAmountRaw) && totalAmountRaw > 0) {
+      totalAmount = Math.round(totalAmountRaw);
+    } else if (prepaid.prepaidPeriods && prepaid.prepaidPeriods >= 2) {
+      totalAmount = Math.round(amount * prepaid.prepaidPeriods);
+    }
+
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId: initialDonationId, donorId },
+    );
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: initialDonationId,
       donor_id: donorId,
+      referred_by: referredBy,
       stripe_subscription_id: null,
       stripe_customer_id: null,
       billing_interval: interval,
-      billing_interval_count: dto.billing_interval_count ?? 1,
+      // Cadence stays every 1 period; prepaid count lives on prepaid_* fields
+      billing_interval_count: 1,
       start_date_mode: resolvedStart.startDateMode,
       start_date: resolvedStart.startDate,
       consent: dto.consent ?? true,
       consent_at: dto.consent === false ? null : new Date(),
       amount,
+      total_amount: totalAmount,
       currency: (dto.currency || "PKR").toUpperCase(),
       status: dto.status || "active",
       donation_method: dto.donation_method || "manual",
       project_id: dto.project_id || null,
       campaign_id: dto.campaign_id ?? null,
       donation_type: dto.donation_type || null,
+      on_behalf_names: dto.on_behalf_names
+        ? String(dto.on_behalf_names).trim() || null
+        : null,
       prepaid_months: prepaid.prepaidMonths,
       prepaid_periods: prepaid.prepaidPeriods,
       prepaid_start_period_key: prepaid.start,
@@ -436,16 +702,223 @@ export class RecurringDonationsLedgerService {
 
     const saved = await this.recurringDonationRepo.save(row);
 
-    // Staff-created ledger subscription ⇒ donor is a recurring donor
-    await this.donorRepository.update(donorId, { recurring: true });
+    // Staff-created ledger subscription ⇒ mark donor as recurring (if not already)
+    const donorPatch: Record<string, unknown> = { recurring: true };
+    const consented = dto.consent !== false;
+    if (consented) {
+      donorPatch.recurring_consent = true;
+      if (!donor.recurring_consent_at) {
+        donorPatch.recurring_consent_at = new Date();
+      }
+    }
+    await this.donorRepository.update(donorId, donorPatch);
+
+    if (prepaid.prepaidPeriods && prepaid.prepaidPeriods >= 2) {
+      // Lump-sum paid for N periods → N completed installments; reminders skipped
+      await this.ensureStaffPrepaidPaidInstallments(saved, {
+        totalAmount: totalAmount ?? amount * prepaid.prepaidPeriods,
+        userId,
+      });
+      const refreshed = await this.recurringDonationRepo.findOne({
+        where: { id: saved.id },
+      });
+      if (refreshed) {
+        await this.sendThanksForCompletedStaffInstallment(refreshed);
+        return refreshed;
+      }
+      return saved;
+    }
 
     // Auto-create first installment (subscription row stays record_type=subscription)
     await this.createFirstInstallmentForStaffSubscription(
       saved,
       dto.installment_status,
+      userId,
     );
 
     return saved;
+  }
+
+  /**
+   * Staff form: Interval count > 1 (or prepaid_periods) = number of prepaid paid installments.
+   * Amount on the form is the TOTAL paid; each installment = total ÷ count.
+   */
+  private resolveStaffPrepaidInstallmentCount(params: {
+    prepaid_periods?: number | null;
+    billing_interval_count?: number | null;
+  }): number | null {
+    const fromPrepaid = Number(params.prepaid_periods);
+    if (Number.isFinite(fromPrepaid) && fromPrepaid >= 2) {
+      return Math.min(36, Math.floor(fromPrepaid));
+    }
+    const fromInterval = Number(params.billing_interval_count);
+    if (Number.isFinite(fromInterval) && fromInterval >= 2) {
+      return Math.min(36, Math.floor(fromInterval));
+    }
+    return null;
+  }
+
+  /** Split total across N periods (remainder on the last period). */
+  private splitTotalAcrossPeriods(
+    totalAmount: number,
+    periods: number,
+  ): { base: number; amounts: number[] } {
+    const n = Math.max(1, Math.floor(Number(periods) || 1));
+    const total = Math.round(Number(totalAmount) || 0);
+    const base = Math.floor(total / n);
+    const remainder = total - base * n;
+    const amounts = Array.from({ length: n }, (_, i) =>
+      i === n - 1 ? base + remainder : base,
+    );
+    return { base, amounts };
+  }
+
+  /**
+   * Create/complete prepaid installments for staff subscriptions.
+   * Never deletes or archives existing installment rows.
+   */
+  private async ensureStaffPrepaidPaidInstallments(
+    subscription: RecurringDonation,
+    options?: { totalAmount?: number | null; userId?: number | null },
+  ): Promise<{ created: number; completed: number }> {
+    if (!subscription?.id || subscription.stripe_subscription_id) {
+      return { created: 0, completed: 0 };
+    }
+
+    const prepaidCount = resolvePrepaidPeriodCount({
+      prepaid_periods: subscription.prepaid_periods,
+      prepaid_months: subscription.prepaid_months,
+    });
+    if (!prepaidCount || prepaidCount < 2) {
+      return { created: 0, completed: 0 };
+    }
+
+    let startKey = subscription.prepaid_start_period_key;
+    let endKey = subscription.prepaid_end_period_key;
+    if (!startKey || !endKey) {
+      const startRef = subscription.start_date
+        ? new Date(`${subscription.start_date}T12:00:00`)
+        : new Date();
+      const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+        prepaidCount,
+        subscription.billing_interval === "year"
+          ? "month"
+          : subscription.billing_interval || "month",
+        Number.isNaN(startRef.getTime()) ? new Date() : startRef,
+      );
+      startKey = prepaid.start;
+      endKey = prepaid.end;
+      await this.recurringDonationRepo.update(subscription.id, {
+        prepaid_periods: prepaid.prepaidPeriods,
+        prepaid_months: prepaid.prepaidMonths,
+        prepaid_start_period_key: prepaid.start,
+        prepaid_end_period_key: prepaid.end,
+        billing_interval_count: 1,
+      });
+      subscription.prepaid_periods = prepaid.prepaidPeriods;
+      subscription.prepaid_months = prepaid.prepaidMonths;
+      subscription.prepaid_start_period_key = prepaid.start;
+      subscription.prepaid_end_period_key = prepaid.end;
+    }
+
+    const periodKeys = listPrepaidPeriodKeysInRange(
+      startKey!,
+      endKey!,
+      subscription.billing_interval || "month",
+    );
+    if (!periodKeys.length) {
+      return { created: 0, completed: 0 };
+    }
+
+    const installmentAmount = Math.round(Number(subscription.amount) || 0);
+    const totalRaw = Number(options?.totalAmount);
+    const totalAmount =
+      Number.isFinite(totalRaw) && totalRaw > 0
+        ? Math.round(totalRaw)
+        : Number(subscription.total_amount) > 0
+          ? Math.round(Number(subscription.total_amount))
+          : installmentAmount * periodKeys.length;
+
+    // Keep amount = installment; persist total_amount for staff prepaid
+    await this.recurringDonationRepo.update(subscription.id, {
+      billing_interval_count: 1,
+      total_amount: totalAmount > 0 ? totalAmount : null,
+    });
+    subscription.total_amount = totalAmount > 0 ? totalAmount : null;
+
+    const paidAt = new Date();
+    const currency = subscription.currency || "PKR";
+    let created = 0;
+    let completed = 0;
+
+    for (let i = 0; i < periodKeys.length; i++) {
+      const periodKey = periodKeys[i];
+      const periodAmount = installmentAmount;
+      const invoiceKey = `staff-prepaid-${subscription.id}-${String(periodKey).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+
+      const existing = await this.recurringDonationRepo.findOne({
+        where: {
+          parent_id: subscription.id,
+          record_type: "installment",
+          period_key: periodKey,
+          is_archived: false,
+        },
+      });
+
+      if (existing) {
+        const st = String(existing.status || "").toLowerCase();
+        if (["completed", "paid", "success"].includes(st)) {
+          // Preserve existing paid row — do not overwrite amount/status
+          continue;
+        }
+        await this.recurringDonationRepo.update(existing.id, {
+          amount: periodAmount,
+          currency,
+          status: "completed",
+          paid_at: existing.paid_at || paidAt,
+          stripe_billing_reason:
+            existing.stripe_billing_reason || "staff_prepaid_period",
+          stripe_invoice_id: existing.stripe_invoice_id || invoiceKey,
+          ...(options?.userId && options.userId > 0
+            ? { updated_by: { id: options.userId } as any }
+            : {}),
+        });
+        completed += 1;
+        continue;
+      }
+
+      await this.recurringDonationRepo.save(
+        this.recurringDonationRepo.create({
+          record_type: "installment",
+          parent_id: subscription.id,
+          initial_donation_id: subscription.initial_donation_id,
+          donor_id: subscription.donor_id,
+          stripe_subscription_id: null,
+          stripe_invoice_id: invoiceKey,
+          billing_interval: subscription.billing_interval,
+          billing_interval_count: 1,
+          amount: periodAmount,
+          currency,
+          status: "completed",
+          donation_method: subscription.donation_method,
+          project_id: subscription.project_id,
+          campaign_id: subscription.campaign_id,
+          donation_type: subscription.donation_type,
+          paid_at: paidAt,
+          period_key: periodKey,
+          stripe_billing_reason: "staff_prepaid_period",
+          ...(options?.userId && options.userId > 0
+            ? {
+                created_by: { id: options.userId } as any,
+                updated_by: { id: options.userId } as any,
+              }
+            : {}),
+        }),
+      );
+      created += 1;
+    }
+
+    return { created, completed };
   }
 
   /**
@@ -455,6 +928,7 @@ export class RecurringDonationsLedgerService {
   private async createFirstInstallmentForStaffSubscription(
     subscription: RecurringDonation,
     installmentStatusRaw?: string | null,
+    userId?: number | null,
   ): Promise<void> {
     if (!subscription?.id || subscription.stripe_subscription_id) return;
 
@@ -468,6 +942,12 @@ export class RecurringDonationsLedgerService {
     )
       ? statusRaw
       : "pending";
+
+    await assertRecurringReconciler(
+      this.permissionsService,
+      { id: userId },
+      installmentStatus,
+    );
 
     let first = await this.recurringDonationRepo.findOne({
       where: {
@@ -556,6 +1036,7 @@ export class RecurringDonationsLedgerService {
           donation_method: subscription.donation_method || "manual",
           donation_source: "recurring_staff_create",
           status: "completed",
+          on_behalf_names: subscription.on_behalf_names || null,
           note: `First installment for subscription #${subscription.id}`,
           manual_recurring_intent: {
             recurring_subscription_id: subscription.id,
@@ -567,6 +1048,7 @@ export class RecurringDonationsLedgerService {
       await this.recurringDonationRepo.update(subscription.id, {
         initial_donation_id: donationId,
       });
+      await this.applySubscriptionReferrerToDonation(subscription, donationId);
     }
 
     try {
@@ -590,6 +1072,7 @@ export class RecurringDonationsLedgerService {
     dto: {
       donor_id?: number;
       amount?: number;
+      total_amount?: number | null;
       currency?: string;
       billing_interval?: "day" | "week" | "month" | "year";
       billing_interval_count?: number;
@@ -600,6 +1083,7 @@ export class RecurringDonationsLedgerService {
       project_id?: string | null;
       campaign_id?: number | null;
       donation_type?: string | null;
+      on_behalf_names?: string | null;
       prepaid_periods?: number | null;
       initial_donation_id?: number | null;
       status?: string;
@@ -656,6 +1140,17 @@ export class RecurringDonationsLedgerService {
         }
         patch.amount = amount;
       }
+      if (dto.total_amount !== undefined) {
+        if (dto.total_amount == null || dto.total_amount === ("" as any)) {
+          patch.total_amount = null;
+        } else {
+          const totalAmount = Number(dto.total_amount);
+          if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+            throw new BadRequestException("total_amount must be greater than 0");
+          }
+          patch.total_amount = Math.round(totalAmount);
+        }
+      }
       if (dto.currency != null) patch.currency = String(dto.currency).toUpperCase();
       if (dto.billing_interval != null) {
         const interval = String(dto.billing_interval).toLowerCase();
@@ -695,6 +1190,10 @@ export class RecurringDonationsLedgerService {
       if (dto.donation_type !== undefined) {
         patch.donation_type = dto.donation_type || null;
       }
+      if (dto.on_behalf_names !== undefined) {
+        const names = String(dto.on_behalf_names || "").trim();
+        patch.on_behalf_names = names || null;
+      }
       if (dto.status != null) {
         const status = String(dto.status).toLowerCase();
         if (!["active", "canceled", "past_due", "failed"].includes(status)) {
@@ -702,7 +1201,54 @@ export class RecurringDonationsLedgerService {
         }
         patch.status = status;
       }
-      if (dto.prepaid_periods !== undefined) {
+
+      // Interval count > 1 or prepaid_periods → N paid installments; amount stays installment
+      const prepaidCount = this.resolveStaffPrepaidInstallmentCount({
+        prepaid_periods:
+          dto.prepaid_periods !== undefined
+            ? dto.prepaid_periods
+            : subscription.prepaid_periods,
+        billing_interval_count:
+          dto.billing_interval_count !== undefined
+            ? dto.billing_interval_count
+            : subscription.billing_interval_count,
+      });
+      const prepaidTouched =
+        dto.prepaid_periods !== undefined ||
+        dto.billing_interval_count !== undefined ||
+        dto.amount != null ||
+        dto.total_amount !== undefined;
+
+      if (prepaidCount && prepaidCount >= 2 && prepaidTouched) {
+        const interval = String(
+          patch.billing_interval || subscription.billing_interval || "month",
+        ).toLowerCase();
+        const startDate =
+          (patch.start_date as string | null | undefined) ??
+          subscription.start_date;
+        const startRef = startDate
+          ? new Date(`${startDate}T12:00:00`)
+          : new Date();
+        const prepaid = resolveSubscriptionPrepaidPeriodKeys(
+          prepaidCount,
+          interval === "year" ? "month" : (interval as any),
+          Number.isNaN(startRef.getTime()) ? new Date() : startRef,
+        );
+        const installmentAmount = Number(
+          patch.amount ?? subscription.amount ?? 0,
+        );
+        const totalFromDto =
+          dto.total_amount != null ? Number(dto.total_amount) : NaN;
+        patch.billing_interval_count = 1;
+        patch.total_amount =
+          Number.isFinite(totalFromDto) && totalFromDto > 0
+            ? Math.round(totalFromDto)
+            : Math.round(installmentAmount * prepaidCount);
+        patch.prepaid_months = prepaid.prepaidMonths;
+        patch.prepaid_periods = prepaid.prepaidPeriods;
+        patch.prepaid_start_period_key = prepaid.start;
+        patch.prepaid_end_period_key = prepaid.end;
+      } else if (dto.prepaid_periods !== undefined) {
         const interval = String(
           patch.billing_interval || subscription.billing_interval || "month",
         ).toLowerCase();
@@ -729,6 +1275,20 @@ export class RecurringDonationsLedgerService {
           patch.initial_donation_id = donationId;
         }
       }
+      if (
+        !subscription.referred_by &&
+        (patch.initial_donation_id || patch.donor_id)
+      ) {
+        const referredBy = await resolveRecurringReferrerUserId(
+          this.donationRepository,
+          {
+            donationId:
+              patch.initial_donation_id ?? subscription.initial_donation_id,
+            donorId: patch.donor_id ?? subscription.donor_id,
+          },
+        );
+        if (referredBy) patch.referred_by = referredBy;
+      }
     }
 
     if (Object.keys(patch).length === 0) {
@@ -748,6 +1308,32 @@ export class RecurringDonationsLedgerService {
     const donorId = updated.donor_id;
     if (donorId && updated.status === "active") {
       await this.donorRepository.update(donorId, { recurring: true });
+    }
+
+    // Ensure missing prepaid paid installments exist (never deletes existing rows)
+    const updatedPrepaidCount = resolvePrepaidPeriodCount({
+      prepaid_periods: updated.prepaid_periods,
+      prepaid_months: updated.prepaid_months,
+    });
+    if (
+      !updated.stripe_subscription_id &&
+      updatedPrepaidCount &&
+      updatedPrepaidCount >= 2
+    ) {
+      const totalFromDto =
+        dto.total_amount != null
+          ? Number(dto.total_amount)
+          : updated.total_amount != null
+            ? Number(updated.total_amount)
+            : null;
+      await this.ensureStaffPrepaidPaidInstallments(updated, {
+        totalAmount: totalFromDto,
+        userId,
+      });
+      const refreshed = await this.recurringDonationRepo.findOne({
+        where: { id },
+      });
+      if (refreshed) return refreshed;
     }
 
     return updated;
@@ -785,6 +1371,16 @@ export class RecurringDonationsLedgerService {
     if (existing) {
       const patch: Partial<RecurringDonation> = {};
       if (params.donorId && !existing.donor_id) patch.donor_id = params.donorId;
+      if (!existing.referred_by) {
+        const referredBy = await resolveRecurringReferrerUserId(
+          this.donationRepository,
+          {
+            donationId: params.donationId,
+            donorId: params.donorId ?? existing.donor_id,
+          },
+        );
+        if (referredBy) patch.referred_by = referredBy;
+      }
       if (params.consent === true && existing.consent !== true) {
         patch.consent = true;
         patch.consent_at = new Date();
@@ -815,11 +1411,17 @@ export class RecurringDonationsLedgerService {
       params.billingInterval,
     );
 
+    const referredBy = await resolveRecurringReferrerUserId(
+      this.donationRepository,
+      { donationId: params.donationId, donorId: params.donorId },
+    );
+
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
       parent_id: null,
       initial_donation_id: params.donationId,
       donor_id: params.donorId,
+      referred_by: referredBy,
       stripe_subscription_id: null,
       stripe_customer_id: null,
       billing_interval: params.billingInterval,
@@ -1574,11 +2176,18 @@ export class RecurringDonationsLedgerService {
   async markInstallmentsPaid(
     subscriptionId: number,
     opts: { installmentIds: number[]; note?: string },
+    userId?: number | null,
   ): Promise<{
     marked: number;
     installment_ids: number[];
     pending_remaining: number;
   }> {
+    await assertRecurringReconciler(
+      this.permissionsService,
+      { id: userId },
+      "completed",
+    );
+
     const ids = [
       ...new Set(
         (opts.installmentIds || [])
@@ -1685,6 +2294,7 @@ export class RecurringDonationsLedgerService {
       period_key?: string | null;
       note?: string | null;
     },
+    userId?: number | null,
   ): Promise<RecurringDonation> {
     const subscription = await this.recurringDonationRepo.findOne({
       where: {
@@ -1723,6 +2333,12 @@ export class RecurringDonationsLedgerService {
           "Installment status must be pending, completed, or failed",
         );
       }
+      await assertRecurringReconciler(
+        this.permissionsService,
+        { id: userId },
+        status,
+        installment.status,
+      );
       patch.status = status;
       if (status === "completed") {
         patch.paid_at = installment.paid_at || new Date();
@@ -1913,6 +2529,7 @@ export class RecurringDonationsLedgerService {
       donation_method: subscription.donation_method || "online",
       donation_source: "recurring_ledger_reminder",
       status: "pending",
+      on_behalf_names: subscription.on_behalf_names || null,
       note: `Installment payment link for ${marker}`,
       manual_recurring_intent: {
         recurring_subscription_id: subscription.id,
@@ -1920,7 +2537,130 @@ export class RecurringDonationsLedgerService {
       },
     });
     const saved = await this.donationRepository.save(created);
+    await this.applySubscriptionReferrerToDonation(subscription, saved.id);
     if (donorRow) saved.donor = donorRow;
     return saved;
+  }
+
+  /**
+   * Copy the subscription referrer onto a ledger-created donation (never overwrites).
+   * Backfills subscription.referred_by for legacy rows that predate the column.
+   */
+  private async applySubscriptionReferrerToDonation(
+    subscription: RecurringDonation,
+    donationId: number,
+  ): Promise<void> {
+    if (!donationId) return;
+    let referredBy = subscription.referred_by ?? null;
+    if (!referredBy) {
+      referredBy = await resolveRecurringReferrerUserId(
+        this.donationRepository,
+        {
+          donationId: subscription.initial_donation_id,
+          donorId: subscription.donor_id,
+        },
+      );
+      if (referredBy && subscription.id) {
+        await this.recurringDonationRepo.update(subscription.id, {
+          referred_by: referredBy,
+        });
+        subscription.referred_by = referredBy;
+      }
+    }
+    if (!referredBy) return;
+    await this.donationRepository.query(
+      `UPDATE "donations" SET "referred_by" = $1 WHERE "id" = $2 AND "referred_by" IS NULL`,
+      [referredBy, donationId],
+    );
+  }
+
+  async listForLookup(params?: EntityLookupParams): Promise<LookupOption[]> {
+    return listEntityLookup(
+      this.recurringDonationRepo,
+      {
+        profile: LOOKUP_PROFILES.recurring_donations,
+        searchFields: ["stripe_subscription_id", "status"],
+        orderBy: "id",
+        labelFallback: (row) =>
+          row.stripe_subscription_id
+            ? String(row.stripe_subscription_id)
+            : `Recurring #${row.id}`,
+      },
+      params,
+    );
+  }
+
+  private async loadAttachmentsGroupedByRecurringId(ids: number[]) {
+    const uniqueIds = [
+      ...new Set(
+        ids.filter((value) => Number.isFinite(value) && value > 0),
+      ),
+    ];
+    const map = new Map<number, RecurringDonationAttachment[]>();
+    if (!uniqueIds.length) return map;
+
+    const rows = await this.recurringDonationAttachmentRepo.find({
+      where: { recurring_donation: { id: In(uniqueIds) } },
+      relations: ["uploaded_by", "recurring_donation"],
+      order: { created_at: "DESC" },
+    });
+
+    for (const row of rows) {
+      const recurringId = Number(row.recurring_donation?.id);
+      if (!recurringId) continue;
+      const bucket = map.get(recurringId) || [];
+      bucket.push(row);
+      map.set(recurringId, bucket);
+    }
+
+    return map;
+  }
+
+  async addAttachment(
+    recurringDonationId: number,
+    dto: AddRecurringDonationAttachmentDto,
+    currentUser?: User | null,
+  ): Promise<RecurringDonationAttachment> {
+    const recurringDonation = await this.recurringDonationRepo.findOne({
+      where: { id: recurringDonationId, is_archived: false },
+    });
+    if (!recurringDonation) {
+      throw new NotFoundException(
+        `Recurring donation with ID ${recurringDonationId} not found`,
+      );
+    }
+
+    const attachment = this.recurringDonationAttachmentRepo.create({
+      recurring_donation: recurringDonation,
+      file_name: dto.file_name,
+      file_url: dto.file_url,
+      file_type: dto.file_type,
+      description: dto.description || null,
+      uploaded_by: currentUser || null,
+    });
+    return this.recurringDonationAttachmentRepo.save(attachment);
+  }
+
+  async removeAttachment(
+    recurringDonationId: number,
+    attachmentId: number,
+  ): Promise<{ deleted: boolean }> {
+    const attachment = await this.recurringDonationAttachmentRepo.findOne({
+      where: { id: attachmentId },
+      relations: ["recurring_donation"],
+    });
+
+    if (
+      !attachment ||
+      !attachment.recurring_donation ||
+      Number(attachment.recurring_donation.id) !== Number(recurringDonationId)
+    ) {
+      throw new NotFoundException(
+        "Attachment not found for this recurring donation",
+      );
+    }
+
+    await this.recurringDonationAttachmentRepo.remove(attachment);
+    return { deleted: true };
   }
 }
