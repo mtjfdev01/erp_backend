@@ -36,6 +36,21 @@ export class CeoNoteConversionService {
     }));
   }
 
+  private async getPrimaryAssigneeManagerId(
+    manager: EntityManager,
+    userIds?: number[] | null,
+  ): Promise<number | null> {
+    const assigneeId = Number(userIds?.[0]);
+    if (!Number.isInteger(assigneeId) || assigneeId <= 0) return null;
+
+    const assignee = await manager.getRepository(User).findOne({
+      where: { id: assigneeId },
+      select: ["id", "manager_id"],
+    });
+    const managerId = Number(assignee?.manager_id);
+    return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+  }
+
   private mapPriority(priority: string): TaskPriority {
     switch (priority) {
       case "low":
@@ -95,6 +110,7 @@ export class CeoNoteConversionService {
       workflow_type: TaskWorkflowType.STANDARD,
       task_type: TaskType.ONE_TIME,
       due_date,
+      reported_to_id: await this.getPrimaryAssigneeManagerId(manager, assignedUsers),
       assigned_user_ids: assignedUsers.length > 0 ? assignedUsers : null,
       assigned_users_meta: assignedUsersMeta,
       mov_items: Array.isArray(convertToTaskDto.mov_items)

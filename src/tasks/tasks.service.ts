@@ -514,12 +514,13 @@ export class TasksService {
   private async applyRoleFilters(
     qb: SelectQueryBuilder<Task>,
     user?: User,
+    reportingUserIds: number[] = [],
   ): Promise<void> {
     if (!user) return;
 
     qb.andWhere(
       new Brackets((mainQb) => {
-        this.applyRoleFiltersWithoutBrackets(mainQb, user);
+        this.applyRoleFiltersWithoutBrackets(mainQb, user, reportingUserIds);
       }),
     );
   }
@@ -527,6 +528,7 @@ export class TasksService {
   private applyRoleFiltersWithoutBrackets(
     qb: any, // Using any for flexibility since it's a query builder sub-query
     user?: User,
+    reportingUserIds: number[] = [],
   ): void {
     if (!user) return;
 
@@ -550,7 +552,21 @@ export class TasksService {
       userId: user.id,
     });
     qb.orWhere("task.created_by_id = :userId", { userId: user.id });
-    qb.orWhere("task.reported_by_id = :userId", { userId: user.id });
+    qb.orWhere("task.reported_to_id = :userId", { userId: user.id });
+
+    if (reportingUserIds.length > 0) {
+      qb.orWhere("task.assigned_user_ids && :reportingUserIds::int[]", {
+        reportingUserIds,
+      });
+      qb.orWhere(
+        `EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(task.assigned_users_meta, '[]'::jsonb)) AS report_assignee
+          WHERE (report_assignee->>'user_id')::int = ANY(:reportingUserIds::int[])
+        )`,
+        { reportingUserIds },
+      );
+    }
 
     // D. Role-based Department Visibility: Leaders see all tasks within their department
     const leadershipRoles = [
@@ -598,10 +614,44 @@ export class TasksService {
     });
   }
 
+  private async applyDirectReportsTaskFilter(
+    qb: SelectQueryBuilder<Task>,
+    currentUser: User,
+    paramSuffix = "",
+    directReportIds?: number[],
+  ): Promise<number[]> {
+    const reportIds =
+      directReportIds ??
+      (await this.dataScopeService.getDirectReportIds(currentUser.id));
+    this.dataScopeService.applyUserIdsFilter(qb, reportIds, {
+      intArrayColumn: "task.assigned_user_ids",
+      jsonbUserIdsColumn: "task.assigned_users_meta",
+      paramKey: `directReports${paramSuffix}`,
+    });
+    return reportIds;
+  }
+
+  private applyApprovalResponsibilityFilter(
+    qb: SelectQueryBuilder<Task>,
+    currentUser: User,
+    paramSuffix = "",
+  ): void {
+    const workflowParam = `approvalWorkflow${paramSuffix}`;
+    const userParam = `approvalUser${paramSuffix}`;
+    qb.andWhere(`task.workflow_type = :${workflowParam}`, {
+      [workflowParam]: TaskWorkflowType.APPROVAL_REQUIRED,
+    });
+    qb.andWhere(
+      `task.approval_required_user_ids @> ARRAY[:${userParam}]::int[]`,
+      { [userParam]: currentUser.id },
+    );
+  }
+
   private async applyViewTypeFilter(
     qb: SelectQueryBuilder<Task>,
     viewType: string | undefined,
     currentUser?: User,
+    directReportIds?: number[],
   ): Promise<void> {
     if (!viewType || !currentUser) return;
 
@@ -632,11 +682,18 @@ export class TasksService {
       return;
     }
 
-    if (viewType === "approval_tasks") {
-      qb.andWhere(
-        "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-        { currentUserId: currentUser.id },
+    if (viewType === "direct_reports") {
+      await this.applyDirectReportsTaskFilter(
+        qb,
+        currentUser,
+        "View",
+        directReportIds,
       );
+      return;
+    }
+
+    if (viewType === "approval_tasks") {
+      this.applyApprovalResponsibilityFilter(qb, currentUser, "View");
       return;
     }
 
@@ -727,6 +784,20 @@ export class TasksService {
     }));
   }
 
+    private async getPrimaryAssigneeManagerId(
+      userIds?: number[] | null,
+    ): Promise<number | null> {
+      const assigneeId = Number(userIds?.[0]);
+      if (!Number.isInteger(assigneeId) || assigneeId <= 0) return null;
+
+      const assignee = await this.userRepo.findOne({
+        where: { id: assigneeId },
+        select: ["id", "manager_id"],
+      });
+      const managerId = Number(assignee?.manager_id);
+      return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+    }
+
   /** System/cron task creation — no permission checks; created_by is null. */
   async createSystemTask(dto: CreateTaskDto): Promise<Task> {
     return this.createInternal(dto, null);
@@ -789,8 +860,9 @@ export class TasksService {
           ? new Date(dto.recurrence_end_date)
           : null,
         recurrence_end_occurrences: dto.recurrence_end_occurrences || null,
-        reported_by_id:
-          typeof dto.reported_by_id === "number" ? dto.reported_by_id : null,
+        reported_to_id: await this.getPrimaryAssigneeManagerId(
+          dto.assigned_users,
+        ),
         created_by_id: currentUser?.id ?? null,
         assigned_user_ids: Array.isArray(dto.assigned_users)
           ? dto.assigned_users
@@ -928,8 +1000,24 @@ export class TasksService {
       const sortOrder =
         payload?.pagination?.sortOrder || payload?.sortOrder || "DESC";
 
+      const requestFilters = payload?.filters || payload || {};
+      const teamPerformanceRequest =
+        requestFilters.team_performance === true ||
+        requestFilters.team_performance === "true";
+      const isReportingTeamRequest =
+        teamPerformanceRequest ||
+        requestFilters.view_type === "direct_reports" ||
+        requestFilters.view_type === "assigned_to_team";
+      const directReportIds = currentUser
+        ? await this.dataScopeService.getDirectReportIds(currentUser.id)
+        : [];
       const qb = this.taskRepo.createQueryBuilder("task");
-      await this.applyRoleFilters(qb, currentUser);
+      qb.leftJoinAndSelect("task.reported_to", "reported_to");
+      await this.applyRoleFilters(
+        qb,
+        currentUser,
+        isReportingTeamRequest ? directReportIds : [],
+      );
 
       const safeFilters = { ...payload };
       delete safeFilters.pagination;
@@ -980,6 +1068,20 @@ export class TasksService {
         safeFilters.assignee_id ?? safeFilters.assigned_user_id;
       delete safeFilters.assignee_id;
       delete safeFilters.assigned_user_id;
+
+      const teamPerformance =
+        safeFilters.team_performance === true ||
+        safeFilters.team_performance === "true";
+      delete safeFilters.team_performance;
+
+      if (teamPerformance && currentUser) {
+        await this.applyDirectReportsTaskFilter(
+          qb,
+          currentUser,
+          "Search",
+          directReportIds,
+        );
+      }
 
       const teamFilter = this.dataScopeService.parseTeamFilter(
         safeFilters.team_filter,
@@ -1110,7 +1212,12 @@ export class TasksService {
         });
       }
 
-      await this.applyViewTypeFilter(qb, viewTypeFilter, currentUser);
+      await this.applyViewTypeFilter(
+        qb,
+        viewTypeFilter,
+        currentUser,
+        directReportIds,
+      );
 
       await this.applyDepartmentUsersFilter(qb, departmentFilter);
 
@@ -1133,6 +1240,14 @@ export class TasksService {
 
       const [data, total] = await qb.getManyAndCount();
 
+      if (currentUser) {
+        data.forEach((task) => {
+          if (!this.canViewAllMovs(task, currentUser)) {
+            this.filterMovItemsForUser(task, currentUser);
+          }
+        });
+      }
+
       // Calculate category-specific counts
       let assignedToMeCount = 0;
       let assignedToTeamCount = 0;
@@ -1141,7 +1256,44 @@ export class TasksService {
 
       // Create a separate query builder for counts (without pagination)
       const countQb = this.taskRepo.createQueryBuilder("task");
-      await this.applyRoleFilters(countQb, currentUser);
+      await this.applyRoleFilters(countQb, currentUser, directReportIds);
+
+      if (teamPerformance && currentUser) {
+        await this.applyDirectReportsTaskFilter(
+          countQb,
+          currentUser,
+          "SearchCount",
+          directReportIds,
+        );
+      }
+
+      if (
+        teamFilter &&
+        teamFilter.mode &&
+        teamFilter.mode !== "all" &&
+        currentUser?.id
+      ) {
+        const baseScope = {
+          bypass: false,
+          type: "org" as const,
+          allowedUserIds: null as number[] | null,
+          userId: Number(currentUser.id),
+          userDepartment: currentUser.department,
+        };
+        const narrowed = await this.dataScopeService.narrowScopeWithTeamFilter(
+          baseScope,
+          teamFilter,
+        );
+        this.dataScopeService.applyUserIdsFilter(
+          countQb,
+          narrowed.allowedUserIds || [],
+          {
+            intArrayColumn: "task.assigned_user_ids",
+            jsonbUserIdsColumn: "task.assigned_users_meta",
+            paramKey: "taskTeamFilterCount",
+          },
+        );
+      }
 
       // Apply all the same filters to countQb as we did to qb
       if (startDate) {
@@ -1235,13 +1387,14 @@ export class TasksService {
         );
         assignedToMeCount = await assignedToMeQb.getCount();
 
-        // assigned_to_team count = reporting tree (not whole department)
+        // The Task List team tab is limited to direct reports.
         if (currentUser?.id) {
           const assignedToTeamQb = countQb.clone();
-          await this.applyAssignedToTeamFilter(
+          await this.applyDirectReportsTaskFilter(
             assignedToTeamQb,
             currentUser,
             "Count",
+            directReportIds,
           );
           assignedToTeamCount = await assignedToTeamQb.getCount();
         }
@@ -1255,9 +1408,10 @@ export class TasksService {
 
         // Calculate approval_tasks count (where current user is required approver)
         const approvalTasksQb = countQb.clone();
-        approvalTasksQb.andWhere(
-          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-          { currentUserId: currentUser.id },
+        this.applyApprovalResponsibilityFilter(
+          approvalTasksQb,
+          currentUser,
+          "Count",
         );
         approvalTasksCount = await approvalTasksQb.getCount();
       }
@@ -1330,6 +1484,14 @@ export class TasksService {
         });
       }
 
+      const teamPerformance =
+        filters.team_performance === true ||
+        filters.team_performance === "true";
+      const directReportIds =
+        teamPerformance && currentUser
+          ? await this.applyDirectReportsTaskFilter(qb, currentUser, "Dash")
+          : [];
+
       if (filters.view_type === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -1349,11 +1511,7 @@ export class TasksService {
       } else if (filters.view_type === "assigned_to_team" && currentUser) {
         await this.applyAssignedToTeamFilter(qb, currentUser, "Dash");
       } else if (filters.view_type === "approval_tasks" && currentUser) {
-        // Tasks where current user is an approver
-        qb.andWhere(
-          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-          { currentUserId: currentUser.id },
-        );
+        this.applyApprovalResponsibilityFilter(qb, currentUser, "Dash");
       }
 
       // Apply visibility filters last, in a single bracket to ensure correct logic
@@ -1362,7 +1520,11 @@ export class TasksService {
           new Brackets((mainQb) => {
             // First, include all tasks the user would normally see
             // (assigned, created, reported, dept head/manager sees dept tasks)
-            this.applyRoleFiltersWithoutBrackets(mainQb, currentUser);
+            this.applyRoleFiltersWithoutBrackets(
+              mainQb,
+              currentUser,
+              directReportIds,
+            );
 
             // Then, if there's a department filter, also apply it as an option
             if (filters.department) {
@@ -1553,6 +1715,7 @@ export class TasksService {
           ? "task.completed_date"
           : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
+      qb.leftJoinAndSelect("task.reported_to", "reported_to");
       
       // Org-wide visibility mirrors getDashboardStats logic above (role + perms)
       const perms = currentUser
@@ -1591,6 +1754,13 @@ export class TasksService {
         });
       }
 
+      const teamPerformance =
+        query.team_performance === true || query.team_performance === "true";
+      const directReportIds =
+        teamPerformance && currentUser
+          ? await this.applyDirectReportsTaskFilter(qb, currentUser, "Rpt")
+          : null;
+
       if (query.view_type === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
@@ -1610,11 +1780,7 @@ export class TasksService {
       } else if (query.view_type === "assigned_to_team" && currentUser) {
         await this.applyAssignedToTeamFilter(qb, currentUser, "Rpt");
       } else if (query.view_type === "approval_tasks" && currentUser) {
-        // Tasks where current user is an approver
-        qb.andWhere(
-          "task.approval_required_user_ids @> ARRAY[:currentUserId]::int[]",
-          { currentUserId: currentUser.id },
-        );
+        this.applyApprovalResponsibilityFilter(qb, currentUser, "Rpt");
       }
 
       // Apply visibility filters last, in a single bracket to ensure correct logic
@@ -1623,7 +1789,11 @@ export class TasksService {
           new Brackets((mainQb) => {
             // First, include all tasks the user would normally see
             // (assigned, created, reported, dept head/manager sees dept tasks)
-            this.applyRoleFiltersWithoutBrackets(mainQb, currentUser);
+            this.applyRoleFiltersWithoutBrackets(
+              mainQb,
+              currentUser,
+              directReportIds || [],
+            );
 
             // Then, if there's a department filter, also apply it as an option
             if (query.department) {
@@ -1705,6 +1875,12 @@ export class TasksService {
         if (Array.isArray(t.assigned_user_ids)) {
           t.assigned_user_ids.forEach((id) => allUserIds.add(Number(id)));
         }
+        if (teamPerformance && Array.isArray(t.assigned_users_meta)) {
+          t.assigned_users_meta.forEach((meta) => {
+            const id = Number(meta?.user_id);
+            if (id > 0) allUserIds.add(id);
+          });
+        }
       }
 
       // Fetch all users that are assigned to any of the filtered tasks
@@ -1713,7 +1889,15 @@ export class TasksService {
         .where("(user.isActive = true OR user.isActive IS NULL)");
 
       // If there are user IDs in allUserIds, filter to include only those users
-      if (allUserIds.size > 0) {
+      if (directReportIds) {
+        if (directReportIds.length > 0) {
+          usersListQuery.andWhere("user.id IN (:...userIds)", {
+            userIds: directReportIds,
+          });
+        } else {
+          usersListQuery.andWhere("1 = 0");
+        }
+      } else if (allUserIds.size > 0) {
         usersListQuery.andWhere("user.id IN (:...userIds)", { 
           userIds: Array.from(allUserIds) 
         });
@@ -1768,12 +1952,20 @@ export class TasksService {
             TaskStatus.APPROVED,
           ].includes(t.status);
 
-        if (
-          Array.isArray(t.assigned_user_ids) &&
-          t.assigned_user_ids.length > 0
-        ) {
-          for (const uid of t.assigned_user_ids) {
-            const userId = Number(uid);
+        const taskAssigneeIds = new Set<number>(
+          Array.isArray(t.assigned_user_ids)
+            ? t.assigned_user_ids.map((id) => Number(id))
+            : [],
+        );
+        if (teamPerformance && Array.isArray(t.assigned_users_meta)) {
+          t.assigned_users_meta.forEach((meta) => {
+            const id = Number(meta?.user_id);
+            if (id > 0) taskAssigneeIds.add(id);
+          });
+        }
+
+        if (taskAssigneeIds.size > 0) {
+          for (const userId of taskAssigneeIds) {
             // Only include users that are in our filtered usersList
             if (userCountsMap[userId]) {
               userCountsMap[userId].count++;
@@ -1965,11 +2157,13 @@ export class TasksService {
         .createQueryBuilder("task")
         .where("task.id = :id", { id })
         .leftJoinAndSelect("task.attachments", "attachments")
+        .leftJoin("attachments.uploaded_by", "attachment_uploaded_by")
+        .addSelect("attachment_uploaded_by.id")
         .leftJoinAndSelect("task.comments", "comments")
         .leftJoinAndSelect("comments.author", "comment_author")
         .leftJoinAndSelect("task.activities", "activities")
         .leftJoinAndSelect("activities.performed_by", "activity_performed_by")
-        .leftJoinAndSelect("task.reported_by", "reported_by")
+        .leftJoinAndSelect("task.reported_to", "reported_to")
         .leftJoinAndSelect("task.created_by", "created_by")
         .leftJoinAndSelect("task.updated_by", "updated_by");
 
@@ -1994,8 +2188,8 @@ export class TasksService {
         const isAssignee = assignedIds.includes(userId);
         const isApprover = approverIds.includes(userId);
         const isReporterOrCreator =
-          (task.reported_by_id != null &&
-            Number(task.reported_by_id) === userId) ||
+          (task.reported_to_id != null &&
+            Number(task.reported_to_id) === userId) ||
           (task.created_by_id != null && Number(task.created_by_id) === userId);
 
         // E. Check if user is a manager of any assigned user's department
@@ -2064,9 +2258,11 @@ export class TasksService {
         }
       }
 
-      const isTaskCreator =
-        currentUser && Number(task.created_by_id) === Number(currentUser.id);
-      if (currentUser && options.filterMov !== false && !isTaskCreator) {
+      if (
+        currentUser &&
+        options.filterMov !== false &&
+        !this.canViewAllMovs(task, currentUser)
+      ) {
         this.filterMovItemsForUser(task, currentUser);
       }
 
@@ -2074,6 +2270,18 @@ export class TasksService {
     } catch (e) {
       throw e;
     }
+  }
+
+  private canViewAllMovs(task: Task, currentUser: User): boolean {
+    const userId = Number(currentUser.id);
+    const approverIds = Array.isArray(task.approval_required_user_ids)
+      ? task.approval_required_user_ids.map(Number)
+      : [];
+    return (
+      Number(task.created_by_id) === userId ||
+      Number(task.reported_to_id) === userId ||
+      approverIds.includes(userId)
+    );
   }
 
   private filterMovItemsForUser(task: Task, currentUser: User): void {
@@ -2142,7 +2350,7 @@ export class TasksService {
         dto.status === TaskStatus.CLOSED
       ) {
         const isCreator = task.created_by_id === currentUser.id;
-        const isReporter = task.reported_by_id === currentUser.id;
+        const isReporter = task.reported_to_id === currentUser.id;
         const isAdmin =
           currentUser.role === UserRole.SUPER_ADMIN ||
           currentUser.role === UserRole.ADMIN;
@@ -2330,6 +2538,10 @@ export class TasksService {
         task.overdue_email_sent = false;
       }
 
+      const reportedToId = Array.isArray(dto.assigned_users)
+        ? await this.getPrimaryAssigneeManagerId(dto.assigned_users)
+        : task.reported_to_id;
+
       const oldProgress = task.progress;
       Object.assign(task, {
         title: dto.title ?? task.title,
@@ -2360,10 +2572,7 @@ export class TasksService {
         recurrence_end_occurrences:
           dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
         progress: newProgress,
-        reported_by_id:
-          typeof dto.reported_by_id === "number"
-            ? dto.reported_by_id
-            : task.reported_by_id,
+        reported_to_id: reportedToId,
         approval_required_user_ids: Array.isArray(
           dto.approval_required_user_ids,
         )
@@ -2497,7 +2706,7 @@ export class TasksService {
     const currentUserId = Number(currentUser.id);
     const isAssignee = allAssignedIds.includes(currentUserId);
     const isCreator = task.created_by_id === currentUserId;
-    const isReporter = task.reported_by_id === currentUserId;
+    const isReporter = task.reported_to_id === currentUserId;
     const approvers = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
       : [];
@@ -2611,6 +2820,9 @@ export class TasksService {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
+        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
+          dto.assigned_users,
+        );
       }
 
       if (
@@ -2685,6 +2897,9 @@ export class TasksService {
       if (Array.isArray(dto.assigned_users)) {
         task.assigned_user_ids = dto.assigned_users;
         task.assigned_users_meta = await this.getAssignedUsersMeta(
+          dto.assigned_users,
+        );
+        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
           dto.assigned_users,
         );
       }
@@ -3053,11 +3268,25 @@ export class TasksService {
 
       const attachment = await this.attachmentRepo.findOne({
         where: { id: attachmentId },
-        relations: ["task"],
+        relations: ["task", "uploaded_by"],
       });
 
       if (!attachment || !attachment.task || attachment.task.id !== task.id) {
         throw new NotFoundException("Attachment not found for this task");
+      }
+
+      const currentUserId = Number(currentUser.id);
+      const taskCreatorId = Number(task.created_by_id);
+      const isAssignee = Array.isArray(task.assigned_user_ids) &&
+        task.assigned_user_ids.some((userId) => Number(userId) === currentUserId);
+      if (
+        isAssignee &&
+        currentUserId !== taskCreatorId &&
+        Number(attachment.uploaded_by?.id) === taskCreatorId
+      ) {
+        throw new ForbiddenException(
+          "Assignees cannot remove attachments added by the task creator",
+        );
       }
 
       if (attachment.file_url && attachment.file_url.startsWith("/files/")) {
@@ -3887,7 +4116,9 @@ export class TasksService {
           project_name: master.project_name,
           assigned_user_ids: master.assigned_user_ids,
           assigned_users_meta: master.assigned_users_meta,
-          reported_by_id: master.reported_by_id,
+          reported_to_id: await this.getPrimaryAssigneeManagerId(
+            master.assigned_user_ids,
+          ),
           created_by_id: master.created_by_id,
           approval_required_user_ids: master.approval_required_user_ids,
           // Reuse the MOV definitions and assignments, but start the new
