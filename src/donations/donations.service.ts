@@ -3816,7 +3816,7 @@ export class DonationsService {
         query.skip(skip).take(pageSize);
       }
 
-      this.logFinalQuery("list", query);
+      // this.logFinalQuery("list", query);
 
       // Get paginated data + total count
       const [data, total] = await query.getManyAndCount();
@@ -3939,7 +3939,7 @@ export class DonationsService {
         "Sum",
         teamFilterActive,
       );
-      this.logFinalQuery("sum", sumQuery);
+      // this.logFinalQuery("sum", sumQuery);
       const sumResult = await sumQuery.getRawOne();
       const totalDonationAmount = Number(sumResult.totalDonationAmount) || 0;
 
@@ -4522,11 +4522,18 @@ export class DonationsService {
     }
   }
 
+  /**
+   * Soft-archive only — hard DELETE is blocked by DB rule prevent_delete on donations.
+   * No donation row is removed.
+   */
   async remove(id: number, user?: any) {
     try {
       const donation = await this.donationRepository.findOne({ where: { id } });
       if (!donation) {
         throw new NotFoundException(`Donation with ID ${id} not found`);
+      }
+      if (donation.is_archived) {
+        return { message: "Donation already archived" };
       }
 
       const auditUserId = this.donationAuditUserId(user);
@@ -4538,7 +4545,7 @@ export class DonationsService {
           {
             field: "record",
             old_value: "active",
-            new_value: "deleted",
+            new_value: "archived",
           },
         ],
         performedByUserId: auditUserId,
@@ -4549,13 +4556,13 @@ export class DonationsService {
         },
       });
 
-      await this.donationRepository.delete(id);
-      return { message: "Donation deleted successfully" };
+      await this.donationRepository.update(id, { is_archived: true });
+      return { message: "Donation archived successfully (record kept)" };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new Error(`Failed to delete donation: ${error.message}`);
+      throw new Error(`Failed to archive donation: ${error.message}`);
     }
   }
 

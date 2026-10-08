@@ -689,13 +689,26 @@ export class UsersService implements OnModuleInit {
     }
   }
 
+  /**
+   * Soft-archive only — hard DELETE is blocked by DB rule prevent_delete on users.
+   * No user row is removed; list queries already exclude is_archived = true.
+   */
   async remove(id: number, currentUser: User): Promise<{ message: string }> {
     if (currentUser.role !== UserRole.ADMIN) {
       throw new ConflictException("Only admin can delete users");
     }
     const user = await this.findOne(id);
-    await this.userRepository.remove(user);
-    return { message: "User deleted successfully" };
+    if (!user) {
+      throw new NotFoundException("User not found");
+    }
+    if (user.is_archived) {
+      return { message: "User already archived" };
+    }
+    await this.userRepository.update(id, {
+      is_archived: true,
+      isActive: false,
+    });
+    return { message: "User archived successfully (record kept)" };
   }
 
   async changePassword(

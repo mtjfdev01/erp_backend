@@ -284,7 +284,7 @@ export class RecurringDonationsController {
       );
       return res.status(HttpStatus.OK).json({
         success: true,
-        message: "Recurring donation deleted",
+        message: "Recurring donation archived (record kept)",
         data,
       });
     } catch (error: any) {
@@ -292,7 +292,7 @@ export class RecurringDonationsController {
         error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
-        message: error?.message || "Failed to delete recurring donation",
+        message: error?.message || "Failed to archive recurring donation",
         data: null,
       });
     }

@@ -67,8 +67,16 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "timestamp", nullable: true, default: null })
   consent_at: Date | null;
 
+  /** Per-period / installment amount (online + staff). */
   @Column({ type: "int", nullable: true, default: null })
   amount: number | null;
+
+  /**
+   * Optional lump-sum total paid (staff prepaid). Null for online/Stripe —
+   * online only sends `amount`.
+   */
+  @Column({ type: "int", nullable: true, default: null })
+  total_amount: number | null;
 
   @Column({ type: "varchar", nullable: true, default: null })
   currency: string | null;
