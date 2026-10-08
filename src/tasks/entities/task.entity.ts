@@ -114,11 +114,11 @@ export class Task {
   assigned_users_meta: { user_id: number; department: Department }[];
 
   @Column({ type: "int", nullable: true, name: "reported_to" })
-  reported_by_id: number;
+  reported_to_id: number | null;
 
   @ManyToOne(() => User, { nullable: true, eager: false, onDelete: "SET NULL" })
   @JoinColumn({ name: "reported_to" })
-  reported_by: User;
+  reported_to: User | null;
 
   @Column({ type: "int", nullable: true })
   created_by_id: number;

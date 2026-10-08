@@ -93,10 +93,6 @@ export class CreateTaskDto {
   approval_required_user_ids?: number[];
 
   @IsOptional()
-  @IsInt()
-  reported_by_id?: number;
-
-  @IsOptional()
   @IsArray()
   mov_checklist?: {
     text: string;

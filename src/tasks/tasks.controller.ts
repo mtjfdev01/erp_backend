@@ -181,12 +181,9 @@ export class TasksController {
   async findOne(
     @Param("id") id: string,
     @CurrentUser() user: User,
-    @Query("include_all_mov") includeAllMov: string,
     @Res() res: Response,
   ) {
-    const result = await this.tasksService.findOne(+id, user, {
-      filterMov: includeAllMov !== "true",
-    });
+    const result = await this.tasksService.findOne(+id, user);
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
 

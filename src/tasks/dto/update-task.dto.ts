@@ -90,10 +90,6 @@ export class UpdateTaskDto {
   recurrence_end_occurrences?: number;
 
   @IsOptional()
-  @IsInt()
-  reported_by_id?: number;
-
-  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   approval_required_user_ids?: number[];
