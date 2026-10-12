@@ -340,6 +340,48 @@ export class TasksService {
     }
   }
 
+  private isTaskAssignee(task: Task, userId: number): boolean {
+    // Accept both stored assignment IDs and their metadata representation for multi-assignee tasks.
+    const assignedIds = Array.isArray(task.assigned_user_ids)
+      ? task.assigned_user_ids.map((value) => Number(value))
+      : [];
+    const metaIds = Array.isArray(task.assigned_users_meta)
+      ? task.assigned_users_meta.map((assignee: any) => Number(assignee?.user_id))
+      : [];
+    return [...assignedIds, ...metaIds].includes(Number(userId));
+  }
+
+  private canChangeTaskStatus(
+    task: Task,
+    currentUser: User,
+    nextStatus: TaskStatus,
+  ): boolean {
+    if (this.isTaskAssignee(task, Number(currentUser.id))) return true;
+    // Closing is the sole non-assignee exception; normal workflow transitions stay assignee-only.
+    if (nextStatus !== TaskStatus.CLOSED) return false;
+
+    const currentUserId = Number(currentUser.id);
+    const role = String(currentUser.role || "").toLowerCase();
+    return (
+      Number(task.created_by_id) === currentUserId ||
+      Number(task.reported_to_id) === currentUserId ||
+      role === UserRole.SUPER_ADMIN.toLowerCase() ||
+      role === UserRole.ADMIN.toLowerCase()
+    );
+  }
+
+  private assertTaskStatusChangeAllowed(
+    task: Task,
+    currentUser: User,
+    nextStatus: TaskStatus,
+  ): void {
+    if (!this.canChangeTaskStatus(task, currentUser, nextStatus)) {
+      throw new ForbiddenException(
+        "Only users assigned to this task can change its status, except authorized task closure.",
+      );
+    }
+  }
+
   private async getTaskScope(
     user: User,
   ): Promise<"org" | "department" | "team" | "self"> {
@@ -650,6 +692,31 @@ export class TasksService {
     qb.andWhere(
       `task.approval_required_user_ids @> ARRAY[:${userParam}]::int[]`,
       { [userParam]: currentUser.id },
+    );
+  }
+
+  private applyDepartmentReportVisibility(
+    qb: any,
+    currentUser: User,
+    paramSuffix: string,
+  ): void {
+    const department = String(currentUser.department || "").toLowerCase();
+    if (!department) return;
+
+    qb.orWhere(
+      new Brackets((departmentQb) => {
+        departmentQb.where(`task.department = :reportDepartment${paramSuffix}`, {
+          [`reportDepartment${paramSuffix}`]: department,
+        });
+        departmentQb.orWhere(
+          `task.assigned_users_meta @> :reportDepartmentMeta${paramSuffix}::jsonb`,
+          {
+            [`reportDepartmentMeta${paramSuffix}`]: JSON.stringify([
+              { department },
+            ]),
+          },
+        );
+      }),
     );
   }
 
@@ -1480,7 +1547,8 @@ export class TasksService {
         });
       }
       if (filters.end_date) {
-        qb.andWhere("task.created_at <= :end_date", {
+        // Treat the selected end date as inclusive for timestamped records.
+        qb.andWhere("task.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')", {
           end_date: filters.end_date,
         });
       }
@@ -1493,10 +1561,23 @@ export class TasksService {
       const teamPerformance =
         filters.team_performance === true ||
         filters.team_performance === "true";
+      // Match the Task List's team tab, which is scoped to immediate reports.
       const directReportIds =
-        teamPerformance && currentUser
-          ? await this.applyDirectReportsTaskFilter(qb, currentUser, "Dash")
+        currentUser &&
+        (teamPerformance ||
+          filters.view_type === "assigned_to_team" ||
+          (filters.view_type === "all" && reports.view_team === true))
+          ? await this.dataScopeService.getDirectReportIds(currentUser.id)
           : [];
+
+      if (teamPerformance && currentUser) {
+        await this.applyDirectReportsTaskFilter(
+          qb,
+          currentUser,
+          "Dash",
+          directReportIds,
+        );
+      }
 
       if (filters.view_type === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
@@ -1515,7 +1596,13 @@ export class TasksService {
           }),
         );
       } else if (filters.view_type === "assigned_to_team" && currentUser) {
-        await this.applyAssignedToTeamFilter(qb, currentUser, "Dash");
+        // Apply the same direct-report assignment filter used by /tasks/search.
+        await this.applyDirectReportsTaskFilter(
+          qb,
+          currentUser,
+          "DashView",
+          directReportIds,
+        );
       } else if (filters.view_type === "approval_tasks" && currentUser) {
         this.applyApprovalResponsibilityFilter(qb, currentUser, "Dash");
       }
@@ -1524,39 +1611,45 @@ export class TasksService {
       if (!isSuperAdminOrAdmin) {
         qb.andWhere(
           new Brackets((mainQb) => {
-            // First, include all tasks the user would normally see
-            // (assigned, created, reported, dept head/manager sees dept tasks)
+            // Keep role visibility as the access boundary for non-admin users.
             this.applyRoleFiltersWithoutBrackets(
               mainQb,
               currentUser,
               directReportIds,
             );
-
-            // Then, if there's a department filter, also apply it as an option
-            if (filters.department) {
-              const lowerDept = String(filters.department).toLowerCase();
-              mainQb.orWhere(
-                new Brackets((dqb) => {
-                  if (
-                    filters.strictDepartment === true ||
-                    filters.strictDepartment === "true"
-                  ) {
-                    dqb.where("task.department = :filterDept", {
-                      filterDept: lowerDept,
-                    });
-                  } else {
-                    dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
-                      deptMeta: JSON.stringify([{ department: lowerDept }]),
-                    });
-                    dqb.orWhere("task.department = :filterDept", {
-                      filterDept: lowerDept,
-                    });
-                  }
-                }),
+            if (reports.view_dept === true) {
+              this.applyDepartmentReportVisibility(
+                mainQb,
+                currentUser,
+                "DashScope",
               );
             }
           }),
         );
+
+        // A department selection may narrow authorized tasks, never grant access by itself.
+        if (filters.department) {
+          const lowerDept = String(filters.department).toLowerCase();
+          qb.andWhere(
+            new Brackets((dqb) => {
+              if (
+                filters.strictDepartment === true ||
+                filters.strictDepartment === "true"
+              ) {
+                dqb.where("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              } else {
+                dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                  deptMeta: JSON.stringify([{ department: lowerDept }]),
+                });
+                dqb.orWhere("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              }
+            }),
+          );
+        }
       } else {
         // Admin/super admin: just apply department filter if present
         if (filters.department) {
@@ -1752,7 +1845,10 @@ export class TasksService {
         });
       }
       if (query.end_date) {
-        qb.andWhere(`${dateField} <= :end_date`, { end_date: query.end_date });
+        // Use an exclusive next-day bound so the whole end date is included.
+        qb.andWhere(`${dateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`, {
+          end_date: query.end_date,
+        });
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -1762,10 +1858,23 @@ export class TasksService {
 
       const teamPerformance =
         query.team_performance === true || query.team_performance === "true";
+      // Keep report charts and aggregates on the same team scope as the list.
       const directReportIds =
-        teamPerformance && currentUser
-          ? await this.applyDirectReportsTaskFilter(qb, currentUser, "Rpt")
-          : null;
+        currentUser &&
+        (teamPerformance ||
+          query.view_type === "assigned_to_team" ||
+          (query.view_type === "all" && reportsPerm.view_team === true))
+          ? await this.dataScopeService.getDirectReportIds(currentUser.id)
+          : [];
+
+      if (teamPerformance && currentUser) {
+        await this.applyDirectReportsTaskFilter(
+          qb,
+          currentUser,
+          "Rpt",
+          directReportIds,
+        );
+      }
 
       if (query.view_type === "created" && currentUser) {
         qb.andWhere("task.created_by_id = :currentUserId", {
@@ -1784,7 +1893,13 @@ export class TasksService {
           }),
         );
       } else if (query.view_type === "assigned_to_team" && currentUser) {
-        await this.applyAssignedToTeamFilter(qb, currentUser, "Rpt");
+        // Keep report aggregates aligned with the Task List's team tab.
+        await this.applyDirectReportsTaskFilter(
+          qb,
+          currentUser,
+          "RptView",
+          directReportIds,
+        );
       } else if (query.view_type === "approval_tasks" && currentUser) {
         this.applyApprovalResponsibilityFilter(qb, currentUser, "Rpt");
       }
@@ -1793,39 +1908,45 @@ export class TasksService {
       if (!isSuperAdminOrAdmin) {
         qb.andWhere(
           new Brackets((mainQb) => {
-            // First, include all tasks the user would normally see
-            // (assigned, created, reported, dept head/manager sees dept tasks)
+            // Keep role visibility as the access boundary for non-admin users.
             this.applyRoleFiltersWithoutBrackets(
               mainQb,
               currentUser,
-              directReportIds || [],
+              directReportIds,
             );
-
-            // Then, if there's a department filter, also apply it as an option
-            if (query.department) {
-              const lowerDept = String(query.department).toLowerCase();
-              mainQb.orWhere(
-                new Brackets((dqb) => {
-                  if (
-                    query.strictDepartment === true ||
-                    query.strictDepartment === "true"
-                  ) {
-                    dqb.where("task.department = :filterDept", {
-                      filterDept: lowerDept,
-                    });
-                  } else {
-                    dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
-                      deptMeta: JSON.stringify([{ department: lowerDept }]),
-                    });
-                    dqb.orWhere("task.department = :filterDept", {
-                      filterDept: lowerDept,
-                    });
-                  }
-                }),
+            if (reportsPerm.view_dept === true) {
+              this.applyDepartmentReportVisibility(
+                mainQb,
+                currentUser,
+                "ReportScope",
               );
             }
           }),
         );
+
+        // A department selection may narrow authorized tasks, never grant access by itself.
+        if (query.department) {
+          const lowerDept = String(query.department).toLowerCase();
+          qb.andWhere(
+            new Brackets((dqb) => {
+              if (
+                query.strictDepartment === true ||
+                query.strictDepartment === "true"
+              ) {
+                dqb.where("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              } else {
+                dqb.where("task.assigned_users_meta @> :deptMeta::jsonb", {
+                  deptMeta: JSON.stringify([{ department: lowerDept }]),
+                });
+                dqb.orWhere("task.department = :filterDept", {
+                  filterDept: lowerDept,
+                });
+              }
+            }),
+          );
+        }
       } else {
         // Admin/super admin: just apply department filter if present
         if (query.department) {
@@ -2342,12 +2463,26 @@ export class TasksService {
       const isCurrentUserAssignee = [...assignedIds, ...metaIds].includes(
         Number(currentUser.id),
       );
+      const statusChanged = dto.status !== undefined && dto.status !== task.status;
+      if (statusChanged) {
+        // Protect direct PATCH requests as well as the dedicated transition endpoint.
+        this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
+      }
       const isApprovalSubmission =
         dto.status === TaskStatus.PENDING_APPROVAL &&
         task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED &&
         isCurrentUserAssignee;
+      const isAuthorizedStatusOnlyChange =
+        statusChanged &&
+        Object.keys(dto).every((key) => key === "status") &&
+        ((isCurrentUserAssignee &&
+          (perms.canUpdate ||
+            perms.canComplete ||
+            (isApprovalSubmission && perms.canView))) ||
+          (dto.status === TaskStatus.CLOSED &&
+            this.canChangeTaskStatus(task, currentUser, dto.status)));
 
-      if (!isApprovalSubmission) {
+      if (!isApprovalSubmission && !isAuthorizedStatusOnlyChange) {
         this.assertTaskMutationAllowed(task, currentUser, "update", perms);
       }
       // If user is trying to CLOSE a COMPLETED task, allow it if they are the creator or reporter
@@ -2711,6 +2846,8 @@ export class TasksService {
     const allAssignedIds = [...assignedIds, ...metaIds];
     const currentUserId = Number(currentUser.id);
     const isAssignee = allAssignedIds.includes(currentUserId);
+    // Enforce assignment at the API boundary; client drag guards are not authorization.
+    this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
     const isCreator = task.created_by_id === currentUserId;
     const isReporter = task.reported_to_id === currentUserId;
     const approvers = Array.isArray(task.approval_required_user_ids)
@@ -3188,6 +3325,8 @@ export class TasksService {
   async complete(id: number, currentUser: User): Promise<Task> {
     try {
       const task = await this.findOne(id, currentUser);
+      // The standalone completion route must follow the same assignment rule.
+      this.assertTaskStatusChangeAllowed(task, currentUser, TaskStatus.COMPLETED);
       const oldStatus = task.status;
       task.status = TaskStatus.COMPLETED;
       if (task.workflow_type === TaskWorkflowType.STANDARD) {
@@ -3574,24 +3713,30 @@ export class TasksService {
     const oldProgress = task.progress;
     const oldStatus = task.status;
 
-    task.progress = value;
-    task.last_progress_notes = mergedNotes || payload.notes || null;
-
     const completion = this.getMovCompletionSummary(task, mergedNotes);
+    let nextStatus = oldStatus;
     if (completion.hasAssignedMovs && completion.allMovsCompleted) {
-      task.status = TaskStatus.COMPLETED;
-      if (task.workflow_type === TaskWorkflowType.STANDARD) {
-        task.completed_date = task.completed_date ?? new Date();
-      }
+      nextStatus = TaskStatus.COMPLETED;
     }
-
-    // Automatically transition to IN_PROGRESS if the task is currently OPEN or DRAFT
-    // and progress is being made (value > 0)
     if (
       value > 0 &&
-      (task.status === TaskStatus.OPEN || task.status === TaskStatus.DRAFT)
+      (nextStatus === TaskStatus.OPEN || nextStatus === TaskStatus.DRAFT)
     ) {
-      task.status = TaskStatus.IN_PROGRESS;
+      nextStatus = TaskStatus.IN_PROGRESS;
+    }
+    if (nextStatus !== oldStatus) {
+      // MOV completion can change status implicitly, so authorize before saving progress.
+      this.assertTaskStatusChangeAllowed(task, currentUser, nextStatus);
+    }
+
+    task.progress = value;
+    task.last_progress_notes = mergedNotes || payload.notes || null;
+    task.status = nextStatus;
+    if (
+      nextStatus === TaskStatus.COMPLETED &&
+      task.workflow_type === TaskWorkflowType.STANDARD
+    ) {
+      task.completed_date = task.completed_date ?? new Date();
     }
 
     await this.taskRepo.save(task);
@@ -4056,8 +4201,7 @@ export class TasksService {
 
   async processRecurrence(): Promise<number> {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const today = formatDateOnlyPkt(new Date());
 
       const recurringTasks = await this.taskRepo
         .createQueryBuilder("task")
