@@ -700,6 +700,7 @@ export class TasksService {
     currentUser: User,
     paramSuffix: string,
   ): void {
+    // Callers gate this expansion on view_dept; department membership alone is not access.
     const department = String(currentUser.department || "").toLowerCase();
     if (!department) return;
 
@@ -1561,7 +1562,7 @@ export class TasksService {
       const teamPerformance =
         filters.team_performance === true ||
         filters.team_performance === "true";
-      // Match the Task List's team tab, which is scoped to immediate reports.
+      // Match the Task List's direct-report scope; All includes team tasks only with view_team permission.
       const directReportIds =
         currentUser &&
         (teamPerformance ||
@@ -1618,6 +1619,7 @@ export class TasksService {
               directReportIds,
             );
             if (reports.view_dept === true) {
+              // Expand only users explicitly granted department-wide report visibility.
               this.applyDepartmentReportVisibility(
                 mainQb,
                 currentUser,
@@ -1627,7 +1629,7 @@ export class TasksService {
           }),
         );
 
-        // A department selection may narrow authorized tasks, never grant access by itself.
+        // Keep this as an AND: OR-ing department membership with role visibility exposed unrelated tasks.
         if (filters.department) {
           const lowerDept = String(filters.department).toLowerCase();
           qb.andWhere(
@@ -1858,7 +1860,7 @@ export class TasksService {
 
       const teamPerformance =
         query.team_performance === true || query.team_performance === "true";
-      // Keep report charts and aggregates on the same team scope as the list.
+      // Keep report aggregates on the Task List's direct-report scope; All uses it only with view_team.
       const directReportIds =
         currentUser &&
         (teamPerformance ||
@@ -1915,6 +1917,7 @@ export class TasksService {
               directReportIds,
             );
             if (reportsPerm.view_dept === true) {
+              // Keep chart and aggregate visibility consistent with stats and role permissions.
               this.applyDepartmentReportVisibility(
                 mainQb,
                 currentUser,
@@ -1924,7 +1927,7 @@ export class TasksService {
           }),
         );
 
-        // A department selection may narrow authorized tasks, never grant access by itself.
+        // Keep this as an AND: OR-ing department membership with role visibility exposed unrelated tasks.
         if (query.department) {
           const lowerDept = String(query.department).toLowerCase();
           qb.andWhere(
