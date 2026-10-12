@@ -13,6 +13,7 @@ export const DONATION_BOX_AUDIT_PATCH_FIELDS = [
   "frequency",
   "active_since",
   "last_collection_date",
+  "removal_date",
   "total_collected",
   "collection_count",
   "notes",

@@ -25,6 +25,7 @@ export enum BoxStatus {
   REMOVED = "removed",
   BROKEN = "broken",
   SNR = "snr",
+  MISPLACED_STOLEN = "misplaced_stolen",
 }
 
 export enum CollectionFrequency {
@@ -102,6 +103,10 @@ export class DonationBox extends BaseEntity {
 
   @Column({ type: "date", nullable: true })
   last_collection_date: Date;
+
+  /** Set when status is removed — date the box was taken out of the shop. */
+  @Column({ type: "date", nullable: true, default: null })
+  removal_date: Date | null;
 
   // Collection Statistics
   @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
