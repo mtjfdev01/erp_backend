@@ -83,7 +83,8 @@ export class CreateDonationBoxDto {
   box_type: BoxType;
 
   @IsEnum(BoxStatus, {
-    message: "Status must be active, inactive, removed, broken, or snr",
+    message:
+      "Status must be active, inactive, removed, broken, snr, or misplaced_stolen",
   })
   @IsNotEmpty({ message: "Status is required" })
   status: BoxStatus;
@@ -98,6 +99,10 @@ export class CreateDonationBoxDto {
   @IsDateString()
   @IsNotEmpty({ message: "Active since date is required" })
   active_since: Date;
+
+  @IsDateString()
+  @IsOptional()
+  removal_date?: string | null;
 
   @IsString()
   @IsOptional()

@@ -58,8 +58,6 @@ const donationReceiptInKindEmailTemplate = ({
         <tr>
           <td align="center">
             <table width="950" cellpadding="0" cellspacing="0" border="0" style="width: 950px; max-width: 950px; background-color: #ffffff; border: 1px solid #000000; margin: auto;">
-              
-              <!-- Header -->
               <tr>
                 <td style="padding: 20px 0 10px 0;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -82,8 +80,6 @@ const donationReceiptInKindEmailTemplate = ({
                   </table>
                 </td>
               </tr>
-
-              <!-- Receipt Data -->
               <tr>
                 <td style="padding: 10px 20px 0 20px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -99,7 +95,6 @@ const donationReceiptInKindEmailTemplate = ({
                         <p style="margin: 0 0 14px 0; line-height: 1.8;"><strong>Unrestricted A/c : </strong> ${escapeHtml(data.unrestrictedAccount)}</p>
                         <p style="margin: 0 0 14px 0; line-height: 1.8;"><strong>Narration : </strong> ${escapeHtml(data.narration)}</p>
                       </td>
-
                       <td width="40%" valign="top">
                         <p style="margin: 0 0 14px 0; line-height: 1.8;"><strong>Receipt Date :</strong> ${escapeHtml(data.receiptDate)}</p>
                         <p style="margin: 0 0 14px 0; line-height: 1.8;"><strong>Store :</strong> ${escapeHtml(data.store)}</p>
@@ -113,8 +108,6 @@ const donationReceiptInKindEmailTemplate = ({
                   </table>
                 </td>
               </tr>
-
-              <!-- Product Table -->
               <tr>
                 <td style="padding: 10px 20px 20px 20px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; border-collapse: collapse; margin-top: 20px; font-family: Arial, sans-serif; font-size: 16px;">
@@ -143,7 +136,6 @@ const donationReceiptInKindEmailTemplate = ({
                   </table>
                 </td>
               </tr>
-
             </table>
           </td>
         </tr>

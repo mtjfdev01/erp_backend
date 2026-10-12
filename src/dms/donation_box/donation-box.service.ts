@@ -3,10 +3,11 @@ import {
   ConflictException,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, In, ILike, SelectQueryBuilder } from "typeorm";
-import { DonationBox } from "./entities/donation-box.entity";
+import { BoxStatus, DonationBox } from "./entities/donation-box.entity";
 import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
 import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
 import {
@@ -207,6 +208,7 @@ export class DonationBoxService {
       frequency: box.frequency,
       active_since: box.active_since,
       last_collection_date: box.last_collection_date,
+      removal_date: box.removal_date,
       total_collected: box.total_collected,
       collection_count: box.collection_count,
       notes: box.notes,
@@ -233,6 +235,7 @@ export class DonationBoxService {
       "frequency",
       "active_since",
       "last_collection_date",
+      "removal_date",
       "notes",
       "is_active",
       "is_archived",
@@ -311,6 +314,15 @@ export class DonationBoxService {
         }
       }
 
+      if (
+        createDonationBoxDto.status === BoxStatus.REMOVED &&
+        !createDonationBoxDto.removal_date
+      ) {
+        throw new BadRequestException(
+          "Removal date is required when status is Removed",
+        );
+      }
+
       // Create donation box entity
       const { assigned_user_ids, ...boxData } = createDonationBoxDto;
       const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
@@ -343,6 +355,13 @@ export class DonationBoxService {
 
       return savedBox;
     } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException ||
+        error instanceof ConflictException
+      ) {
+        throw error;
+      }
       console.error("Error creating donation box:", error);
       throw new Error(`Failed to create donation box: ${error.message}`);
     }
@@ -998,6 +1017,28 @@ export class DonationBoxService {
       const scalarPatch = this.buildDonationBoxPatch(
         updateData as Record<string, unknown>,
       );
+
+      const nextStatus =
+        (scalarPatch.status as BoxStatus | undefined) ?? donationBox.status;
+      if (nextStatus === BoxStatus.REMOVED) {
+        const providedRemovalDate =
+          scalarPatch.removal_date !== undefined
+            ? scalarPatch.removal_date
+            : donationBox.removal_date;
+        if (
+          providedRemovalDate === undefined ||
+          providedRemovalDate === null ||
+          providedRemovalDate === ""
+        ) {
+          throw new BadRequestException(
+            "Removal date is required when status is Removed",
+          );
+        }
+        scalarPatch.removal_date = providedRemovalDate;
+      } else if (scalarPatch.status !== undefined) {
+        scalarPatch.removal_date = null;
+      }
+
       Object.assign(auditPatch, scalarPatch);
 
       if (auditUserId != null) {
@@ -1040,7 +1081,10 @@ export class DonationBoxService {
         ],
       });
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       console.error("Error updating donation box:", error.message);

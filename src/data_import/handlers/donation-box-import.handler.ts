@@ -129,6 +129,11 @@ export class DonationBoxImportHandler implements EntityImportHandler {
       maintenance: BoxStatus.BROKEN,
       retired: BoxStatus.REMOVED,
       damaged: BoxStatus.BROKEN,
+      misplaced: BoxStatus.MISPLACED_STOLEN,
+      stolen: BoxStatus.MISPLACED_STOLEN,
+      "misplaced/stolen": BoxStatus.MISPLACED_STOLEN,
+      "misplaced-stolen": BoxStatus.MISPLACED_STOLEN,
+      "misplaced_stolen": BoxStatus.MISPLACED_STOLEN,
     };
     const raw = String(value || "")
       .trim()

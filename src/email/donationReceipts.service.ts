@@ -147,6 +147,41 @@ export class DonationReceiptsService {
 
     return sent;
   }
+
+  /** Send pre-rendered receipt HTML to the donor. */
+  async sendRenderedReceiptEmail(params: {
+    donorEmail: string;
+    donationId: number;
+    receiptNo?: string | number;
+    html: string;
+    style?: string;
+  }): Promise<boolean> {
+    const { donorEmail, donationId, receiptNo, html, style } = params;
+    if (!donorEmail) return false;
+
+    const label =
+      style === "donation"
+        ? "In-Kind Donation Receipt"
+        : "Donation Receipt";
+    const subject = `${label} - ${receiptNo ?? donationId}`;
+    const text = `${label}\nDonation ID: ${donationId}\nReceipt #: ${receiptNo ?? donationId}`;
+
+    this.logger.log(
+      `Sending ${style || "receipt"} for donation #${donationId} to ${donorEmail}`,
+    );
+
+    const sent = await this.emailService.sendReportEmail({
+      to: donorEmail,
+      subject,
+      html,
+      text,
+    });
+
+    this.logger.log(
+      `Receipt email result for donation #${donationId}: ${sent}`,
+    );
+    return sent;
+  }
 }
 
 // Backward-compat alias for the misspelling requested by the user.
