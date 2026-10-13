@@ -21,6 +21,7 @@ import {
   AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
+  AidPropertyType,
   AidRequestType,
   AidWriterRelation,
 } from "../aid.enums";
@@ -97,6 +98,18 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(200)
   disability_type?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_land?: boolean;
+
+  @IsOptional()
+  @IsEnum(AidPropertyType)
+  property_type?: AidPropertyType | null;
+
+  @IsOptional()
+  @IsString()
+  property_details?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -197,6 +210,18 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(200)
   disability_type?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_land?: boolean;
+
+  @IsOptional()
+  @IsEnum(AidPropertyType)
+  property_type?: AidPropertyType | null;
+
+  @IsOptional()
+  @IsString()
+  property_details?: string | null;
 
   @IsOptional()
   @IsBoolean()

@@ -110,6 +110,13 @@ export class AidPeopleService {
         dto.disability_type !== undefined
           ? dto.disability_type?.trim() || null
           : undefined,
+      has_land: dto.has_land !== undefined ? !!dto.has_land : undefined,
+      property_type:
+        dto.property_type !== undefined ? dto.property_type : undefined,
+      property_details:
+        dto.property_details !== undefined
+          ? dto.property_details?.trim() || null
+          : undefined,
       is_alive: dto.is_alive !== undefined ? dto.is_alive : undefined,
       health_notes:
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
@@ -141,6 +148,10 @@ export class AidPeopleService {
       monthly_income: mapped.monthly_income ?? null,
       has_disability: mapped.has_disability === true,
       disability_type: mapped.disability_type ?? null,
+      has_land: mapped.has_land === true,
+      property_type: mapped.has_land === true ? mapped.property_type ?? null : null,
+      property_details:
+        mapped.has_land === true ? mapped.property_details ?? null : null,
       is_alive: mapped.is_alive !== false,
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
@@ -427,6 +438,19 @@ export class AidPeopleService {
     }
     if (mapped.disability_type !== undefined) {
       person.disability_type = mapped.disability_type;
+    }
+    if (mapped.has_land !== undefined) {
+      person.has_land = mapped.has_land;
+      if (!mapped.has_land) {
+        person.property_type = null;
+        person.property_details = null;
+      }
+    }
+    if (mapped.property_type !== undefined && person.has_land) {
+      person.property_type = mapped.property_type;
+    }
+    if (mapped.property_details !== undefined && person.has_land) {
+      person.property_details = mapped.property_details;
     }
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive;
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;

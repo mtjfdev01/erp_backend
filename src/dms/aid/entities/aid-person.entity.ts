@@ -6,6 +6,7 @@ import {
   AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
+  AidPropertyType,
 } from "../aid.enums";
 
 @Entity("aid_people")
@@ -87,6 +88,22 @@ export class AidPerson extends BaseEntity {
 
   @Column({ type: "varchar", length: 200, nullable: true, default: null })
   disability_type: string | null;
+
+  /** Do you have land? */
+  @Column({ type: "boolean", default: false })
+  has_land: boolean;
+
+  /** Agri / commercial property type when has_land. */
+  @Column({
+    type: "enum",
+    enum: AidPropertyType,
+    nullable: true,
+    default: null,
+  })
+  property_type: AidPropertyType | null;
+
+  @Column({ type: "text", nullable: true, default: null })
+  property_details: string | null;
 
   @Column({ type: "boolean", default: true })
   is_alive: boolean;

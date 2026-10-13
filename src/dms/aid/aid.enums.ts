@@ -45,6 +45,14 @@ export enum AidLiteracyCategory {
   OTHERS = "others",
 }
 
+/** Property ownership type when has_land = true. */
+export enum AidPropertyType {
+  AGRI = "agri",
+  COMMERCIAL = "commercial",
+  PLOT = "plot",
+  OTHERS = "others",
+}
+
 export enum AidHouseholdRole {
   HEAD = "head",
   SPOUSE = "spouse",
