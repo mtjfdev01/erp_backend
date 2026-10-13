@@ -36,7 +36,7 @@ export class TasksCronsService {
     }
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_1AM, { timeZone: "Asia/Karachi" })
+  @Cron(CronExpression.EVERY_DAY_AT_2AM, { timeZone: "Asia/Karachi" })
   async handleOverdueEscalation() {
     try {
       const count = await this.tasksService.overdueEscalation();
