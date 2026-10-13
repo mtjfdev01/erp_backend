@@ -121,6 +121,22 @@ export class AidApplicationsService {
       title: dto.title?.trim() || null,
       request_summary: dto.request_summary?.trim() || null,
       requested_aid_type: dto.requested_aid_type || AidRequestType.OTHER,
+      education_details:
+        dto.requested_aid_type === AidRequestType.EDUCATION
+          ? dto.education_details ?? null
+          : null,
+      ration_details:
+        dto.requested_aid_type === AidRequestType.RATION
+          ? dto.ration_details ?? null
+          : null,
+      marriage_gift_details:
+        dto.requested_aid_type === AidRequestType.MARRIAGE_GIFT
+          ? dto.marriage_gift_details ?? null
+          : null,
+      financial_assistance_details:
+        dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
+          ? dto.financial_assistance_details ?? null
+          : null,
       status: AidApplicationStatus.SUBMITTED,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
@@ -551,6 +567,46 @@ export class AidApplicationsService {
     }
     if (dto.requested_aid_type !== undefined) {
       app.requested_aid_type = dto.requested_aid_type;
+      if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
+        app.education_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.RATION) {
+        app.ration_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
+        app.marriage_gift_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
+        app.financial_assistance_details = null;
+      }
+    }
+    if (dto.education_details !== undefined) {
+      app.education_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.EDUCATION
+          ? dto.education_details
+          : null;
+    }
+    if (dto.ration_details !== undefined) {
+      app.ration_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.RATION
+          ? dto.ration_details
+          : null;
+    }
+    if (dto.marriage_gift_details !== undefined) {
+      app.marriage_gift_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.MARRIAGE_GIFT
+          ? dto.marriage_gift_details
+          : null;
+    }
+    if (dto.financial_assistance_details !== undefined) {
+      app.financial_assistance_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.FINANCIAL_ASSISTANCE
+          ? dto.financial_assistance_details
+          : null;
     }
     if (dto.assigned_to_user_id !== undefined) {
       app.assigned_to_user_id = dto.assigned_to_user_id;
@@ -733,6 +789,17 @@ export class AidApplicationsService {
       updated_by: params.user || null,
     });
     return this.attachmentRepo.save(row);
+  }
+
+  /** Upload a document to S3 and return URL (no person/app link yet — e.g. NECTA on create). */
+  async uploadLooseDocument(file: Express.Multer.File, context = "necta") {
+    if (!file) throw new BadRequestException("file is required");
+    const uploaded = await this.s3.uploadAidAttachment(file, context);
+    return {
+      url: uploaded.url,
+      file_name: file.originalname,
+      file_type: file.mimetype || null,
+    };
   }
 
   async deleteAttachment(attachmentId: number, user?: User) {

@@ -60,6 +60,33 @@ export class AidApplication extends BaseEntity {
   })
   requested_aid_type: AidRequestType;
 
+  /**
+   * Education aid type only:
+   * education_history[], scholarships[], income_source_before, continue_education_if_not_approved
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  education_details: Record<string, unknown> | null;
+
+  /**
+   * Ration aid type only:
+   * persons (male/female/kids), wheat, how_know_mtjf, arrangements, duration, alternative plan
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  ration_details: Record<string, unknown> | null;
+
+  /**
+   * Marriage gift aid type only:
+   * date_of_marriage, nikah status/date, bride-groom relation, earlier expenses, items
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  marriage_gift_details: Record<string, unknown> | null;
+
+  /**
+   * Financial assistance aid type only — Financial Condition intake
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  financial_assistance_details: Record<string, unknown> | null;
+
   @Column({
     type: "enum",
     enum: AidApplicationStatus,

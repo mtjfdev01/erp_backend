@@ -53,6 +53,34 @@ export enum AidPropertyType {
   OTHERS = "others",
 }
 
+/** Resident / housing type. */
+export enum AidResidentType {
+  OWN_HOUSE = "own_house",
+  RENTED = "rented",
+  SHAM_LOT = "sham_lot",
+}
+
+export enum AidLivestockAnimalType {
+  GOAT = "goat",
+  COW = "cow",
+  BUFFALO = "buffalo",
+}
+
+export enum AidLivestockOwnership {
+  PERSONAL = "personal",
+  SHARING = "sharing",
+}
+
+export enum AidNectaStatus {
+  CLEAR = "clear",
+  NOT_CLEAR = "not_clear",
+}
+
+export enum AidBispStatus {
+  ELIGIBLE = "eligible",
+  NOT_ELIGIBLE = "not_eligible",
+}
+
 export enum AidHouseholdRole {
   HEAD = "head",
   SPOUSE = "spouse",
@@ -99,6 +127,9 @@ export enum AidWriterRelation {
 export enum AidRequestType {
   HEALTH = "health",
   EDUCATION = "education",
+  RATION = "ration",
+  MARRIAGE_GIFT = "marriage_gift",
+  FINANCIAL_ASSISTANCE = "financial_assistance",
   CLEAN_WATER = "clean_water",
   APNA_GHAR = "apna_ghar",
   DISASTER_RELIEF = "disaster_relief",
@@ -109,7 +140,6 @@ export enum AidRequestType {
   OTHER = "other",
   /** @deprecated legacy values kept for existing rows */
   CASH = "cash",
-  RATION = "ration",
   MEDICAL = "medical",
 }
 

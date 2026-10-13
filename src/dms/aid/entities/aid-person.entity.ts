@@ -6,7 +6,10 @@ import {
   AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
+  AidBispStatus,
+  AidNectaStatus,
   AidPropertyType,
+  AidResidentType,
 } from "../aid.enums";
 
 @Entity("aid_people")
@@ -104,6 +107,65 @@ export class AidPerson extends BaseEntity {
 
   @Column({ type: "text", nullable: true, default: null })
   property_details: string | null;
+
+  /** Resident — Own House | Rented | Sham Lot */
+  @Column({
+    type: "enum",
+    enum: AidResidentType,
+    nullable: true,
+    default: null,
+  })
+  resident_type: AidResidentType | null;
+
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  resident_ownership_status: string | null;
+
+  @Column({ type: "varchar", length: 200, nullable: true, default: null })
+  resident_ownership_other: string | null;
+
+  @Column({ type: "numeric", precision: 12, scale: 2, nullable: true, default: null })
+  rented_amount: string | null;
+
+  @Column({ type: "numeric", precision: 10, scale: 2, nullable: true, default: null })
+  house_area_marla: string | null;
+
+  @Column({ type: "text", nullable: true, default: null })
+  house_details: string | null;
+
+  @Column({ type: "boolean", default: false })
+  has_livestock: boolean;
+
+  /** Rows: animal_type, quantity, ownership, owner_name, owner_contact */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  livestock_entries: Record<string, unknown>[] | null;
+
+  @Column({ type: "boolean", default: false })
+  has_vehicle: boolean;
+
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  vehicle_type: string | null;
+
+  @Column({
+    type: "enum",
+    enum: AidNectaStatus,
+    nullable: true,
+    default: null,
+  })
+  necta_status: AidNectaStatus | null;
+
+  @Column({ type: "varchar", length: 500, nullable: true, default: null })
+  necta_document_url: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  necta_document_name: string | null;
+
+  @Column({
+    type: "enum",
+    enum: AidBispStatus,
+    nullable: true,
+    default: null,
+  })
+  bisp_status: AidBispStatus | null;
 
   @Column({ type: "boolean", default: true })
   is_alive: boolean;

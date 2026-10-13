@@ -74,11 +74,44 @@ export class AidPeopleService {
     }
   }
 
+  private sanitizeLivestockEntries(
+    raw: Record<string, unknown>[] | null | undefined,
+  ): Record<string, unknown>[] | null {
+    if (!Array.isArray(raw)) return null;
+    const allowedAnimals = new Set(["goat", "cow", "buffalo"]);
+    const allowedOwnership = new Set(["personal", "sharing"]);
+    const rows = raw
+      .map((row) => {
+        const animal = String(row?.animal_type || "").toLowerCase();
+        const ownership = String(row?.ownership || "personal").toLowerCase();
+        const qty = Number(row?.quantity);
+        if (!allowedAnimals.has(animal) || !Number.isFinite(qty) || qty <= 0) {
+          return null;
+        }
+        const entry: Record<string, unknown> = {
+          animal_type: animal,
+          quantity: Math.floor(qty),
+          ownership: allowedOwnership.has(ownership) ? ownership : "personal",
+        };
+        if (entry.ownership === "sharing") {
+          const ownerName = String(row?.owner_name || "").trim();
+          const ownerContact = String(row?.owner_contact || "").trim();
+          if (ownerName) entry.owner_name = ownerName;
+          if (ownerContact) entry.owner_contact = ownerContact;
+        }
+        return entry;
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+    return rows.length ? rows : null;
+  }
+
   private mapPersonFields(dto: CreateAidPersonDto | UpdateAidPersonDto) {
     const income =
       dto.monthly_income === undefined || dto.monthly_income === null || dto.monthly_income === ""
         ? undefined
         : String(dto.monthly_income);
+    const numericField = (v: string | number | null | undefined) =>
+      v === undefined || v === null || v === "" ? undefined : String(v);
     return {
       phone: dto.phone !== undefined ? dto.phone?.trim() || null : undefined,
       gender: dto.gender !== undefined ? dto.gender : undefined,
@@ -117,6 +150,44 @@ export class AidPeopleService {
         dto.property_details !== undefined
           ? dto.property_details?.trim() || null
           : undefined,
+      resident_type:
+        dto.resident_type !== undefined ? dto.resident_type : undefined,
+      resident_ownership_status:
+        dto.resident_ownership_status !== undefined
+          ? dto.resident_ownership_status?.trim() || null
+          : undefined,
+      resident_ownership_other:
+        dto.resident_ownership_other !== undefined
+          ? dto.resident_ownership_other?.trim() || null
+          : undefined,
+      rented_amount: numericField(dto.rented_amount),
+      house_area_marla: numericField(dto.house_area_marla),
+      house_details:
+        dto.house_details !== undefined
+          ? dto.house_details?.trim() || null
+          : undefined,
+      has_livestock:
+        dto.has_livestock !== undefined ? !!dto.has_livestock : undefined,
+      livestock_entries:
+        dto.livestock_entries !== undefined
+          ? this.sanitizeLivestockEntries(dto.livestock_entries)
+          : undefined,
+      has_vehicle: dto.has_vehicle !== undefined ? !!dto.has_vehicle : undefined,
+      vehicle_type:
+        dto.vehicle_type !== undefined
+          ? dto.vehicle_type?.trim() || null
+          : undefined,
+      necta_status:
+        dto.necta_status !== undefined ? dto.necta_status : undefined,
+      necta_document_url:
+        dto.necta_document_url !== undefined
+          ? dto.necta_document_url?.trim() || null
+          : undefined,
+      necta_document_name:
+        dto.necta_document_name !== undefined
+          ? dto.necta_document_name?.trim() || null
+          : undefined,
+      bisp_status: dto.bisp_status !== undefined ? dto.bisp_status : undefined,
       is_alive: dto.is_alive !== undefined ? dto.is_alive : undefined,
       health_notes:
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
@@ -152,6 +223,23 @@ export class AidPeopleService {
       property_type: mapped.has_land === true ? mapped.property_type ?? null : null,
       property_details:
         mapped.has_land === true ? mapped.property_details ?? null : null,
+      resident_type: mapped.resident_type ?? null,
+      resident_ownership_status: mapped.resident_ownership_status ?? null,
+      resident_ownership_other: mapped.resident_ownership_other ?? null,
+      rented_amount:
+        mapped.resident_type === "rented" ? mapped.rented_amount ?? null : null,
+      house_area_marla: mapped.house_area_marla ?? null,
+      house_details: mapped.house_details ?? null,
+      has_livestock: mapped.has_livestock === true,
+      livestock_entries:
+        mapped.has_livestock === true ? mapped.livestock_entries ?? null : null,
+      has_vehicle: mapped.has_vehicle === true,
+      vehicle_type:
+        mapped.has_vehicle === true ? mapped.vehicle_type ?? null : null,
+      necta_status: mapped.necta_status ?? null,
+      necta_document_url: mapped.necta_document_url ?? null,
+      necta_document_name: mapped.necta_document_name ?? null,
+      bisp_status: mapped.bisp_status ?? null,
       is_alive: mapped.is_alive !== false,
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
@@ -451,6 +539,57 @@ export class AidPeopleService {
     }
     if (mapped.property_details !== undefined && person.has_land) {
       person.property_details = mapped.property_details;
+    }
+    if (mapped.resident_type !== undefined) {
+      person.resident_type = mapped.resident_type;
+      if (mapped.resident_type !== "rented") {
+        person.rented_amount = null;
+      }
+    }
+    if (mapped.resident_ownership_status !== undefined) {
+      person.resident_ownership_status = mapped.resident_ownership_status;
+    }
+    if (mapped.resident_ownership_other !== undefined) {
+      person.resident_ownership_other = mapped.resident_ownership_other;
+    }
+    if (mapped.rented_amount !== undefined && person.resident_type === "rented") {
+      person.rented_amount = mapped.rented_amount;
+    }
+    if (mapped.house_area_marla !== undefined) {
+      person.house_area_marla = mapped.house_area_marla;
+    }
+    if (mapped.house_details !== undefined) {
+      person.house_details = mapped.house_details;
+    }
+    if (mapped.has_livestock !== undefined) {
+      person.has_livestock = mapped.has_livestock;
+      if (!mapped.has_livestock) {
+        person.livestock_entries = null;
+      }
+    }
+    if (mapped.livestock_entries !== undefined && person.has_livestock) {
+      person.livestock_entries = mapped.livestock_entries;
+    }
+    if (mapped.has_vehicle !== undefined) {
+      person.has_vehicle = mapped.has_vehicle;
+      if (!mapped.has_vehicle) {
+        person.vehicle_type = null;
+      }
+    }
+    if (mapped.vehicle_type !== undefined && person.has_vehicle) {
+      person.vehicle_type = mapped.vehicle_type;
+    }
+    if (mapped.necta_status !== undefined) {
+      person.necta_status = mapped.necta_status;
+    }
+    if (mapped.necta_document_url !== undefined) {
+      person.necta_document_url = mapped.necta_document_url;
+    }
+    if (mapped.necta_document_name !== undefined) {
+      person.necta_document_name = mapped.necta_document_name;
+    }
+    if (mapped.bisp_status !== undefined) {
+      person.bisp_status = mapped.bisp_status;
     }
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive;
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;

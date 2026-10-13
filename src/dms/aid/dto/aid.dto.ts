@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -21,7 +22,10 @@ import {
   AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
+  AidBispStatus,
+  AidNectaStatus,
   AidPropertyType,
+  AidResidentType,
   AidRequestType,
   AidWriterRelation,
 } from "../aid.enums";
@@ -110,6 +114,67 @@ export class CreateAidPersonDto {
   @IsOptional()
   @IsString()
   property_details?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidResidentType)
+  resident_type?: AidResidentType | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  resident_ownership_status?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  resident_ownership_other?: string | null;
+
+  @IsOptional()
+  @IsString()
+  rented_amount?: string | number | null;
+
+  @IsOptional()
+  @IsString()
+  house_area_marla?: string | number | null;
+
+  @IsOptional()
+  @IsString()
+  house_details?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_livestock?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  livestock_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_vehicle?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidNectaStatus)
+  necta_status?: AidNectaStatus | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  necta_document_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  necta_document_name?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidBispStatus)
+  bisp_status?: AidBispStatus | null;
 
   @IsOptional()
   @IsBoolean()
@@ -222,6 +287,67 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsString()
   property_details?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidResidentType)
+  resident_type?: AidResidentType | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  resident_ownership_status?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  resident_ownership_other?: string | null;
+
+  @IsOptional()
+  @IsString()
+  rented_amount?: string | number | null;
+
+  @IsOptional()
+  @IsString()
+  house_area_marla?: string | number | null;
+
+  @IsOptional()
+  @IsString()
+  house_details?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_livestock?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  livestock_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_vehicle?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidNectaStatus)
+  necta_status?: AidNectaStatus | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  necta_document_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  necta_document_name?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidBispStatus)
+  bisp_status?: AidBispStatus | null;
 
   @IsOptional()
   @IsBoolean()
@@ -368,6 +494,26 @@ export class CreateAidApplicationDto {
   @IsEnum(AidRequestType)
   requested_aid_type?: AidRequestType;
 
+  /** Education-aid intake payload (history, scholarship, questions). */
+  @IsOptional()
+  @IsObject()
+  education_details?: Record<string, unknown> | null;
+
+  /** Ration-aid intake payload (persons, wheat, duration, questions). */
+  @IsOptional()
+  @IsObject()
+  ration_details?: Record<string, unknown> | null;
+
+  /** Marriage-gift intake payload (dates, nikah, relation, items). */
+  @IsOptional()
+  @IsObject()
+  marriage_gift_details?: Record<string, unknown> | null;
+
+  /** Financial-assistance intake payload (Financial Condition). */
+  @IsOptional()
+  @IsObject()
+  financial_assistance_details?: Record<string, unknown> | null;
+
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsInt()
@@ -406,6 +552,22 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsEnum(AidRequestType)
   requested_aid_type?: AidRequestType;
+
+  @IsOptional()
+  @IsObject()
+  education_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  ration_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  marriage_gift_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  financial_assistance_details?: Record<string, unknown> | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)

@@ -89,6 +89,50 @@ export class AidApplicationsController {
     });
   }
 
+  @Post("documents/upload")
+  @RequiredPermissions([
+    ...AID_APPLICATIONS_CREATE_GUARD,
+    ...AID_APPLICATIONS_UPDATE_GUARD,
+    ...AID_PEOPLE_UPDATE_GUARD,
+  ])
+  @UseInterceptors(FileInterceptor("file", uploadOptions))
+  async uploadLooseDocument(
+    @UploadedFile() file: Express.Multer.File,
+    @Body("context") context: string,
+    @Res() res: Response,
+  ) {
+    if (!file) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "file is required",
+      });
+    }
+    const mime = String(file.mimetype || "").toLowerCase();
+    const name = String(file.originalname || "").toLowerCase();
+    const allowedMime = new Set([
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+    ]);
+    const allowedExt = /\.(jpe?g|png|webp)$/;
+    if (!allowedMime.has(mime) && !allowedExt.test(name)) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "Only JPG, JPEG, PNG, or WEBP images are allowed",
+      });
+    }
+    const data = await this.applicationsService.uploadLooseDocument(
+      file,
+      context || "necta",
+    );
+    return res.status(HttpStatus.CREATED).json({
+      success: true,
+      message: "Document uploaded",
+      data,
+    });
+  }
+
   @Get("person/:personId/attachments")
   @RequiredPermissions([...AID_PEOPLE_VIEW_GUARD])
   async personAttachments(
