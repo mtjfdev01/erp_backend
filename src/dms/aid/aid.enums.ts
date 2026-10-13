@@ -24,6 +24,27 @@ export enum AidEducationLevel {
   OTHER = "other",
 }
 
+/** Top-level literacy branch (Educated / UnEducated). */
+export enum AidLiteracyStatus {
+  EDUCATED = "educated",
+  UNEDUCATED = "uneducated",
+}
+
+/**
+ * Second-level literacy/occupation category under literacy_status.
+ * Educated: student | job | self_employed | business | others
+ * Uneducated: skilled_laborer | laborer | self_employed | others
+ */
+export enum AidLiteracyCategory {
+  STUDENT = "student",
+  JOB = "job",
+  SELF_EMPLOYED = "self_employed",
+  BUSINESS = "business",
+  SKILLED_LABORER = "skilled_laborer",
+  LABORER = "laborer",
+  OTHERS = "others",
+}
+
 export enum AidHouseholdRole {
   HEAD = "head",
   SPOUSE = "spouse",
@@ -68,11 +89,20 @@ export enum AidWriterRelation {
 }
 
 export enum AidRequestType {
+  HEALTH = "health",
+  EDUCATION = "education",
+  CLEAN_WATER = "clean_water",
+  APNA_GHAR = "apna_ghar",
+  DISASTER_RELIEF = "disaster_relief",
+  KASB_SKILL_DEVELOPMENT = "kasb_skill_development",
+  SEEDS_OF_CHANGE = "seeds_of_change",
+  AAS_LAB_DIAGNOSTICS = "aas_lab_diagnostics",
+  COMMUNITY_SERVICES = "community_services",
+  OTHER = "other",
+  /** @deprecated legacy values kept for existing rows */
   CASH = "cash",
   RATION = "ration",
   MEDICAL = "medical",
-  EDUCATION = "education",
-  OTHER = "other",
 }
 
 /** Overall application pipeline (list filter source of truth). */

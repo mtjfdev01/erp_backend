@@ -36,12 +36,16 @@ export const AID_PEOPLE_DELETE_GUARD = [`${PEOPLE}.delete`, ...STAFF] as const;
 export const AID_APPLICATIONS_LIST_GUARD = [
   `${APPS}.list_view`,
   `${APPS}.view`,
+  `${APPS}.ceo_approve`,
+  `${APPS}.deliver`,
   ...STAFF,
 ] as const;
 
 export const AID_APPLICATIONS_VIEW_GUARD = [
   `${APPS}.view`,
   `${APPS}.list_view`,
+  `${APPS}.ceo_approve`,
+  `${APPS}.deliver`,
   ...STAFF,
 ] as const;
 
@@ -60,16 +64,14 @@ export const AID_APPLICATIONS_DELETE_GUARD = [
   ...STAFF,
 ] as const;
 
-/** CEO approve / reject after verification */
+/** CEO approve / reject after verification (ceo_approve required; not generic update). */
 export const AID_APPLICATIONS_CEO_GUARD = [
   `${APPS}.ceo_approve`,
-  `${APPS}.update`,
   ...STAFF,
 ] as const;
 
 /** Mark delivery after successful CEO approval */
 export const AID_APPLICATIONS_DELIVER_GUARD = [
   `${APPS}.deliver`,
-  `${APPS}.update`,
   ...STAFF,
 ] as const;

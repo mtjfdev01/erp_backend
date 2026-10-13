@@ -9,6 +9,7 @@ import {
 import { Donation } from "../entities/donation.entity";
 import { StripeService } from "../stripe.service";
 import { resolveRecurringReferrerUserId } from "./recurring-referrer.util";
+import { RecurringDonationsLedgerService } from "./recurring-donations-ledger.service";
 
 export interface RecurringDonationWebhookResult {
   handled: boolean;
@@ -27,7 +28,27 @@ export class RecurringDonationsStripeService {
     @InjectRepository(Donation)
     private readonly donationRepository: Repository<Donation>,
     private readonly stripeService: StripeService,
+    private readonly ledgerService: RecurringDonationsLedgerService,
   ) {}
+
+  /**
+   * Skip creating a second open subscription for the same donor (Stripe webhooks).
+   * Returns the existing open row when blocked.
+   */
+  private async skipIfDonorHasOpenSubscription(
+    donorId: number | null | undefined,
+  ): Promise<RecurringDonation | null> {
+    const id = Number(donorId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const existing =
+      await this.ledgerService.findOpenSubscriptionForDonor(id);
+    if (existing) {
+      this.logger.warn(
+        `Skipping Stripe subscription create: donor ${id} already has open recurring subscription #${existing.id}`,
+      );
+    }
+    return existing;
+  }
 
   /**
    * Stripe recurring handler — additive only; does not replace donations.service webhook logic.
@@ -127,6 +148,18 @@ export class RecurringDonationsStripeService {
     }
 
     const donation = await this.loadInitialDonation(donationId);
+    const donorAlreadyOpen = await this.skipIfDonorHasOpenSubscription(
+      donation?.donor_id,
+    );
+    if (donorAlreadyOpen) {
+      return {
+        handled: true,
+        action: "skipped_duplicate_donor_subscription",
+        recurringDonationId: donorAlreadyOpen.id,
+        initialDonationId: donorAlreadyOpen.initial_donation_id ?? donationId,
+      };
+    }
+
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
     const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
 
@@ -201,6 +234,18 @@ export class RecurringDonationsStripeService {
 
     if (await this.eventAlreadyProcessed(event.id)) {
       return { handled: true, action: "duplicate_event" };
+    }
+
+    const donorAlreadyOpen = await this.skipIfDonorHasOpenSubscription(
+      donation.donor_id,
+    );
+    if (donorAlreadyOpen) {
+      return {
+        handled: true,
+        action: "skipped_duplicate_donor_subscription",
+        recurringDonationId: donorAlreadyOpen.id,
+        initialDonationId: donorAlreadyOpen.initial_donation_id ?? donationId,
+      };
     }
 
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
@@ -420,6 +465,10 @@ export class RecurringDonationsStripeService {
   ): Promise<void> {
     const donation = await this.loadInitialDonation(donationId);
     if (!donation) return;
+    const donorAlreadyOpen = await this.skipIfDonorHasOpenSubscription(
+      donation.donor_id,
+    );
+    if (donorAlreadyOpen) return;
     const billing = await this.fetchSubscriptionBilling(subscriptionId);
     const schedule = await this.fetchSubscriptionScheduleMeta(subscriptionId);
     const referredBy = await resolveRecurringReferrerUserId(

@@ -8,6 +8,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  ValidateIf,
 } from "class-validator";
 import {
   AidAttachmentContext,
@@ -16,6 +17,8 @@ import {
   AidEducationLevel,
   AidHouseholdRole,
   AidKinshipRelation,
+  AidLiteracyCategory,
+  AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
   AidRequestType,
@@ -60,8 +63,40 @@ export class CreateAidPersonDto {
   education_level?: AidEducationLevel | null;
 
   @IsOptional()
+  @IsEnum(AidLiteracyStatus)
+  literacy_status?: AidLiteracyStatus | null;
+
+  @IsOptional()
+  @IsEnum(AidLiteracyCategory)
+  literacy_category?: AidLiteracyCategory | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  student_class?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  student_class_type?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  student_class_name?: string | null;
+
+  @IsOptional()
   @IsString()
   monthly_income?: string | number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_disability?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  disability_type?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -128,8 +163,40 @@ export class UpdateAidPersonDto {
   education_level?: AidEducationLevel | null;
 
   @IsOptional()
+  @IsEnum(AidLiteracyStatus)
+  literacy_status?: AidLiteracyStatus | null;
+
+  @IsOptional()
+  @IsEnum(AidLiteracyCategory)
+  literacy_category?: AidLiteracyCategory | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  student_class?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  student_class_type?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  student_class_name?: string | null;
+
+  @IsOptional()
   @IsString()
   monthly_income?: string | number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  has_disability?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  disability_type?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -277,6 +344,7 @@ export class CreateAidApplicationDto {
   requested_aid_type?: AidRequestType;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsInt()
   assigned_to_user_id?: number | null;
 
@@ -315,6 +383,7 @@ export class UpdateAidApplicationDto {
   requested_aid_type?: AidRequestType;
 
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsInt()
   assigned_to_user_id?: number | null;
 

@@ -2,6 +2,8 @@ import { Column, Entity } from "typeorm";
 import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import {
   AidEducationLevel,
+  AidLiteracyCategory,
+  AidLiteracyStatus,
   AidMaritalStatus,
   AidPersonGender,
 } from "../aid.enums";
@@ -48,9 +50,43 @@ export class AidPerson extends BaseEntity {
   })
   education_level: AidEducationLevel | null;
 
+  /** Literacy tree root: educated | uneducated. */
+  @Column({
+    type: "enum",
+    enum: AidLiteracyStatus,
+    nullable: true,
+    default: null,
+  })
+  literacy_status: AidLiteracyStatus | null;
+
+  /** Literacy tree leaf category (student, job, laborer, …). */
+  @Column({
+    type: "enum",
+    enum: AidLiteracyCategory,
+    nullable: true,
+    default: null,
+  })
+  literacy_category: AidLiteracyCategory | null;
+
+  /** Student path: class / type of class / editable class name. */
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  student_class: string | null;
+
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  student_class_type: string | null;
+
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  student_class_name: string | null;
+
   /** Approximate monthly household/personal income (PKR), optional. */
   @Column({ type: "numeric", precision: 12, scale: 2, nullable: true, default: null })
   monthly_income: string | null;
+
+  @Column({ type: "boolean", default: false })
+  has_disability: boolean;
+
+  @Column({ type: "varchar", length: 200, nullable: true, default: null })
+  disability_type: string | null;
 
   @Column({ type: "boolean", default: true })
   is_alive: boolean;

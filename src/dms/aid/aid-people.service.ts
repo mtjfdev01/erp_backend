@@ -87,7 +87,29 @@ export class AidPeopleService {
       occupation:
         dto.occupation !== undefined ? dto.occupation?.trim() || null : undefined,
       education_level: dto.education_level !== undefined ? dto.education_level : undefined,
+      literacy_status:
+        dto.literacy_status !== undefined ? dto.literacy_status : undefined,
+      literacy_category:
+        dto.literacy_category !== undefined ? dto.literacy_category : undefined,
+      student_class:
+        dto.student_class !== undefined
+          ? dto.student_class?.trim() || null
+          : undefined,
+      student_class_type:
+        dto.student_class_type !== undefined
+          ? dto.student_class_type?.trim() || null
+          : undefined,
+      student_class_name:
+        dto.student_class_name !== undefined
+          ? dto.student_class_name?.trim() || null
+          : undefined,
       monthly_income: income === undefined ? undefined : income,
+      has_disability:
+        dto.has_disability !== undefined ? !!dto.has_disability : undefined,
+      disability_type:
+        dto.disability_type !== undefined
+          ? dto.disability_type?.trim() || null
+          : undefined,
       is_alive: dto.is_alive !== undefined ? dto.is_alive : undefined,
       health_notes:
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
@@ -111,7 +133,14 @@ export class AidPeopleService {
       marital_status: mapped.marital_status ?? null,
       occupation: mapped.occupation ?? null,
       education_level: mapped.education_level ?? null,
+      literacy_status: mapped.literacy_status ?? null,
+      literacy_category: mapped.literacy_category ?? null,
+      student_class: mapped.student_class ?? null,
+      student_class_type: mapped.student_class_type ?? null,
+      student_class_name: mapped.student_class_name ?? null,
       monthly_income: mapped.monthly_income ?? null,
+      has_disability: mapped.has_disability === true,
+      disability_type: mapped.disability_type ?? null,
       is_alive: mapped.is_alive !== false,
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
@@ -377,7 +406,28 @@ export class AidPeopleService {
     if (mapped.marital_status !== undefined) person.marital_status = mapped.marital_status;
     if (mapped.occupation !== undefined) person.occupation = mapped.occupation;
     if (mapped.education_level !== undefined) person.education_level = mapped.education_level;
+    if (mapped.literacy_status !== undefined) {
+      person.literacy_status = mapped.literacy_status;
+    }
+    if (mapped.literacy_category !== undefined) {
+      person.literacy_category = mapped.literacy_category;
+    }
+    if (mapped.student_class !== undefined) {
+      person.student_class = mapped.student_class;
+    }
+    if (mapped.student_class_type !== undefined) {
+      person.student_class_type = mapped.student_class_type;
+    }
+    if (mapped.student_class_name !== undefined) {
+      person.student_class_name = mapped.student_class_name;
+    }
     if (mapped.monthly_income !== undefined) person.monthly_income = mapped.monthly_income;
+    if (mapped.has_disability !== undefined) {
+      person.has_disability = mapped.has_disability;
+    }
+    if (mapped.disability_type !== undefined) {
+      person.disability_type = mapped.disability_type;
+    }
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive;
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;
     if (mapped.address !== undefined) person.address = mapped.address;

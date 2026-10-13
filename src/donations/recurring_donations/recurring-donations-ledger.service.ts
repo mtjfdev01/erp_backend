@@ -50,6 +50,9 @@ const SORTABLE_FIELDS = new Set([
   "billing_interval",
 ]);
 
+/** Open subscription statuses — donor may have at most one of these. */
+const OPEN_RECURRING_SUBSCRIPTION_STATUSES = ["active", "past_due"] as const;
+
 @Injectable()
 export class RecurringDonationsLedgerService {
   private readonly logger = new Logger(RecurringDonationsLedgerService.name);
@@ -551,6 +554,63 @@ export class RecurringDonationsLedgerService {
   }
 
   /**
+   * Find another open (active / past_due) subscription for this donor.
+   * Used to enforce one open recurring subscription per donor.
+   */
+  async findOpenSubscriptionForDonor(
+    donorId: number,
+    excludeSubscriptionId?: number | null,
+  ): Promise<RecurringDonation | null> {
+    if (!Number.isFinite(donorId) || donorId <= 0) return null;
+    const qb = this.recurringDonationRepo
+      .createQueryBuilder("rd")
+      .where("rd.donor_id = :donorId", { donorId })
+      .andWhere("rd.record_type = :recordType", { recordType: "subscription" })
+      .andWhere("rd.is_archived = false")
+      .andWhere("rd.status IN (:...statuses)", {
+        statuses: [...OPEN_RECURRING_SUBSCRIPTION_STATUSES],
+      })
+      .orderBy("rd.id", "ASC")
+      .take(1);
+    if (
+      excludeSubscriptionId != null &&
+      Number.isFinite(Number(excludeSubscriptionId)) &&
+      Number(excludeSubscriptionId) > 0
+    ) {
+      qb.andWhere("rd.id != :excludeId", {
+        excludeId: Number(excludeSubscriptionId),
+      });
+    }
+    return qb.getOne();
+  }
+
+  /**
+   * Throws if the donor already has an open recurring subscription.
+   */
+  async assertNoOtherOpenSubscriptionForDonor(
+    donorId: number | null | undefined,
+    excludeSubscriptionId?: number | null,
+  ): Promise<void> {
+    const id = Number(donorId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const existing = await this.findOpenSubscriptionForDonor(
+      id,
+      excludeSubscriptionId,
+    );
+    if (existing) {
+      throw new BadRequestException(
+        `This donor already has an active recurring subscription (#${existing.id}). Cancel or archive it before creating another.`,
+      );
+    }
+  }
+
+  private isOpenSubscriptionStatus(status: string | null | undefined): boolean {
+    return OPEN_RECURRING_SUBSCRIPTION_STATUSES.includes(
+      String(status || "").toLowerCase() as (typeof OPEN_RECURRING_SUBSCRIPTION_STATUSES)[number],
+    );
+  }
+
+  /**
    * Staff Add: create a non-Stripe subscription row on the Recurring Donations ledger.
    * Stripe subscriptions continue to be created only via checkout/webhooks.
    */
@@ -627,6 +687,11 @@ export class RecurringDonationsLedgerService {
         );
       }
       initialDonationId = donationId;
+    }
+
+    const nextStatus = String(dto.status || "active").toLowerCase();
+    if (this.isOpenSubscriptionStatus(nextStatus)) {
+      await this.assertNoOtherOpenSubscriptionForDonor(donorId);
     }
 
     // Empty start mode / start date → same_date + today (PKT)
@@ -1295,6 +1360,12 @@ export class RecurringDonationsLedgerService {
       return subscription;
     }
 
+    const nextDonorId = patch.donor_id ?? subscription.donor_id;
+    const nextStatus = String(patch.status ?? subscription.status ?? "").toLowerCase();
+    if (nextDonorId && this.isOpenSubscriptionStatus(nextStatus)) {
+      await this.assertNoOtherOpenSubscriptionForDonor(nextDonorId, id);
+    }
+
     if (userId && userId > 0) {
       (patch as any).updated_by = { id: userId };
     }
@@ -1415,6 +1486,18 @@ export class RecurringDonationsLedgerService {
       this.donationRepository,
       { donationId: params.donationId, donorId: params.donorId },
     );
+
+    // One open subscription per donor — reuse existing instead of creating a duplicate
+    // (donation create has already succeeded; do not fail the payment path).
+    const openForDonor = await this.findOpenSubscriptionForDonor(
+      Number(params.donorId),
+    );
+    if (openForDonor) {
+      this.logger.warn(
+        `Donor ${params.donorId} already has open recurring subscription #${openForDonor.id}; skipping new subscription for donation ${params.donationId}`,
+      );
+      return openForDonor;
+    }
 
     const row = this.recurringDonationRepo.create({
       record_type: "subscription",
