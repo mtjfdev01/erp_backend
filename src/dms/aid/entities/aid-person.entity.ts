@@ -17,6 +17,10 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 200 })
   full_name: string;
 
+  /** Father / husband name (Urdu or English) — Family Head personal card. */
+  @Column({ type: "varchar", length: 200, nullable: true, default: null })
+  father_or_husband_name: string | null;
+
   /** Unique when present; PostgreSQL allows multiple NULLs. */
   @Column({ type: "varchar", length: 15, nullable: true, unique: true, default: null })
   cnic: string | null;
@@ -43,12 +47,16 @@ export class AidPerson extends BaseEntity {
   })
   marital_status: AidMaritalStatus | null;
 
-  /** Vulnerability category (Poor, Divorced, Widow, Orphan, …). */
-  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  /** Vulnerability category(ies) — single or comma-separated multi-select. */
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
   vulnerability: string | null;
 
   @Column({ type: "varchar", length: 120, nullable: true, default: null })
   occupation: string | null;
+
+  /** Dependency within household (e.g. dependent_on_family_head). */
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  household_dependency: string | null;
 
   @Column({
     type: "enum",

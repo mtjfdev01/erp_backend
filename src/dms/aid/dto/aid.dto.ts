@@ -38,6 +38,11 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  father_or_husband_name?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(15)
   cnic?: string | null;
 
@@ -60,13 +65,18 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(80)
+  @MaxLength(255)
   vulnerability?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(120)
   occupation?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  household_dependency?: string | null;
 
   @IsOptional()
   @IsEnum(AidEducationLevel)
@@ -216,6 +226,11 @@ export class UpdateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  father_or_husband_name?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(15)
   cnic?: string | null;
 
@@ -238,13 +253,18 @@ export class UpdateAidPersonDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(80)
+  @MaxLength(255)
   vulnerability?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(120)
   occupation?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  household_dependency?: string | null;
 
   @IsOptional()
   @IsEnum(AidEducationLevel)

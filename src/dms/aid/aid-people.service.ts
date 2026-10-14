@@ -113,6 +113,10 @@ export class AidPeopleService {
     const numericField = (v: string | number | null | undefined) =>
       v === undefined || v === null || v === "" ? undefined : String(v);
     return {
+      father_or_husband_name:
+        dto.father_or_husband_name !== undefined
+          ? dto.father_or_husband_name?.trim() || null
+          : undefined,
       phone: dto.phone !== undefined ? dto.phone?.trim() || null : undefined,
       gender: dto.gender !== undefined ? dto.gender : undefined,
       date_of_birth: dto.date_of_birth !== undefined ? dto.date_of_birth || null : undefined,
@@ -123,6 +127,10 @@ export class AidPeopleService {
           : undefined,
       occupation:
         dto.occupation !== undefined ? dto.occupation?.trim() || null : undefined,
+      household_dependency:
+        dto.household_dependency !== undefined
+          ? dto.household_dependency?.trim() || null
+          : undefined,
       education_level: dto.education_level !== undefined ? dto.education_level : undefined,
       literacy_status:
         dto.literacy_status !== undefined ? dto.literacy_status : undefined,
@@ -208,6 +216,7 @@ export class AidPeopleService {
     const mapped = this.mapPersonFields(dto);
     const row = this.personRepo.create({
       full_name: dto.full_name.trim(),
+      father_or_husband_name: mapped.father_or_husband_name ?? null,
       cnic,
       phone: mapped.phone ?? null,
       gender: mapped.gender ?? null,
@@ -215,6 +224,7 @@ export class AidPeopleService {
       marital_status: mapped.marital_status ?? null,
       vulnerability: mapped.vulnerability ?? null,
       occupation: mapped.occupation ?? null,
+      household_dependency: mapped.household_dependency ?? null,
       education_level: mapped.education_level ?? null,
       literacy_status: mapped.literacy_status ?? null,
       literacy_category: mapped.literacy_category ?? null,
@@ -504,12 +514,18 @@ export class AidPeopleService {
     }
     if (dto.full_name !== undefined) person.full_name = dto.full_name.trim();
     const mapped = this.mapPersonFields(dto);
+    if (mapped.father_or_husband_name !== undefined) {
+      person.father_or_husband_name = mapped.father_or_husband_name;
+    }
     if (mapped.phone !== undefined) person.phone = mapped.phone;
     if (mapped.gender !== undefined) person.gender = mapped.gender;
     if (mapped.date_of_birth !== undefined) person.date_of_birth = mapped.date_of_birth;
     if (mapped.marital_status !== undefined) person.marital_status = mapped.marital_status;
     if (mapped.vulnerability !== undefined) person.vulnerability = mapped.vulnerability;
     if (mapped.occupation !== undefined) person.occupation = mapped.occupation;
+    if (mapped.household_dependency !== undefined) {
+      person.household_dependency = mapped.household_dependency;
+    }
     if (mapped.education_level !== undefined) person.education_level = mapped.education_level;
     if (mapped.literacy_status !== undefined) {
       person.literacy_status = mapped.literacy_status;
