@@ -9,12 +9,17 @@ import {
 import {
   CeoComplaintCategory,
   CeoComplaintDepartment,
+  CeoComplaintEntryKind,
   CeoComplaintOrganization,
   CeoComplaintStatus,
   CeoComplainantType,
 } from "../ceo-complaints.constants";
 
 export class CreateCeoComplaintDto {
+  @IsOptional()
+  @IsEnum(CeoComplaintEntryKind)
+  entry_kind?: CeoComplaintEntryKind;
+
   @IsEnum(CeoComplaintOrganization)
   organization: CeoComplaintOrganization;
 
@@ -40,8 +45,12 @@ export class CreateCeoComplaintDto {
   @IsEnum(CeoComplaintDepartment)
   department: CeoComplaintDepartment;
 
+  /** Required for complaints; omitted for issues. */
+  @ValidateIf(
+    (o) => (o.entry_kind || CeoComplaintEntryKind.COMPLAINT) !== CeoComplaintEntryKind.ISSUE,
+  )
   @IsEnum(CeoComplaintCategory)
-  category: CeoComplaintCategory;
+  category?: CeoComplaintCategory;
 
   @IsOptional()
   @IsString()

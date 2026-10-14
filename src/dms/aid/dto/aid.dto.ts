@@ -60,6 +60,11 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(80)
+  vulnerability?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(120)
   occupation?: string | null;
 
@@ -230,6 +235,11 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsEnum(AidMaritalStatus)
   marital_status?: AidMaritalStatus | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  vulnerability?: string | null;
 
   @IsOptional()
   @IsString()
@@ -514,6 +524,16 @@ export class CreateAidApplicationDto {
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
 
+  /** Zakat Permission Letter (Urdu/English) — all applications. */
+  @IsOptional()
+  @IsObject()
+  zakat_permission?: Record<string, unknown> | null;
+
+  /** Consent Form (کنسنٹ فارم) — all applications. */
+  @IsOptional()
+  @IsObject()
+  consent_form?: Record<string, unknown> | null;
+
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsInt()
@@ -568,6 +588,14 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  zakat_permission?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  consent_form?: Record<string, unknown> | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)

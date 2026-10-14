@@ -117,6 +117,10 @@ export class AidPeopleService {
       gender: dto.gender !== undefined ? dto.gender : undefined,
       date_of_birth: dto.date_of_birth !== undefined ? dto.date_of_birth || null : undefined,
       marital_status: dto.marital_status !== undefined ? dto.marital_status : undefined,
+      vulnerability:
+        dto.vulnerability !== undefined
+          ? dto.vulnerability?.trim() || null
+          : undefined,
       occupation:
         dto.occupation !== undefined ? dto.occupation?.trim() || null : undefined,
       education_level: dto.education_level !== undefined ? dto.education_level : undefined,
@@ -209,6 +213,7 @@ export class AidPeopleService {
       gender: mapped.gender ?? null,
       date_of_birth: mapped.date_of_birth ?? null,
       marital_status: mapped.marital_status ?? null,
+      vulnerability: mapped.vulnerability ?? null,
       occupation: mapped.occupation ?? null,
       education_level: mapped.education_level ?? null,
       literacy_status: mapped.literacy_status ?? null,
@@ -503,6 +508,7 @@ export class AidPeopleService {
     if (mapped.gender !== undefined) person.gender = mapped.gender;
     if (mapped.date_of_birth !== undefined) person.date_of_birth = mapped.date_of_birth;
     if (mapped.marital_status !== undefined) person.marital_status = mapped.marital_status;
+    if (mapped.vulnerability !== undefined) person.vulnerability = mapped.vulnerability;
     if (mapped.occupation !== undefined) person.occupation = mapped.occupation;
     if (mapped.education_level !== undefined) person.education_level = mapped.education_level;
     if (mapped.literacy_status !== undefined) {

@@ -43,6 +43,10 @@ export class AidPerson extends BaseEntity {
   })
   marital_status: AidMaritalStatus | null;
 
+  /** Vulnerability category (Poor, Divorced, Widow, Orphan, …). */
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  vulnerability: string | null;
+
   @Column({ type: "varchar", length: 120, nullable: true, default: null })
   occupation: string | null;
 

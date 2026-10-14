@@ -137,6 +137,8 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details ?? null
           : null,
+      zakat_permission: dto.zakat_permission ?? null,
+      consent_form: dto.consent_form ?? null,
       status: AidApplicationStatus.SUBMITTED,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
@@ -607,6 +609,12 @@ export class AidApplicationsService {
         AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details
           : null;
+    }
+    if (dto.zakat_permission !== undefined) {
+      app.zakat_permission = dto.zakat_permission;
+    }
+    if (dto.consent_form !== undefined) {
+      app.consent_form = dto.consent_form;
     }
     if (dto.assigned_to_user_id !== undefined) {
       app.assigned_to_user_id = dto.assigned_to_user_id;

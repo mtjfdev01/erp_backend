@@ -87,6 +87,18 @@ export class AidApplication extends BaseEntity {
   @Column({ type: "jsonb", nullable: true, default: null })
   financial_assistance_details: Record<string, unknown> | null;
 
+  /**
+   * Zakat Permission Letter (اجازت نامہ برائے زکوٰۃ) — all aid types.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  zakat_permission: Record<string, unknown> | null;
+
+  /**
+   * Media / donor Consent Form (کنسنٹ فارم) — all aid types.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  consent_form: Record<string, unknown> | null;
+
   @Column({
     type: "enum",
     enum: AidApplicationStatus,

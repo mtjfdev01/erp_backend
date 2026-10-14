@@ -10,6 +10,7 @@ import { CreateCeoComplaintDto } from "./dto/create-ceo-complaint.dto";
 import {
   ASLAB_BRANCHES,
   CATEGORY_PRIORITY_MAP,
+  CeoComplaintEntryKind,
   CeoComplaintOrganization,
   CeoComplaintStatus,
   CeoComplaintSubmissionChannel,
@@ -24,6 +25,12 @@ export class CeoComplaintsService {
     private readonly repo: Repository<CeoComplaint>,
   ) {}
 
+  private resolveEntryKind(dto: CreateCeoComplaintDto): CeoComplaintEntryKind {
+    return dto.entry_kind === CeoComplaintEntryKind.ISSUE
+      ? CeoComplaintEntryKind.ISSUE
+      : CeoComplaintEntryKind.COMPLAINT;
+  }
+
   private validatePayload(dto: CreateCeoComplaintDto) {
     if (dto.organization === CeoComplaintOrganization.ASLAB) {
       const branch = String(dto.branch || "").trim();
@@ -36,13 +43,17 @@ export class CeoComplaintsService {
       }
     }
 
-    if (!CATEGORY_PRIORITY_MAP[dto.category]) {
-      throw new BadRequestException("Invalid complaint type");
+    const kind = this.resolveEntryKind(dto);
+    if (kind === CeoComplaintEntryKind.COMPLAINT) {
+      if (!dto.category || !CATEGORY_PRIORITY_MAP[dto.category]) {
+        throw new BadRequestException("Invalid complaint type");
+      }
     }
   }
 
-  private resolvePriority(category: CreateCeoComplaintDto["category"]) {
-    return CATEGORY_PRIORITY_MAP[category];
+  private resolvePriority(category: CreateCeoComplaintDto["category"] | null) {
+    if (!category) return null;
+    return CATEGORY_PRIORITY_MAP[category] ?? null;
   }
 
   private async createUniqueNumber(): Promise<string> {
@@ -60,9 +71,12 @@ export class CeoComplaintsService {
   async createPublic(dto: CreateCeoComplaintDto) {
     this.validatePayload(dto);
     const complaint_number = await this.createUniqueNumber();
+    const entry_kind = this.resolveEntryKind(dto);
+    const isIssue = entry_kind === CeoComplaintEntryKind.ISSUE;
 
     const row = this.repo.create({
       complaint_number,
+      entry_kind,
       organization: dto.organization,
       branch:
         dto.organization === CeoComplaintOrganization.ASLAB
@@ -72,9 +86,9 @@ export class CeoComplaintsService {
       complainant_name: dto.complainant_name?.trim() || null,
       contact_number: dto.contact_number?.trim() || null,
       department: dto.department,
-      category: dto.category,
-      priority: this.resolvePriority(dto.category),
-      category_other: dto.category_other?.trim() || null,
+      category: isIssue ? null : dto.category,
+      priority: isIssue ? null : this.resolvePriority(dto.category),
+      category_other: isIssue ? null : dto.category_other?.trim() || null,
       details: dto.details.trim(),
       status: CeoComplaintStatus.SUBMITTED,
       submission_channel: CeoComplaintSubmissionChannel.WEBSITE,
@@ -87,9 +101,12 @@ export class CeoComplaintsService {
   async createStaff(dto: CreateCeoComplaintDto, user?: User | null) {
     this.validatePayload(dto);
     const complaint_number = await this.createUniqueNumber();
+    const entry_kind = this.resolveEntryKind(dto);
+    const isIssue = entry_kind === CeoComplaintEntryKind.ISSUE;
 
     const row = this.repo.create({
       complaint_number,
+      entry_kind,
       organization: dto.organization,
       branch:
         dto.organization === CeoComplaintOrganization.ASLAB
@@ -99,9 +116,9 @@ export class CeoComplaintsService {
       complainant_name: dto.complainant_name?.trim() || null,
       contact_number: dto.contact_number?.trim() || null,
       department: dto.department,
-      category: dto.category,
-      priority: this.resolvePriority(dto.category),
-      category_other: dto.category_other?.trim() || null,
+      category: isIssue ? null : dto.category,
+      priority: isIssue ? null : this.resolvePriority(dto.category),
+      category_other: isIssue ? null : dto.category_other?.trim() || null,
       details: dto.details.trim(),
       status: dto.status || CeoComplaintStatus.SUBMITTED,
       submission_channel: CeoComplaintSubmissionChannel.DMS,
@@ -177,6 +194,11 @@ export class CeoComplaintsService {
       .leftJoinAndSelect("c.created_by", "created_by")
       .where("c.is_archived = false");
 
+    if (filters.entry_kind) {
+      qb.andWhere("c.entry_kind = :entry_kind", {
+        entry_kind: filters.entry_kind,
+      });
+    }
     if (filters.organization) {
       qb.andWhere("c.organization = :organization", {
         organization: filters.organization,
