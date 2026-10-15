@@ -21,7 +21,8 @@ import {
   AID_SUCCESS_STATUSES,
 } from "./aid-leakage.constants";
 import {
-  AID_VERIFICATION_CHECKLIST_ITEMS,
+  assertInvestigationComplete,
+  buildInvestigationItems,
 } from "./aid-verification-checklist";
 import { AidPeopleService } from "./aid-people.service";
 import {
@@ -228,13 +229,38 @@ export class AidApplicationsService {
     });
     const duplicate_flags = await this.buildDuplicateFlags(app);
     const aid_history = await this.buildAidHistory(app);
+
+    let personDetail: Awaited<
+      ReturnType<AidPeopleService["findOneDetailed"]>
+    > | null = null;
+    try {
+      personDetail = await this.peopleService.findOneDetailed(
+        app.beneficiary_person_id,
+      );
+    } catch {
+      personDetail = null;
+    }
+
+    const investigation_items = buildInvestigationItems({
+      beneficiary: personDetail?.person || app.beneficiary,
+      writer: app.writer,
+      writer_relation: app.writer_relation,
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      households: personDetail?.households || null,
+      request_summary: app.request_summary,
+      requested_aid_type: app.requested_aid_type,
+    });
+
     return {
       ...app,
       created_by: this.pickAuditActor((app as any).created_by),
       attachments,
       duplicate_flags,
       aid_history,
-      verification_checklist_items: AID_VERIFICATION_CHECKLIST_ITEMS,
+      investigation_items,
+      /** @deprecated use investigation_items */
+      verification_checklist_items: investigation_items,
     };
   }
 
@@ -538,18 +564,27 @@ export class AidApplicationsService {
     return history;
   }
 
-  private assertChecklistComplete(checklist: Record<string, boolean> | null | undefined) {
-    if (!checklist || typeof checklist !== "object") {
-      throw new BadRequestException("verification_checklist is required");
-    }
-    const missing = AID_VERIFICATION_CHECKLIST_ITEMS.filter(
-      (item) => item.required && checklist[item.key] !== true,
-    ).map((item) => item.label);
-    if (missing.length) {
-      throw new BadRequestException(
-        `Complete all required checklist items before verify: ${missing.join("; ")}`,
+  private async buildInvestigationForApp(app: AidApplication) {
+    let personDetail: Awaited<
+      ReturnType<AidPeopleService["findOneDetailed"]>
+    > | null = null;
+    try {
+      personDetail = await this.peopleService.findOneDetailed(
+        app.beneficiary_person_id,
       );
+    } catch {
+      personDetail = null;
     }
+    return buildInvestigationItems({
+      beneficiary: personDetail?.person || (app as any).beneficiary,
+      writer: (app as any).writer,
+      writer_relation: app.writer_relation,
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      households: personDetail?.households || null,
+      request_summary: app.request_summary,
+      requested_aid_type: app.requested_aid_type,
+    });
   }
 
   async update(id: number, dto: UpdateAidApplicationDto, user?: User) {
@@ -648,7 +683,10 @@ export class AidApplicationsService {
   }
 
   async markVerified(id: number, dto: VerifyAidApplicationDto, user?: User) {
-    const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary", "writer"],
+    });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     if (
       ![
@@ -660,13 +698,19 @@ export class AidApplicationsService {
         "Only submitted/under_review applications can be verified",
       );
     }
-    this.assertChecklistComplete(dto.verification_checklist);
-    await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
-
-    const checklistPayload: Record<string, boolean> = {};
-    for (const item of AID_VERIFICATION_CHECKLIST_ITEMS) {
-      checklistPayload[item.key] = dto.verification_checklist[item.key] === true;
+    const investigationItems = await this.buildInvestigationForApp(app);
+    let checklistPayload: Record<string, unknown>;
+    try {
+      checklistPayload = assertInvestigationComplete(
+        investigationItems,
+        dto.verification_checklist as Record<string, unknown>,
+      );
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message || "Complete investigation before verify",
+      );
     }
+    await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
 
     app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
     app.ceo_approval_status = AidCeoApprovalStatus.PENDING;

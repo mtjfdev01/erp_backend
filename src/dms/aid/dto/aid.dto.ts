@@ -638,9 +638,14 @@ export class VerifyAidApplicationDto {
   @IsString()
   verification_notes?: string | null;
 
-  /** Map of checklist key → checked (true/false). Required items must be true. */
+  /**
+   * Investigation results by item key.
+   * Each value: true | { status: 'verified'|'mismatch'|'not_checked', note?: string }
+   * Required claims: verified, or mismatch with Found note (≥3 chars).
+   * Process rows: must be verified.
+   */
   @IsObject()
-  verification_checklist: Record<string, boolean>;
+  verification_checklist: Record<string, unknown>;
 
   /** Required when beneficiary/household already received aid this year or within cooldown. */
   @IsOptional()

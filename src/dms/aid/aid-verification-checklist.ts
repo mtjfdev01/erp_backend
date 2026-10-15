@@ -1,53 +1,603 @@
-/** Home-visit / field verification checklist (no geo/photo evidence in this phase). */
-export const AID_VERIFICATION_CHECKLIST_ITEMS = [
+/** Field investigation — verify declared intake claims on site. */
+
+export const AID_INVESTIGATION_STATUSES = [
+  "verified",
+  "mismatch",
+  "not_checked",
+] as const;
+
+export type AidInvestigationStatus =
+  (typeof AID_INVESTIGATION_STATUSES)[number];
+
+export type AidInvestigationItemResult = {
+  status: AidInvestigationStatus;
+  note?: string | null;
+};
+
+export type AidInvestigationItem = {
+  key: string;
+  label: string;
+  /** Declared value from intake (null for process rows). */
+  declared: string | null;
+  required: boolean;
+  kind: "claim" | "process";
+  /** Allow mismatch + found note (claims yes; process usually no). */
+  allow_mismatch?: boolean;
+};
+
+type PersonLike = {
+  id?: number;
+  full_name?: string | null;
+  cnic?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  monthly_income?: string | number | null;
+  occupation?: string | null;
+  marital_status?: string | null;
+  has_disability?: boolean;
+  disability_type?: string | null;
+  has_land?: boolean;
+  property_type?: string | null;
+  property_details?: string | null;
+  resident_type?: string | null;
+  resident_ownership_status?: string | null;
+  rented_amount?: string | number | null;
+  house_area_marla?: string | number | null;
+  house_details?: string | null;
+  has_livestock?: boolean;
+  livestock_entries?: Record<string, unknown>[] | null;
+  has_vehicle?: boolean;
+  vehicle_type?: string | null;
+  necta_status?: string | null;
+  bisp_status?: string | null;
+  date_of_birth?: string | Date | null;
+};
+
+type TreePerson = {
+  person?: PersonLike | null;
+  relation_type?: string | null;
+  notes?: string | null;
+};
+
+type FamilyTree = {
+  parents?: TreePerson[];
+  spouse?: TreePerson[];
+  children?: TreePerson[];
+  brothers?: TreePerson[];
+  sisters?: TreePerson[];
+  siblings?: TreePerson[];
+  grandparents?: TreePerson[];
+  grandchildren?: TreePerson[];
+  extended?: TreePerson[];
+};
+
+type HouseholdMember = {
+  role_in_household?: string | null;
+  person?: PersonLike | null;
+};
+
+/** Fixed process rows — always required for verify. */
+export const AID_INVESTIGATION_PROCESS_ITEMS: AidInvestigationItem[] = [
   {
     key: "home_visited",
     label: "Home / field visit completed",
+    declared: null,
     required: true,
-  },
-  {
-    key: "identity_confirmed",
-    label: "Beneficiary identity confirmed (name / CNIC)",
-    required: true,
-  },
-  {
-    key: "address_confirmed",
-    label: "Residence / address confirmed",
-    required: true,
-  },
-  {
-    key: "family_confirmed",
-    label: "Family composition confirmed (parents / spouse / kids / siblings)",
-    required: true,
+    kind: "process",
+    allow_mismatch: false,
   },
   {
     key: "need_verified",
     label: "Aid need verified as genuine",
+    declared: null,
     required: true,
-  },
-  {
-    key: "livelihood_reviewed",
-    label: "Profession / monthly income situation reviewed",
-    required: true,
+    kind: "process",
+    allow_mismatch: false,
   },
   {
     key: "duplicates_reviewed",
     label: "Duplicate / prior-aid flags reviewed",
+    declared: null,
     required: true,
+    kind: "process",
+    allow_mismatch: false,
   },
   {
     key: "eligible_recommended",
     label: "Case recommended for CEO approval",
+    declared: null,
     required: true,
+    kind: "process",
+    allow_mismatch: false,
   },
-] as const;
+];
 
-export type AidVerificationChecklistKey =
-  (typeof AID_VERIFICATION_CHECKLIST_ITEMS)[number]["key"];
+/** @deprecated Use investigation items from buildInvestigationItems / findOne. */
+export const AID_VERIFICATION_CHECKLIST_ITEMS = AID_INVESTIGATION_PROCESS_ITEMS.map(
+  (i) => ({
+    key: i.key,
+    label: i.label,
+    required: i.required,
+    kind: i.kind,
+  }),
+);
 
-export type AidVerificationChecklist = Partial<
-  Record<AidVerificationChecklistKey, boolean>
-> & {
-  /** Optional freeform answers keyed by checklist item */
-  item_notes?: Partial<Record<AidVerificationChecklistKey, string>>;
-};
+function money(v: string | number | null | undefined): string | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return `PKR ${n.toLocaleString("en-PK")}`;
+}
+
+function ageFromDob(dob: string | Date | null | undefined): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const age = Math.floor(
+    (Date.now() - d.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+  );
+  return age >= 0 && age < 130 ? age : null;
+}
+
+function personLabel(p?: PersonLike | null): string {
+  if (!p) return "—";
+  const bits = [p.full_name || "—"];
+  const age = ageFromDob(p.date_of_birth);
+  if (age != null) bits.push(`(${age})`);
+  if (p.cnic) bits.push(p.cnic);
+  return bits.join(", ").replace(", (", " (");
+}
+
+function listPeople(rows?: TreePerson[]): string | null {
+  if (!rows?.length) return null;
+  const labels = rows
+    .map((r) => personLabel(r.person))
+    .filter((s) => s && s !== "—");
+  return labels.length ? labels.join("; ") : null;
+}
+
+function livestockSummary(p?: PersonLike | null): string | null {
+  if (!p?.has_livestock) return p?.has_livestock === false ? "No livestock" : null;
+  const entries = Array.isArray(p.livestock_entries) ? p.livestock_entries : [];
+  if (!entries.length) return "Yes (details not listed)";
+  return entries
+    .map((row) => {
+      const t = String(row.animal_type || "animal");
+      const q = row.quantity != null ? `× ${row.quantity}` : "";
+      const own = row.ownership ? ` · ${row.ownership}` : "";
+      return `${t} ${q}${own}`.trim();
+    })
+    .join("; ");
+}
+
+function vehicleSummary(p?: PersonLike | null): string | null {
+  if (!p?.has_vehicle) return p?.has_vehicle === false ? "No vehicle" : null;
+  return p.vehicle_type
+    ? `Yes · ${String(p.vehicle_type).replace(/_/g, " ")}`
+    : "Yes";
+}
+
+function residentSummary(p?: PersonLike | null): string | null {
+  if (!p?.resident_type) return null;
+  const parts = [String(p.resident_type).replace(/_/g, " ")];
+  if (p.resident_ownership_status) parts.push(String(p.resident_ownership_status));
+  if (p.rented_amount != null && p.rented_amount !== "") {
+    parts.push(`Rent ${money(p.rented_amount)}`);
+  }
+  if (p.house_area_marla != null && p.house_area_marla !== "") {
+    parts.push(`${p.house_area_marla} Marla`);
+  }
+  if (p.house_details) parts.push(String(p.house_details));
+  return parts.join(" · ");
+}
+
+function landSummary(p?: PersonLike | null): string | null {
+  if (!p?.has_land) return p?.has_land === false ? "No land" : null;
+  const parts = ["Yes"];
+  if (p.property_type) parts.push(String(p.property_type).replace(/_/g, " "));
+  if (p.property_details) parts.push(String(p.property_details));
+  return parts.join(" · ");
+}
+
+function pushClaim(
+  items: AidInvestigationItem[],
+  key: string,
+  label: string,
+  declared: string | null | undefined,
+  required = false,
+) {
+  const text = declared == null ? null : String(declared).trim();
+  if (!text) return;
+  items.push({
+    key,
+    label,
+    declared: text,
+    required,
+    kind: "claim",
+    allow_mismatch: true,
+  });
+}
+
+function resolveFamilyHead(
+  beneficiary: PersonLike | null | undefined,
+  familyTree: FamilyTree | null | undefined,
+  households:
+    | ({ members?: HouseholdMember[]; head_person?: PersonLike | null } | null)[]
+    | null
+    | undefined,
+  writerRelation?: string | null,
+  writer?: PersonLike | null,
+): PersonLike | null {
+  for (const hh of households || []) {
+    if (!hh) continue;
+    if (hh.head_person) return hh.head_person;
+    const head = (hh.members || []).find(
+      (m) =>
+        String(m.role_in_household || "").toLowerCase() === "head" && m.person,
+    );
+    if (head?.person) return head.person;
+  }
+  const parents = familyTree?.parents || [];
+  if (parents[0]?.person) return parents[0].person;
+  const rel = String(writerRelation || "").toLowerCase();
+  if (
+    writer &&
+    ["father", "mother", "guardian", "relative", "other", "spouse"].includes(rel)
+  ) {
+    return writer;
+  }
+  return beneficiary || null;
+}
+
+export function buildInvestigationItems(ctx: {
+  beneficiary?: PersonLike | null;
+  writer?: PersonLike | null;
+  writer_relation?: string | null;
+  family_tree?: FamilyTree | null;
+  family_counts?: Record<string, number> | null;
+  households?: { members?: HouseholdMember[] }[] | null;
+  request_summary?: string | null;
+  requested_aid_type?: string | null;
+}): AidInvestigationItem[] {
+  const beneficiary = ctx.beneficiary || null;
+  const familyTree = ctx.family_tree || {};
+  const head = resolveFamilyHead(
+    beneficiary,
+    familyTree,
+    ctx.households,
+    ctx.writer_relation,
+    ctx.writer,
+  );
+  const claims: AidInvestigationItem[] = [];
+
+  if (head) {
+    const idBits = [head.full_name, head.cnic].filter(Boolean).join(" · ");
+    pushClaim(
+      claims,
+      "identity_of_head",
+      "Identity of head",
+      idBits || null,
+      true,
+    );
+  }
+
+  if (beneficiary && beneficiary.id !== head?.id) {
+    const idBits = [beneficiary.full_name, beneficiary.cnic]
+      .filter(Boolean)
+      .join(" · ");
+    pushClaim(
+      claims,
+      "identity_of_beneficiary",
+      "Identity of beneficiary",
+      idBits || null,
+      true,
+    );
+  }
+
+  const addressBits = [
+    beneficiary?.address,
+    beneficiary?.city,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  pushClaim(claims, "address", "Address", addressBits || null, true);
+
+  const hhMembers = new Set<number>();
+  for (const hh of ctx.households || []) {
+    for (const m of hh.members || []) {
+      if (m.person?.id) hhMembers.add(m.person.id);
+    }
+  }
+  const treeCount =
+    (ctx.family_counts?.total_linked || 0) + (beneficiary ? 1 : 0);
+  const size =
+    hhMembers.size > 0
+      ? hhMembers.size
+      : treeCount > 0
+        ? treeCount
+        : null;
+  if (size != null) {
+    pushClaim(
+      claims,
+      "household_size",
+      "Household size",
+      `${size} member${size === 1 ? "" : "s"}`,
+      true,
+    );
+  }
+
+  const incomePerson = head || beneficiary;
+  pushClaim(
+    claims,
+    "monthly_household_income",
+    "Monthly household income",
+    money(incomePerson?.monthly_income),
+    true,
+  );
+
+  pushClaim(
+    claims,
+    "occupation",
+    "Occupation / livelihood",
+    incomePerson?.occupation || beneficiary?.occupation || null,
+    false,
+  );
+
+  const rentPerson = head || beneficiary;
+  if (
+    rentPerson?.resident_type === "rented" ||
+    (rentPerson?.rented_amount != null && rentPerson.rented_amount !== "")
+  ) {
+    pushClaim(
+      claims,
+      "monthly_rent",
+      "Monthly rent",
+      money(rentPerson.rented_amount) || "Rented (amount not stated)",
+      false,
+    );
+  }
+
+  pushClaim(
+    claims,
+    "resident_housing",
+    "Resident / housing",
+    residentSummary(head) || residentSummary(beneficiary),
+    false,
+  );
+
+  pushClaim(
+    claims,
+    "land_property",
+    "Land / property",
+    landSummary(head) || landSummary(beneficiary),
+    false,
+  );
+
+  pushClaim(
+    claims,
+    "livestock",
+    "Livestock",
+    livestockSummary(head) || livestockSummary(beneficiary),
+    false,
+  );
+
+  pushClaim(
+    claims,
+    "vehicle",
+    "Vehicle",
+    vehicleSummary(head) || vehicleSummary(beneficiary),
+    false,
+  );
+
+  const siblings = [
+    ...(familyTree.brothers || []),
+    ...(familyTree.sisters || []),
+    ...(familyTree.siblings || []),
+  ];
+  pushClaim(
+    claims,
+    "siblings",
+    "Siblings",
+    listPeople(siblings),
+    false,
+  );
+
+  pushClaim(
+    claims,
+    "children",
+    "Children",
+    listPeople(familyTree.children),
+    false,
+  );
+
+  pushClaim(
+    claims,
+    "spouse",
+    "Spouse",
+    listPeople(familyTree.spouse),
+    false,
+  );
+
+  const marital = String(beneficiary?.marital_status || "").toLowerCase();
+  if (marital === "widowed") {
+    pushClaim(
+      claims,
+      "spouse_deceased",
+      "Spouse / husband deceased",
+      "Widowed (confirm death certificate / status on site)",
+      false,
+    );
+  }
+
+  const brothersSeparate = (familyTree.brothers || []).filter((b) =>
+    /separat|own home|lives apart|independent/i.test(String(b.notes || "")),
+  );
+  if (brothersSeparate.length) {
+    pushClaim(
+      claims,
+      "brother_lives_separately",
+      "Brother lives separately",
+      brothersSeparate
+        .map((b) => {
+          const name = b.person?.full_name || "Brother";
+          return b.notes ? `${name} — ${b.notes}` : name;
+        })
+        .join("; "),
+      false,
+    );
+  }
+
+  if (beneficiary?.has_disability) {
+    pushClaim(
+      claims,
+      "disability",
+      "Disability",
+      beneficiary.disability_type
+        ? `Yes · ${beneficiary.disability_type}`
+        : "Yes",
+      false,
+    );
+  }
+
+  if (beneficiary?.necta_status || head?.necta_status) {
+    pushClaim(
+      claims,
+      "necta_status",
+      "NECTA status",
+      String(beneficiary?.necta_status || head?.necta_status).replace(
+        /_/g,
+        " ",
+      ),
+      false,
+    );
+  }
+
+  if (beneficiary?.bisp_status || head?.bisp_status) {
+    pushClaim(
+      claims,
+      "bisp_status",
+      "BISP status",
+      String(beneficiary?.bisp_status || head?.bisp_status).replace(/_/g, " "),
+      false,
+    );
+  }
+
+  if (ctx.requested_aid_type || ctx.request_summary) {
+    const aidBits = [
+      ctx.requested_aid_type
+        ? String(ctx.requested_aid_type).replace(/_/g, " ")
+        : null,
+      ctx.request_summary ? String(ctx.request_summary).slice(0, 160) : null,
+    ]
+      .filter(Boolean)
+      .join(" — ");
+    pushClaim(claims, "aid_request", "Aid request declared", aidBits, true);
+  }
+
+  // Fallback identity if somehow nothing else was claimed
+  if (!claims.some((c) => c.key.startsWith("identity"))) {
+    pushClaim(
+      claims,
+      "identity_of_beneficiary",
+      "Identity of beneficiary",
+      beneficiary
+        ? [beneficiary.full_name, beneficiary.cnic].filter(Boolean).join(" · ")
+        : "Not recorded",
+      true,
+    );
+  }
+
+  return [...claims, ...AID_INVESTIGATION_PROCESS_ITEMS];
+}
+
+export function normalizeInvestigationEntry(
+  value: unknown,
+): AidInvestigationItemResult {
+  if (value === true || value === "verified") {
+    return { status: "verified", note: null };
+  }
+  if (value === false || value === "not_checked" || value == null) {
+    return { status: "not_checked", note: null };
+  }
+  if (value === "mismatch") {
+    return { status: "mismatch", note: null };
+  }
+  if (typeof value === "object" && value !== null) {
+    const raw = value as Record<string, unknown>;
+    const statusRaw = String(raw.status || "").toLowerCase();
+    let status: AidInvestigationStatus = "not_checked";
+    if (statusRaw === "verified" || statusRaw === "mismatch") {
+      status = statusRaw;
+    } else if (raw.checked === true || raw.ok === true) {
+      status = "verified";
+    }
+    const note =
+      typeof raw.note === "string"
+        ? raw.note
+        : typeof raw.notes === "string"
+          ? raw.notes
+          : typeof raw.found === "string"
+            ? raw.found
+            : null;
+    return { status, note };
+  }
+  return { status: "not_checked", note: null };
+}
+
+export function isInvestigationItemComplete(
+  item: {
+    key: string;
+    required?: boolean;
+    kind?: string;
+    allow_mismatch?: boolean;
+  },
+  entry: AidInvestigationItemResult,
+): boolean {
+  if (item.kind === "process" || item.allow_mismatch === false) {
+    return entry.status === "verified";
+  }
+  if (!item.required) {
+    if (entry.status === "mismatch") {
+      return String(entry.note || "").trim().length >= 3;
+    }
+    return true;
+  }
+  if (entry.status === "verified") return true;
+  if (entry.status === "mismatch") {
+    return String(entry.note || "").trim().length >= 3;
+  }
+  return false;
+}
+
+export function assertInvestigationComplete(
+  items: AidInvestigationItem[],
+  checklist: Record<string, unknown> | null | undefined,
+): Record<string, AidInvestigationItemResult> {
+  if (!checklist || typeof checklist !== "object") {
+    throw new Error("verification_checklist is required");
+  }
+  const payload: Record<string, AidInvestigationItemResult> = {};
+  const missing: string[] = [];
+  for (const item of items) {
+    const entry = normalizeInvestigationEntry(checklist[item.key]);
+    payload[item.key] = {
+      status: entry.status,
+      note:
+        entry.status === "mismatch"
+          ? String(entry.note || "").trim() || null
+          : entry.note
+            ? String(entry.note).trim()
+            : null,
+    };
+    if (!isInvestigationItemComplete(item, payload[item.key])) {
+      missing.push(item.label);
+    }
+  }
+  if (missing.length) {
+    throw new Error(
+      `Complete investigation before verify: ${missing.join("; ")}. Mismatches need a Found note.`,
+    );
+  }
+  return payload;
+}
