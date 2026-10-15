@@ -72,15 +72,21 @@ export class AidApplicationsController {
   async findAll(
     @Query("search") search: string,
     @Query("status") status: string,
+    @Query("queue") queue: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
+    @Query("sortField") sortField: string,
+    @Query("sortOrder") sortOrder: string,
     @Res() res: Response,
   ) {
     const result = await this.applicationsService.findAll({
       search,
       status,
+      queue,
       page: page ? Number(page) : 1,
       pageSize: pageSize ? Number(pageSize) : 20,
+      sortField,
+      sortOrder,
     });
     return res.status(HttpStatus.OK).json({
       success: true,
@@ -205,8 +211,8 @@ export class AidApplicationsController {
     });
   }
 
+  /** Selection lookup — authenticated only (no module permissions), same as /users/lookup. */
   @Get("lookup")
-  @RequiredPermissions([...AID_APPLICATIONS_LIST_GUARD])
   async lookup(
     @Query("search") search?: string,
     @Query("limit") limit?: string,

@@ -3,7 +3,9 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -11,6 +13,7 @@ import {
   MinLength,
   ValidateIf,
 } from "class-validator";
+import { Type } from "class-transformer";
 import {
   AidAttachmentContext,
   AidCeoApprovalStatus,
@@ -633,6 +636,29 @@ export class RejectAidApplicationDto {
   rejection_reason: string;
 }
 
+export class InvestigationRecommendationDto {
+  @IsIn(["approve_as_requested", "approve_with_changes", "reject"])
+  decision: "approve_as_requested" | "approve_with_changes" | "reject";
+
+  @IsOptional()
+  @IsNumber()
+  amount?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  period_months?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  remarks?: string | null;
+
+  /** Optional found monthly income used for after-visit score. */
+  @IsOptional()
+  @IsNumber()
+  found_monthly_income?: number | null;
+}
+
 export class VerifyAidApplicationDto {
   @IsOptional()
   @IsString()
@@ -646,6 +672,11 @@ export class VerifyAidApplicationDto {
    */
   @IsObject()
   verification_checklist: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
 
   /** Required when beneficiary/household already received aid this year or within cooldown. */
   @IsOptional()

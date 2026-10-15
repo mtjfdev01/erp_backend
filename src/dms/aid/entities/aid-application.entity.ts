@@ -116,6 +116,13 @@ export class AidApplication extends BaseEntity {
   @Column({ type: "jsonb", nullable: true, default: null })
   verification_checklist: Record<string, unknown> | null;
 
+  /**
+   * Investigator recommendation after field visit:
+   * decision, amount, period_months, remarks, vulnerability snapshots.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  investigation_recommendation: Record<string, unknown> | null;
+
   /** Required when approving/verifying despite cooldown or same-year prior success. */
   @Column({ type: "text", nullable: true, default: null })
   leakage_override_reason: string | null;

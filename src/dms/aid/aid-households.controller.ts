@@ -70,8 +70,8 @@ export class AidHouseholdsController {
     });
   }
 
+  /** Selection lookup — authenticated only (no module permissions), same as /users/lookup. */
   @Get("lookup")
-  @RequiredPermissions([...AID_PEOPLE_LIST_GUARD])
   async lookup(
     @Query("search") search?: string,
     @Query("limit") limit?: string,
