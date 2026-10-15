@@ -314,7 +314,10 @@ export class AidApplicationsService {
     const writer = (app as any).writer;
     const households = personDetail?.households || [];
     const familyTree = personDetail?.family_tree || {};
-    const familyCounts = personDetail?.family_counts || {};
+    const familyCounts = (personDetail?.family_counts || {}) as Record<
+      string,
+      number
+    >;
 
     let head =
       households

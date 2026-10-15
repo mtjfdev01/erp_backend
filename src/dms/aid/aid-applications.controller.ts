@@ -247,7 +247,15 @@ export class AidApplicationsController {
   @Get(":id")
   @RequiredPermissions([...AID_APPLICATIONS_VIEW_GUARD])
   async findOne(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.applicationsService.findOne(Number(id));
+    const numId = Number(id);
+    if (!Number.isInteger(numId) || numId <= 0) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "Invalid application id",
+        data: null,
+      });
+    }
+    const data = await this.applicationsService.findOne(numId);
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Application retrieved",
