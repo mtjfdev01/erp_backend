@@ -117,7 +117,21 @@ export class AidPeopleService {
         dto.father_or_husband_name !== undefined
           ? dto.father_or_husband_name?.trim() || null
           : undefined,
+      cnic_expiry:
+        dto.cnic_expiry !== undefined ? dto.cnic_expiry || null : undefined,
+      name_urdu:
+        dto.name_urdu !== undefined ? dto.name_urdu?.trim() || null : undefined,
       phone: dto.phone !== undefined ? dto.phone?.trim() || null : undefined,
+      phone_alternate:
+        dto.phone_alternate !== undefined
+          ? dto.phone_alternate?.trim() || null
+          : undefined,
+      photo_url:
+        dto.photo_url !== undefined ? dto.photo_url?.trim() || null : undefined,
+      photo_name:
+        dto.photo_name !== undefined
+          ? dto.photo_name?.trim() || null
+          : undefined,
       gender: dto.gender !== undefined ? dto.gender : undefined,
       date_of_birth: dto.date_of_birth !== undefined ? dto.date_of_birth || null : undefined,
       marital_status: dto.marital_status !== undefined ? dto.marital_status : undefined,
@@ -205,6 +219,15 @@ export class AidPeopleService {
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
       address: dto.address !== undefined ? dto.address?.trim() || null : undefined,
       city: dto.city !== undefined ? dto.city?.trim() || null : undefined,
+      province:
+        dto.province !== undefined ? dto.province?.trim() || null : undefined,
+      district:
+        dto.district !== undefined ? dto.district?.trim() || null : undefined,
+      tehsil: dto.tehsil !== undefined ? dto.tehsil?.trim() || null : undefined,
+      union_council:
+        dto.union_council !== undefined
+          ? dto.union_council?.trim() || null
+          : undefined,
       notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
       is_active: dto.is_active !== undefined ? dto.is_active : undefined,
     };
@@ -218,7 +241,12 @@ export class AidPeopleService {
       full_name: dto.full_name.trim(),
       father_or_husband_name: mapped.father_or_husband_name ?? null,
       cnic,
+      cnic_expiry: mapped.cnic_expiry ?? null,
+      name_urdu: mapped.name_urdu ?? null,
       phone: mapped.phone ?? null,
+      phone_alternate: mapped.phone_alternate ?? null,
+      photo_url: mapped.photo_url ?? null,
+      photo_name: mapped.photo_name ?? null,
       gender: mapped.gender ?? null,
       date_of_birth: mapped.date_of_birth ?? null,
       marital_status: mapped.marital_status ?? null,
@@ -259,6 +287,10 @@ export class AidPeopleService {
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
       city: mapped.city ?? null,
+      province: mapped.province ?? null,
+      district: mapped.district ?? null,
+      tehsil: mapped.tehsil ?? null,
+      union_council: mapped.union_council ?? null,
       notes: mapped.notes ?? null,
       is_active: mapped.is_active !== false,
       created_by: user || null,
@@ -523,7 +555,14 @@ export class AidPeopleService {
     if (mapped.father_or_husband_name !== undefined) {
       person.father_or_husband_name = mapped.father_or_husband_name;
     }
+    if (mapped.cnic_expiry !== undefined) person.cnic_expiry = mapped.cnic_expiry;
+    if (mapped.name_urdu !== undefined) person.name_urdu = mapped.name_urdu;
     if (mapped.phone !== undefined) person.phone = mapped.phone;
+    if (mapped.phone_alternate !== undefined) {
+      person.phone_alternate = mapped.phone_alternate;
+    }
+    if (mapped.photo_url !== undefined) person.photo_url = mapped.photo_url;
+    if (mapped.photo_name !== undefined) person.photo_name = mapped.photo_name;
     if (mapped.gender !== undefined) person.gender = mapped.gender;
     if (mapped.date_of_birth !== undefined) person.date_of_birth = mapped.date_of_birth;
     if (mapped.marital_status !== undefined) person.marital_status = mapped.marital_status;
@@ -623,6 +662,12 @@ export class AidPeopleService {
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;
     if (mapped.address !== undefined) person.address = mapped.address;
     if (mapped.city !== undefined) person.city = mapped.city;
+    if (mapped.province !== undefined) person.province = mapped.province;
+    if (mapped.district !== undefined) person.district = mapped.district;
+    if (mapped.tehsil !== undefined) person.tehsil = mapped.tehsil;
+    if (mapped.union_council !== undefined) {
+      person.union_council = mapped.union_council;
+    }
     if (mapped.notes !== undefined) person.notes = mapped.notes;
     if (mapped.is_active !== undefined) person.is_active = mapped.is_active;
     person.updated_by = user || null;

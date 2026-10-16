@@ -50,9 +50,33 @@ export class CreateAidPersonDto {
   cnic?: string | null;
 
   @IsOptional()
+  @IsDateString()
+  cnic_expiry?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  name_urdu?: string | null;
+
+  @IsOptional()
   @IsString()
   @MaxLength(30)
   phone?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  phone_alternate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  photo_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  photo_name?: string | null;
 
   @IsOptional()
   @IsEnum(AidPersonGender)
@@ -210,6 +234,26 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(100)
   city?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  province?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  district?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  tehsil?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  union_council?: string | null;
 
   @IsOptional()
   @IsString()
@@ -238,9 +282,33 @@ export class UpdateAidPersonDto {
   cnic?: string | null;
 
   @IsOptional()
+  @IsDateString()
+  cnic_expiry?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  name_urdu?: string | null;
+
+  @IsOptional()
   @IsString()
   @MaxLength(30)
   phone?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  phone_alternate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  photo_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  photo_name?: string | null;
 
   @IsOptional()
   @IsEnum(AidPersonGender)
@@ -398,6 +466,26 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(100)
   city?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  province?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  district?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  tehsil?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  union_council?: string | null;
 
   @IsOptional()
   @IsString()

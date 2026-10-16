@@ -25,8 +25,25 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 15, nullable: true, unique: true, default: null })
   cnic: string | null;
 
+  @Column({ type: "date", nullable: true, default: null })
+  cnic_expiry: string | null;
+
+  /** Full name in Urdu script (optional). */
+  @Column({ type: "varchar", length: 200, nullable: true, default: null })
+  name_urdu: string | null;
+
   @Column({ type: "varchar", length: 30, nullable: true, default: null })
   phone: string | null;
+
+  /** Alternate contact with optional relation note, e.g. "0301-… (son)". */
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  phone_alternate: string | null;
+
+  @Column({ type: "varchar", length: 500, nullable: true, default: null })
+  photo_url: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  photo_name: string | null;
 
   @Column({
     type: "enum",
@@ -190,6 +207,18 @@ export class AidPerson extends BaseEntity {
 
   @Column({ type: "varchar", length: 100, nullable: true, default: null })
   city: string | null;
+
+  @Column({ type: "varchar", length: 100, nullable: true, default: null })
+  province: string | null;
+
+  @Column({ type: "varchar", length: 100, nullable: true, default: null })
+  district: string | null;
+
+  @Column({ type: "varchar", length: 100, nullable: true, default: null })
+  tehsil: string | null;
+
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  union_council: string | null;
 
   @Column({ type: "text", nullable: true, default: null })
   notes: string | null;
