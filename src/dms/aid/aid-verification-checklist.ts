@@ -12,7 +12,17 @@ export type AidInvestigationStatus =
 export type AidInvestigationItemResult = {
   status: AidInvestigationStatus;
   note?: string | null;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_id?: number | null;
 };
+
+/** Which application view tab this claim belongs to (case = all / process). */
+export type AidInvestigationSection =
+  | "case"
+  | "beneficiary"
+  | "family"
+  | "applicant";
 
 export type AidInvestigationItem = {
   key: string;
@@ -23,6 +33,10 @@ export type AidInvestigationItem = {
   kind: "claim" | "process";
   /** Allow mismatch + found note (claims yes; process usually no). */
   allow_mismatch?: boolean;
+  /** View-tab grouping for filtered investigation UI. */
+  section?: AidInvestigationSection;
+  /** Process/claim may require a supporting file (e.g. Site Visit). */
+  accepts_file?: boolean;
 };
 
 type PersonLike = {
@@ -77,15 +91,17 @@ type HouseholdMember = {
   person?: PersonLike | null;
 };
 
-/** Fixed process rows — always required for verify. */
+/** Fixed process rows — always required for verify. Site Visit is first. */
 export const AID_INVESTIGATION_PROCESS_ITEMS: AidInvestigationItem[] = [
   {
-    key: "home_visited",
-    label: "Home / field visit completed",
+    key: "site_visit",
+    label: "Site Visit",
     declared: null,
     required: true,
     kind: "process",
     allow_mismatch: false,
+    section: "case",
+    accepts_file: true,
   },
   {
     key: "need_verified",
@@ -94,6 +110,7 @@ export const AID_INVESTIGATION_PROCESS_ITEMS: AidInvestigationItem[] = [
     required: true,
     kind: "process",
     allow_mismatch: false,
+    section: "case",
   },
   {
     key: "duplicates_reviewed",
@@ -102,6 +119,7 @@ export const AID_INVESTIGATION_PROCESS_ITEMS: AidInvestigationItem[] = [
     required: true,
     kind: "process",
     allow_mismatch: false,
+    section: "case",
   },
   {
     key: "eligible_recommended",
@@ -110,6 +128,7 @@ export const AID_INVESTIGATION_PROCESS_ITEMS: AidInvestigationItem[] = [
     required: true,
     kind: "process",
     allow_mismatch: false,
+    section: "case",
   },
 ];
 
@@ -206,6 +225,7 @@ function pushClaim(
   label: string,
   declared: string | null | undefined,
   required = false,
+  section: AidInvestigationSection = "case",
 ) {
   const text = declared == null ? null : String(declared).trim();
   if (!text) return;
@@ -216,6 +236,7 @@ function pushClaim(
     required,
     kind: "claim",
     allow_mismatch: true,
+    section,
   });
 }
 
@@ -279,6 +300,7 @@ export function buildInvestigationItems(ctx: {
       "Identity of head",
       idBits || null,
       true,
+      "family",
     );
   }
 
@@ -292,6 +314,39 @@ export function buildInvestigationItems(ctx: {
       "Identity of beneficiary",
       idBits || null,
       true,
+      "beneficiary",
+    );
+  }
+
+  const writer = ctx.writer || null;
+  const writerRel = String(ctx.writer_relation || "").toLowerCase();
+  if (
+    writer &&
+    writer.id &&
+    writer.id !== beneficiary?.id &&
+    writer.id !== head?.id
+  ) {
+    const idBits = [writer.full_name, writer.cnic].filter(Boolean).join(" · ");
+    pushClaim(
+      claims,
+      "identity_of_applicant",
+      "Identity of applicant",
+      idBits
+        ? `${idBits}${writerRel ? ` · relation: ${writerRel}` : ""}`
+        : null,
+      true,
+      "applicant",
+    );
+  } else if (writerRel && writerRel !== "self" && head) {
+    pushClaim(
+      claims,
+      "identity_of_applicant",
+      "Identity of applicant",
+      [head.full_name, head.cnic, `relation: ${writerRel}`]
+        .filter(Boolean)
+        .join(" · ") || null,
+      false,
+      "applicant",
     );
   }
 
@@ -301,7 +356,7 @@ export function buildInvestigationItems(ctx: {
   ]
     .filter(Boolean)
     .join(", ");
-  pushClaim(claims, "address", "Address", addressBits || null, true);
+  pushClaim(claims, "address", "Address", addressBits || null, true, "beneficiary");
 
   const hhMembers = new Set<number>();
   for (const hh of ctx.households || []) {
@@ -324,6 +379,7 @@ export function buildInvestigationItems(ctx: {
       "Household size",
       `${size} member${size === 1 ? "" : "s"}`,
       true,
+      "family",
     );
   }
 
@@ -334,6 +390,7 @@ export function buildInvestigationItems(ctx: {
     "Monthly household income",
     money(incomePerson?.monthly_income),
     true,
+    "family",
   );
 
   pushClaim(
@@ -342,6 +399,7 @@ export function buildInvestigationItems(ctx: {
     "Occupation / livelihood",
     incomePerson?.occupation || beneficiary?.occupation || null,
     false,
+    "family",
   );
 
   const rentPerson = head || beneficiary;
@@ -355,6 +413,7 @@ export function buildInvestigationItems(ctx: {
       "Monthly rent",
       money(rentPerson.rented_amount) || "Rented (amount not stated)",
       false,
+      "family",
     );
   }
 
@@ -364,6 +423,7 @@ export function buildInvestigationItems(ctx: {
     "Resident / housing",
     residentSummary(head) || residentSummary(beneficiary),
     false,
+    "family",
   );
 
   pushClaim(
@@ -372,6 +432,7 @@ export function buildInvestigationItems(ctx: {
     "Land / property",
     landSummary(head) || landSummary(beneficiary),
     false,
+    "family",
   );
 
   pushClaim(
@@ -380,6 +441,7 @@ export function buildInvestigationItems(ctx: {
     "Livestock",
     livestockSummary(head) || livestockSummary(beneficiary),
     false,
+    "family",
   );
 
   pushClaim(
@@ -388,6 +450,7 @@ export function buildInvestigationItems(ctx: {
     "Vehicle",
     vehicleSummary(head) || vehicleSummary(beneficiary),
     false,
+    "family",
   );
 
   const siblings = [
@@ -395,13 +458,7 @@ export function buildInvestigationItems(ctx: {
     ...(familyTree.sisters || []),
     ...(familyTree.siblings || []),
   ];
-  pushClaim(
-    claims,
-    "siblings",
-    "Siblings",
-    listPeople(siblings),
-    false,
-  );
+  pushClaim(claims, "siblings", "Siblings", listPeople(siblings), false, "family");
 
   pushClaim(
     claims,
@@ -409,6 +466,7 @@ export function buildInvestigationItems(ctx: {
     "Children",
     listPeople(familyTree.children),
     false,
+    "family",
   );
 
   pushClaim(
@@ -417,6 +475,7 @@ export function buildInvestigationItems(ctx: {
     "Spouse",
     listPeople(familyTree.spouse),
     false,
+    "family",
   );
 
   const marital = String(beneficiary?.marital_status || "").toLowerCase();
@@ -427,6 +486,7 @@ export function buildInvestigationItems(ctx: {
       "Spouse / husband deceased",
       "Widowed (confirm death certificate / status on site)",
       false,
+      "beneficiary",
     );
   }
 
@@ -445,6 +505,7 @@ export function buildInvestigationItems(ctx: {
         })
         .join("; "),
       false,
+      "family",
     );
   }
 
@@ -457,6 +518,7 @@ export function buildInvestigationItems(ctx: {
         ? `Yes · ${beneficiary.disability_type}`
         : "Yes",
       false,
+      "beneficiary",
     );
   }
 
@@ -470,6 +532,7 @@ export function buildInvestigationItems(ctx: {
         " ",
       ),
       false,
+      head?.necta_status ? "family" : "beneficiary",
     );
   }
 
@@ -480,6 +543,7 @@ export function buildInvestigationItems(ctx: {
       "BISP status",
       String(beneficiary?.bisp_status || head?.bisp_status).replace(/_/g, " "),
       false,
+      head?.bisp_status ? "family" : "beneficiary",
     );
   }
 
@@ -492,7 +556,14 @@ export function buildInvestigationItems(ctx: {
     ]
       .filter(Boolean)
       .join(" — ");
-    pushClaim(claims, "aid_request", "Aid request declared", aidBits, true);
+    pushClaim(
+      claims,
+      "aid_request",
+      "Aid request declared",
+      aidBits,
+      true,
+      "case",
+    );
   }
 
   // Fallback identity if somehow nothing else was claimed
@@ -505,10 +576,18 @@ export function buildInvestigationItems(ctx: {
         ? [beneficiary.full_name, beneficiary.cnic].filter(Boolean).join(" · ")
         : "Not recorded",
       true,
+      "beneficiary",
     );
   }
 
-  return [...claims, ...AID_INVESTIGATION_PROCESS_ITEMS];
+  const process = [...AID_INVESTIGATION_PROCESS_ITEMS];
+  const siteVisit = process.find((i) => i.key === "site_visit");
+  const restProcess = process.filter((i) => i.key !== "site_visit");
+  return [
+    ...(siteVisit ? [siteVisit] : []),
+    ...claims,
+    ...restProcess,
+  ];
 }
 
 export function normalizeInvestigationEntry(
@@ -540,7 +619,15 @@ export function normalizeInvestigationEntry(
           : typeof raw.found === "string"
             ? raw.found
             : null;
-    return { status, note };
+    const attachment_url =
+      typeof raw.attachment_url === "string" ? raw.attachment_url : null;
+    const attachment_name =
+      typeof raw.attachment_name === "string" ? raw.attachment_name : null;
+    const attachment_id =
+      raw.attachment_id != null && Number.isFinite(Number(raw.attachment_id))
+        ? Number(raw.attachment_id)
+        : null;
+    return { status, note, attachment_url, attachment_name, attachment_id };
   }
   return { status: "not_checked", note: null };
 }
@@ -551,9 +638,15 @@ export function isInvestigationItemComplete(
     required?: boolean;
     kind?: string;
     allow_mismatch?: boolean;
+    accepts_file?: boolean;
   },
   entry: AidInvestigationItemResult,
 ): boolean {
+  if (item.accepts_file) {
+    const hasFile = !!String(entry.attachment_url || "").trim();
+    if (!hasFile || entry.status !== "verified") return false;
+    return true;
+  }
   if (item.kind === "process" || item.allow_mismatch === false) {
     return entry.status === "verified";
   }
@@ -570,6 +663,18 @@ export function isInvestigationItemComplete(
   return false;
 }
 
+function checklistEntryForItem(
+  checklist: Record<string, unknown>,
+  key: string,
+): unknown {
+  if (checklist[key] !== undefined) return checklist[key];
+  // Legacy key for Site Visit
+  if (key === "site_visit" && checklist.home_visited !== undefined) {
+    return checklist.home_visited;
+  }
+  return undefined;
+}
+
 export function assertInvestigationComplete(
   items: AidInvestigationItem[],
   checklist: Record<string, unknown> | null | undefined,
@@ -580,7 +685,9 @@ export function assertInvestigationComplete(
   const payload: Record<string, AidInvestigationItemResult> = {};
   const missing: string[] = [];
   for (const item of items) {
-    const entry = normalizeInvestigationEntry(checklist[item.key]);
+    const entry = normalizeInvestigationEntry(
+      checklistEntryForItem(checklist, item.key),
+    );
     payload[item.key] = {
       status: entry.status,
       note:
@@ -589,9 +696,16 @@ export function assertInvestigationComplete(
           : entry.note
             ? String(entry.note).trim()
             : null,
+      attachment_url: entry.attachment_url || null,
+      attachment_name: entry.attachment_name || null,
+      attachment_id: entry.attachment_id ?? null,
     };
     if (!isInvestigationItemComplete(item, payload[item.key])) {
-      missing.push(item.label);
+      missing.push(
+        item.accepts_file
+          ? `${item.label} (file required)`
+          : item.label,
+      );
     }
   }
   if (missing.length) {

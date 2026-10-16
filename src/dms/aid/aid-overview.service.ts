@@ -5,8 +5,6 @@ import { AidApplicationStatus, AidRequestType } from "./aid.enums";
 import { AidApplication } from "./entities/aid-application.entity";
 import { AidPerson } from "./entities/aid-person.entity";
 
-type PeriodKey = "this_month" | "last_month" | "last_3_months" | "last_6_months";
-
 const PROGRAM_BUDGET_PKR: Record<string, number> = {
   ration: 1_600_000,
   education: 1_600_000,
@@ -38,33 +36,96 @@ export class AidOverviewService {
     private readonly personRepo: Repository<AidPerson>,
   ) {}
 
-  private periodRange(period: PeriodKey = "this_month") {
-    const now = new Date();
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-
-    if (period === "this_month") {
-      start.setDate(1);
-    } else if (period === "last_month") {
-      start.setMonth(start.getMonth() - 1, 1);
-      end.setDate(0);
-      end.setHours(23, 59, 59, 999);
-    } else if (period === "last_3_months") {
-      start.setMonth(start.getMonth() - 2, 1);
-    } else {
-      start.setMonth(start.getMonth() - 5, 1);
+  private parseYmd(value?: string | null): Date | null {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
+    const [y, m, d] = value.trim().split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (
+      !Number.isFinite(dt.getTime()) ||
+      dt.getFullYear() !== y ||
+      dt.getMonth() !== m - 1 ||
+      dt.getDate() !== d
+    ) {
+      return null;
     }
-    return { start, end };
+    return dt;
   }
 
-  private prevPeriodRange(period: PeriodKey = "this_month") {
-    const { start, end } = this.periodRange(period);
+  private startOfDay(d: Date) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+
+  private endOfDay(d: Date) {
+    const x = new Date(d);
+    x.setHours(23, 59, 59, 999);
+    return x;
+  }
+
+  /** Resolve date / date-range filters. Default: current month → today. */
+  private resolveDateRange(params: {
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+  }) {
+    const single = this.parseYmd(params.date);
+    const rangeStart = this.parseYmd(params.start_date);
+    const rangeEnd = this.parseYmd(params.end_date);
+
+    const now = new Date();
+    let start: Date;
+    let end: Date;
+    let mode: "date" | "range" | "default" = "default";
+
+    if (rangeStart || rangeEnd) {
+      mode = "range";
+      const a = rangeStart || rangeEnd || now;
+      const b = rangeEnd || rangeStart || now;
+      if (a.getTime() <= b.getTime()) {
+        start = this.startOfDay(a);
+        end = this.endOfDay(b);
+      } else {
+        start = this.startOfDay(b);
+        end = this.endOfDay(a);
+      }
+    } else if (single) {
+      mode = "date";
+      start = this.startOfDay(single);
+      end = this.endOfDay(single);
+    } else {
+      start = this.startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+      end = this.endOfDay(now);
+    }
+
+    return { start, end, mode };
+  }
+
+  private prevRange(start: Date, end: Date) {
     const ms = end.getTime() - start.getTime();
     const prevEnd = new Date(start.getTime() - 1);
     const prevStart = new Date(prevEnd.getTime() - ms);
     return { start: prevStart, end: prevEnd };
+  }
+
+  private formatRangeLabel(start: Date, end: Date, mode: string) {
+    const sameDay =
+      start.getFullYear() === end.getFullYear() &&
+      start.getMonth() === end.getMonth() &&
+      start.getDate() === end.getDate();
+    if (mode === "date" || sameDay) {
+      return start.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+    const opts: Intl.DateTimeFormatOptions = {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    };
+    return `${start.toLocaleDateString("en-US", opts)} – ${end.toLocaleDateString("en-US", opts)}`;
   }
 
   private daysBetween(a?: Date | string | null, b?: Date | string | null) {
@@ -90,13 +151,13 @@ export class AidOverviewService {
   }
 
   async getOverview(params: {
-    period?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     program?: string;
-    district?: string;
   }) {
-    const period = (params.period || "this_month") as PeriodKey;
-    const { start, end } = this.periodRange(period);
-    const prev = this.prevPeriodRange(period);
+    const { start, end, mode } = this.resolveDateRange(params);
+    const prev = this.prevRange(start, end);
     const program =
       params.program && params.program !== "all" ? params.program : null;
 
@@ -392,17 +453,15 @@ export class AidOverviewService {
       .filter((r) => r.applications > 0 || r.approved > 0)
       .sort((a, b) => b.applications - a.applications);
 
-    const periodLabel = start.toLocaleString("en-US", {
-      month: "long",
-      year: "numeric",
-    });
+    const rangeLabel = this.formatRangeLabel(start, end, mode);
 
     return {
       filters: {
-        period,
+        date: params.date || null,
+        start_date: params.start_date || null,
+        end_date: params.end_date || null,
         program: program || "all",
-        district: params.district || "all",
-        period_label: periodLabel,
+        range_label: rangeLabel,
       },
       kpis: {
         applications: appsCount,

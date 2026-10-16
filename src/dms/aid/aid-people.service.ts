@@ -355,6 +355,10 @@ export class AidPeopleService {
           [AidKinshipRelation.SPOUSE]: AidKinshipRelation.SPOUSE,
           [AidKinshipRelation.GRANDFATHER]: AidKinshipRelation.GRANDCHILD,
           [AidKinshipRelation.GRANDMOTHER]: AidKinshipRelation.GRANDCHILD,
+          [AidKinshipRelation.MATERNAL_GRANDFATHER]:
+            AidKinshipRelation.GRANDCHILD,
+          [AidKinshipRelation.MATERNAL_GRANDMOTHER]:
+            AidKinshipRelation.GRANDCHILD,
           [AidKinshipRelation.GRANDCHILD]: AidKinshipRelation.GRANDFATHER,
         };
         relation = invert[edge.relation_type] || edge.relation_type;
@@ -407,6 +411,8 @@ export class AidPeopleService {
           break;
         case AidKinshipRelation.GRANDFATHER:
         case AidKinshipRelation.GRANDMOTHER:
+        case AidKinshipRelation.MATERNAL_GRANDFATHER:
+        case AidKinshipRelation.MATERNAL_GRANDMOTHER:
           push("grandparents", edge, relative, relation);
           break;
         case AidKinshipRelation.GRANDCHILD:
@@ -667,8 +673,22 @@ export class AidPeopleService {
     await this.findOne(fromPersonId);
     let toPersonId = dto.existing_person_id;
     if (!toPersonId && dto.person) {
-      const created = await this.create(dto.person, user);
-      toPersonId = created.id;
+      try {
+        const created = await this.create(dto.person, user);
+        toPersonId = created.id;
+      } catch (err) {
+        // Same person already created as applicant/writer — reuse by CNIC
+        if (err instanceof ConflictException) {
+          const cnic = this.normalizeCnic(dto.person.cnic);
+          if (cnic) {
+            const existing = await this.personRepo.findOne({
+              where: { cnic, is_archived: false },
+            });
+            if (existing) toPersonId = existing.id;
+          }
+        }
+        if (!toPersonId) throw err;
+      }
     }
     if (!toPersonId) {
       throw new BadRequestException(

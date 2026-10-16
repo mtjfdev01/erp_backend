@@ -249,6 +249,9 @@
   },
   "program_manager": {
     "program": {
+      "aid_overview": {
+        "view": true
+      },
       "aid_applications": {
         "create": true,
         "list_view": true,
@@ -256,7 +259,8 @@
         "update": true,
         "delete": false,
         "ceo_approve": true,
-        "deliver": true
+        "deliver": true,
+        "bulk_verify": true
       },
       "aid_people": {
         "create": true,
