@@ -11,6 +11,7 @@ import { S3StorageService } from "../../utils/storage/s3-storage.service";
 import {
   AidApplicationStatus,
   AidAttachmentContext,
+  AidCaseSource,
   AidCeoApprovalStatus,
   AidDeliveryStatus,
   AidRequestType,
@@ -128,6 +129,7 @@ export class AidApplicationsService {
       household_id: dto.household_id ?? null,
       title: dto.title?.trim() || null,
       request_summary: dto.request_summary?.trim() || null,
+      case_source: dto.case_source || AidCaseSource.WALK_IN,
       requested_aid_type: dto.requested_aid_type || AidRequestType.OTHER,
       education_details:
         dto.requested_aid_type === AidRequestType.EDUCATION
@@ -829,6 +831,9 @@ export class AidApplicationsService {
     if (dto.title !== undefined) app.title = dto.title?.trim() || null;
     if (dto.request_summary !== undefined) {
       app.request_summary = dto.request_summary?.trim() || null;
+    }
+    if (dto.case_source !== undefined) {
+      app.case_source = dto.case_source || null;
     }
     if (dto.requested_aid_type !== undefined) {
       app.requested_aid_type = dto.requested_aid_type;

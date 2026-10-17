@@ -126,6 +126,14 @@ export enum AidWriterRelation {
   OTHER = "other",
 }
 
+/** How the case entered data entry (intake channel). */
+export enum AidCaseSource {
+  WALK_IN = "walk_in",
+  FIELD_SURVEY = "field_survey",
+  REFERRAL = "referral",
+  CALL_CENTER = "call_center",
+}
+
 export enum AidRequestType {
   HEALTH = "health",
   EDUCATION = "education",

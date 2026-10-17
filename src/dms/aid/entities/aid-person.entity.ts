@@ -32,6 +32,10 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 200, nullable: true, default: null })
   name_urdu: string | null;
 
+  /** Caste / tribe (optional) — Family Head identity. */
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  caste: string | null;
+
   @Column({ type: "varchar", length: 30, nullable: true, default: null })
   phone: string | null;
 

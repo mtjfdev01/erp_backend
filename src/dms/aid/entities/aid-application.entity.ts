@@ -3,6 +3,7 @@ import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import { User } from "../../../users/user.entity";
 import {
   AidApplicationStatus,
+  AidCaseSource,
   AidCeoApprovalStatus,
   AidDeliveryStatus,
   AidRequestType,
@@ -52,6 +53,15 @@ export class AidApplication extends BaseEntity {
 
   @Column({ type: "text", nullable: true, default: null })
   request_summary: string | null;
+
+  /** Intake channel — walk-in, field survey, referral, call center. */
+  @Column({
+    type: "enum",
+    enum: AidCaseSource,
+    nullable: true,
+    default: AidCaseSource.WALK_IN,
+  })
+  case_source: AidCaseSource | null;
 
   @Column({
     type: "enum",

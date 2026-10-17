@@ -121,6 +121,7 @@ export class AidPeopleService {
         dto.cnic_expiry !== undefined ? dto.cnic_expiry || null : undefined,
       name_urdu:
         dto.name_urdu !== undefined ? dto.name_urdu?.trim() || null : undefined,
+      caste: dto.caste !== undefined ? dto.caste?.trim() || null : undefined,
       phone: dto.phone !== undefined ? dto.phone?.trim() || null : undefined,
       phone_alternate:
         dto.phone_alternate !== undefined
@@ -243,6 +244,7 @@ export class AidPeopleService {
       cnic,
       cnic_expiry: mapped.cnic_expiry ?? null,
       name_urdu: mapped.name_urdu ?? null,
+      caste: mapped.caste ?? null,
       phone: mapped.phone ?? null,
       phone_alternate: mapped.phone_alternate ?? null,
       photo_url: mapped.photo_url ?? null,
@@ -557,6 +559,7 @@ export class AidPeopleService {
     }
     if (mapped.cnic_expiry !== undefined) person.cnic_expiry = mapped.cnic_expiry;
     if (mapped.name_urdu !== undefined) person.name_urdu = mapped.name_urdu;
+    if (mapped.caste !== undefined) person.caste = mapped.caste;
     if (mapped.phone !== undefined) person.phone = mapped.phone;
     if (mapped.phone_alternate !== undefined) {
       person.phone_alternate = mapped.phone_alternate;
