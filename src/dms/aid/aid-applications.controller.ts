@@ -72,6 +72,10 @@ export class AidApplicationsController {
   async findAll(
     @Query("search") search: string,
     @Query("status") status: string,
+    @Query("stage") stage: string,
+    @Query("requested_aid_type") requested_aid_type: string,
+    @Query("district") district: string,
+    @Query("assigned_to_user_id") assigned_to_user_id: string,
     @Query("queue") queue: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
@@ -82,6 +86,10 @@ export class AidApplicationsController {
     const result = await this.applicationsService.findAll({
       search,
       status,
+      stage,
+      requested_aid_type,
+      district,
+      assigned_to_user_id,
       queue,
       page: page ? Number(page) : 1,
       pageSize: pageSize ? Number(pageSize) : 20,
