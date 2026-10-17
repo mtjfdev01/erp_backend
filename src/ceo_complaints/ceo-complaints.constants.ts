@@ -1,5 +1,11 @@
 /** CEO public complaint portal — org / type / category constants. */
 
+/** Complaint (default) vs Issue — existing rows treated as complaint. */
+export enum CeoComplaintEntryKind {
+  COMPLAINT = "complaint",
+  ISSUE = "issue",
+}
+
 export enum CeoComplaintOrganization {
   MTJ_FOUNDATION = "mtj_foundation",
   ASLAB = "aslab",

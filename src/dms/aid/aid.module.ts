@@ -5,6 +5,8 @@ import { PermissionsModule } from "../../permissions/permissions.module";
 import { S3StorageModule } from "../../utils/storage/s3-storage.module";
 import { AidApplicationsController } from "./aid-applications.controller";
 import { AidApplicationsService } from "./aid-applications.service";
+import { AidOverviewController } from "./aid-overview.controller";
+import { AidOverviewService } from "./aid-overview.service";
 import { AidHouseholdsController } from "./aid-households.controller";
 import { AidHouseholdsService } from "./aid-households.service";
 import { AidPeopleController } from "./aid-people.controller";
@@ -36,13 +38,20 @@ import { AidPerson } from "./entities/aid-person.entity";
   controllers: [
     AidPeopleController,
     AidHouseholdsController,
+    AidOverviewController,
     AidApplicationsController,
   ],
-  providers: [AidPeopleService, AidHouseholdsService, AidApplicationsService],
+  providers: [
+    AidPeopleService,
+    AidHouseholdsService,
+    AidApplicationsService,
+    AidOverviewService,
+  ],
   exports: [
     AidPeopleService,
     AidHouseholdsService,
     AidApplicationsService,
+    AidOverviewService,
     TypeOrmModule,
   ],
 })

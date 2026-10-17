@@ -72,20 +72,70 @@ export class AidApplicationsController {
   async findAll(
     @Query("search") search: string,
     @Query("status") status: string,
+    @Query("queue") queue: string,
     @Query("page") page: string,
     @Query("pageSize") pageSize: string,
+    @Query("sortField") sortField: string,
+    @Query("sortOrder") sortOrder: string,
     @Res() res: Response,
   ) {
     const result = await this.applicationsService.findAll({
       search,
       status,
+      queue,
       page: page ? Number(page) : 1,
       pageSize: pageSize ? Number(pageSize) : 20,
+      sortField,
+      sortOrder,
     });
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Applications retrieved",
       ...result,
+    });
+  }
+
+  @Post("documents/upload")
+  @RequiredPermissions([
+    ...AID_APPLICATIONS_CREATE_GUARD,
+    ...AID_APPLICATIONS_UPDATE_GUARD,
+    ...AID_PEOPLE_UPDATE_GUARD,
+  ])
+  @UseInterceptors(FileInterceptor("file", uploadOptions))
+  async uploadLooseDocument(
+    @UploadedFile() file: Express.Multer.File,
+    @Body("context") context: string,
+    @Res() res: Response,
+  ) {
+    if (!file) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "file is required",
+      });
+    }
+    const mime = String(file.mimetype || "").toLowerCase();
+    const name = String(file.originalname || "").toLowerCase();
+    const allowedMime = new Set([
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp",
+    ]);
+    const allowedExt = /\.(jpe?g|png|webp)$/;
+    if (!allowedMime.has(mime) && !allowedExt.test(name)) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "Only JPG, JPEG, PNG, or WEBP images are allowed",
+      });
+    }
+    const data = await this.applicationsService.uploadLooseDocument(
+      file,
+      context || "necta",
+    );
+    return res.status(HttpStatus.CREATED).json({
+      success: true,
+      message: "Document uploaded",
+      data,
     });
   }
 
@@ -161,8 +211,8 @@ export class AidApplicationsController {
     });
   }
 
+  /** Selection lookup — authenticated only (no module permissions), same as /users/lookup. */
   @Get("lookup")
-  @RequiredPermissions([...AID_APPLICATIONS_LIST_GUARD])
   async lookup(
     @Query("search") search?: string,
     @Query("limit") limit?: string,
@@ -197,7 +247,15 @@ export class AidApplicationsController {
   @Get(":id")
   @RequiredPermissions([...AID_APPLICATIONS_VIEW_GUARD])
   async findOne(@Param("id") id: string, @Res() res: Response) {
-    const data = await this.applicationsService.findOne(Number(id));
+    const numId = Number(id);
+    if (!Number.isInteger(numId) || numId <= 0) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: "Invalid application id",
+        data: null,
+      });
+    }
+    const data = await this.applicationsService.findOne(numId);
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Application retrieved",

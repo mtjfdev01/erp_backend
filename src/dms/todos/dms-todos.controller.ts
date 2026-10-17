@@ -19,6 +19,13 @@ import { UpdateDmsTodoDto } from "./dto/update-dms-todo.dto";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions/decorators/require-permission.decorator";
 import { JwtGuard } from "src/auth/jwt.guard";
+import {
+  DMS_TODOS_CREATE_GUARD,
+  DMS_TODOS_DELETE_GUARD,
+  DMS_TODOS_LIST_GUARD,
+  DMS_TODOS_UPDATE_GUARD,
+  DMS_TODOS_VIEW_GUARD,
+} from "src/permissions/dms-todos-permissions.constants";
 
 @Controller("dms/todos")
 @UseGuards(JwtGuard, PermissionsGuard)
@@ -26,12 +33,7 @@ export class DmsTodosController {
   constructor(private readonly todosService: DmsTodosService) {}
 
   @Post()
-  @RequiredPermissions([
-    "fund_raising.dms_todos.create",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_CREATE_GUARD])
   async create(
     @Body() dto: CreateDmsTodoDto,
     @Request() req: any,
@@ -57,14 +59,7 @@ export class DmsTodosController {
   }
 
   @Get("lookup")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.list_view",
-    "fund_raising.dms_todos.view",
-    "fund_raising.dms_todos.create",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_LIST_GUARD])
   async lookup(
     @Query("search") search?: string,
     @Query("limit") limit?: string,
@@ -97,14 +92,7 @@ export class DmsTodosController {
   }
 
   @Get("summary")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.list_view",
-    "fund_raising.dms_todos.view",
-    "fund_raising.dms_todos.create",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_LIST_GUARD])
   async summary(@Request() req: any, @Res() res: Response) {
     try {
       const data = await this.todosService.getSummary(req.user?.id, true);
@@ -131,14 +119,7 @@ export class DmsTodosController {
   }
 
   @Get()
-  @RequiredPermissions([
-    "fund_raising.dms_todos.list_view",
-    "fund_raising.dms_todos.view",
-    "fund_raising.dms_todos.create",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_LIST_GUARD])
   async findAll(
     @Request() req: any,
     @Res() res: Response,
@@ -207,13 +188,7 @@ export class DmsTodosController {
   }
 
   @Get(":id")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.view",
-    "fund_raising.dms_todos.list_view",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_VIEW_GUARD])
   async findOne(
     @Param("id") id: string,
     @Res() res: Response,
@@ -238,12 +213,7 @@ export class DmsTodosController {
   }
 
   @Patch(":id/complete")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.update",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_UPDATE_GUARD])
   async markComplete(
     @Param("id") id: string,
     @Request() req: any,
@@ -274,12 +244,7 @@ export class DmsTodosController {
   }
 
   @Patch(":id")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.update",
-    "super_admin",
-    "fund_raising_manager",
-    "fund_raising_user",
-  ])
+  @RequiredPermissions([...DMS_TODOS_UPDATE_GUARD])
   async update(
     @Param("id") id: string,
     @Body() dto: UpdateDmsTodoDto,
@@ -310,11 +275,7 @@ export class DmsTodosController {
   }
 
   @Delete(":id")
-  @RequiredPermissions([
-    "fund_raising.dms_todos.delete",
-    "super_admin",
-    "fund_raising_manager",
-  ])
+  @RequiredPermissions([...DMS_TODOS_DELETE_GUARD])
   async remove(
     @Param("id") id: string,
     @Request() req: any,

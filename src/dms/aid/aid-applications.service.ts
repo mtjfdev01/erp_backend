@@ -21,8 +21,16 @@ import {
   AID_SUCCESS_STATUSES,
 } from "./aid-leakage.constants";
 import {
-  AID_VERIFICATION_CHECKLIST_ITEMS,
+  assertInvestigationComplete,
+  buildInvestigationItems,
+  normalizeInvestigationEntry,
 } from "./aid-verification-checklist";
+import {
+  computeVulnerabilityScore,
+  extractAmountFromNote,
+  vulnerabilityDeltas,
+  type VulnerabilityInputs,
+} from "./aid-vulnerability-score";
 import { AidPeopleService } from "./aid-people.service";
 import {
   CeoDecideAidApplicationDto,
@@ -121,6 +129,24 @@ export class AidApplicationsService {
       title: dto.title?.trim() || null,
       request_summary: dto.request_summary?.trim() || null,
       requested_aid_type: dto.requested_aid_type || AidRequestType.OTHER,
+      education_details:
+        dto.requested_aid_type === AidRequestType.EDUCATION
+          ? dto.education_details ?? null
+          : null,
+      ration_details:
+        dto.requested_aid_type === AidRequestType.RATION
+          ? dto.ration_details ?? null
+          : null,
+      marriage_gift_details:
+        dto.requested_aid_type === AidRequestType.MARRIAGE_GIFT
+          ? dto.marriage_gift_details ?? null
+          : null,
+      financial_assistance_details:
+        dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
+          ? dto.financial_assistance_details ?? null
+          : null,
+      zakat_permission: dto.zakat_permission ?? null,
+      consent_form: dto.consent_form ?? null,
       status: AidApplicationStatus.SUBMITTED,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
@@ -151,8 +177,12 @@ export class AidApplicationsService {
   async findAll(params: {
     search?: string;
     status?: string;
+    /** approvals = verified & not rejected (CEO queue + decided non-rejects) */
+    queue?: string;
     page?: number;
     pageSize?: number;
+    sortField?: string;
+    sortOrder?: string;
   }) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
@@ -161,14 +191,37 @@ export class AidApplicationsService {
       .leftJoinAndSelect("a.beneficiary", "beneficiary")
       .leftJoinAndSelect("a.writer", "writer")
       .leftJoinAndSelect("a.assigned_to", "assigned_to")
-      .where("a.is_archived = :archived", { archived: false })
-      .orderBy("a.created_at", "DESC")
+      .where("a.is_archived = :archived", { archived: false });
+
+    const sortField = String(params.sortField || "created_at");
+    const sortOrder =
+      String(params.sortOrder || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
+    const allowedSort = new Set([
+      "created_at",
+      "updated_at",
+      "status",
+      "application_no",
+      "id",
+      "verified_at",
+    ]);
+    const orderCol = allowedSort.has(sortField) ? sortField : "created_at";
+    qb.orderBy(`a.${orderCol}`, sortOrder as "ASC" | "DESC")
       .skip((page - 1) * pageSize)
       .take(pageSize);
 
-    if (params.status) {
+    if (params.queue === "approvals") {
+      // After investigation: verified, and not rejected
+      qb.andWhere("a.verified_at IS NOT NULL");
+      qb.andWhere("a.status != :rejected", {
+        rejected: AidApplicationStatus.REJECTED,
+      });
+      if (params.status) {
+        qb.andWhere("a.status = :status", { status: params.status });
+      }
+    } else if (params.status) {
       qb.andWhere("a.status = :status", { status: params.status });
     }
+
     const search = String(params.search || "").trim();
     if (search) {
       qb.andWhere(
@@ -210,13 +263,232 @@ export class AidApplicationsService {
     });
     const duplicate_flags = await this.buildDuplicateFlags(app);
     const aid_history = await this.buildAidHistory(app);
+
+    let personDetail: Awaited<
+      ReturnType<AidPeopleService["findOneDetailed"]>
+    > | null = null;
+    try {
+      personDetail = await this.peopleService.findOneDetailed(
+        app.beneficiary_person_id,
+      );
+    } catch {
+      personDetail = null;
+    }
+
+    const investigation_items = buildInvestigationItems({
+      beneficiary: personDetail?.person || app.beneficiary,
+      writer: app.writer,
+      writer_relation: app.writer_relation,
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      households: personDetail?.households || null,
+      request_summary: app.request_summary,
+      requested_aid_type: app.requested_aid_type,
+    });
+
+    const vulnerability = this.buildVulnerabilityBundle(
+      app,
+      personDetail,
+      (app.verification_checklist as Record<string, unknown>) || null,
+      (app.investigation_recommendation as Record<string, unknown>) || null,
+    );
+
     return {
       ...app,
       created_by: this.pickAuditActor((app as any).created_by),
       attachments,
       duplicate_flags,
       aid_history,
-      verification_checklist_items: AID_VERIFICATION_CHECKLIST_ITEMS,
+      investigation_items,
+      vulnerability,
+      /** @deprecated use investigation_items */
+      verification_checklist_items: investigation_items,
+    };
+  }
+
+  private buildVulnerabilityInputs(
+    app: AidApplication,
+    personDetail: Awaited<ReturnType<AidPeopleService["findOneDetailed"]>> | null,
+  ): VulnerabilityInputs {
+    const beneficiary = personDetail?.person || (app as any).beneficiary;
+    const writer = (app as any).writer;
+    const households = personDetail?.households || [];
+    const familyTree = personDetail?.family_tree || {};
+    const familyCounts = (personDetail?.family_counts || {}) as Record<
+      string,
+      number
+    >;
+
+    let head =
+      households
+        .flatMap((h: any) => h.members || [])
+        .find(
+          (m: any) =>
+            String(m.role_in_household || "").toLowerCase() === "head" &&
+            m.person,
+        )?.person || null;
+    if (!head) {
+      head = households.find((h: any) => h.head_person)?.head_person || null;
+    }
+    if (!head) {
+      head = (familyTree as any)?.parents?.[0]?.person || null;
+    }
+    if (
+      !head &&
+      writer &&
+      String(app.writer_relation || "").toLowerCase() !== "self"
+    ) {
+      head = writer;
+    }
+    const scorePerson = head || beneficiary;
+
+    let members = 0;
+    const memberIds = new Set<number>();
+    for (const hh of households as any[]) {
+      for (const m of hh.members || []) {
+        if (m.person?.id) memberIds.add(m.person.id);
+      }
+    }
+    if (memberIds.size) members = memberIds.size;
+    else {
+      members = Number(familyCounts.total_linked || 0) + (beneficiary ? 1 : 0);
+    }
+    if (members < 1) members = 1;
+
+    let earners = 0;
+    const peoplePool: any[] = [];
+    if (scorePerson) peoplePool.push(scorePerson);
+    if (beneficiary && beneficiary.id !== scorePerson?.id) {
+      peoplePool.push(beneficiary);
+    }
+    for (const hh of households as any[]) {
+      for (const m of hh.members || []) {
+        if (m.person) peoplePool.push(m.person);
+      }
+    }
+    const seen = new Set<number>();
+    for (const p of peoplePool) {
+      if (!p?.id || seen.has(p.id)) continue;
+      seen.add(p.id);
+      const income = Number(p.monthly_income);
+      if ((Number.isFinite(income) && income > 0) || p.occupation) {
+        earners += 1;
+      }
+    }
+    if (earners === 0 && Number(scorePerson?.monthly_income) > 0) earners = 1;
+
+    let disability_count = 0;
+    for (const p of peoplePool) {
+      if (!p?.id || !p.has_disability) continue;
+      disability_count += 1;
+    }
+    if (!disability_count && beneficiary?.has_disability) disability_count = 1;
+
+    const cats = [
+      scorePerson?.vulnerability,
+      beneficiary?.vulnerability,
+    ].filter(Boolean) as string[];
+
+    return {
+      monthly_household_income: Number(scorePerson?.monthly_income) || null,
+      household_members: members,
+      earners,
+      vulnerability_categories: cats,
+      resident_type: scorePerson?.resident_type || beneficiary?.resident_type,
+      house_structure: null,
+      has_land: !!(scorePerson?.has_land || beneficiary?.has_land),
+      property_type:
+        scorePerson?.property_type || beneficiary?.property_type || null,
+      house_area_marla:
+        Number(scorePerson?.house_area_marla ?? beneficiary?.house_area_marla) ||
+        null,
+      has_livestock: !!(
+        scorePerson?.has_livestock || beneficiary?.has_livestock
+      ),
+      livestock_entries:
+        (scorePerson?.livestock_entries as any) ||
+        (beneficiary?.livestock_entries as any) ||
+        null,
+      has_vehicle: !!(scorePerson?.has_vehicle || beneficiary?.has_vehicle),
+      vehicle_type:
+        scorePerson?.vehicle_type || beneficiary?.vehicle_type || null,
+      disability_count,
+      bisp_status: beneficiary?.bisp_status || scorePerson?.bisp_status || null,
+      requested_aid_type: app.requested_aid_type,
+    };
+  }
+
+  private buildVulnerabilityBundle(
+    app: AidApplication,
+    personDetail: Awaited<ReturnType<AidPeopleService["findOneDetailed"]>> | null,
+    checklist: Record<string, unknown> | null,
+    recommendation: Record<string, unknown> | null,
+  ) {
+    const declaredInputs = this.buildVulnerabilityInputs(app, personDetail);
+    const declared = computeVulnerabilityScore(declaredInputs);
+
+    const afterInputs: VulnerabilityInputs = { ...declaredInputs };
+    const incomeEntry = checklist
+      ? normalizeInvestigationEntry(checklist.monthly_household_income)
+      : null;
+    if (incomeEntry?.status === "mismatch") {
+      const fromNote = extractAmountFromNote(incomeEntry.note);
+      const fromRec = Number(recommendation?.found_monthly_income);
+      const bump =
+        (Number.isFinite(fromRec) && fromRec > 0 ? fromRec : null) ?? fromNote;
+      if (bump != null && afterInputs.monthly_household_income != null) {
+        // If note looks like "extra" earnings, add; else treat as found total when larger
+        const note = String(incomeEntry.note || "").toLowerCase();
+        if (note.includes("more") || note.includes("extra") || note.includes("also")) {
+          afterInputs.monthly_household_income += bump;
+        } else {
+          afterInputs.monthly_household_income = Math.max(
+            afterInputs.monthly_household_income,
+            bump,
+          );
+        }
+      }
+    }
+
+    const vehicleEntry = checklist
+      ? normalizeInvestigationEntry(checklist.vehicle)
+      : null;
+    if (
+      vehicleEntry &&
+      (vehicleEntry.status === "verified" || vehicleEntry.status === "mismatch")
+    ) {
+      const note = String(vehicleEntry.note || "").toLowerCase();
+      if (
+        note.includes("motorcycle") ||
+        note.includes("bike") ||
+        note.includes("rickshaw") ||
+        afterInputs.has_vehicle
+      ) {
+        afterInputs.has_vehicle = true;
+        if (!afterInputs.vehicle_type) {
+          afterInputs.vehicle_type = note.includes("rickshaw")
+            ? "rickshaw"
+            : "motorcycle";
+        }
+      }
+    }
+
+    if (
+      recommendation?.found_monthly_income != null &&
+      Number(recommendation.found_monthly_income) > 0
+    ) {
+      afterInputs.monthly_household_income = Number(
+        recommendation.found_monthly_income,
+      );
+    }
+
+    const after_visit = computeVulnerabilityScore(afterInputs);
+    const deltas = vulnerabilityDeltas(declared, after_visit);
+
+    return {
+      declared,
+      after_visit,
+      deltas,
     };
   }
 
@@ -520,18 +792,27 @@ export class AidApplicationsService {
     return history;
   }
 
-  private assertChecklistComplete(checklist: Record<string, boolean> | null | undefined) {
-    if (!checklist || typeof checklist !== "object") {
-      throw new BadRequestException("verification_checklist is required");
-    }
-    const missing = AID_VERIFICATION_CHECKLIST_ITEMS.filter(
-      (item) => item.required && checklist[item.key] !== true,
-    ).map((item) => item.label);
-    if (missing.length) {
-      throw new BadRequestException(
-        `Complete all required checklist items before verify: ${missing.join("; ")}`,
+  private async buildInvestigationForApp(app: AidApplication) {
+    let personDetail: Awaited<
+      ReturnType<AidPeopleService["findOneDetailed"]>
+    > | null = null;
+    try {
+      personDetail = await this.peopleService.findOneDetailed(
+        app.beneficiary_person_id,
       );
+    } catch {
+      personDetail = null;
     }
+    return buildInvestigationItems({
+      beneficiary: personDetail?.person || (app as any).beneficiary,
+      writer: (app as any).writer,
+      writer_relation: app.writer_relation,
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      households: personDetail?.households || null,
+      request_summary: app.request_summary,
+      requested_aid_type: app.requested_aid_type,
+    });
   }
 
   async update(id: number, dto: UpdateAidApplicationDto, user?: User) {
@@ -551,6 +832,52 @@ export class AidApplicationsService {
     }
     if (dto.requested_aid_type !== undefined) {
       app.requested_aid_type = dto.requested_aid_type;
+      if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
+        app.education_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.RATION) {
+        app.ration_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
+        app.marriage_gift_details = null;
+      }
+      if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
+        app.financial_assistance_details = null;
+      }
+    }
+    if (dto.education_details !== undefined) {
+      app.education_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.EDUCATION
+          ? dto.education_details
+          : null;
+    }
+    if (dto.ration_details !== undefined) {
+      app.ration_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.RATION
+          ? dto.ration_details
+          : null;
+    }
+    if (dto.marriage_gift_details !== undefined) {
+      app.marriage_gift_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.MARRIAGE_GIFT
+          ? dto.marriage_gift_details
+          : null;
+    }
+    if (dto.financial_assistance_details !== undefined) {
+      app.financial_assistance_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.FINANCIAL_ASSISTANCE
+          ? dto.financial_assistance_details
+          : null;
+    }
+    if (dto.zakat_permission !== undefined) {
+      app.zakat_permission = dto.zakat_permission;
+    }
+    if (dto.consent_form !== undefined) {
+      app.consent_form = dto.consent_form;
     }
     if (dto.assigned_to_user_id !== undefined) {
       app.assigned_to_user_id = dto.assigned_to_user_id;
@@ -584,7 +911,10 @@ export class AidApplicationsService {
   }
 
   async markVerified(id: number, dto: VerifyAidApplicationDto, user?: User) {
-    const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary", "writer"],
+    });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     if (
       ![
@@ -596,18 +926,85 @@ export class AidApplicationsService {
         "Only submitted/under_review applications can be verified",
       );
     }
-    this.assertChecklistComplete(dto.verification_checklist);
+    const investigationItems = await this.buildInvestigationForApp(app);
+    let checklistPayload: Record<string, unknown>;
+    try {
+      checklistPayload = assertInvestigationComplete(
+        investigationItems,
+        dto.verification_checklist as Record<string, unknown>,
+      );
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message || "Complete investigation before verify",
+      );
+    }
+
+    const rec = dto.recommendation;
+    if (!rec?.decision) {
+      throw new BadRequestException(
+        "Investigation recommendation is required (approve as requested / with changes / reject)",
+      );
+    }
+    const remarks = String(rec.remarks || "").trim();
+    if (remarks.length < 3) {
+      throw new BadRequestException(
+        "Investigator remarks are required (min 3 characters)",
+      );
+    }
+    if (rec.decision !== "reject") {
+      const amount = Number(rec.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new BadRequestException(
+          "Recommended amount (PKR) is required for approval recommendations",
+        );
+      }
+      if (rec.decision === "approve_with_changes") {
+        const months = Number(rec.period_months);
+        if (!Number.isFinite(months) || months <= 0) {
+          throw new BadRequestException(
+            "Period (months) is required when approving with changes",
+          );
+        }
+      }
+    }
+
     await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
 
-    const checklistPayload: Record<string, boolean> = {};
-    for (const item of AID_VERIFICATION_CHECKLIST_ITEMS) {
-      checklistPayload[item.key] = dto.verification_checklist[item.key] === true;
+    let personDetail: Awaited<
+      ReturnType<AidPeopleService["findOneDetailed"]>
+    > | null = null;
+    try {
+      personDetail = await this.peopleService.findOneDetailed(
+        app.beneficiary_person_id,
+      );
+    } catch {
+      personDetail = null;
     }
+    const vulnerability = this.buildVulnerabilityBundle(
+      app,
+      personDetail,
+      checklistPayload,
+      rec as unknown as Record<string, unknown>,
+    );
 
     app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
     app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
-    app.verification_notes = dto.verification_notes?.trim() || app.verification_notes;
+    app.verification_notes =
+      dto.verification_notes?.trim() || remarks || app.verification_notes;
     app.verification_checklist = checklistPayload;
+    app.investigation_recommendation = {
+      decision: rec.decision,
+      amount: rec.amount ?? null,
+      period_months: rec.period_months ?? null,
+      remarks,
+      found_monthly_income: rec.found_monthly_income ?? null,
+      vulnerability_score_declared: vulnerability.declared.total,
+      vulnerability_score_after_visit: vulnerability.after_visit.total,
+      vulnerability_deltas: vulnerability.deltas,
+      vulnerability_declared: vulnerability.declared,
+      vulnerability_after_visit: vulnerability.after_visit,
+      submitted_at: new Date().toISOString(),
+    };
     app.verified_at = new Date();
     app.verified_by_id = user?.id ?? null;
     app.updated_by = user || null;
@@ -733,6 +1130,17 @@ export class AidApplicationsService {
       updated_by: params.user || null,
     });
     return this.attachmentRepo.save(row);
+  }
+
+  /** Upload a document to S3 and return URL (no person/app link yet — e.g. NECTA on create). */
+  async uploadLooseDocument(file: Express.Multer.File, context = "necta") {
+    if (!file) throw new BadRequestException("file is required");
+    const uploaded = await this.s3.uploadAidAttachment(file, context);
+    return {
+      url: uploaded.url,
+      file_name: file.originalname,
+      file_type: file.mimetype || null,
+    };
   }
 
   async deleteAttachment(attachmentId: number, user?: User) {

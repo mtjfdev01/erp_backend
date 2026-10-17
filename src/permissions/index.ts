@@ -107,6 +107,14 @@ export {
   COMPLAINT_CASE_ADD_NARRATIVE_GUARD,
 } from "./complaint-case-permissions.constants";
 
+export {
+  DMS_TODOS_CREATE_GUARD,
+  DMS_TODOS_LIST_GUARD,
+  DMS_TODOS_VIEW_GUARD,
+  DMS_TODOS_UPDATE_GUARD,
+  DMS_TODOS_DELETE_GUARD,
+} from "./dms-todos-permissions.constants";
+
 // Export entities
 export { PermissionsEntity } from "./entities/permissions.entity";
 
