@@ -1131,12 +1131,20 @@ export class TasksService {
 
       delete safeFilters.strictDepartment;
 
+      // Extract date and calendar-related filter parameters before applyCommonFilters
+      // to avoid applying standard exact column comparisons on custom-handled date logic.
       const startDate = safeFilters.start_date;
       const endDate = safeFilters.end_date;
       const exactDate = safeFilters.date;
+      const dateField = safeFilters.date_field;
+      const dueDate = safeFilters.due_date;
+      const scheduledDate = safeFilters.scheduled_date;
       delete safeFilters.start_date;
       delete safeFilters.end_date;
       delete safeFilters.date;
+      delete safeFilters.date_field;
+      delete safeFilters.due_date;
+      delete safeFilters.scheduled_date;
 
       const assigneeIdRaw =
         safeFilters.assignee_id ?? safeFilters.assigned_user_id;
@@ -1168,18 +1176,50 @@ export class TasksService {
       const searchTerm = safeFilters.search;
       const userNameFilter = safeFilters.user_name;
 
-      if (startDate) {
-        qb.andWhere("task.created_at >= :start_date", {
-          start_date: startDate,
-        });
-      }
-      if (endDate) {
-        qb.andWhere("task.created_at <= :end_date", { end_date: endDate });
-      }
-      if (exactDate) {
-        qb.andWhere("DATE(task.created_at) = :exact_date", {
-          exact_date: exactDate,
-        });
+      // Date filtering: When filtering by due_date or scheduled_date (e.g., from the task calendar
+      // or date drill-down), match against both task.due_date and task.recurrence_next_date
+      // so recurring tasks are accurately included. Otherwise default to created_at range.
+      if (dateField === "due_date" || dueDate || scheduledDate) {
+        const targetDate = scheduledDate || dueDate || exactDate;
+        if (targetDate) {
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.due_date = CAST(:targetDate AS date)", { targetDate });
+              dqb.orWhere("task.recurrence_next_date = CAST(:targetDate AS date)", { targetDate });
+            }),
+          );
+        } else {
+          if (startDate) {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date >= :start_date", { start_date: startDate });
+                dqb.orWhere("task.recurrence_next_date >= :start_date", { start_date: startDate });
+              }),
+            );
+          }
+          if (endDate) {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date <= CAST(:end_date AS date)", { end_date: endDate });
+                dqb.orWhere("task.recurrence_next_date <= CAST(:end_date AS date)", { end_date: endDate });
+              }),
+            );
+          }
+        }
+      } else {
+        if (startDate) {
+          qb.andWhere("task.created_at >= :start_date", {
+            start_date: startDate,
+          });
+        }
+        if (endDate) {
+          qb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+        }
+        if (exactDate) {
+          qb.andWhere("DATE(task.created_at) = :exact_date", {
+            exact_date: exactDate,
+          });
+        }
       }
 
       if (
@@ -1370,18 +1410,48 @@ export class TasksService {
       }
 
       // Apply all the same filters to countQb as we did to qb
-      if (startDate) {
-        countQb.andWhere("task.created_at >= :start_date", {
-          start_date: startDate,
-        });
-      }
-      if (endDate) {
-        countQb.andWhere("task.created_at <= :end_date", { end_date: endDate });
-      }
-      if (exactDate) {
-        countQb.andWhere("DATE(task.created_at) = :exact_date", {
-          exact_date: exactDate,
-        });
+      // Mirror the scheduled/due date matching on countQb so pagination totals match filtered rows
+      if (dateField === "due_date" || dueDate || scheduledDate) {
+        const targetDate = scheduledDate || dueDate || exactDate;
+        if (targetDate) {
+          countQb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.due_date = CAST(:targetDate AS date)", { targetDate });
+              dqb.orWhere("task.recurrence_next_date = CAST(:targetDate AS date)", { targetDate });
+            }),
+          );
+        } else {
+          if (startDate) {
+            countQb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date >= :start_date", { start_date: startDate });
+                dqb.orWhere("task.recurrence_next_date >= :start_date", { start_date: startDate });
+              }),
+            );
+          }
+          if (endDate) {
+            countQb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date <= CAST(:end_date AS date)", { end_date: endDate });
+                dqb.orWhere("task.recurrence_next_date <= CAST(:end_date AS date)", { end_date: endDate });
+              }),
+            );
+          }
+        }
+      } else {
+        if (startDate) {
+          countQb.andWhere("task.created_at >= :start_date", {
+            start_date: startDate,
+          });
+        }
+        if (endDate) {
+          countQb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+        }
+        if (exactDate) {
+          countQb.andWhere("DATE(task.created_at) = :exact_date", {
+            exact_date: exactDate,
+          });
+        }
       }
 
       if (
@@ -1542,16 +1612,58 @@ export class TasksService {
           (perms && (perms as any).super_admin === true) ||
           reports.view_all === true);
 
-      if (filters.start_date) {
-        qb.andWhere("task.created_at >= :start_date", {
-          start_date: filters.start_date,
-        });
-      }
-      if (filters.end_date) {
-        // Treat the selected end date as inclusive for timestamped records.
-        qb.andWhere("task.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')", {
-          end_date: filters.end_date,
-        });
+      // Calendar Mode & Single-Day Scheduled View:
+      // - calendarMode: aggregates task counts and status breakdowns per calendar day for the month view.
+      // - isSingleDayDueDate: drill-down query for a specific day (start_date === end_date with date_field=due_date).
+      // Both modes gather candidate tasks and expand recurring occurrences so daily metrics match 1:1.
+      const calendarMode = filters.calendar === true || filters.calendar === "true";
+      const useDueDateFilter = calendarMode || filters.date_field === "due_date";
+      const isSingleDayDueDate =
+        !calendarMode &&
+        useDueDateFilter &&
+        filters.start_date &&
+        filters.start_date === filters.end_date;
+      const filterDateField = useDueDateFilter ? "task.due_date" : "task.created_at";
+
+      if (calendarMode || isSingleDayDueDate) {
+        // Query candidate tasks whose static due_date or recurrence_next_date falls in the window,
+        // or active recurring tasks whose recurrence rules can generate occurrences within this range.
+        qb.andWhere(
+          new Brackets((cqb) => {
+            cqb.where(
+              "(task.due_date >= :calStartDate AND task.due_date <= CAST(:calEndDate AS date))",
+              { calStartDate: filters.start_date, calEndDate: filters.end_date },
+            );
+            cqb.orWhere(
+              "(task.recurrence_next_date >= :calStartDate AND task.recurrence_next_date <= CAST(:calEndDate AS date))",
+              { calStartDate: filters.start_date, calEndDate: filters.end_date },
+            );
+            cqb.orWhere(
+              "(task.task_type = :calRecType AND (task.recurrence_end_date IS NULL OR task.recurrence_end_date >= :calStartDate) AND task.status != :calCancelled)",
+              {
+                calRecType: TaskType.RECURRING,
+                calStartDate: filters.start_date,
+                calCancelled: TaskStatus.CANCELLED,
+              },
+            );
+          }),
+        );
+      } else {
+        if (filters.start_date) {
+          qb.andWhere(`${filterDateField} >= :start_date`, {
+            start_date: filters.start_date,
+          });
+        }
+        if (filters.end_date) {
+          qb.andWhere(
+            useDueDateFilter
+              ? `${filterDateField} <= CAST(:end_date AS date)`
+              : `${filterDateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`,
+            {
+              end_date: filters.end_date,
+            },
+          );
+        }
       }
       if (filters.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -1675,6 +1787,269 @@ export class TasksService {
               }),
             );
           }
+        }
+      }
+
+      if (calendarMode || isSingleDayDueDate) {
+        // Retrieve candidate tasks matching role and scope filters.
+        // We use Postgres TO_CHAR(..., 'YYYY-MM-DD') directly in SQL to format dates as calendar strings.
+        // This avoids JavaScript Date object timezone conversions which could shift dates across day boundaries.
+        const rawTasks = await qb
+          .clone()
+          .select([
+            "task.id",
+            "task.title",
+            "task.status",
+            "task.priority",
+            "task.department",
+            "task.project_name",
+            "task.task_type",
+            "task.recurrence_rule",
+            "task.recurrence_end_type",
+            "task.recurrence_end_occurrences",
+            "task.recurrence_created_count",
+            "task.assigned_users_meta",
+          ])
+          .addSelect("TO_CHAR(task.due_date, 'YYYY-MM-DD')", "due_date")
+          .addSelect("TO_CHAR(task.recurrence_next_date, 'YYYY-MM-DD')", "recurrence_next_date")
+          .addSelect("TO_CHAR(task.recurrence_end_date, 'YYYY-MM-DD')", "recurrence_end_date")
+          .addSelect("TO_CHAR(task.start_date, 'YYYY-MM-DD')", "start_date")
+          .getRawMany();
+
+        const startDateStr = String(filters.start_date || "");
+        const endDateStr = String(filters.end_date || "");
+        const calendarDays = new Map<string, any>();
+
+        // Helper to retrieve or initialize a calendar day entry
+        const getOrCreateDay = (dateStr: string) => {
+          let day = calendarDays.get(dateStr);
+          if (!day) {
+            day = {
+              date: dateStr,
+              total_tasks: 0,
+              completed_tasks: 0,
+              in_progress_tasks: 0,
+              status_counts: {},
+              tasks: [],
+            };
+            calendarDays.set(dateStr, day);
+          }
+          return day;
+        };
+
+        // Helper to register a task under a specific calendar date (dateStr: 'YYYY-MM-DD').
+        // Ensures deduplication by task ID and accumulates total counts, status breakdowns, and task items.
+        const addTaskToDay = (dateStr: string, row: any) => {
+          if (!dateStr) return;
+          if (startDateStr && dateStr < startDateStr) return;
+          if (endDateStr && dateStr > endDateStr) return;
+
+          const day = getOrCreateDay(dateStr);
+          const taskId = Number(row.task_id);
+          // Avoid duplicate entry if task qualifies via multiple date conditions (e.g., due_date & recurrence_next_date)
+          if (day.tasks.some((t: any) => t.id === taskId)) return;
+
+          const status = String(row.task_status || "open");
+          day.total_tasks += 1;
+          day.status_counts[status] = (day.status_counts[status] || 0) + 1;
+
+          // Categorize completed/terminal positive statuses for completion rate metrics
+          if ([TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.APPROVED].includes(status as TaskStatus)) {
+            day.completed_tasks += 1;
+          }
+          if (status === TaskStatus.IN_PROGRESS) {
+            day.in_progress_tasks += 1;
+          }
+
+          let meta = row.task_assigned_users_meta;
+          if (typeof meta === "string") {
+            try {
+              meta = JSON.parse(meta);
+            } catch {
+              meta = [];
+            }
+          }
+
+          day.tasks.push({
+            id: taskId,
+            title: row.task_title,
+            status: status,
+            priority: row.task_priority,
+            department: row.task_department,
+            project_name: row.task_project_name,
+            task_type: row.task_task_type,
+            due_date: row.due_date,
+            recurrence_next_date: row.recurrence_next_date,
+            assigned_users_meta: Array.isArray(meta) ? meta : [],
+          });
+        };
+
+        // Map tasks to their scheduled calendar day(s):
+        // 1. Scheduled on due_date
+        // 2. Scheduled on recurrence_next_date
+        // 3. For recurring tasks with recurrence_rule, project future occurrences across the date window
+        // 4. Fallback to start_date if neither due_date nor recurrence_next_date is set
+        rawTasks.forEach((row) => {
+          // 1. Scheduled on due_date
+          if (row.due_date) {
+            addTaskToDay(row.due_date, row);
+          }
+          // 2. Scheduled on recurrence_next_date
+          if (row.recurrence_next_date) {
+            addTaskToDay(row.recurrence_next_date, row);
+          }
+          // 3. If recurring task with recurrence_rule, project future occurrences in date range
+          if (
+            row.task_task_type === TaskType.RECURRING &&
+            row.task_recurrence_rule &&
+            row.task_status !== TaskStatus.CANCELLED
+          ) {
+            const anchorDateStr = row.recurrence_next_date || row.due_date || row.start_date;
+            if (anchorDateStr) {
+              let currentOccurrence = new Date(`${anchorDateStr}T00:00:00`);
+              let count = row.task_recurrence_created_count || 0;
+              const maxOccurrences =
+                row.task_recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES
+                  ? row.task_recurrence_end_occurrences || Infinity
+                  : Infinity;
+              const recEndDate = row.recurrence_end_date ? new Date(`${row.recurrence_end_date}T23:59:59`) : null;
+
+              for (let i = 0; i < 60; i++) {
+                currentOccurrence = this.getNextOccurrence(currentOccurrence, row.task_recurrence_rule);
+                count++;
+                if (count > maxOccurrences) break;
+                if (recEndDate && currentOccurrence > recEndDate) break;
+
+                const y = currentOccurrence.getFullYear();
+                const m = String(currentOccurrence.getMonth() + 1).padStart(2, "0");
+                const d = String(currentOccurrence.getDate()).padStart(2, "0");
+                const occStr = `${y}-${m}-${d}`;
+
+                if (endDateStr && occStr > endDateStr) break;
+                if (!startDateStr || occStr >= startDateStr) {
+                  addTaskToDay(occStr, row);
+                }
+              }
+            }
+          }
+          // 4. Fallback: if task has no due_date and no recurrence_next_date, but has start_date
+          if (!row.due_date && !row.recurrence_next_date && row.start_date) {
+            addTaskToDay(row.start_date, row);
+          }
+        });
+
+        if (calendarMode) {
+          // Calendar month mode: return all active calendar days sorted chronologically
+          return {
+            calendar_days: Array.from(calendarDays.values()).sort((a, b) => a.date.localeCompare(b.date)),
+          };
+        }
+
+        if (isSingleDayDueDate) {
+          // Single-day drilldown mode (Task Nested Dashboard):
+          // When a user clicks a calendar day, the nested dashboard fetches dashboard stats with:
+          // { start_date: 'YYYY-MM-DD', end_date: 'YYYY-MM-DD', date_field: 'due_date' }.
+          // We compute full dashboard metrics (status breakdown, priority, department distributions,
+          // overdue count, completion rate, and task items) directly from the day's tasks so that
+          // the numbers in the nested dashboard match the calendar day's indicator badge exactly.
+          const targetDayStr = String(filters.start_date);
+          const singleDay = calendarDays.get(targetDayStr) || {
+            date: targetDayStr,
+            total_tasks: 0,
+            completed_tasks: 0,
+            in_progress_tasks: 0,
+            status_counts: {},
+            tasks: [],
+          };
+
+          const pBreakdown: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+          const deptCountMap: Record<string, number> = {};
+          const deptStatusMap: Record<string, Record<string, { count: number; tasks: any[] }>> = {};
+
+          Object.values(Department).forEach((dept) => {
+            deptCountMap[dept] = 0;
+            deptStatusMap[dept] = {};
+          });
+
+          const todayIso = new Date().toISOString().slice(0, 10);
+          let overdueCount = 0;
+
+          for (const task of singleDay.tasks) {
+            const p = String(task.priority || "medium").toLowerCase();
+            if (pBreakdown[p] !== undefined) pBreakdown[p]++;
+            else pBreakdown.medium++;
+
+            const st = String(task.status || "open").toLowerCase();
+            if (
+              targetDayStr < todayIso &&
+              ![TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.APPROVED, TaskStatus.CANCELLED].includes(st as TaskStatus)
+            ) {
+              overdueCount++;
+            }
+
+            const taskAssigneeDepartments = new Set<string>();
+            if (Array.isArray(task.assigned_users_meta) && task.assigned_users_meta.length > 0) {
+              task.assigned_users_meta.forEach((meta: any) => {
+                if (meta.department) taskAssigneeDepartments.add(meta.department.toLowerCase());
+              });
+            }
+            if (taskAssigneeDepartments.size === 0 && task.department) {
+              taskAssigneeDepartments.add(task.department.toLowerCase());
+            }
+
+            taskAssigneeDepartments.forEach((dept) => {
+              deptCountMap[dept] = (deptCountMap[dept] || 0) + 1;
+              if (!deptStatusMap[dept]) deptStatusMap[dept] = {};
+              if (!deptStatusMap[dept][st]) {
+                deptStatusMap[dept][st] = { count: 0, tasks: [] };
+              }
+              deptStatusMap[dept][st].count++;
+              deptStatusMap[dept][st].tasks.push({ id: task.id, title: task.title });
+            });
+          }
+
+          const deptBreakdown = Object.values(Department)
+            .map((dept) => ({
+              department: dept,
+              count: deptCountMap[dept] || 0,
+            }))
+            .filter((item) => item.count > 0);
+
+          const deptStatusBreakdown: Record<string, any> = {};
+          Object.values(Department).forEach((dept) => {
+            deptStatusBreakdown[dept] = deptStatusMap[dept] || {};
+          });
+
+          const completionRate =
+            singleDay.total_tasks > 0
+              ? parseFloat(((singleDay.completed_tasks / singleDay.total_tasks) * 100).toFixed(2))
+              : 0;
+
+          return {
+            total_tasks: singleDay.total_tasks,
+            status_breakdown: {
+              open: singleDay.status_counts.open || 0,
+              in_progress: singleDay.status_counts.in_progress || 0,
+              pending_approval: singleDay.status_counts.pending_approval || 0,
+              approved: singleDay.status_counts.approved || 0,
+              completed: singleDay.status_counts.completed || 0,
+              closed: singleDay.status_counts.closed || 0,
+              rejected: singleDay.status_counts.rejected || 0,
+              cancelled: singleDay.status_counts.cancelled || 0,
+              draft: singleDay.status_counts.draft || 0,
+              blocked: singleDay.status_counts.blocked || 0,
+              ...singleDay.status_counts,
+            },
+            priority_breakdown: pBreakdown,
+            department_breakdown: deptBreakdown.reduce(
+              (acc, item) => ({ ...acc, [item.department]: +item.count }),
+              {},
+            ),
+            department_status_breakdown: deptStatusBreakdown,
+            overdue_tasks: overdueCount,
+            completion_rate: completionRate,
+            tasks: singleDay.tasks,
+          };
         }
       }
 
@@ -1803,6 +2178,32 @@ export class TasksService {
         department_status_breakdown: departmentStatusBreakdown,
         overdue_tasks: overdueTasks,
         completion_rate: parseFloat(completionRate as string),
+        // Format task dates as timezone-neutral 'YYYY-MM-DD' strings for the dashboard task list
+        tasks: allTasks.map((t) => {
+          const formatDate = (d: any) => {
+            if (!d) return null;
+            if (typeof d === "string") return d.slice(0, 10);
+            if (d instanceof Date) {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, "0");
+              const day = String(d.getDate()).padStart(2, "0");
+              return `${y}-${m}-${day}`;
+            }
+            return null;
+          };
+          return {
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            department: t.department,
+            project_name: t.project_name,
+            task_type: t.task_type,
+            due_date: formatDate(t.due_date),
+            recurrence_next_date: formatDate(t.recurrence_next_date),
+            assigned_users_meta: t.assigned_users_meta || [],
+          };
+        }),
       };
     } catch (e) {
       throw e;
@@ -1814,7 +2215,9 @@ export class TasksService {
       const dateField =
         query?.date_field === "completed"
           ? "task.completed_date"
-          : "task.created_at";
+          : query?.date_field === "due_date"
+            ? "task.due_date"
+            : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
       qb.leftJoinAndSelect("task.reported_to", "reported_to");
       
@@ -1841,16 +2244,40 @@ export class TasksService {
           (perms && (perms as any).super_admin === true) ||
           reportsPerm.view_all === true);
 
-      if (query.start_date) {
-        qb.andWhere(`${dateField} >= :start_date`, {
-          start_date: query.start_date,
-        });
-      }
-      if (query.end_date) {
-        // Use an exclusive next-day bound so the whole end date is included.
-        qb.andWhere(`${dateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`, {
-          end_date: query.end_date,
-        });
+      // Single-day drill-down by due date: match due_date, recurrence_next_date,
+      // or active recurring tasks to ensure reports mirror the calendar view and nested dashboard task lists.
+      if (query.date_field === "due_date" && query.start_date && query.start_date === query.end_date) {
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where("task.due_date = CAST(:singleDate AS date)", { singleDate: query.start_date });
+            dqb.orWhere("task.recurrence_next_date = CAST(:singleDate AS date)", { singleDate: query.start_date });
+            dqb.orWhere(
+              "(task.task_type = :recType AND (task.recurrence_end_date IS NULL OR task.recurrence_end_date >= CAST(:singleDate AS date)) AND task.status != :recCancelled)",
+              {
+                recType: TaskType.RECURRING,
+                singleDate: query.start_date,
+                recCancelled: TaskStatus.CANCELLED,
+              },
+            );
+          }),
+        );
+      } else {
+        if (query.start_date) {
+          qb.andWhere(`${dateField} >= :start_date`, {
+            start_date: query.start_date,
+          });
+        }
+        if (query.end_date) {
+          // Use an exclusive next-day bound so the whole end date is included.
+          qb.andWhere(
+            query.date_field === "due_date"
+              ? `${dateField} <= CAST(:end_date AS date)`
+              : `${dateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`,
+            {
+              end_date: query.end_date,
+            },
+          );
+        }
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
