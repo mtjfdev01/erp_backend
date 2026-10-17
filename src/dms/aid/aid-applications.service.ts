@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Not, Repository } from "typeorm";
+import { Repository } from "typeorm";
 import { User } from "../../users/user.entity";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
 import {
@@ -774,10 +774,16 @@ export class AidApplicationsService {
     }
 
     if (cnic) {
-      const rows = await this.personRepo.find({
-        where: { cnic, is_archived: false, id: Not(beneficiary.id) },
-        take: 20,
-      });
+      const rows = await this.personRepo
+        .createQueryBuilder("p")
+        .where("p.is_archived = false")
+        .andWhere("p.id != :id", { id: beneficiary.id })
+        .andWhere(
+          "REPLACE(REPLACE(COALESCE(p.cnic, ''), '-', ''), ' ', '') = :cnic",
+          { cnic },
+        )
+        .take(20)
+        .getMany();
       cnic_matches.push(...rows);
     }
 

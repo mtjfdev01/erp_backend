@@ -62,16 +62,120 @@ export class AidPeopleService {
     return digits;
   }
 
+  /** Match CNIC by digits only; optionally restrict to active or archived rows. */
+  private async findByCnicDigits(
+    cnicDigits: string | null,
+    opts?: { excludeId?: number; archivedOnly?: boolean; activeOnly?: boolean },
+  ): Promise<AidPerson | null> {
+    if (!cnicDigits) return null;
+    const qb = this.personRepo
+      .createQueryBuilder("p")
+      .where(
+        "REPLACE(REPLACE(COALESCE(p.cnic, ''), '-', ''), ' ', '') = :cnic",
+        { cnic: cnicDigits },
+      );
+    if (opts?.archivedOnly) {
+      qb.andWhere("p.is_archived = :archived", { archived: true });
+    } else if (opts?.activeOnly !== false) {
+      // Default: only non-archived people count as conflicts / links
+      qb.andWhere("p.is_archived = :archived", { archived: false });
+    }
+    if (opts?.excludeId) {
+      qb.andWhere("p.id != :excludeId", { excludeId: opts.excludeId });
+    }
+    qb.orderBy("p.id", "ASC").take(1);
+    return qb.getOne();
+  }
+
   private async assertUniqueCnic(cnic: string | null, excludeId?: number) {
     if (!cnic) return;
-    const existing = await this.personRepo.findOne({
-      where: { cnic, is_archived: false },
+    const existing = await this.findByCnicDigits(cnic, {
+      excludeId,
+      activeOnly: true,
     });
-    if (existing && existing.id !== excludeId) {
+    if (existing) {
       throw new ConflictException(
         `CNIC already registered to person #${existing.id} (${existing.full_name})`,
       );
     }
+  }
+
+  /** Reactivate an archived person and apply create/update payload (CNIC reclaim). */
+  private async reactivateArchivedPerson(
+    person: AidPerson,
+    dto: CreateAidPersonDto,
+    user?: User,
+  ) {
+    person.is_archived = false;
+    person.is_active = true;
+    person.full_name = dto.full_name.trim();
+    const mapped = this.mapPersonFields(dto);
+    const cnic = this.normalizeCnic(dto.cnic);
+    if (cnic) person.cnic = cnic;
+    if (mapped.father_or_husband_name !== undefined) {
+      person.father_or_husband_name = mapped.father_or_husband_name;
+    }
+    if (mapped.cnic_expiry !== undefined) person.cnic_expiry = mapped.cnic_expiry;
+    if (mapped.name_urdu !== undefined) person.name_urdu = mapped.name_urdu;
+    if (mapped.caste !== undefined) person.caste = mapped.caste;
+    if (mapped.phone !== undefined) person.phone = mapped.phone;
+    if (mapped.phone_alternate !== undefined) {
+      person.phone_alternate = mapped.phone_alternate;
+    }
+    if (mapped.photo_url !== undefined) person.photo_url = mapped.photo_url;
+    if (mapped.photo_name !== undefined) person.photo_name = mapped.photo_name;
+    if (mapped.gender !== undefined) person.gender = mapped.gender;
+    if (mapped.date_of_birth !== undefined) {
+      person.date_of_birth = mapped.date_of_birth;
+    }
+    if (mapped.marital_status !== undefined) {
+      person.marital_status = mapped.marital_status;
+    }
+    if (mapped.vulnerability !== undefined) {
+      person.vulnerability = mapped.vulnerability;
+    }
+    if (mapped.occupation !== undefined) person.occupation = mapped.occupation;
+    if (mapped.household_dependency !== undefined) {
+      person.household_dependency = mapped.household_dependency;
+    }
+    if (mapped.education_level !== undefined) {
+      person.education_level = mapped.education_level;
+    }
+    if (mapped.literacy_status !== undefined) {
+      person.literacy_status = mapped.literacy_status;
+    }
+    if (mapped.literacy_category !== undefined) {
+      person.literacy_category = mapped.literacy_category;
+    }
+    if (mapped.student_class !== undefined) {
+      person.student_class = mapped.student_class;
+    }
+    if (mapped.student_class_type !== undefined) {
+      person.student_class_type = mapped.student_class_type;
+    }
+    if (mapped.student_class_name !== undefined) {
+      person.student_class_name = mapped.student_class_name;
+    }
+    if (mapped.monthly_income !== undefined) {
+      person.monthly_income = mapped.monthly_income;
+    }
+    if (mapped.has_disability !== undefined) {
+      person.has_disability = mapped.has_disability === true;
+    }
+    if (mapped.disability_type !== undefined) {
+      person.disability_type = mapped.disability_type;
+    }
+    if (mapped.address !== undefined) person.address = mapped.address;
+    if (mapped.city !== undefined) person.city = mapped.city;
+    if (mapped.province !== undefined) person.province = mapped.province;
+    if (mapped.district !== undefined) person.district = mapped.district;
+    if (mapped.tehsil !== undefined) person.tehsil = mapped.tehsil;
+    if (mapped.union_council !== undefined) {
+      person.union_council = mapped.union_council;
+    }
+    if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive !== false;
+    person.updated_by = user || null;
+    return this.personRepo.save(person);
   }
 
   private sanitizeLivestockEntries(
@@ -237,6 +341,17 @@ export class AidPeopleService {
   async create(dto: CreateAidPersonDto, user?: User) {
     const cnic = this.normalizeCnic(dto.cnic);
     await this.assertUniqueCnic(cnic);
+
+    // Archived person with same CNIC — reclaim instead of blocking
+    if (cnic) {
+      const archived = await this.findByCnicDigits(cnic, {
+        archivedOnly: true,
+      });
+      if (archived) {
+        return this.reactivateArchivedPerson(archived, dto, user);
+      }
+    }
+
     const mapped = this.mapPersonFields(dto);
     const row = this.personRepo.create({
       full_name: dto.full_name.trim(),
@@ -680,7 +795,10 @@ export class AidPeopleService {
   async softDelete(id: number, user?: User) {
     const person = await this.findOne(id);
     person.is_archived = true;
+    person.is_active = false;
     person.updated_by = user || null;
+    // Keep CNIC on the row for history; uniqueness is only among active rows
+    // (uq_aid_people_cnic_active). Reclaim path reactivates this record if needed.
     return this.personRepo.save(person);
   }
 
@@ -729,8 +847,8 @@ export class AidPeopleService {
         if (err instanceof ConflictException) {
           const cnic = this.normalizeCnic(dto.person.cnic);
           if (cnic) {
-            const existing = await this.personRepo.findOne({
-              where: { cnic, is_archived: false },
+            const existing = await this.findByCnicDigits(cnic, {
+              activeOnly: true,
             });
             if (existing) toPersonId = existing.id;
           }
