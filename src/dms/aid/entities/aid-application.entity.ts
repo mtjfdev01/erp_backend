@@ -71,6 +71,33 @@ export class AidApplication extends BaseEntity {
   requested_aid_type: AidRequestType;
 
   /**
+   * Catalog program under requested_aid_type (e.g. health_patient_care).
+   * Drives Expected Amount from the project rates sheet.
+   */
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  aid_program: string | null;
+
+  /** Expected amount (PKR) for the selected program — lower bound when ranged. */
+  @Column({
+    type: "numeric",
+    precision: 14,
+    scale: 2,
+    nullable: true,
+    default: null,
+  })
+  expected_amount: string | null;
+
+  /** Upper bound when the program rate is a range (e.g. Hand Pump 70k–90k). */
+  @Column({
+    type: "numeric",
+    precision: 14,
+    scale: 2,
+    nullable: true,
+    default: null,
+  })
+  expected_amount_max: string | null;
+
+  /**
    * Education aid type only:
    * education_history[], scholarships[], income_source_before, continue_education_if_not_approved
    */

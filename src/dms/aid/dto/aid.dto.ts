@@ -630,6 +630,26 @@ export class CreateAidApplicationDto {
   @IsEnum(AidRequestType)
   requested_aid_type?: AidRequestType;
 
+  /** Program key under aid type (project rates catalog). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  aid_program?: string | null;
+
+  /** Expected amount PKR (lower bound when ranged). */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @Type(() => Number)
+  @IsNumber()
+  expected_amount?: number | null;
+
+  /** Expected amount upper bound PKR when program has a range. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @Type(() => Number)
+  @IsNumber()
+  expected_amount_max?: number | null;
+
   /** Education-aid intake payload (history, scholarship, questions). */
   @IsOptional()
   @IsObject()
@@ -683,6 +703,10 @@ export class UpdateAidApplicationDto {
   household_id?: number | null;
 
   @IsOptional()
+  @IsInt()
+  writer_person_id?: number;
+
+  @IsOptional()
   @IsEnum(AidWriterRelation)
   writer_relation?: AidWriterRelation;
 
@@ -702,6 +726,23 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsEnum(AidRequestType)
   requested_aid_type?: AidRequestType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  aid_program?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @Type(() => Number)
+  @IsNumber()
+  expected_amount?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined)
+  @Type(() => Number)
+  @IsNumber()
+  expected_amount_max?: number | null;
 
   @IsOptional()
   @IsObject()
@@ -735,6 +776,20 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsString()
   verification_notes?: string | null;
+
+  /** Patch beneficiary person fields (same shape as create person). */
+  @IsOptional()
+  @IsObject()
+  beneficiary?: Record<string, unknown>;
+
+  /** Patch writer person fields when writer_person_id already set. */
+  @IsOptional()
+  @IsObject()
+  writer?: Record<string, unknown>;
+
+  /** Add new family members (existing links are ignored on conflict). */
+  @IsOptional()
+  family_members?: CreateAidFamilyMemberDto[];
 }
 
 export class RejectAidApplicationDto {
