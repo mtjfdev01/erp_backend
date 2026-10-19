@@ -36,19 +36,72 @@ export class CeoNoteConversionService {
     }));
   }
 
+  private async getReportingManagerIds(
+    manager: EntityManager,
+    userIds?: number[] | null,
+  ): Promise<number[]> {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+    const numericUserIds = userIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (numericUserIds.length === 0) return [];
+
+    const userRepo = manager.getRepository(User);
+    const assignees = await userRepo.find({
+      where: { id: In(numericUserIds) },
+      relations: ["managers"],
+    });
+
+    const managerIds: number[] = [];
+    for (const assignee of assignees) {
+      if (Array.isArray(assignee.managers) && assignee.managers.length > 0) {
+        for (const m of assignee.managers) {
+          if (
+            m?.id &&
+            Number.isInteger(Number(m.id)) &&
+            Number(m.id) > 0 &&
+            !m.is_archived &&
+            m.isActive !== false
+          ) {
+            managerIds.push(Number(m.id));
+          }
+        }
+      }
+      if (
+        assignee.manager_id &&
+        Number.isInteger(Number(assignee.manager_id)) &&
+        Number(assignee.manager_id) > 0
+      ) {
+        managerIds.push(Number(assignee.manager_id));
+      }
+    }
+
+    if (managerIds.length === 0) return [];
+
+    const validManagers = await userRepo.find({
+      where: {
+        id: In(Array.from(new Set(managerIds))),
+        is_archived: false,
+        isActive: true,
+      },
+      select: ["id"],
+    });
+    const validIdSet = new Set(validManagers.map((u) => u.id));
+    const result: number[] = [];
+    for (const id of managerIds) {
+      if (validIdSet.has(id) && !result.includes(id)) {
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
   private async getPrimaryAssigneeManagerId(
     manager: EntityManager,
     userIds?: number[] | null,
   ): Promise<number | null> {
-    const assigneeId = Number(userIds?.[0]);
-    if (!Number.isInteger(assigneeId) || assigneeId <= 0) return null;
-
-    const assignee = await manager.getRepository(User).findOne({
-      where: { id: assigneeId },
-      select: ["id", "manager_id"],
-    });
-    const managerId = Number(assignee?.manager_id);
-    return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+    const ids = await this.getReportingManagerIds(manager, userIds);
+    return ids.length > 0 ? ids[0] : null;
   }
 
   private mapPriority(priority: string): TaskPriority {
@@ -100,9 +153,25 @@ export class CeoNoteConversionService {
       convertToTaskDto.assigned_users || note.assigned_user_ids || [];
 
     const assignedUsersMeta = await this.getAssignedUsersMeta(manager, assignedUsers);
+
+    const explicitReporterIds = Array.isArray(convertToTaskDto.reported_to_ids)
+      ? convertToTaskDto.reported_to_ids
+          .map((id: any) => Number(id))
+          .filter((id: number) => Number.isInteger(id) && id > 0)
+      : convertToTaskDto.reported_to_id != null && Number(convertToTaskDto.reported_to_id) > 0
+        ? [Number(convertToTaskDto.reported_to_id)]
+        : [];
+
+    const reporterIds: number[] =
+      explicitReporterIds.length > 0
+        ? Array.from<number>(new Set(explicitReporterIds))
+        : await this.getReportingManagerIds(manager, assignedUsers);
+
+    const primaryReporterId = reporterIds.length > 0 ? reporterIds[0] : null;
+
     const taskRepository = manager.getRepository(Task);
 
-    const task = taskRepository.create({
+    const task: Task = taskRepository.create({
       title,
       description,
       department,
@@ -110,7 +179,9 @@ export class CeoNoteConversionService {
       workflow_type: TaskWorkflowType.STANDARD,
       task_type: TaskType.ONE_TIME,
       due_date,
-      reported_to_id: await this.getPrimaryAssigneeManagerId(manager, assignedUsers),
+      reported_to: reporterIds.length > 0 ? reporterIds : null,
+      reported_to_id: primaryReporterId,
+      reported_to_ids: reporterIds.length > 0 ? reporterIds : null,
       assigned_user_ids: assignedUsers.length > 0 ? assignedUsers : null,
       assigned_users_meta: assignedUsersMeta,
       mov_items: Array.isArray(convertToTaskDto.mov_items)

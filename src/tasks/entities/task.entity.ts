@@ -113,12 +113,15 @@ export class Task {
   @Column({ type: "jsonb", nullable: true })
   assigned_users_meta: { user_id: number; department: Department }[];
 
-  @Column({ type: "int", nullable: true, name: "reported_to" })
-  reported_to_id: number | null;
+  @Column({ type: "int", array: true, nullable: true, name: "reported_to" })
+  reported_to: number[] | null;
 
-  @ManyToOne(() => User, { nullable: true, eager: false, onDelete: "SET NULL" })
-  @JoinColumn({ name: "reported_to" })
-  reported_to: User | null;
+  @Column({ type: "int", array: true, nullable: true, name: "reported_to_ids" })
+  reported_to_ids: number[] | null;
+
+  reported_to_id?: number | null;
+
+  reported_to_users?: User[];
 
   @Column({ type: "int", nullable: true })
   created_by_id: number;

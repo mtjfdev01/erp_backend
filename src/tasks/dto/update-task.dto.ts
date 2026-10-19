@@ -70,6 +70,18 @@ export class UpdateTaskDto {
   assigned_users_meta?: Array<{ user_id: number; department: Department }>;
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  reported_to_ids?: number[];
+
+  @IsOptional()
+  reported_to?: number[] | number;
+
+  @IsOptional()
+  @IsInt()
+  reported_to_id?: number;
+
+  @IsOptional()
   @IsString()
   recurrence_rule?: string;
 

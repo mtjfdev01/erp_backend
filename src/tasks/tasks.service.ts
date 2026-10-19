@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Logger,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder, IsNull, Not, Brackets, In } from "typeorm";
@@ -57,9 +58,63 @@ import {
 } from "../utils/lookup";
 
 @Injectable()
-export class TasksService {
+export class TasksService implements OnModuleInit {
   private readonly logger = new Logger(TasksService.name);
   private readonly searchableColumns = ["title", "description", "project_name"];
+
+  async onModuleInit() {
+    void this.migrateExistingReportedTo().catch((err) => {
+      this.logger.warn(`Task reported_to migration skipped: ${err?.message || err}`);
+    });
+  }
+
+  private async migrateExistingReportedTo(): Promise<void> {
+    try {
+      await this.taskRepo.query(`
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS "FK_7c8b35981277df842e52dd65f61";
+      `);
+
+      await this.taskRepo.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to' AND data_type != 'ARRAY'
+          ) THEN
+            ALTER TABLE tasks ALTER COLUMN reported_to TYPE integer[] USING CASE 
+              WHEN reported_to IS NULL THEN NULL 
+              ELSE ARRAY[reported_to]::integer[] 
+            END;
+          END IF;
+        END $$;
+      `);
+
+      await this.taskRepo.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to'
+          ) AND EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to_ids'
+          ) THEN
+            UPDATE tasks
+            SET reported_to = reported_to_ids
+            WHERE (reported_to IS NULL OR cardinality(reported_to) = 0)
+              AND reported_to_ids IS NOT NULL AND cardinality(reported_to_ids) > 0;
+
+            UPDATE tasks
+            SET reported_to_ids = reported_to
+            WHERE (reported_to_ids IS NULL OR cardinality(reported_to_ids) = 0)
+              AND reported_to IS NOT NULL AND cardinality(reported_to) > 0;
+          END IF;
+        END $$;
+      `);
+    } catch (err: any) {
+      this.logger.warn(`migrateExistingReportedTo query note: ${err?.message || err}`);
+    }
+  }
 
   constructor(
     @InjectRepository(Task)
@@ -362,11 +417,31 @@ export class TasksService {
 
     const currentUserId = Number(currentUser.id);
     const role = String(currentUser.role || "").toLowerCase();
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(currentUserId);
     return (
       Number(task.created_by_id) === currentUserId ||
-      Number(task.reported_to_id) === currentUserId ||
+      isReporter ||
       role === UserRole.SUPER_ADMIN.toLowerCase() ||
       role === UserRole.ADMIN.toLowerCase()
+    );
+  }
+
+  private getReporterIds(task: Task): number[] {
+    const raw =
+      Array.isArray(task.reported_to) && task.reported_to.length > 0
+        ? task.reported_to
+        : Array.isArray(task.reported_to_ids) && task.reported_to_ids.length > 0
+          ? task.reported_to_ids
+          : task.reported_to_id != null
+            ? [task.reported_to_id]
+            : [];
+    return Array.from(
+      new Set(
+        raw
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
     );
   }
 
@@ -600,7 +675,10 @@ export class TasksService {
       userId: user.id,
     });
     qb.orWhere("task.created_by_id = :userId", { userId: user.id });
-    qb.orWhere("task.reported_to_id = :userId", { userId: user.id });
+    qb.orWhere(
+      "(task.reported_to @> ARRAY[:userId]::int[] OR task.reported_to_ids @> ARRAY[:userId]::int[])",
+      { userId: user.id },
+    );
 
     if (reportingUserIds.length > 0) {
       qb.orWhere("task.assigned_user_ids && :reportingUserIds::int[]", {
@@ -858,19 +936,149 @@ export class TasksService {
     }));
   }
 
-    private async getPrimaryAssigneeManagerId(
-      userIds?: number[] | null,
-    ): Promise<number | null> {
-      const assigneeId = Number(userIds?.[0]);
-      if (!Number.isInteger(assigneeId) || assigneeId <= 0) return null;
+  private async getReportingManagerIds(
+    userIds?: number[] | null,
+  ): Promise<number[]> {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+    const numericUserIds = userIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (numericUserIds.length === 0) return [];
 
-      const assignee = await this.userRepo.findOne({
-        where: { id: assigneeId },
-        select: ["id", "manager_id"],
-      });
-      const managerId = Number(assignee?.manager_id);
-      return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+    const assignees = await this.userRepo.find({
+      where: { id: In(numericUserIds) },
+      relations: ["managers"],
+    });
+
+    const managerIds: number[] = [];
+    for (const assignee of assignees) {
+      if (Array.isArray(assignee.managers) && assignee.managers.length > 0) {
+        for (const m of assignee.managers) {
+          if (
+            m?.id &&
+            Number.isInteger(Number(m.id)) &&
+            Number(m.id) > 0 &&
+            !m.is_archived &&
+            m.isActive !== false
+          ) {
+            managerIds.push(Number(m.id));
+          }
+        }
+      }
+      if (
+        assignee.manager_id &&
+        Number.isInteger(Number(assignee.manager_id)) &&
+        Number(assignee.manager_id) > 0
+      ) {
+        managerIds.push(Number(assignee.manager_id));
+      }
     }
+
+    if (managerIds.length === 0) return [];
+
+    const validManagers = await this.userRepo.find({
+      where: {
+        id: In(Array.from(new Set(managerIds))),
+        is_archived: false,
+        isActive: true,
+      },
+      select: ["id"],
+    });
+    const validIdSet = new Set(validManagers.map((u) => u.id));
+    const result: number[] = [];
+    for (const id of managerIds) {
+      if (validIdSet.has(id) && !result.includes(id)) {
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
+  private async getPrimaryAssigneeManagerId(
+    userIds?: number[] | null,
+  ): Promise<number | null> {
+    const ids = await this.getReportingManagerIds(userIds);
+    return ids.length > 0 ? ids[0] : null;
+  }
+
+  private async resolveReportingManagers(
+    dto: {
+      reported_to?: number[] | number;
+      reported_to_ids?: number[];
+      reported_to_id?: number;
+      assigned_users?: number[];
+    },
+    existingTask?: Task,
+  ): Promise<{
+    reported_to: number[] | null;
+    reported_to_ids: number[] | null;
+    reported_to_id: number | null;
+  }> {
+    let resolvedIds: number[] = [];
+
+    // 1. If assigned users are present, automatically derive reporting managers
+    // from the user management relationships configured in DMS.
+    if (Array.isArray(dto.assigned_users) && dto.assigned_users.length > 0) {
+      resolvedIds = await this.getReportingManagerIds(dto.assigned_users);
+    }
+
+    // 2. If no managers were found from assigned users (or assigned users was not provided/had no managers),
+    // check explicit reporting managers from DTO
+    if (resolvedIds.length === 0) {
+      if (Array.isArray(dto.reported_to_ids) && dto.reported_to_ids.length > 0) {
+        resolvedIds = dto.reported_to_ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } else if (Array.isArray(dto.reported_to) && dto.reported_to.length > 0) {
+        resolvedIds = dto.reported_to
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } else if (dto.reported_to != null && Number(dto.reported_to) > 0) {
+        resolvedIds = [Number(dto.reported_to)];
+      } else if (dto.reported_to_id != null && Number(dto.reported_to_id) > 0) {
+        resolvedIds = [Number(dto.reported_to_id)];
+      }
+    }
+
+    // 3. Fallback to existing task's reporting managers or existing assignees
+    if (resolvedIds.length === 0 && existingTask) {
+      if (
+        Array.isArray(existingTask.reported_to) &&
+        existingTask.reported_to.length > 0
+      ) {
+        resolvedIds = existingTask.reported_to;
+      } else if (
+        Array.isArray(existingTask.reported_to_ids) &&
+        existingTask.reported_to_ids.length > 0
+      ) {
+        resolvedIds = existingTask.reported_to_ids;
+      } else if (
+        existingTask.reported_to_id != null &&
+        Number(existingTask.reported_to_id) > 0
+      ) {
+        resolvedIds = [Number(existingTask.reported_to_id)];
+      } else if (
+        Array.isArray(existingTask.assigned_user_ids) &&
+        existingTask.assigned_user_ids.length > 0
+      ) {
+        resolvedIds = await this.getReportingManagerIds(existingTask.assigned_user_ids);
+      }
+    }
+
+    const uniqueIds = Array.from(
+      new Set(
+        resolvedIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    const primaryId = uniqueIds.length > 0 ? uniqueIds[0] : null;
+    return {
+      reported_to: uniqueIds.length > 0 ? uniqueIds : null,
+      reported_to_ids: uniqueIds.length > 0 ? uniqueIds : null,
+      reported_to_id: primaryId,
+    };
+  }
 
   /** System/cron task creation — no permission checks; created_by is null. */
   async createSystemTask(dto: CreateTaskDto): Promise<Task> {
@@ -906,6 +1114,9 @@ export class TasksService {
         movItemsFromDto = dto.mov_checklist.map((item) => item.text);
       }
 
+      const { reported_to_ids, reported_to_id, reported_to } =
+        await this.resolveReportingManagers(dto);
+
       const task = this.taskRepo.create({
         title: dto.title,
         description: dto.description || "",
@@ -934,9 +1145,9 @@ export class TasksService {
           ? new Date(dto.recurrence_end_date)
           : null,
         recurrence_end_occurrences: dto.recurrence_end_occurrences || null,
-        reported_to_id: await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        ),
+        reported_to: reported_to_ids,
+        reported_to_id,
+        reported_to_ids,
         created_by_id: currentUser?.id ?? null,
         assigned_user_ids: Array.isArray(dto.assigned_users)
           ? dto.assigned_users
@@ -1086,7 +1297,6 @@ export class TasksService {
         ? await this.dataScopeService.getDirectReportIds(currentUser.id)
         : [];
       const qb = this.taskRepo.createQueryBuilder("task");
-      qb.leftJoinAndSelect("task.reported_to", "reported_to");
       await this.applyRoleFilters(
         qb,
         currentUser,
@@ -1308,14 +1518,16 @@ export class TasksService {
         );
       }
 
-      // Remove user_name from safeFilters so it's not passed to applyCommonFilters
       delete safeFilters.user_name;
+      delete safeFilters.reported_to;
+      delete safeFilters.reported_to_id;
+      delete safeFilters.reported_to_ids;
 
       // Now make a copy of safeFilters for count query builder
       const countSafeFilters = { ...safeFilters };
       
       // Clean up countSafeFilters to remove any extra fields we don't want (like reported_to)
-      const countExcludeFields = ["reported_to"];
+      const countExcludeFields = ["reported_to", "reported_to_id", "reported_to_ids"];
       countExcludeFields.forEach(field => delete countSafeFilters[field]);
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
@@ -1353,6 +1565,33 @@ export class TasksService {
       }
 
       const [data, total] = await qb.getManyAndCount();
+
+      // Ensure reported_to, reported_to_ids, reported_to_id, and reported_to_users are populated for all returned tasks
+      const allReporterUserIds = new Set<number>();
+      data.forEach((task) => {
+        const ids = this.getReporterIds(task);
+        task.reported_to = ids.length > 0 ? ids : null;
+        task.reported_to_ids = ids.length > 0 ? ids : null;
+        task.reported_to_id = ids.length > 0 ? ids[0] : null;
+        ids.forEach((id) => allReporterUserIds.add(id));
+      });
+      if (allReporterUserIds.size > 0) {
+        const reporterUsers = await this.userRepo.find({
+          where: { id: In(Array.from(allReporterUserIds)) },
+        });
+        const reporterUserMap = new Map<number, User>();
+        reporterUsers.forEach((u) => reporterUserMap.set(u.id, u));
+        data.forEach((task) => {
+          const ids = task.reported_to || task.reported_to_ids || [];
+          if (Array.isArray(ids) && ids.length > 0) {
+            (task as any).reported_to_users = ids
+              .map((id) => reporterUserMap.get(Number(id)))
+              .filter(Boolean);
+          } else {
+            (task as any).reported_to_users = [];
+          }
+        });
+      }
 
       if (currentUser) {
         data.forEach((task) => {
@@ -2219,7 +2458,6 @@ export class TasksService {
             ? "task.due_date"
             : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
-      qb.leftJoinAndSelect("task.reported_to", "reported_to");
       
       // Org-wide visibility mirrors getDashboardStats logic above (role + perms)
       const perms = currentUser
@@ -2720,13 +2958,27 @@ export class TasksService {
         .leftJoinAndSelect("comments.author", "comment_author")
         .leftJoinAndSelect("task.activities", "activities")
         .leftJoinAndSelect("activities.performed_by", "activity_performed_by")
-        .leftJoinAndSelect("task.reported_to", "reported_to")
         .leftJoinAndSelect("task.created_by", "created_by")
         .leftJoinAndSelect("task.updated_by", "updated_by");
 
       const task = await qb.getOne();
       if (!task) {
         throw new NotFoundException("Task not found");
+      }
+
+      const reporterIds = this.getReporterIds(task);
+
+      task.reported_to = reporterIds.length > 0 ? reporterIds : null;
+      task.reported_to_ids = reporterIds.length > 0 ? reporterIds : null;
+      task.reported_to_id = reporterIds.length > 0 ? reporterIds[0] : null;
+
+      if (reporterIds.length > 0) {
+        const reporterUsers = await this.userRepo.find({
+          where: { id: In(reporterIds) },
+        });
+        (task as any).reported_to_users = reporterUsers;
+      } else {
+        (task as any).reported_to_users = [];
       }
 
       if (currentUser) {
@@ -2745,8 +2997,7 @@ export class TasksService {
         const isAssignee = assignedIds.includes(userId);
         const isApprover = approverIds.includes(userId);
         const isReporterOrCreator =
-          (task.reported_to_id != null &&
-            Number(task.reported_to_id) === userId) ||
+          reporterIds.includes(userId) ||
           (task.created_by_id != null && Number(task.created_by_id) === userId);
 
         // E. Check if user is a manager of any assigned user's department
@@ -2834,9 +3085,10 @@ export class TasksService {
     const approverIds = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map(Number)
       : [];
+    const reporterIds = this.getReporterIds(task);
     return (
       Number(task.created_by_id) === userId ||
-      Number(task.reported_to_id) === userId ||
+      reporterIds.includes(userId) ||
       approverIds.includes(userId)
     );
   }
@@ -2920,8 +3172,10 @@ export class TasksService {
         task.status === TaskStatus.COMPLETED &&
         dto.status === TaskStatus.CLOSED
       ) {
-        const isCreator = task.created_by_id === currentUser.id;
-        const isReporter = task.reported_to_id === currentUser.id;
+        const currentUserId = Number(currentUser.id);
+        const isCreator = Number(task.created_by_id) === currentUserId;
+        const reporterIds = this.getReporterIds(task);
+        const isReporter = reporterIds.includes(currentUserId);
         const isAdmin =
           currentUser.role === UserRole.SUPER_ADMIN ||
           currentUser.role === UserRole.ADMIN;
@@ -3109,9 +3363,8 @@ export class TasksService {
         task.overdue_email_sent = false;
       }
 
-      const reportedToId = Array.isArray(dto.assigned_users)
-        ? await this.getPrimaryAssigneeManagerId(dto.assigned_users)
-        : task.reported_to_id;
+      const { reported_to_ids, reported_to_id } =
+        await this.resolveReportingManagers(dto, task);
 
       const oldProgress = task.progress;
       Object.assign(task, {
@@ -3143,7 +3396,9 @@ export class TasksService {
         recurrence_end_occurrences:
           dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
         progress: newProgress,
-        reported_to_id: reportedToId,
+        reported_to: reported_to_ids,
+        reported_to_id,
+        reported_to_ids,
         approval_required_user_ids: Array.isArray(
           dto.approval_required_user_ids,
         )
@@ -3278,8 +3533,9 @@ export class TasksService {
     const isAssignee = allAssignedIds.includes(currentUserId);
     // Enforce assignment at the API boundary; client drag guards are not authorization.
     this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
-    const isCreator = task.created_by_id === currentUserId;
-    const isReporter = task.reported_to_id === currentUserId;
+    const isCreator = Number(task.created_by_id) === currentUserId;
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(currentUserId);
     const approvers = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
       : [];
@@ -3393,9 +3649,21 @@ export class TasksService {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
-        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        );
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
+      } else if (
+        dto.reported_to !== undefined ||
+        dto.reported_to_ids !== undefined ||
+        dto.reported_to_id !== undefined
+      ) {
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
       }
 
       if (
@@ -3472,9 +3740,11 @@ export class TasksService {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
-        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        );
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
       }
 
       const saved = await this.taskRepo.save(task);
@@ -4696,9 +4966,17 @@ export class TasksService {
           project_name: master.project_name,
           assigned_user_ids: master.assigned_user_ids,
           assigned_users_meta: master.assigned_users_meta,
-          reported_to_id: await this.getPrimaryAssigneeManagerId(
-            master.assigned_user_ids,
-          ),
+          reported_to:
+            master.reported_to ??
+            master.reported_to_ids ??
+            (await this.getReportingManagerIds(master.assigned_user_ids)),
+          reported_to_id:
+            master.reported_to_id ??
+            (await this.getPrimaryAssigneeManagerId(master.assigned_user_ids)),
+          reported_to_ids:
+            master.reported_to_ids ??
+            master.reported_to ??
+            (await this.getReportingManagerIds(master.assigned_user_ids)),
           created_by_id: master.created_by_id,
           approval_required_user_ids: master.approval_required_user_ids,
           // Reuse the MOV definitions and assignments, but start the new
