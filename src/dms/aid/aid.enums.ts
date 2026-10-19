@@ -6,10 +6,16 @@ export enum AidPersonGender {
 
 export enum AidMaritalStatus {
   SINGLE = "single",
+  ENGAGED = "engaged",
   MARRIED = "married",
+  /** @deprecated prefer WIDOW — kept for existing rows */
   WIDOWED = "widowed",
+  WIDOW = "widow",
+  WIDOWER = "widower",
   DIVORCED = "divorced",
   SEPARATED = "separated",
+  KHULA = "khula",
+  ABANDONED = "abandoned",
 }
 
 export enum AidEducationLevel {

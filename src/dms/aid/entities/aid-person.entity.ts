@@ -146,6 +146,14 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   property_details: string | null;
 
+  /** Area of primary/legacy property (also stored per row in property_entries). */
+  @Column({ type: "varchar", length: 80, nullable: true, default: null })
+  property_area: string | null;
+
+  /** Rows: property_type, property_area, property_details */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  property_entries: Record<string, unknown>[] | null;
+
   /** Resident — Own House | Rented | Sham Lot */
   @Column({
     type: "enum",
@@ -170,6 +178,10 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   house_details: string | null;
 
+  /** Rows: resident_type, ownership, area, details, rented_amount */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  resident_entries: Record<string, unknown>[] | null;
+
   @Column({ type: "boolean", default: false })
   has_livestock: boolean;
 
@@ -182,6 +194,10 @@ export class AidPerson extends BaseEntity {
 
   @Column({ type: "varchar", length: 120, nullable: true, default: null })
   vehicle_type: string | null;
+
+  /** Rows: vehicle_type */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  vehicle_entries: Record<string, unknown>[] | null;
 
   @Column({
     type: "enum",

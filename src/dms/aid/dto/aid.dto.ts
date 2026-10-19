@@ -164,6 +164,15 @@ export class CreateAidPersonDto {
   property_details?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  property_area?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  property_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsEnum(AidResidentType)
   resident_type?: AidResidentType | null;
 
@@ -190,6 +199,10 @@ export class CreateAidPersonDto {
   house_details?: string | null;
 
   @IsOptional()
+  @IsArray()
+  resident_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsBoolean()
   has_livestock?: boolean;
 
@@ -205,6 +218,10 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(120)
   vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  vehicle_entries?: Record<string, unknown>[] | null;
 
   @IsOptional()
   @IsEnum(AidNectaStatus)
@@ -401,6 +418,15 @@ export class UpdateAidPersonDto {
   property_details?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  property_area?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  property_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsEnum(AidResidentType)
   resident_type?: AidResidentType | null;
 
@@ -427,6 +453,10 @@ export class UpdateAidPersonDto {
   house_details?: string | null;
 
   @IsOptional()
+  @IsArray()
+  resident_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsBoolean()
   has_livestock?: boolean;
 
@@ -442,6 +472,10 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(120)
   vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  vehicle_entries?: Record<string, unknown>[] | null;
 
   @IsOptional()
   @IsEnum(AidNectaStatus)

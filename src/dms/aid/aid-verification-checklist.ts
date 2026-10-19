@@ -213,8 +213,24 @@ function residentSummary(p?: PersonLike | null): string | null {
 
 function landSummary(p?: PersonLike | null): string | null {
   if (!p?.has_land) return p?.has_land === false ? "No land" : null;
+  const entries = Array.isArray((p as any).property_entries)
+    ? ((p as any).property_entries as Record<string, unknown>[])
+    : [];
+  if (entries.length) {
+    const bits = entries.map((row) => {
+      const parts: string[] = [];
+      if (row.property_type) {
+        parts.push(String(row.property_type).replace(/_/g, " "));
+      }
+      if (row.property_area) parts.push(String(row.property_area));
+      if (row.property_details) parts.push(String(row.property_details));
+      return parts.join(" · ");
+    });
+    return `Yes · ${bits.filter(Boolean).join(" | ")}`;
+  }
   const parts = ["Yes"];
   if (p.property_type) parts.push(String(p.property_type).replace(/_/g, " "));
+  if ((p as any).property_area) parts.push(String((p as any).property_area));
   if (p.property_details) parts.push(String(p.property_details));
   return parts.join(" · ");
 }
@@ -479,12 +495,16 @@ export function buildInvestigationItems(ctx: {
   );
 
   const marital = String(beneficiary?.marital_status || "").toLowerCase();
-  if (marital === "widowed") {
+  if (["widowed", "widow", "widower"].includes(marital)) {
     pushClaim(
       claims,
       "spouse_deceased",
-      "Spouse / husband deceased",
-      "Widowed (confirm death certificate / status on site)",
+      marital === "widower"
+        ? "Spouse / wife deceased"
+        : "Spouse / husband deceased",
+      marital === "widower"
+        ? "Widower (confirm death certificate / status on site)"
+        : "Widow (confirm death certificate / status on site)",
       false,
       "beneficiary",
     );
