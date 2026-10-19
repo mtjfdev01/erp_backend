@@ -1,4 +1,4 @@
-import { Column, Entity } from "typeorm";
+import { Column, Entity, Index } from "typeorm";
 import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import {
   AidEducationLevel,
@@ -13,6 +13,11 @@ import {
 } from "../aid.enums";
 
 @Entity("aid_people")
+/** CNIC unique only among active (non-archived) rows — archived CNICs can be reused. */
+@Index("uq_aid_people_cnic_active", ["cnic"], {
+  unique: true,
+  where: '"is_archived" = false AND "cnic" IS NOT NULL',
+})
 export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 200 })
   full_name: string;
@@ -21,8 +26,8 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 200, nullable: true, default: null })
   father_or_husband_name: string | null;
 
-  /** Unique when present; PostgreSQL allows multiple NULLs. */
-  @Column({ type: "varchar", length: 15, nullable: true, unique: true, default: null })
+  /** Unique among non-archived people (see uq_aid_people_cnic_active). */
+  @Column({ type: "varchar", length: 15, nullable: true, default: null })
   cnic: string | null;
 
   @Column({ type: "date", nullable: true, default: null })
@@ -31,6 +36,10 @@ export class AidPerson extends BaseEntity {
   /** Full name in Urdu script (optional). */
   @Column({ type: "varchar", length: 200, nullable: true, default: null })
   name_urdu: string | null;
+
+  /** Caste / tribe (optional) — Family Head identity. */
+  @Column({ type: "varchar", length: 120, nullable: true, default: null })
+  caste: string | null;
 
   @Column({ type: "varchar", length: 30, nullable: true, default: null })
   phone: string | null;

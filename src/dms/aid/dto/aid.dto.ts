@@ -16,6 +16,7 @@ import {
 import { Type } from "class-transformer";
 import {
   AidAttachmentContext,
+  AidCaseSource,
   AidCeoApprovalStatus,
   AidDeliveryStatus,
   AidEducationLevel,
@@ -57,6 +58,11 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(200)
   name_urdu?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  caste?: string | null;
 
   @IsOptional()
   @IsString()
@@ -289,6 +295,11 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(200)
   name_urdu?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  caste?: string | null;
 
   @IsOptional()
   @IsString()
@@ -612,6 +623,10 @@ export class CreateAidApplicationDto {
   request_summary?: string | null;
 
   @IsOptional()
+  @IsEnum(AidCaseSource)
+  case_source?: AidCaseSource | null;
+
+  @IsOptional()
   @IsEnum(AidRequestType)
   requested_aid_type?: AidRequestType;
 
@@ -679,6 +694,10 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsString()
   request_summary?: string | null;
+
+  @IsOptional()
+  @IsEnum(AidCaseSource)
+  case_source?: AidCaseSource | null;
 
   @IsOptional()
   @IsEnum(AidRequestType)
