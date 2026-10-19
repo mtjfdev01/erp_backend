@@ -113,14 +113,31 @@ export class Task {
   @Column({ type: "jsonb", nullable: true })
   assigned_users_meta: { user_id: number; department: Department }[];
 
+  /**
+   * Reporting Manager IDs (Multi-manager support):
+   * Stores the IDs of all reporting managers associated with the task assignees.
+   * Derived automatically from DMS User Management (`user_managers` relation & legacy `manager_id`).
+   * Note: The previous `reported_to_users_meta` JSONB column was removed to store IDs only.
+   */
   @Column({ type: "int", array: true, nullable: true, name: "reported_to" })
   reported_to: number[] | null;
 
+  /**
+   * Alias / synchronization array for reporting manager IDs to maintain compatibility across all query interfaces.
+   */
   @Column({ type: "int", array: true, nullable: true, name: "reported_to_ids" })
   reported_to_ids: number[] | null;
 
+  /**
+   * Backward-compatibility helper: represents the primary (first) reporting manager ID.
+   * Not a separate database column.
+   */
   reported_to_id?: number | null;
 
+  /**
+   * Runtime-hydrated User entities for all reporting managers.
+   * Populated on findOne/search for rich frontend display without storing duplicate JSON metadata.
+   */
   reported_to_users?: User[];
 
   @Column({ type: "int", nullable: true })

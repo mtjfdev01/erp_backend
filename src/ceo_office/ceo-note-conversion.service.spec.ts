@@ -16,6 +16,9 @@ describe("CeoNoteConversionService", () => {
       create: jest.fn((task) => task),
       save: jest.fn(async (task) => ({ ...task, id: 99 })),
     };
+    // Mock user repository to support both:
+    // 1. Loading assignee with relations: ["managers"] from DMS user management
+    // 2. Querying manager records by ID to verify active and non-archived status
     const userRepository = {
       find: jest.fn().mockImplementation(async (options?: any) => {
         const whereId = options?.where?.id;

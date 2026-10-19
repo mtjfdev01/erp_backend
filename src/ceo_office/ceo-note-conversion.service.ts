@@ -36,6 +36,11 @@ export class CeoNoteConversionService {
     }));
   }
 
+  /**
+   * Automatically resolves all active, non-archived reporting managers for the given assignees.
+   * Traverses both the DMS user management relation (`assignee.managers` via `user_managers`)
+   * and the direct `assignee.manager_id` foreign key.
+   */
   private async getReportingManagerIds(
     manager: EntityManager,
     userIds?: number[] | null,
@@ -54,6 +59,7 @@ export class CeoNoteConversionService {
 
     const managerIds: number[] = [];
     for (const assignee of assignees) {
+      // 1. Collect managers configured via DMS Menu (`user_managers` table)
       if (Array.isArray(assignee.managers) && assignee.managers.length > 0) {
         for (const m of assignee.managers) {
           if (
@@ -162,6 +168,7 @@ export class CeoNoteConversionService {
         ? [Number(convertToTaskDto.reported_to_id)]
         : [];
 
+    // Multi-manager support: resolve all reporting managers for the assigned users
     const reporterIds: number[] =
       explicitReporterIds.length > 0
         ? Array.from<number>(new Set(explicitReporterIds))
@@ -171,6 +178,7 @@ export class CeoNoteConversionService {
 
     const taskRepository = manager.getRepository(Task);
 
+    // Create the task storing reporting manager IDs in reported_to and reported_to_ids (without reported_to_users_meta)
     const task: Task = taskRepository.create({
       title,
       description,

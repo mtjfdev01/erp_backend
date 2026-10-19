@@ -427,6 +427,11 @@ export class TasksService implements OnModuleInit {
     );
   }
 
+  /**
+   * Helper to extract all valid reporting manager IDs from a task.
+   * Checks `task.reported_to` (array), `task.reported_to_ids` (array), or legacy `task.reported_to_id`.
+   * Returns a deduplicated array of positive integers.
+   */
   private getReporterIds(task: Task): number[] {
     const raw =
       Array.isArray(task.reported_to) && task.reported_to.length > 0
@@ -675,6 +680,7 @@ export class TasksService implements OnModuleInit {
       userId: user.id,
     });
     qb.orWhere("task.created_by_id = :userId", { userId: user.id });
+    // Match if user is among any of the multiple reporting managers assigned to this task
     qb.orWhere(
       "(task.reported_to @> ARRAY[:userId]::int[] OR task.reported_to_ids @> ARRAY[:userId]::int[])",
       { userId: user.id },
@@ -936,6 +942,16 @@ export class TasksService implements OnModuleInit {
     }));
   }
 
+  /**
+   * Retrieves all reporting manager IDs for the specified user IDs.
+   * Traverses both the DMS User Management many-to-many relation (`assignee.managers` from the `user_managers` table)
+   * and the legacy direct `assignee.manager_id` foreign key.
+   * Validates that each manager is active (`isActive !== false`) and not archived (`is_archived === false`).
+   * Returns a deduplicated array of active reporting manager IDs.
+   *
+   * @param userIds List of assigned user IDs
+   * @returns Array of unique manager IDs
+   */
   private async getReportingManagerIds(
     userIds?: number[] | null,
   ): Promise<number[]> {
@@ -945,6 +961,7 @@ export class TasksService implements OnModuleInit {
       .filter((id) => Number.isInteger(id) && id > 0);
     if (numericUserIds.length === 0) return [];
 
+    // Query assignees along with their configured managers from the DMS user management relation
     const assignees = await this.userRepo.find({
       where: { id: In(numericUserIds) },
       relations: ["managers"],
@@ -952,6 +969,7 @@ export class TasksService implements OnModuleInit {
 
     const managerIds: number[] = [];
     for (const assignee of assignees) {
+      // 1. Collect managers from the user_managers join table (configured via DMS Menu)
       if (Array.isArray(assignee.managers) && assignee.managers.length > 0) {
         for (const m of assignee.managers) {
           if (
@@ -965,6 +983,7 @@ export class TasksService implements OnModuleInit {
           }
         }
       }
+      // 2. Collect manager from legacy manager_id column
       if (
         assignee.manager_id &&
         Number.isInteger(Number(assignee.manager_id)) &&
@@ -976,6 +995,7 @@ export class TasksService implements OnModuleInit {
 
     if (managerIds.length === 0) return [];
 
+    // Verify all collected managers are valid, active, and not archived in the user table
     const validManagers = await this.userRepo.find({
       where: {
         id: In(Array.from(new Set(managerIds))),
@@ -994,6 +1014,10 @@ export class TasksService implements OnModuleInit {
     return result;
   }
 
+  /**
+   * Helper to retrieve the primary (first) reporting manager ID for a list of user IDs.
+   * Used for backward compatibility with systems expecting a single manager ID.
+   */
   private async getPrimaryAssigneeManagerId(
     userIds?: number[] | null,
   ): Promise<number | null> {
@@ -1001,6 +1025,16 @@ export class TasksService implements OnModuleInit {
     return ids.length > 0 ? ids[0] : null;
   }
 
+  /**
+   * Resolves the reporting manager IDs for a task create/update/assign operation.
+   * Priority:
+   * 1. Automatically derives all reporting managers configured for the assigned users in DMS.
+   * 2. Falls back to explicit DTO reporter IDs if no managers were found or assignees have none.
+   * 3. Falls back to existing task reporting managers during update/reassign.
+   *
+   * Sets both `reported_to` and `reported_to_ids` as arrays of manager IDs, eliminating the need
+   * for a separate `reported_to_users_meta` column.
+   */
   private async resolveReportingManagers(
     dto: {
       reported_to?: number[] | number;
@@ -1566,7 +1600,8 @@ export class TasksService implements OnModuleInit {
 
       const [data, total] = await qb.getManyAndCount();
 
-      // Ensure reported_to, reported_to_ids, reported_to_id, and reported_to_users are populated for all returned tasks
+      // Hydrate multi-manager IDs and populate runtime `reported_to_users` array for all returned tasks.
+      // This eliminates the need for storing duplicate user metadata in the database.
       const allReporterUserIds = new Set<number>();
       data.forEach((task) => {
         const ids = this.getReporterIds(task);
@@ -2966,6 +3001,8 @@ export class TasksService implements OnModuleInit {
         throw new NotFoundException("Task not found");
       }
 
+      // Retrieve all reporting manager IDs for the task and hydrate full User entities
+      // into `reported_to_users` for frontend display (without requiring `reported_to_users_meta` column).
       const reporterIds = this.getReporterIds(task);
 
       task.reported_to = reporterIds.length > 0 ? reporterIds : null;
@@ -3085,6 +3122,7 @@ export class TasksService implements OnModuleInit {
     const approverIds = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map(Number)
       : [];
+    // Allow any of the task's reporting managers full visibility of MOV checklist items
     const reporterIds = this.getReporterIds(task);
     return (
       Number(task.created_by_id) === userId ||
@@ -3174,6 +3212,7 @@ export class TasksService implements OnModuleInit {
       ) {
         const currentUserId = Number(currentUser.id);
         const isCreator = Number(task.created_by_id) === currentUserId;
+        // Verify if user is any of the multiple reporting managers configured for this task
         const reporterIds = this.getReporterIds(task);
         const isReporter = reporterIds.includes(currentUserId);
         const isAdmin =
@@ -3396,6 +3435,7 @@ export class TasksService implements OnModuleInit {
         recurrence_end_occurrences:
           dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
         progress: newProgress,
+        // Save reporting manager IDs (supports multiple managers from DMS; no reported_to_users_meta needed)
         reported_to: reported_to_ids,
         reported_to_id,
         reported_to_ids,
@@ -3649,6 +3689,7 @@ export class TasksService implements OnModuleInit {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
+        // Automatically derive all configured reporting managers from the new assignees (DMS user_managers & manager_id)
         const { reported_to_ids, reported_to_id } =
           await this.resolveReportingManagers(dto, task);
         task.reported_to = reported_to_ids;
@@ -3659,6 +3700,7 @@ export class TasksService implements OnModuleInit {
         dto.reported_to_ids !== undefined ||
         dto.reported_to_id !== undefined
       ) {
+        // Explicit reporting manager updates (without changing assignees)
         const { reported_to_ids, reported_to_id } =
           await this.resolveReportingManagers(dto, task);
         task.reported_to = reported_to_ids;
@@ -3740,6 +3782,7 @@ export class TasksService implements OnModuleInit {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
+        // Automatically derive all configured reporting managers for the reassigned users
         const { reported_to_ids, reported_to_id } =
           await this.resolveReportingManagers(dto, task);
         task.reported_to = reported_to_ids;
@@ -4966,6 +5009,7 @@ export class TasksService implements OnModuleInit {
           project_name: master.project_name,
           assigned_user_ids: master.assigned_user_ids,
           assigned_users_meta: master.assigned_users_meta,
+          // Propagate multiple reporting manager IDs from master task or re-derive from DMS assignees
           reported_to:
             master.reported_to ??
             master.reported_to_ids ??

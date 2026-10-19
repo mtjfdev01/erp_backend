@@ -18,7 +18,7 @@ async function bootstrap() {
   // Define allowed origins (normalized - no trailing slashes, lowercase)
   const allowedOrigins = [
     "http://localhost:5173", // Local development
-    "http://127.0.0.1:5173", // Local development alternative
+    "http://192.168.100.203:5173", // Local development alternative
     "http://localhost:3001", // Special origin - bypasses JWT authentication (see ConditionalJwtGuard)
     "http://localhost:3000",
     "https://donation.mtjfoundation.org",
@@ -68,6 +68,7 @@ async function bootstrap() {
         process.env.NODE_ENV !== "production" &&
         (normalizedOrigin.startsWith("http://localhost:") ||
           normalizedOrigin.startsWith("http://127.0.0.1:") ||
+          normalizedOrigin.startsWith("http://192.168.100.203:") ||
           normalizedOrigin.startsWith("http://192.168.2.131:"))
       ) {
         console.log("Development mode: Allowing origin:", origin);
@@ -129,6 +130,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
+  // await app.listen(3000, '0.0.0.0');
   console.log(`Application is running on: ${await app.getUrl()}`);
   console.log("Allowed origins:", allowedOrigins);
 }
