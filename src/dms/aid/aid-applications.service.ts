@@ -44,6 +44,7 @@ import {
 import { AidApplication } from "./entities/aid-application.entity";
 import { AidAttachment } from "./entities/aid-attachment.entity";
 import { AidHouseholdMember } from "./entities/aid-household-member.entity";
+import { AidKinshipEdge } from "./entities/aid-kinship-edge.entity";
 import { AidPerson } from "./entities/aid-person.entity";
 import {
   LOOKUP_PROFILES,
@@ -131,6 +132,16 @@ export class AidApplicationsService {
       request_summary: dto.request_summary?.trim() || null,
       case_source: dto.case_source || AidCaseSource.WALK_IN,
       requested_aid_type: dto.requested_aid_type || AidRequestType.OTHER,
+      aid_program: dto.aid_program?.trim() || null,
+      expected_amount:
+        dto.expected_amount != null && Number.isFinite(Number(dto.expected_amount))
+          ? String(dto.expected_amount)
+          : null,
+      expected_amount_max:
+        dto.expected_amount_max != null &&
+        Number.isFinite(Number(dto.expected_amount_max))
+          ? String(dto.expected_amount_max)
+          : null,
       education_details:
         dto.requested_aid_type === AidRequestType.EDUCATION
           ? dto.education_details ?? null
@@ -236,7 +247,7 @@ export class AidApplicationsService {
     const search = String(params.search || "").trim();
     if (search) {
       qb.andWhere(
-        "(a.application_no ILIKE :q OR a.title ILIKE :q OR beneficiary.full_name ILIKE :q OR beneficiary.cnic ILIKE :q)",
+        "(a.application_no ILIKE :q OR a.title ILIKE :q OR beneficiary.full_name ILIKE :q OR beneficiary.cnic ILIKE :q OR writer.full_name ILIKE :q OR writer.cnic ILIKE :q OR hh_head.full_name ILIKE :q OR hh_head.cnic ILIKE :q)",
         { q: `%${search}%` },
       );
     }
@@ -284,6 +295,9 @@ export class AidApplicationsService {
       const qb = this.appRepo
         .createQueryBuilder("a")
         .leftJoin("a.beneficiary", "beneficiary")
+        .leftJoin("a.writer", "writer")
+        .leftJoin("a.household", "household")
+        .leftJoin("household.head_person", "hh_head")
         .where("a.is_archived = :archived", { archived: false });
       this.applyListFilters(qb, params);
       return qb;
@@ -321,11 +335,74 @@ export class AidApplicationsService {
     };
   }
 
+  /**
+   * Family Head ≠ Beneficiary. Prefer household head, then kinship edge
+   * marked "Family head", then applicant/writer (when not self), else beneficiary.
+   */
+  private pickListFamilyHead(
+    app: AidApplication,
+    kinshipHeadByBeneficiary?: Map<number, AidPerson>,
+  ): AidPerson | null {
+    const b = (app as any).beneficiary as AidPerson | null;
+    const hhHead = (app as any).household?.head_person as AidPerson | null;
+    if (hhHead?.full_name) return hhHead;
+
+    const bid = app.beneficiary_person_id;
+    if (bid && kinshipHeadByBeneficiary?.has(bid)) {
+      return kinshipHeadByBeneficiary.get(bid) || null;
+    }
+
+    const writer = (app as any).writer as AidPerson | null;
+    const rel = String(app.writer_relation || "").toLowerCase();
+    if (
+      writer?.full_name &&
+      rel &&
+      rel !== "self" &&
+      writer.id !== bid
+    ) {
+      return writer;
+    }
+    return b || null;
+  }
+
+  private async loadKinshipFamilyHeads(
+    beneficiaryIds: number[],
+  ): Promise<Map<number, AidPerson>> {
+    const map = new Map<number, AidPerson>();
+    const ids = [...new Set(beneficiaryIds.filter((id) => id > 0))];
+    if (!ids.length) return map;
+
+    const edges = await this.personRepo.manager
+      .getRepository(AidKinshipEdge)
+      .createQueryBuilder("e")
+      .leftJoinAndSelect("e.to_person", "to_person")
+      .leftJoinAndSelect("e.from_person", "from_person")
+      .where("e.is_archived = :arch", { arch: false })
+      .andWhere(
+        "(e.from_person_id IN (:...ids) OR e.to_person_id IN (:...ids))",
+        { ids },
+      )
+      .andWhere("e.notes ILIKE :q", { q: "%family head%" })
+      .getMany();
+
+    for (const edge of edges) {
+      for (const bid of ids) {
+        if (edge.from_person_id !== bid && edge.to_person_id !== bid) continue;
+        const other =
+          edge.from_person_id === bid ? edge.to_person : edge.from_person;
+        if (other?.full_name) map.set(bid, other);
+      }
+    }
+    return map;
+  }
+
   private summarizeListRow(
     app: AidApplication,
     members: number,
+    kinshipHeadByBeneficiary?: Map<number, AidPerson>,
   ): Record<string, unknown> {
     const b = (app as any).beneficiary;
+    const head = this.pickListFamilyHead(app, kinshipHeadByBeneficiary);
     const assigned = (app as any).assigned_to;
     const location = [b?.tehsil || b?.city, b?.district]
       .filter(Boolean)
@@ -361,8 +438,8 @@ export class AidApplicationsService {
       location: location || null,
       vulnerability_pct: vul.total,
       assigned_to_label: assignedName,
-      family_head_name: b?.full_name || null,
-      family_head_cnic: b?.cnic || null,
+      family_head_name: head?.full_name || b?.full_name || null,
+      family_head_cnic: head?.cnic || b?.cnic || null,
     };
   }
 
@@ -387,6 +464,8 @@ export class AidApplicationsService {
       .createQueryBuilder("a")
       .leftJoinAndSelect("a.beneficiary", "beneficiary")
       .leftJoinAndSelect("a.writer", "writer")
+      .leftJoinAndSelect("a.household", "household")
+      .leftJoinAndSelect("household.head_person", "hh_head")
       .leftJoinAndSelect("a.assigned_to", "assigned_to")
       .leftJoinAndSelect("a.created_by", "created_by")
       .where("a.is_archived = :archived", { archived: false });
@@ -450,10 +529,14 @@ export class AidApplicationsService {
       }
     }
 
+    const kinshipHeads = await this.loadKinshipFamilyHeads(
+      rows.map((r) => r.beneficiary_person_id).filter(Boolean),
+    );
+
     const data = rows.map((app) => {
       const members =
         (app.household_id && memberByHousehold.get(app.household_id)) || 1;
-      return this.summarizeListRow(app, members);
+      return this.summarizeListRow(app, members, kinshipHeads);
     });
 
     const stage_counts = await this.buildStageCounts(params);
@@ -1072,6 +1155,31 @@ export class AidApplicationsService {
     ) {
       throw new BadRequestException("Cannot edit a closed application");
     }
+
+    if (dto.beneficiary && app.beneficiary_person_id) {
+      await this.peopleService.update(
+        app.beneficiary_person_id,
+        dto.beneficiary as any,
+        user,
+      );
+    }
+
+    if (dto.writer_person_id !== undefined) {
+      const wid = Number(dto.writer_person_id);
+      if (!Number.isFinite(wid) || wid <= 0) {
+        throw new BadRequestException("writer_person_id is invalid");
+      }
+      await this.peopleService.findOne(wid);
+      app.writer_person_id = wid;
+    }
+
+    if (dto.writer) {
+      const writerId = app.writer_person_id || app.beneficiary_person_id;
+      if (writerId) {
+        await this.peopleService.update(writerId, dto.writer as any, user);
+      }
+    }
+
     if (dto.household_id !== undefined) app.household_id = dto.household_id;
     if (dto.writer_relation !== undefined) app.writer_relation = dto.writer_relation;
     if (dto.title !== undefined) app.title = dto.title?.trim() || null;
@@ -1095,6 +1203,23 @@ export class AidApplicationsService {
       if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
         app.financial_assistance_details = null;
       }
+    }
+    if (dto.aid_program !== undefined) {
+      app.aid_program = dto.aid_program?.trim() || null;
+    }
+    if (dto.expected_amount !== undefined) {
+      app.expected_amount =
+        dto.expected_amount != null &&
+        Number.isFinite(Number(dto.expected_amount))
+          ? String(dto.expected_amount)
+          : null;
+    }
+    if (dto.expected_amount_max !== undefined) {
+      app.expected_amount_max =
+        dto.expected_amount_max != null &&
+        Number.isFinite(Number(dto.expected_amount_max))
+          ? String(dto.expected_amount_max)
+          : null;
     }
     if (dto.education_details !== undefined) {
       app.education_details =
@@ -1141,6 +1266,29 @@ export class AidApplicationsService {
     }
     app.updated_by = user || null;
     await this.appRepo.save(app);
+
+    const beneficiaryId = app.beneficiary_person_id;
+    for (const fm of dto.family_members || []) {
+      if (!fm?.relation_type || !beneficiaryId) continue;
+      const hasPerson =
+        fm.existing_person_id ||
+        (fm.person && String(fm.person.full_name || "").trim());
+      if (!hasPerson) continue;
+      try {
+        if (fm.existing_person_id && fm.person) {
+          await this.peopleService.update(
+            Number(fm.existing_person_id),
+            fm.person as any,
+            user,
+          );
+        }
+        await this.peopleService.addFamilyMember(beneficiaryId, fm, user);
+      } catch (err) {
+        if (err instanceof ConflictException) continue;
+        throw err;
+      }
+    }
+
     return this.findOne(id);
   }
 
