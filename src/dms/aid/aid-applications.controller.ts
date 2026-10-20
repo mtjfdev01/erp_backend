@@ -19,6 +19,7 @@ import { memoryStorage } from "multer";
 import { Response } from "express";
 import { JwtGuard } from "../../auth/jwt.guard";
 import {
+  AID_APPLICATIONS_APPROVE_DRAFT_GUARD,
   AID_APPLICATIONS_CEO_GUARD,
   AID_APPLICATIONS_CREATE_GUARD,
   AID_APPLICATIONS_DELETE_GUARD,
@@ -34,6 +35,7 @@ import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { AidAttachmentContext } from "./aid.enums";
 import { AidApplicationsService } from "./aid-applications.service";
 import {
+  ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
@@ -62,7 +64,7 @@ export class AidApplicationsController {
     const data = await this.applicationsService.create(dto, req?.user);
     return res.status(HttpStatus.CREATED).json({
       success: true,
-      message: "Application created",
+      message: "Application saved as draft",
       data,
     });
   }
@@ -287,6 +289,27 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Application updated",
+      data,
+    });
+  }
+
+  @Post(":id/approve-draft")
+  @RequiredPermissions([...AID_APPLICATIONS_APPROVE_DRAFT_GUARD])
+  async approveDraft(
+    @Param("id") id: string,
+    @Body() dto: ApproveDraftAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.approveDraft(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message:
+        "Draft approved and assigned — application submitted for verification",
       data,
     });
   }

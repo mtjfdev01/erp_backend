@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { PermissionsModule } from "../../permissions/permissions.module";
+import { UsersModule } from "../../users/users.module";
 import { S3StorageModule } from "../../utils/storage/s3-storage.module";
 import { AidApplicationsController } from "./aid-applications.controller";
 import { AidApplicationsService } from "./aid-applications.service";
@@ -33,6 +34,7 @@ import { AidPerson } from "./entities/aid-person.entity";
       signOptions: { expiresIn: "24h" },
     }),
     PermissionsModule,
+    UsersModule,
     S3StorageModule,
   ],
   controllers: [

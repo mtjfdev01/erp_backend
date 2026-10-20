@@ -213,8 +213,24 @@ function residentSummary(p?: PersonLike | null): string | null {
 
 function landSummary(p?: PersonLike | null): string | null {
   if (!p?.has_land) return p?.has_land === false ? "No land" : null;
+  const entries = Array.isArray((p as any).property_entries)
+    ? ((p as any).property_entries as Record<string, unknown>[])
+    : [];
+  if (entries.length) {
+    const bits = entries.map((row) => {
+      const parts: string[] = [];
+      if (row.property_type) {
+        parts.push(String(row.property_type).replace(/_/g, " "));
+      }
+      if (row.property_area) parts.push(String(row.property_area));
+      if (row.property_details) parts.push(String(row.property_details));
+      return parts.join(" · ");
+    });
+    return `Yes · ${bits.filter(Boolean).join(" | ")}`;
+  }
   const parts = ["Yes"];
   if (p.property_type) parts.push(String(p.property_type).replace(/_/g, " "));
+  if ((p as any).property_area) parts.push(String((p as any).property_area));
   if (p.property_details) parts.push(String(p.property_details));
   return parts.join(" · ");
 }
@@ -479,12 +495,16 @@ export function buildInvestigationItems(ctx: {
   );
 
   const marital = String(beneficiary?.marital_status || "").toLowerCase();
-  if (marital === "widowed") {
+  if (["widowed", "widow", "widower"].includes(marital)) {
     pushClaim(
       claims,
       "spouse_deceased",
-      "Spouse / husband deceased",
-      "Widowed (confirm death certificate / status on site)",
+      marital === "widower"
+        ? "Spouse / wife deceased"
+        : "Spouse / husband deceased",
+      marital === "widower"
+        ? "Widower (confirm death certificate / status on site)"
+        : "Widow (confirm death certificate / status on site)",
       false,
       "beneficiary",
     );
@@ -642,23 +662,28 @@ export function isInvestigationItemComplete(
   },
   entry: AidInvestigationItemResult,
 ): boolean {
+  const hasNote = String(entry.note || "").trim().length >= 3;
   if (item.accepts_file) {
     const hasFile = !!String(entry.attachment_url || "").trim();
     if (!hasFile || entry.status !== "verified") return false;
+    // Field process (e.g. Site Visit): Found note required with any status path
+    if (item.kind === "process" && !hasNote) return false;
     return true;
   }
   if (item.kind === "process" || item.allow_mismatch === false) {
-    return entry.status === "verified";
+    if (entry.status !== "verified") return false;
+    if (item.kind === "process" && !hasNote) return false;
+    return true;
   }
   if (!item.required) {
     if (entry.status === "mismatch") {
-      return String(entry.note || "").trim().length >= 3;
+      return hasNote;
     }
     return true;
   }
   if (entry.status === "verified") return true;
   if (entry.status === "mismatch") {
-    return String(entry.note || "").trim().length >= 3;
+    return hasNote;
   }
   return false;
 }
@@ -688,14 +713,16 @@ export function assertInvestigationComplete(
     const entry = normalizeInvestigationEntry(
       checklistEntryForItem(checklist, item.key),
     );
+    const noteTrimmed = entry.note ? String(entry.note).trim() : "";
     payload[item.key] = {
       status: entry.status,
+      // Persist Found notes for field process at any status, and for claim mismatches
       note:
-        entry.status === "mismatch"
-          ? String(entry.note || "").trim() || null
-          : entry.note
-            ? String(entry.note).trim()
-            : null,
+        item.kind === "process" ||
+        entry.status === "mismatch" ||
+        noteTrimmed
+          ? noteTrimmed || null
+          : null,
       attachment_url: entry.attachment_url || null,
       attachment_name: entry.attachment_name || null,
       attachment_id: entry.attachment_id ?? null,
@@ -703,14 +730,16 @@ export function assertInvestigationComplete(
     if (!isInvestigationItemComplete(item, payload[item.key])) {
       missing.push(
         item.accepts_file
-          ? `${item.label} (file required)`
-          : item.label,
+          ? `${item.label} (file + Found note required)`
+          : item.kind === "process"
+            ? `${item.label} (Verified + Found note)`
+            : item.label,
       );
     }
   }
   if (missing.length) {
     throw new Error(
-      `Complete investigation before verify: ${missing.join("; ")}. Mismatches need a Found note.`,
+      `Complete investigation before verify: ${missing.join("; ")}. Field process and mismatches need a Found note.`,
     );
   }
   return payload;

@@ -173,6 +173,7 @@ export class AidPeopleService {
     if (mapped.union_council !== undefined) {
       person.union_council = mapped.union_council;
     }
+    if (mapped.landmark !== undefined) person.landmark = mapped.landmark;
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive !== false;
     person.updated_by = user || null;
     return this.personRepo.save(person);
@@ -204,6 +205,81 @@ export class AidPeopleService {
           if (ownerContact) entry.owner_contact = ownerContact;
         }
         return entry;
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+    return rows.length ? rows : null;
+  }
+
+  private sanitizePropertyEntries(
+    raw: Record<string, unknown>[] | null | undefined,
+  ): Record<string, unknown>[] | null {
+    if (!Array.isArray(raw)) return null;
+    const allowedTypes = new Set(["agri", "commercial", "plot", "others"]);
+    const rows = raw
+      .map((row) => {
+        const property_type = String(row?.property_type || "")
+          .trim()
+          .toLowerCase();
+        const property_area = String(row?.property_area || "").trim();
+        const property_details = String(row?.property_details || "").trim();
+        if (!property_type && !property_area && !property_details) return null;
+        const entry: Record<string, unknown> = {};
+        if (property_type && allowedTypes.has(property_type)) {
+          entry.property_type = property_type;
+        } else if (property_type) {
+          entry.property_type = "others";
+        }
+        if (property_area) entry.property_area = property_area;
+        if (property_details) entry.property_details = property_details;
+        return entry;
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+    return rows.length ? rows : null;
+  }
+
+  private sanitizeResidentEntries(
+    raw: Record<string, unknown>[] | null | undefined,
+  ): Record<string, unknown>[] | null {
+    if (!Array.isArray(raw)) return null;
+    const allowed = new Set(["own_house", "rented", "sham_lot"]);
+    const rows = raw
+      .map((row) => {
+        const resident_type = String(row?.resident_type || "")
+          .trim()
+          .toLowerCase();
+        if (!allowed.has(resident_type)) return null;
+        const entry: Record<string, unknown> = { resident_type };
+        const own = String(row?.resident_ownership_status || "").trim();
+        const other = String(row?.resident_ownership_other || "").trim();
+        const details = String(row?.house_details || "").trim();
+        if (own) entry.resident_ownership_status = own;
+        if (other) entry.resident_ownership_other = other;
+        if (details) entry.house_details = details;
+        if (row?.house_area_marla != null && row.house_area_marla !== "") {
+          entry.house_area_marla = String(row.house_area_marla);
+        }
+        if (
+          resident_type === "rented" &&
+          row?.rented_amount != null &&
+          row.rented_amount !== ""
+        ) {
+          entry.rented_amount = String(row.rented_amount);
+        }
+        return entry;
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+    return rows.length ? rows : null;
+  }
+
+  private sanitizeVehicleEntries(
+    raw: Record<string, unknown>[] | null | undefined,
+  ): Record<string, unknown>[] | null {
+    if (!Array.isArray(raw)) return null;
+    const rows = raw
+      .map((row) => {
+        const vehicle_type = String(row?.vehicle_type || "").trim();
+        if (!vehicle_type) return null;
+        return { vehicle_type };
       })
       .filter(Boolean) as Record<string, unknown>[];
     return rows.length ? rows : null;
@@ -281,6 +357,14 @@ export class AidPeopleService {
         dto.property_details !== undefined
           ? dto.property_details?.trim() || null
           : undefined,
+      property_area:
+        dto.property_area !== undefined
+          ? dto.property_area?.trim() || null
+          : undefined,
+      property_entries:
+        dto.property_entries !== undefined
+          ? this.sanitizePropertyEntries(dto.property_entries)
+          : undefined,
       resident_type:
         dto.resident_type !== undefined ? dto.resident_type : undefined,
       resident_ownership_status:
@@ -297,6 +381,10 @@ export class AidPeopleService {
         dto.house_details !== undefined
           ? dto.house_details?.trim() || null
           : undefined,
+      resident_entries:
+        dto.resident_entries !== undefined
+          ? this.sanitizeResidentEntries(dto.resident_entries)
+          : undefined,
       has_livestock:
         dto.has_livestock !== undefined ? !!dto.has_livestock : undefined,
       livestock_entries:
@@ -307,6 +395,10 @@ export class AidPeopleService {
       vehicle_type:
         dto.vehicle_type !== undefined
           ? dto.vehicle_type?.trim() || null
+          : undefined,
+      vehicle_entries:
+        dto.vehicle_entries !== undefined
+          ? this.sanitizeVehicleEntries(dto.vehicle_entries)
           : undefined,
       necta_status:
         dto.necta_status !== undefined ? dto.necta_status : undefined,
@@ -333,6 +425,8 @@ export class AidPeopleService {
         dto.union_council !== undefined
           ? dto.union_council?.trim() || null
           : undefined,
+      landmark:
+        dto.landmark !== undefined ? dto.landmark?.trim() || null : undefined,
       notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
       is_active: dto.is_active !== undefined ? dto.is_active : undefined,
     };
@@ -383,6 +477,10 @@ export class AidPeopleService {
       property_type: mapped.has_land === true ? mapped.property_type ?? null : null,
       property_details:
         mapped.has_land === true ? mapped.property_details ?? null : null,
+      property_area:
+        mapped.has_land === true ? mapped.property_area ?? null : null,
+      property_entries:
+        mapped.has_land === true ? mapped.property_entries ?? null : null,
       resident_type: mapped.resident_type ?? null,
       resident_ownership_status: mapped.resident_ownership_status ?? null,
       resident_ownership_other: mapped.resident_ownership_other ?? null,
@@ -390,12 +488,15 @@ export class AidPeopleService {
         mapped.resident_type === "rented" ? mapped.rented_amount ?? null : null,
       house_area_marla: mapped.house_area_marla ?? null,
       house_details: mapped.house_details ?? null,
+      resident_entries: mapped.resident_entries ?? null,
       has_livestock: mapped.has_livestock === true,
       livestock_entries:
         mapped.has_livestock === true ? mapped.livestock_entries ?? null : null,
       has_vehicle: mapped.has_vehicle === true,
       vehicle_type:
         mapped.has_vehicle === true ? mapped.vehicle_type ?? null : null,
+      vehicle_entries:
+        mapped.has_vehicle === true ? mapped.vehicle_entries ?? null : null,
       necta_status: mapped.necta_status ?? null,
       necta_document_url: mapped.necta_document_url ?? null,
       necta_document_name: mapped.necta_document_name ?? null,
@@ -408,6 +509,7 @@ export class AidPeopleService {
       district: mapped.district ?? null,
       tehsil: mapped.tehsil ?? null,
       union_council: mapped.union_council ?? null,
+      landmark: mapped.landmark ?? null,
       notes: mapped.notes ?? null,
       is_active: mapped.is_active !== false,
       created_by: user || null,
@@ -717,6 +819,8 @@ export class AidPeopleService {
       if (!mapped.has_land) {
         person.property_type = null;
         person.property_details = null;
+        person.property_area = null;
+        person.property_entries = null;
       }
     }
     if (mapped.property_type !== undefined && person.has_land) {
@@ -724,6 +828,26 @@ export class AidPeopleService {
     }
     if (mapped.property_details !== undefined && person.has_land) {
       person.property_details = mapped.property_details;
+    }
+    if (mapped.property_area !== undefined && person.has_land) {
+      person.property_area = mapped.property_area;
+    }
+    if (mapped.property_entries !== undefined && person.has_land) {
+      person.property_entries = mapped.property_entries;
+      const first = mapped.property_entries?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (first) {
+        if (first.property_type != null) {
+          person.property_type = first.property_type as any;
+        }
+        if (first.property_details != null) {
+          person.property_details = String(first.property_details);
+        }
+        if (first.property_area != null) {
+          person.property_area = String(first.property_area);
+        }
+      }
     }
     if (mapped.resident_type !== undefined) {
       person.resident_type = mapped.resident_type;
@@ -746,6 +870,36 @@ export class AidPeopleService {
     if (mapped.house_details !== undefined) {
       person.house_details = mapped.house_details;
     }
+    if (mapped.resident_entries !== undefined) {
+      person.resident_entries = mapped.resident_entries;
+      const first = mapped.resident_entries?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (first) {
+        if (first.resident_type != null) {
+          person.resident_type = first.resident_type as any;
+        }
+        if (first.resident_ownership_status != null) {
+          person.resident_ownership_status = String(
+            first.resident_ownership_status,
+          );
+        }
+        if (first.resident_ownership_other != null) {
+          person.resident_ownership_other = String(
+            first.resident_ownership_other,
+          );
+        }
+        if (first.house_details != null) {
+          person.house_details = String(first.house_details);
+        }
+        if (first.house_area_marla != null) {
+          person.house_area_marla = String(first.house_area_marla);
+        }
+        if (first.rented_amount != null) {
+          person.rented_amount = String(first.rented_amount);
+        }
+      }
+    }
     if (mapped.has_livestock !== undefined) {
       person.has_livestock = mapped.has_livestock;
       if (!mapped.has_livestock) {
@@ -759,10 +913,20 @@ export class AidPeopleService {
       person.has_vehicle = mapped.has_vehicle;
       if (!mapped.has_vehicle) {
         person.vehicle_type = null;
+        person.vehicle_entries = null;
       }
     }
     if (mapped.vehicle_type !== undefined && person.has_vehicle) {
       person.vehicle_type = mapped.vehicle_type;
+    }
+    if (mapped.vehicle_entries !== undefined && person.has_vehicle) {
+      person.vehicle_entries = mapped.vehicle_entries;
+      const first = mapped.vehicle_entries?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (first?.vehicle_type != null) {
+        person.vehicle_type = String(first.vehicle_type);
+      }
     }
     if (mapped.necta_status !== undefined) {
       person.necta_status = mapped.necta_status;
@@ -786,6 +950,7 @@ export class AidPeopleService {
     if (mapped.union_council !== undefined) {
       person.union_council = mapped.union_council;
     }
+    if (mapped.landmark !== undefined) person.landmark = mapped.landmark;
     if (mapped.notes !== undefined) person.notes = mapped.notes;
     if (mapped.is_active !== undefined) person.is_active = mapped.is_active;
     person.updated_by = user || null;

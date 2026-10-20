@@ -259,7 +259,19 @@
         "update": true,
         "delete": false,
         "ceo_approve": true,
-        "deliver": true,
+        "deliver": true
+      },
+      "aid_drafts": {
+        "list_view": true,
+        "view": true,
+        "create": true,
+        "update": true,
+        "approve_draft": true
+      },
+      "aid_verification": {
+        "list_view": true,
+        "view": true,
+        "update": true,
         "bulk_verify": true
       },
       "aid_people": {

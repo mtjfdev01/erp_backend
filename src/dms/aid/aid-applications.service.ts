@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import { User } from "../../users/user.entity";
+import { PermissionsService } from "../../permissions/permissions.service";
+import { Department, User } from "../../users/user.entity";
+import { UsersService } from "../../users/users.service";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
 import {
   AidApplicationStatus,
@@ -34,6 +37,7 @@ import {
 } from "./aid-vulnerability-score";
 import { AidPeopleService } from "./aid-people.service";
 import {
+  ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
@@ -65,8 +69,61 @@ export class AidApplicationsService {
     @InjectRepository(AidHouseholdMember)
     private readonly memberRepo: Repository<AidHouseholdMember>,
     private readonly peopleService: AidPeopleService,
+    private readonly usersService: UsersService,
+    private readonly permissionsService: PermissionsService,
     private readonly s3: S3StorageService,
   ) {}
+
+  /**
+   * Investigation (checklist / verify / site-visit attach):
+   * assigned investigator, super admin, or bulk_verify (Mark all complete).
+   */
+  private async assertCanPerformInvestigation(
+    app: AidApplication,
+    user?: User,
+  ) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program.aid_verification.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program.aid_applications.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising.aid_verification.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising.aid_applications.bulk_verify",
+      ))
+    ) {
+      return;
+    }
+
+    if (
+      app.assigned_to_user_id != null &&
+      Number(app.assigned_to_user_id) === Number(user.id)
+    ) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      "Only the assigned investigator, super admin, or users with Mark all complete may perform the investigation",
+    );
+  }
 
   private pickAuditActor(user: any) {
     if (!user || typeof user !== "object") return null;
@@ -160,11 +217,12 @@ export class AidApplicationsService {
           : null,
       zakat_permission: dto.zakat_permission ?? null,
       consent_form: dto.consent_form ?? null,
-      status: AidApplicationStatus.SUBMITTED,
+      status: AidApplicationStatus.DRAFT,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
-      assigned_to_user_id: dto.assigned_to_user_id ?? null,
-      submitted_at: new Date(),
+      // Assignment is done by the draft approver (program user), not at intake
+      assigned_to_user_id: null,
+      submitted_at: null,
       created_by: user || null,
       updated_by: user || null,
     });
@@ -189,7 +247,6 @@ export class AidApplicationsService {
 
   /**
    * Pipeline stage for data-entry board (maps to AidApplicationStatus).
-   * draft is reserved (no status yet) — always 0 until draft workflow exists.
    */
   private applyStageFilter(
     qb: ReturnType<Repository<AidApplication>["createQueryBuilder"]>,
@@ -203,7 +260,7 @@ export class AidApplicationsService {
 
     switch (s) {
       case "draft":
-        qb.andWhere("1 = 0");
+        qb.andWhere("a.status = :st", { st: AidApplicationStatus.DRAFT });
         break;
       case "submitted":
         qb.andWhere("a.status = :st", { st: AidApplicationStatus.SUBMITTED });
@@ -269,6 +326,8 @@ export class AidApplicationsService {
 
   private mapStatusToStage(status: string | null | undefined): string {
     switch (String(status || "").toLowerCase()) {
+      case AidApplicationStatus.DRAFT:
+        return "draft";
       case AidApplicationStatus.SUBMITTED:
         return "submitted";
       case AidApplicationStatus.UNDER_REVIEW:
@@ -451,7 +510,11 @@ export class AidApplicationsService {
     requested_aid_type?: string;
     district?: string;
     assigned_to_user_id?: number | string;
-    /** approvals = verified & not rejected (CEO queue + decided non-rejects) */
+    /**
+     * approvals = verified & not rejected (CEO queue + decided non-rejects)
+     * entry = Beneficiary Registration board (excludes drafts)
+     * drafts = Drafts board (status = draft only)
+     */
     queue?: string;
     page?: number;
     pageSize?: number;
@@ -488,18 +551,43 @@ export class AidApplicationsService {
 
     this.applyListFilters(qb, params);
 
+    const isEntryBoard = params.queue === "entry";
+    const isDraftsBoard = params.queue === "drafts";
+
     if (params.queue === "approvals") {
       qb.andWhere("a.verified_at IS NOT NULL");
       qb.andWhere("a.status != :rejected", {
         rejected: AidApplicationStatus.REJECTED,
       });
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
       if (params.status) {
+        qb.andWhere("a.status = :status", { status: params.status });
+      }
+    } else if (isDraftsBoard) {
+      qb.andWhere("a.status = :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
+    } else if (isEntryBoard) {
+      // Registration board: live applications only (not drafts)
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
+      if (params.stage) {
+        this.applyStageFilter(qb, params.stage);
+      } else if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
     } else if (params.stage) {
       this.applyStageFilter(qb, params.stage);
     } else if (params.status) {
       qb.andWhere("a.status = :status", { status: params.status });
+    } else {
+      // Verification Process default: hide registration drafts
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
     }
 
     const [rows, total] = await qb.getManyAndCount();
@@ -1156,6 +1244,13 @@ export class AidApplicationsService {
       throw new BadRequestException("Cannot edit a closed application");
     }
 
+    if (
+      dto.verification_checklist !== undefined ||
+      dto.investigation_recommendation !== undefined
+    ) {
+      await this.assertCanPerformInvestigation(app, user);
+    }
+
     if (dto.beneficiary && app.beneficiary_person_id) {
       await this.peopleService.update(
         app.beneficiary_person_id,
@@ -1255,11 +1350,29 @@ export class AidApplicationsService {
     if (dto.consent_form !== undefined) {
       app.consent_form = dto.consent_form;
     }
-    if (dto.assigned_to_user_id !== undefined) {
+    if (
+      dto.assigned_to_user_id !== undefined &&
+      app.status !== AidApplicationStatus.DRAFT
+    ) {
+      // Draft assignment is only set via approve-draft
       app.assigned_to_user_id = dto.assigned_to_user_id;
     }
     if (dto.verification_notes !== undefined) {
       app.verification_notes = dto.verification_notes?.trim() || null;
+    }
+    if (dto.verification_checklist !== undefined) {
+      app.verification_checklist =
+        dto.verification_checklist &&
+        typeof dto.verification_checklist === "object"
+          ? dto.verification_checklist
+          : null;
+    }
+    if (dto.investigation_recommendation !== undefined) {
+      app.investigation_recommendation =
+        dto.investigation_recommendation &&
+        typeof dto.investigation_recommendation === "object"
+          ? dto.investigation_recommendation
+          : null;
     }
     if (app.status === AidApplicationStatus.SUBMITTED) {
       app.status = AidApplicationStatus.UNDER_REVIEW;
@@ -1292,9 +1405,54 @@ export class AidApplicationsService {
     return this.findOne(id);
   }
 
+  /**
+   * Registration approval: draft → submitted (enters Verification Process).
+   * Requires assigning a program-department user as case owner.
+   */
+  async approveDraft(
+    id: number,
+    dto: ApproveDraftAidApplicationDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.status !== AidApplicationStatus.DRAFT) {
+      throw new BadRequestException(
+        "Only draft applications can be approved for verification",
+      );
+    }
+
+    const assigneeId = Number(dto?.assigned_to_user_id);
+    if (!Number.isFinite(assigneeId) || assigneeId <= 0) {
+      throw new BadRequestException(
+        "assigned_to_user_id is required (program department user)",
+      );
+    }
+    const assignee = await this.usersService.findOne(assigneeId);
+    if (String(assignee.department || "").toLowerCase() !== Department.PROGRAM) {
+      throw new BadRequestException(
+        "Assignee must be a user in the program department",
+      );
+    }
+
+    app.assigned_to_user_id = assigneeId;
+    app.status = AidApplicationStatus.SUBMITTED;
+    app.submitted_at = new Date();
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
   async reject(id: number, dto: RejectAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.status === AidApplicationStatus.DRAFT) {
+      throw new BadRequestException(
+        "Approve or edit the draft instead of rejecting it from verification",
+      );
+    }
     if (app.status === AidApplicationStatus.SUCCESSFUL || app.status === AidApplicationStatus.DELIVERED) {
       throw new BadRequestException("Cannot reject after success");
     }
@@ -1325,6 +1483,7 @@ export class AidApplicationsService {
         "Only submitted/under_review applications can be verified",
       );
     }
+    await this.assertCanPerformInvestigation(app, user);
     const investigationItems = await this.buildInvestigationForApp(app);
     let checklistPayload: Record<string, unknown>;
     try {
@@ -1500,12 +1659,30 @@ export class AidApplicationsService {
     if (params.applicationId) {
       const exists = await this.appRepo.findOne({
         where: { id: params.applicationId, is_archived: false },
-        select: ["id"],
       });
       if (!exists) {
         throw new NotFoundException(
           `Application #${params.applicationId} not found`,
         );
+      }
+      const desc = String(params.description || "").trim();
+      const investigationAttach =
+        params.context === AidAttachmentContext.SITE_VISIT ||
+        [
+          "site_visit",
+          "need_verified",
+          "duplicates_reviewed",
+          "eligible_recommended",
+          "home_visited",
+        ].includes(desc);
+      if (
+        investigationAttach &&
+        [
+          AidApplicationStatus.SUBMITTED,
+          AidApplicationStatus.UNDER_REVIEW,
+        ].includes(exists.status)
+      ) {
+        await this.assertCanPerformInvestigation(exists, params.user);
       }
     }
     if (params.personId) {

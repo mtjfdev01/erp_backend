@@ -164,6 +164,15 @@ export class CreateAidPersonDto {
   property_details?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  property_area?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  property_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsEnum(AidResidentType)
   resident_type?: AidResidentType | null;
 
@@ -190,6 +199,10 @@ export class CreateAidPersonDto {
   house_details?: string | null;
 
   @IsOptional()
+  @IsArray()
+  resident_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsBoolean()
   has_livestock?: boolean;
 
@@ -205,6 +218,10 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(120)
   vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  vehicle_entries?: Record<string, unknown>[] | null;
 
   @IsOptional()
   @IsEnum(AidNectaStatus)
@@ -260,6 +277,11 @@ export class CreateAidPersonDto {
   @IsString()
   @MaxLength(120)
   union_council?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  landmark?: string | null;
 
   @IsOptional()
   @IsString()
@@ -401,6 +423,15 @@ export class UpdateAidPersonDto {
   property_details?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  property_area?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  property_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsEnum(AidResidentType)
   resident_type?: AidResidentType | null;
 
@@ -427,6 +458,10 @@ export class UpdateAidPersonDto {
   house_details?: string | null;
 
   @IsOptional()
+  @IsArray()
+  resident_entries?: Record<string, unknown>[] | null;
+
+  @IsOptional()
   @IsBoolean()
   has_livestock?: boolean;
 
@@ -442,6 +477,10 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(120)
   vehicle_type?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  vehicle_entries?: Record<string, unknown>[] | null;
 
   @IsOptional()
   @IsEnum(AidNectaStatus)
@@ -497,6 +536,11 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(120)
   union_council?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  landmark?: string | null;
 
   @IsOptional()
   @IsString()
@@ -777,6 +821,18 @@ export class UpdateAidApplicationDto {
   @IsString()
   verification_notes?: string | null;
 
+  /**
+   * Draft investigation progress (no completeness check — use POST :id/verify to submit).
+   */
+  @IsOptional()
+  @IsObject()
+  verification_checklist?: Record<string, unknown> | null;
+
+  /** Draft investigator recommendation (saved with checklist progress). */
+  @IsOptional()
+  @IsObject()
+  investigation_recommendation?: Record<string, unknown> | null;
+
   /** Patch beneficiary person fields (same shape as create person). */
   @IsOptional()
   @IsObject()
@@ -796,6 +852,13 @@ export class RejectAidApplicationDto {
   @IsString()
   @MinLength(2)
   rejection_reason: string;
+}
+
+/** Approve draft → submitted; must assign a program-department user. */
+export class ApproveDraftAidApplicationDto {
+  @Type(() => Number)
+  @IsInt()
+  assigned_to_user_id: number;
 }
 
 export class InvestigationRecommendationDto {
