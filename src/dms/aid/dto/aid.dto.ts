@@ -280,6 +280,11 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
+  landmark?: string | null;
+
+  @IsOptional()
+  @IsString()
   notes?: string | null;
 
   @IsOptional()
@@ -531,6 +536,11 @@ export class UpdateAidPersonDto {
   @IsString()
   @MaxLength(120)
   union_council?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  landmark?: string | null;
 
   @IsOptional()
   @IsString()

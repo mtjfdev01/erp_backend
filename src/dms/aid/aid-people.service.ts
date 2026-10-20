@@ -173,6 +173,7 @@ export class AidPeopleService {
     if (mapped.union_council !== undefined) {
       person.union_council = mapped.union_council;
     }
+    if (mapped.landmark !== undefined) person.landmark = mapped.landmark;
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive !== false;
     person.updated_by = user || null;
     return this.personRepo.save(person);
@@ -424,6 +425,8 @@ export class AidPeopleService {
         dto.union_council !== undefined
           ? dto.union_council?.trim() || null
           : undefined,
+      landmark:
+        dto.landmark !== undefined ? dto.landmark?.trim() || null : undefined,
       notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
       is_active: dto.is_active !== undefined ? dto.is_active : undefined,
     };
@@ -506,6 +509,7 @@ export class AidPeopleService {
       district: mapped.district ?? null,
       tehsil: mapped.tehsil ?? null,
       union_council: mapped.union_council ?? null,
+      landmark: mapped.landmark ?? null,
       notes: mapped.notes ?? null,
       is_active: mapped.is_active !== false,
       created_by: user || null,
@@ -946,6 +950,7 @@ export class AidPeopleService {
     if (mapped.union_council !== undefined) {
       person.union_council = mapped.union_council;
     }
+    if (mapped.landmark !== undefined) person.landmark = mapped.landmark;
     if (mapped.notes !== undefined) person.notes = mapped.notes;
     if (mapped.is_active !== undefined) person.is_active = mapped.is_active;
     person.updated_by = user || null;

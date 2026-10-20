@@ -245,6 +245,9 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 120, nullable: true, default: null })
   union_council: string | null;
 
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  landmark: string | null;
+
   @Column({ type: "text", nullable: true, default: null })
   notes: string | null;
 
