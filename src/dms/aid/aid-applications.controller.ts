@@ -35,6 +35,7 @@ import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { AidAttachmentContext } from "./aid.enums";
 import { AidApplicationsService } from "./aid-applications.service";
 import {
+  ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
@@ -296,16 +297,19 @@ export class AidApplicationsController {
   @RequiredPermissions([...AID_APPLICATIONS_APPROVE_DRAFT_GUARD])
   async approveDraft(
     @Param("id") id: string,
+    @Body() dto: ApproveDraftAidApplicationDto,
     @Req() req: any,
     @Res() res: Response,
   ) {
     const data = await this.applicationsService.approveDraft(
       Number(id),
+      dto,
       req?.user,
     );
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: "Draft approved — application submitted for verification",
+      message:
+        "Draft approved and assigned — application submitted for verification",
       data,
     });
   }

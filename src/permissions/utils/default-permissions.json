@@ -258,9 +258,15 @@
         "view": true,
         "update": true,
         "delete": false,
-        "approve_draft": true,
         "ceo_approve": true,
         "deliver": true
+      },
+      "aid_drafts": {
+        "list_view": true,
+        "view": true,
+        "create": true,
+        "update": true,
+        "approve_draft": true
       },
       "aid_verification": {
         "list_view": true,

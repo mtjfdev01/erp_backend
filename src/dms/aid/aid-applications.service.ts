@@ -6,7 +6,8 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import { User } from "../../users/user.entity";
+import { Department, User } from "../../users/user.entity";
+import { UsersService } from "../../users/users.service";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
 import {
   AidApplicationStatus,
@@ -34,6 +35,7 @@ import {
 } from "./aid-vulnerability-score";
 import { AidPeopleService } from "./aid-people.service";
 import {
+  ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
@@ -65,6 +67,7 @@ export class AidApplicationsService {
     @InjectRepository(AidHouseholdMember)
     private readonly memberRepo: Repository<AidHouseholdMember>,
     private readonly peopleService: AidPeopleService,
+    private readonly usersService: UsersService,
     private readonly s3: S3StorageService,
   ) {}
 
@@ -163,7 +166,8 @@ export class AidApplicationsService {
       status: AidApplicationStatus.DRAFT,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
-      assigned_to_user_id: dto.assigned_to_user_id ?? null,
+      // Assignment is done by the draft approver (program user), not at intake
+      assigned_to_user_id: null,
       submitted_at: null,
       created_by: user || null,
       updated_by: user || null,
@@ -454,7 +458,8 @@ export class AidApplicationsService {
     assigned_to_user_id?: number | string;
     /**
      * approvals = verified & not rejected (CEO queue + decided non-rejects)
-     * entry = Beneficiary Registration board (includes drafts)
+     * entry = Beneficiary Registration board (excludes drafts)
+     * drafts = Drafts board (status = draft only)
      */
     queue?: string;
     page?: number;
@@ -493,6 +498,7 @@ export class AidApplicationsService {
     this.applyListFilters(qb, params);
 
     const isEntryBoard = params.queue === "entry";
+    const isDraftsBoard = params.queue === "drafts";
 
     if (params.queue === "approvals") {
       qb.andWhere("a.verified_at IS NOT NULL");
@@ -505,13 +511,20 @@ export class AidApplicationsService {
       if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
+    } else if (isDraftsBoard) {
+      qb.andWhere("a.status = :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
     } else if (isEntryBoard) {
+      // Registration board: live applications only (not drafts)
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
       if (params.stage) {
         this.applyStageFilter(qb, params.stage);
       } else if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
-      // else: all statuses including draft
     } else if (params.stage) {
       this.applyStageFilter(qb, params.stage);
     } else if (params.status) {
@@ -1276,7 +1289,11 @@ export class AidApplicationsService {
     if (dto.consent_form !== undefined) {
       app.consent_form = dto.consent_form;
     }
-    if (dto.assigned_to_user_id !== undefined) {
+    if (
+      dto.assigned_to_user_id !== undefined &&
+      app.status !== AidApplicationStatus.DRAFT
+    ) {
+      // Draft assignment is only set via approve-draft
       app.assigned_to_user_id = dto.assigned_to_user_id;
     }
     if (dto.verification_notes !== undefined) {
@@ -1329,8 +1346,13 @@ export class AidApplicationsService {
 
   /**
    * Registration approval: draft → submitted (enters Verification Process).
+   * Requires assigning a program-department user as case owner.
    */
-  async approveDraft(id: number, user?: User) {
+  async approveDraft(
+    id: number,
+    dto: ApproveDraftAidApplicationDto,
+    user?: User,
+  ) {
     const app = await this.appRepo.findOne({
       where: { id, is_archived: false },
     });
@@ -1340,6 +1362,21 @@ export class AidApplicationsService {
         "Only draft applications can be approved for verification",
       );
     }
+
+    const assigneeId = Number(dto?.assigned_to_user_id);
+    if (!Number.isFinite(assigneeId) || assigneeId <= 0) {
+      throw new BadRequestException(
+        "assigned_to_user_id is required (program department user)",
+      );
+    }
+    const assignee = await this.usersService.findOne(assigneeId);
+    if (String(assignee.department || "").toLowerCase() !== Department.PROGRAM) {
+      throw new BadRequestException(
+        "Assignee must be a user in the program department",
+      );
+    }
+
+    app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
     app.submitted_at = new Date();
     app.updated_by = user || null;

@@ -854,6 +854,13 @@ export class RejectAidApplicationDto {
   rejection_reason: string;
 }
 
+/** Approve draft → submitted; must assign a program-department user. */
+export class ApproveDraftAidApplicationDto {
+  @Type(() => Number)
+  @IsInt()
+  assigned_to_user_id: number;
+}
+
 export class InvestigationRecommendationDto {
   @IsIn(["approve_as_requested", "approve_with_changes", "reject"])
   decision: "approve_as_requested" | "approve_with_changes" | "reject";
