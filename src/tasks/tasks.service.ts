@@ -1219,28 +1219,54 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  public getNextOccurrence(date: Date, rule: string): Date {
-    const next = new Date(date);
-    const ruleLower = (rule || "").toLowerCase();
+  /**
+   * Calculates the next calendar occurrence date for a recurring task based on its cadence rule.
+   *
+   * Converts the reference date to 'YYYY-MM-DD' in Asia/Karachi (PKT) time and evaluates date arithmetic
+   * in UTC to prevent timezone offsets from shifting dates across day boundaries.
+   *
+   * Supported cadence rules:
+   * - 'daily': advances by +1 day
+   * - 'weekly': advances by +7 days
+   * - 'monthly': advances by +1 calendar month
+   * - 'quarterly': advances by +3 calendar months
+   * - 'annually': advances by +1 calendar year
+   * - 'N days' / 'N day' (e.g. '3 days'): advances by +N days
+   * - Fallback: defaults to +1 day for unrecognized rules
+   *
+   * @param date - Base reference date (Date instance or 'YYYY-MM-DD' string)
+   * @param rule - Recurrence cadence rule string
+   * @returns Next occurrence Date object set to UTC midnight
+   */
+  public getNextOccurrence(date: Date | string, rule: string): Date {
+    // Normalize date to YYYY-MM-DD string in PKT timezone
+    const dateStr =
+      typeof date === "string" ? date.slice(0, 10) : formatDateOnlyPkt(date);
+    const [y, m, d] = dateStr.split("-").map(Number);
+    // Instantiate Date in UTC to avoid daylight saving or local timezone shift anomalies
+    const next = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    const ruleLower = (rule || "").toLowerCase().trim();
 
     if (ruleLower === "daily") {
-      next.setDate(next.getDate() + 1);
+      next.setUTCDate(next.getUTCDate() + 1);
     } else if (ruleLower === "weekly") {
-      next.setDate(next.getDate() + 7);
+      next.setUTCDate(next.getUTCDate() + 7);
     } else if (ruleLower === "monthly") {
-      next.setMonth(next.getMonth() + 1);
+      next.setUTCMonth(next.getUTCMonth() + 1);
     } else if (ruleLower === "quarterly") {
-      next.setMonth(next.getMonth() + 3);
+      next.setUTCMonth(next.getUTCMonth() + 3);
     } else if (ruleLower === "annually") {
-      next.setFullYear(next.getFullYear() + 1);
-    } else if (ruleLower.includes("days")) {
+      next.setUTCFullYear(next.getUTCFullYear() + 1);
+    } else if (ruleLower.includes("days") || ruleLower.includes("day")) {
       const days = parseInt(ruleLower.split(" ")[0]);
-      if (!isNaN(days)) {
-        next.setDate(next.getDate() + days);
+      if (!isNaN(days) && days > 0) {
+        next.setUTCDate(next.getUTCDate() + days);
+      } else {
+        next.setUTCDate(next.getUTCDate() + 1);
       }
     } else {
       // Default to daily if rule is unknown
-      next.setDate(next.getDate() + 1);
+      next.setUTCDate(next.getUTCDate() + 1);
     }
     return next;
   }
@@ -5062,6 +5088,22 @@ export class TasksService implements OnModuleInit {
           }
         }
 
+        // Reset master task MOV items and status workflow for the new recurrence cycle.
+        // Clears checked tokens from last_progress_notes ([indices:...] and [ownership:...])
+        // while preserving master checklist definitions (mov_items) and per-item user assignments (mov_assignments).
+        master.progress = 0;
+        master.last_progress_notes = null;
+        master.status = TaskStatus.OPEN;
+        master.completed_date = null;
+        master.overdue_email_sent = false;
+        // Re-initialize approval workflow states if required so new occurrence can request approval afresh
+        if (master.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
+          master.approved_by_id = null;
+          master.rejected_by_id = null;
+          await this.upsertTaskApprovalState(master);
+          await this.setTaskApprovalMeta(master.id, null);
+        }
+
         await this.taskRepo.save(master);
         createdCount++;
 
@@ -5091,58 +5133,207 @@ export class TasksService implements OnModuleInit {
     }
   }
 
+  /**
+   * Finalizes recurring tasks at the 12:00 PM (noon) Asia/Karachi cutoff before the next cycle begins.
+   *
+   * Evaluates hourly via cron. When the next recurrence occurrence begins tomorrow and the current PKT time
+   * is 12:00 PM or later (or if a cutoff reset was missed while the service was offline), this method:
+   * 1. Records an audit log in task history if the previous cycle was left unfinished.
+   * 2. Resets Means of Verification (MOV) checklist items to unchecked state (progress = 0%) while preserving definitions and assignments.
+   * 3. Resets task workflow status to OPEN and clears completion dates, overdue flags, and approvals.
+   * 4. Updates cycle start_date and due_date for the new cycle, advances recurrence_next_date, and evaluates end limits.
+   * 5. Records a dedicated 'recurrence_reset' activity audit entry to preserve complete historical lineage.
+   *
+   * @returns Total number of recurring tasks successfully reset for the new cycle.
+   */
   async finalizeRecurringCutoffs(): Promise<number> {
     const now = new Date();
-    const karachiParts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Karachi",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      hour12: false,
-    }).formatToParts(now);
-    const parts = Object.fromEntries(
-      karachiParts.map((part) => [part.type, part.value]),
-    );
-    const today = `${parts.year}-${parts.month}-${parts.day}`;
-    const cutoffHour = Number(parts.hour);
+    const today = formatDateOnlyPkt(now);
+    const cutoffHour = getPktHour(now);
+
+    // Reset window opens at 12:00 PM (noon) Asia/Karachi (PKT) before the next recurrence cycle starts
     if (!Number.isFinite(cutoffHour) || cutoffHour < 12) return 0;
 
-    const tomorrow = new Date(`${today}T00:00:00Z`);
+    const tomorrow = new Date(`${today}T12:00:00Z`);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+
     const recurringTasks = await this.taskRepo.find({
       where: { task_type: TaskType.RECURRING },
     });
 
-    let finalized = 0;
+    let processedCount = 0;
     for (const task of recurringTasks) {
-      const nextDate = task.recurrence_next_date
-        ? new Date(task.recurrence_next_date).toISOString().slice(0, 10)
-        : null;
-      if (nextDate !== tomorrowDate) continue;
-      if (
-        [TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.CANCELLED].includes(
-          task.status,
-        )
-      ) {
+      if (!task.recurrence_rule || !task.recurrence_next_date) continue;
+      if (task.status === TaskStatus.CANCELLED) continue;
+
+      const nextDateStr = dueDateToPktDateString(task.recurrence_next_date);
+
+      // Check whether this task is due for reset before the next recurrence:
+      // Case 1: Next recurrence begins tomorrow, and current time is >= 12:00 PM (noon) today.
+      // Case 2: Missed reset catch-up where nextDateStr <= today and hasn't been reset yet.
+      const isDueTomorrowNoon = nextDateStr === tomorrowDate && cutoffHour >= 12;
+      const isPastOrTodayDue = nextDateStr <= today;
+
+      if (!isDueTomorrowNoon && !isPastOrTodayDue) {
         continue;
       }
 
-      const oldStatus = task.status;
-      task.status = TaskStatus.COMPLETED;
-      if (task.workflow_type === TaskWorkflowType.STANDARD) {
-        task.completed_date = task.completed_date ?? now;
+      // Guard: If the task was created today after 12:00 PM noon, do not reset it on the same day
+      if (task.created_at) {
+        const createdDateStr = formatDateOnlyPkt(task.created_at);
+        const createdHour = getPktHour(task.created_at);
+        if (
+          createdDateStr === today &&
+          createdHour >= 12 &&
+          nextDateStr === tomorrowDate
+        ) {
+          continue;
+        }
       }
+
+      // Check termination end conditions before executing reset:
+      // Condition A: Limited by fixed occurrence count (AFTER_OCCURRENCES)
+      if (
+        task.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES &&
+        task.recurrence_end_occurrences &&
+        task.recurrence_created_count >= task.recurrence_end_occurrences
+      ) {
+        task.recurrence_next_date = null;
+        await this.taskRepo.save(task);
+        continue;
+      }
+
+      // Condition B: Limited by fixed end date (ON_DATE)
+      if (
+        task.recurrence_end_type === RecurrenceEndType.ON_DATE &&
+        task.recurrence_end_date &&
+        nextDateStr > dueDateToPktDateString(task.recurrence_end_date)
+      ) {
+        task.recurrence_next_date = null;
+        await this.taskRepo.save(task);
+        continue;
+      }
+
+      // Idempotency check: Ensure the reset executes exactly once per recurrence cycle date.
+      // Queries the activity log for an existing 'recurrence_reset' matching this cycleDate.
+      const alreadyReset = await this.activityRepo
+        .createQueryBuilder("activity")
+        .where("activity.task_id = :taskId", { taskId: task.id })
+        .andWhere("activity.action = :action", { action: "recurrence_reset" })
+        .andWhere(
+          "activity.details ::jsonb ->> 'recurrence_cycle_date' = :cycleDate",
+          {
+            cycleDate: nextDateStr,
+          },
+        )
+        .getOne();
+
+      if (alreadyReset) {
+        continue;
+      }
+
+      // Capture previous cycle state
+      const oldStatus = task.status;
+      const oldProgress = task.progress || 0;
+      const oldStartDate = task.start_date ? new Date(task.start_date) : null;
+      const oldDueDate = task.due_date ? new Date(task.due_date) : null;
+
+      // 1. If previous cycle was not completed/closed, record cutoff finalization in history
+      if (
+        ![
+          TaskStatus.COMPLETED,
+          TaskStatus.CLOSED,
+          TaskStatus.CANCELLED,
+        ].includes(oldStatus)
+      ) {
+        await this.logActivity(task, null, "recurrence_cutoff_finalized", {
+          from_status: oldStatus,
+          progress: oldProgress,
+          cutoff: "12:00 Asia/Karachi",
+          ended_cycle_date: oldStartDate
+            ? dueDateToPktDateString(oldStartDate)
+            : today,
+        });
+      }
+
+      // 2. Reset MOV items to initial unchecked state
+      // Reset progress notes (removes checked indices [indices:...] and ownership tags)
+      task.last_progress_notes = null;
+      // Recalculate progress to 0%
+      task.progress = 0;
+      // Definitions, descriptions, and assignments of mov_items remain preserved
+
+      // 3. Reset Task Status Workflow to initial state (OPEN)
+      task.status = TaskStatus.OPEN;
+      task.completed_date = null;
+      task.overdue_email_sent = false;
+
+      // Reset approvals if this task has approval workflow
+      if (task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
+        task.approved_by_id = null;
+        task.rejected_by_id = null;
+        await this.upsertTaskApprovalState(task);
+        await this.setTaskApprovalMeta(task.id, null);
+      }
+
+      // 4. Update recurrence dates for the new cycle:
+      // Preserves original cycle duration if start_date and due_date were both defined;
+      // otherwise computes the new due date using the recurrence rule.
+      const newStartDate = new Date(`${nextDateStr}T00:00:00Z`);
+      let durationMs = 0;
+      if (oldStartDate && oldDueDate) {
+        durationMs = oldDueDate.getTime() - oldStartDate.getTime();
+      }
+      task.start_date = newStartDate;
+      task.due_date =
+        durationMs > 0
+          ? new Date(newStartDate.getTime() + durationMs)
+          : this.getNextOccurrence(newStartDate, task.recurrence_rule);
+
+      // Advance recurrence_next_date to the subsequent occurrence after newStartDate
+      const upcomingNextDate = this.getNextOccurrence(
+        newStartDate,
+        task.recurrence_rule,
+      );
+      task.recurrence_next_date = upcomingNextDate;
+      task.recurrence_created_count = (task.recurrence_created_count || 0) + 1;
+
+      // Re-evaluate termination end conditions for the newly scheduled occurrence date
+      if (
+        task.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES &&
+        task.recurrence_end_occurrences &&
+        task.recurrence_created_count >= task.recurrence_end_occurrences
+      ) {
+        task.recurrence_next_date = null;
+      } else if (
+        task.recurrence_end_type === RecurrenceEndType.ON_DATE &&
+        task.recurrence_end_date &&
+        upcomingNextDate > new Date(task.recurrence_end_date)
+      ) {
+        task.recurrence_next_date = null;
+      }
+
+      // Persist the updated task state for the new cycle
       const saved = await this.taskRepo.save(task);
-      await this.logActivity(saved, null, "recurrence_cutoff_finalized", {
+
+      // 5. Log audit entry in Task Activity Progress History documenting the recurrence reset.
+      // This maintains complete auditability across all recurring cycles in the timeline view.
+      await this.logActivity(saved, null, "recurrence_reset", {
+        notes:
+          "Recurrence cycle reset: MOV checklist items reset to unchecked, status reset to Open for next recurrence.",
+        progress: 0,
         from_status: oldStatus,
+        to_status: TaskStatus.OPEN,
+        recurrence_cycle_date: nextDateStr,
+        previous_progress: oldProgress,
         cutoff: "12:00 Asia/Karachi",
-        next_recurrence_date: nextDate,
       });
-      finalized++;
+
+      processedCount++;
     }
-    return finalized;
+
+    return processedCount;
   }
 
   private async createNotification(
