@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import { PermissionsService } from "../../permissions/permissions.service";
 import { Department, User } from "../../users/user.entity";
 import { UsersService } from "../../users/users.service";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
@@ -68,8 +70,60 @@ export class AidApplicationsService {
     private readonly memberRepo: Repository<AidHouseholdMember>,
     private readonly peopleService: AidPeopleService,
     private readonly usersService: UsersService,
+    private readonly permissionsService: PermissionsService,
     private readonly s3: S3StorageService,
   ) {}
+
+  /**
+   * Investigation (checklist / verify / site-visit attach):
+   * assigned investigator, super admin, or bulk_verify (Mark all complete).
+   */
+  private async assertCanPerformInvestigation(
+    app: AidApplication,
+    user?: User,
+  ) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program.aid_verification.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program.aid_applications.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising.aid_verification.bulk_verify",
+      )) ||
+      (await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising.aid_applications.bulk_verify",
+      ))
+    ) {
+      return;
+    }
+
+    if (
+      app.assigned_to_user_id != null &&
+      Number(app.assigned_to_user_id) === Number(user.id)
+    ) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      "Only the assigned investigator, super admin, or users with Mark all complete may perform the investigation",
+    );
+  }
 
   private pickAuditActor(user: any) {
     if (!user || typeof user !== "object") return null;
@@ -1190,6 +1244,13 @@ export class AidApplicationsService {
       throw new BadRequestException("Cannot edit a closed application");
     }
 
+    if (
+      dto.verification_checklist !== undefined ||
+      dto.investigation_recommendation !== undefined
+    ) {
+      await this.assertCanPerformInvestigation(app, user);
+    }
+
     if (dto.beneficiary && app.beneficiary_person_id) {
       await this.peopleService.update(
         app.beneficiary_person_id,
@@ -1422,6 +1483,7 @@ export class AidApplicationsService {
         "Only submitted/under_review applications can be verified",
       );
     }
+    await this.assertCanPerformInvestigation(app, user);
     const investigationItems = await this.buildInvestigationForApp(app);
     let checklistPayload: Record<string, unknown>;
     try {
@@ -1597,12 +1659,30 @@ export class AidApplicationsService {
     if (params.applicationId) {
       const exists = await this.appRepo.findOne({
         where: { id: params.applicationId, is_archived: false },
-        select: ["id"],
       });
       if (!exists) {
         throw new NotFoundException(
           `Application #${params.applicationId} not found`,
         );
+      }
+      const desc = String(params.description || "").trim();
+      const investigationAttach =
+        params.context === AidAttachmentContext.SITE_VISIT ||
+        [
+          "site_visit",
+          "need_verified",
+          "duplicates_reviewed",
+          "eligible_recommended",
+          "home_visited",
+        ].includes(desc);
+      if (
+        investigationAttach &&
+        [
+          AidApplicationStatus.SUBMITTED,
+          AidApplicationStatus.UNDER_REVIEW,
+        ].includes(exists.status)
+      ) {
+        await this.assertCanPerformInvestigation(exists, params.user);
       }
     }
     if (params.personId) {
