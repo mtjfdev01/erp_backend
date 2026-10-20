@@ -14,9 +14,16 @@ export enum JobStatus {
   DRAFT = "draft",
 }
 
+export enum JobProject {
+  MTJ_FOUNDATION = "MTJ Foundation",
+  AAS_LAB = "Aas Lab",
+  AAS_CLINICS = "Aas Clinics",
+}
+
 @Entity("jobs")
 @Index("idx_jobs_status", ["status"])
 @Index("idx_jobs_type", ["type"])
+@Index("idx_jobs_project", ["project"])
 @Index("idx_jobs_location", ["location"])
 @Index("idx_jobs_posted_date", ["posted_date"])
 @Index("idx_jobs_slug", ["slug"], { unique: true })
@@ -29,6 +36,14 @@ export class Job extends BaseEntity {
 
   @Column({ type: "varchar", length: 500, nullable: true })
   icon: string;
+
+  @Column({
+    type: "enum",
+    enum: JobProject,
+    default: JobProject.MTJ_FOUNDATION,
+    nullable: true,
+  })
+  project: JobProject;
 
   @Column({ type: "varchar", length: 255, nullable: true })
   department: string;

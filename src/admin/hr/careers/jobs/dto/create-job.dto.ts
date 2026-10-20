@@ -10,7 +10,7 @@ import {
   MaxLength,
   ArrayMinSize,
 } from "class-validator";
-import { JobType, JobStatus } from "../entities/job.entity";
+import { JobType, JobStatus, JobProject } from "../entities/job.entity";
 
 export class CreateJobDto {
   @IsString()
@@ -26,6 +26,12 @@ export class CreateJobDto {
   @IsOptional()
   @IsString()
   icon?: string;
+
+  @IsEnum(JobProject, {
+    message: "Project must be MTJ Foundation, Aas Lab, or Aas Clinics",
+  })
+  @IsNotEmpty({ message: "Project is required" })
+  project: JobProject;
 
   @IsString()
   @IsNotEmpty({ message: "Department is required" })
