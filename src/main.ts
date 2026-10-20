@@ -40,8 +40,13 @@ async function bootstrap() {
     return origin.toLowerCase().replace(/\/$/, "");
   };
 
-  // Stripe + Resend webhooks need raw body for signature verification; all other routes use JSON
+  // Stripe + Resend webhooks need raw body for signature verification; all other routes use JSON.
+  // Never run json/urlencoded parsers on multipart — they can consume the stream and break Multer uploads.
   app.use((req, res, next) => {
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (contentType.includes("multipart/form-data")) {
+      return next();
+    }
     if (
       req.originalUrl === "/donations/public/stripe/webhook" ||
       req.originalUrl === "/email/public/resend/webhook"
@@ -50,7 +55,17 @@ async function bootstrap() {
     }
     return bodyParser.json({ limit: "10mb" })(req, res, next);
   });
-  app.use(bodyParser.urlencoded({ limit: "10mb", extended: true }));
+  app.use((req, res, next) => {
+    const contentType = String(req.headers["content-type"] || "").toLowerCase();
+    if (contentType.includes("multipart/form-data")) {
+      return next();
+    }
+    return bodyParser.urlencoded({ limit: "10mb", extended: true })(
+      req,
+      res,
+      next,
+    );
+  });
 
   app.enableCors({
     origin: (origin, callback) => {
