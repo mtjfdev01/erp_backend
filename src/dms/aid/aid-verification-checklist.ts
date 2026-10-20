@@ -662,23 +662,28 @@ export function isInvestigationItemComplete(
   },
   entry: AidInvestigationItemResult,
 ): boolean {
+  const hasNote = String(entry.note || "").trim().length >= 3;
   if (item.accepts_file) {
     const hasFile = !!String(entry.attachment_url || "").trim();
     if (!hasFile || entry.status !== "verified") return false;
+    // Field process (e.g. Site Visit): Found note required with any status path
+    if (item.kind === "process" && !hasNote) return false;
     return true;
   }
   if (item.kind === "process" || item.allow_mismatch === false) {
-    return entry.status === "verified";
+    if (entry.status !== "verified") return false;
+    if (item.kind === "process" && !hasNote) return false;
+    return true;
   }
   if (!item.required) {
     if (entry.status === "mismatch") {
-      return String(entry.note || "").trim().length >= 3;
+      return hasNote;
     }
     return true;
   }
   if (entry.status === "verified") return true;
   if (entry.status === "mismatch") {
-    return String(entry.note || "").trim().length >= 3;
+    return hasNote;
   }
   return false;
 }
@@ -708,14 +713,16 @@ export function assertInvestigationComplete(
     const entry = normalizeInvestigationEntry(
       checklistEntryForItem(checklist, item.key),
     );
+    const noteTrimmed = entry.note ? String(entry.note).trim() : "";
     payload[item.key] = {
       status: entry.status,
+      // Persist Found notes for field process at any status, and for claim mismatches
       note:
-        entry.status === "mismatch"
-          ? String(entry.note || "").trim() || null
-          : entry.note
-            ? String(entry.note).trim()
-            : null,
+        item.kind === "process" ||
+        entry.status === "mismatch" ||
+        noteTrimmed
+          ? noteTrimmed || null
+          : null,
       attachment_url: entry.attachment_url || null,
       attachment_name: entry.attachment_name || null,
       attachment_id: entry.attachment_id ?? null,
@@ -723,14 +730,16 @@ export function assertInvestigationComplete(
     if (!isInvestigationItemComplete(item, payload[item.key])) {
       missing.push(
         item.accepts_file
-          ? `${item.label} (file required)`
-          : item.label,
+          ? `${item.label} (file + Found note required)`
+          : item.kind === "process"
+            ? `${item.label} (Verified + Found note)`
+            : item.label,
       );
     }
   }
   if (missing.length) {
     throw new Error(
-      `Complete investigation before verify: ${missing.join("; ")}. Mismatches need a Found note.`,
+      `Complete investigation before verify: ${missing.join("; ")}. Field process and mismatches need a Found note.`,
     );
   }
   return payload;

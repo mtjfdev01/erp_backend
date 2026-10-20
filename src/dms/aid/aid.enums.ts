@@ -161,6 +161,8 @@ export enum AidRequestType {
 
 /** Overall application pipeline (list filter source of truth). */
 export enum AidApplicationStatus {
+  /** Intake saved; not yet in verification pipeline. */
+  DRAFT = "draft",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
   REJECTED = "rejected",

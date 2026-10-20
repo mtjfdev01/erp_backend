@@ -239,8 +239,13 @@ export class AidOverviewService {
           )
         : null;
 
-    const appsCount = created.length;
-    const appsPrev = createdPrev.length;
+    const liveCreated = created.filter(
+      (a) => a.status !== AidApplicationStatus.DRAFT,
+    );
+    const appsCount = liveCreated.length;
+    const appsPrev = createdPrev.filter(
+      (a) => a.status !== AidApplicationStatus.DRAFT,
+    ).length;
     const appsDeltaPct =
       appsPrev > 0
         ? Math.round(((appsCount - appsPrev) / appsPrev) * 100)
@@ -250,9 +255,9 @@ export class AidOverviewService {
       .filter(([k]) => !program || k === program)
       .reduce((s, [, v]) => s + v, 0);
 
-    // Pipeline (period)
+    // Pipeline (period) — drafts stay on Beneficiary Registration
     const registered = appsCount;
-    const submittedCount = created.filter(
+    const submittedCount = liveCreated.filter(
       (a) => a.status !== AidApplicationStatus.SUBMITTED || !!a.submitted_at,
     ).length;
     const investigatedCount = verified.length;

@@ -139,7 +139,7 @@ export class AidApplication extends BaseEntity {
   @Column({
     type: "enum",
     enum: AidApplicationStatus,
-    default: AidApplicationStatus.SUBMITTED,
+    default: AidApplicationStatus.DRAFT,
   })
   status: AidApplicationStatus;
 

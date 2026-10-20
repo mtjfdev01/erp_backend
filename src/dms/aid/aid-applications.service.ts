@@ -160,11 +160,11 @@ export class AidApplicationsService {
           : null,
       zakat_permission: dto.zakat_permission ?? null,
       consent_form: dto.consent_form ?? null,
-      status: AidApplicationStatus.SUBMITTED,
+      status: AidApplicationStatus.DRAFT,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
       assigned_to_user_id: dto.assigned_to_user_id ?? null,
-      submitted_at: new Date(),
+      submitted_at: null,
       created_by: user || null,
       updated_by: user || null,
     });
@@ -189,7 +189,6 @@ export class AidApplicationsService {
 
   /**
    * Pipeline stage for data-entry board (maps to AidApplicationStatus).
-   * draft is reserved (no status yet) — always 0 until draft workflow exists.
    */
   private applyStageFilter(
     qb: ReturnType<Repository<AidApplication>["createQueryBuilder"]>,
@@ -203,7 +202,7 @@ export class AidApplicationsService {
 
     switch (s) {
       case "draft":
-        qb.andWhere("1 = 0");
+        qb.andWhere("a.status = :st", { st: AidApplicationStatus.DRAFT });
         break;
       case "submitted":
         qb.andWhere("a.status = :st", { st: AidApplicationStatus.SUBMITTED });
@@ -269,6 +268,8 @@ export class AidApplicationsService {
 
   private mapStatusToStage(status: string | null | undefined): string {
     switch (String(status || "").toLowerCase()) {
+      case AidApplicationStatus.DRAFT:
+        return "draft";
       case AidApplicationStatus.SUBMITTED:
         return "submitted";
       case AidApplicationStatus.UNDER_REVIEW:
@@ -451,7 +452,10 @@ export class AidApplicationsService {
     requested_aid_type?: string;
     district?: string;
     assigned_to_user_id?: number | string;
-    /** approvals = verified & not rejected (CEO queue + decided non-rejects) */
+    /**
+     * approvals = verified & not rejected (CEO queue + decided non-rejects)
+     * entry = Beneficiary Registration board (includes drafts)
+     */
     queue?: string;
     page?: number;
     pageSize?: number;
@@ -488,18 +492,35 @@ export class AidApplicationsService {
 
     this.applyListFilters(qb, params);
 
+    const isEntryBoard = params.queue === "entry";
+
     if (params.queue === "approvals") {
       qb.andWhere("a.verified_at IS NOT NULL");
       qb.andWhere("a.status != :rejected", {
         rejected: AidApplicationStatus.REJECTED,
       });
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
       if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
+    } else if (isEntryBoard) {
+      if (params.stage) {
+        this.applyStageFilter(qb, params.stage);
+      } else if (params.status) {
+        qb.andWhere("a.status = :status", { status: params.status });
+      }
+      // else: all statuses including draft
     } else if (params.stage) {
       this.applyStageFilter(qb, params.stage);
     } else if (params.status) {
       qb.andWhere("a.status = :status", { status: params.status });
+    } else {
+      // Verification Process default: hide registration drafts
+      qb.andWhere("a.status != :draft", {
+        draft: AidApplicationStatus.DRAFT,
+      });
     }
 
     const [rows, total] = await qb.getManyAndCount();
@@ -1261,6 +1282,20 @@ export class AidApplicationsService {
     if (dto.verification_notes !== undefined) {
       app.verification_notes = dto.verification_notes?.trim() || null;
     }
+    if (dto.verification_checklist !== undefined) {
+      app.verification_checklist =
+        dto.verification_checklist &&
+        typeof dto.verification_checklist === "object"
+          ? dto.verification_checklist
+          : null;
+    }
+    if (dto.investigation_recommendation !== undefined) {
+      app.investigation_recommendation =
+        dto.investigation_recommendation &&
+        typeof dto.investigation_recommendation === "object"
+          ? dto.investigation_recommendation
+          : null;
+    }
     if (app.status === AidApplicationStatus.SUBMITTED) {
       app.status = AidApplicationStatus.UNDER_REVIEW;
     }
@@ -1292,9 +1327,34 @@ export class AidApplicationsService {
     return this.findOne(id);
   }
 
+  /**
+   * Registration approval: draft → submitted (enters Verification Process).
+   */
+  async approveDraft(id: number, user?: User) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.status !== AidApplicationStatus.DRAFT) {
+      throw new BadRequestException(
+        "Only draft applications can be approved for verification",
+      );
+    }
+    app.status = AidApplicationStatus.SUBMITTED;
+    app.submitted_at = new Date();
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
   async reject(id: number, dto: RejectAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.status === AidApplicationStatus.DRAFT) {
+      throw new BadRequestException(
+        "Approve or edit the draft instead of rejecting it from verification",
+      );
+    }
     if (app.status === AidApplicationStatus.SUCCESSFUL || app.status === AidApplicationStatus.DELIVERED) {
       throw new BadRequestException("Cannot reject after success");
     }

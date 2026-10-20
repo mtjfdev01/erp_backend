@@ -821,6 +821,18 @@ export class UpdateAidApplicationDto {
   @IsString()
   verification_notes?: string | null;
 
+  /**
+   * Draft investigation progress (no completeness check — use POST :id/verify to submit).
+   */
+  @IsOptional()
+  @IsObject()
+  verification_checklist?: Record<string, unknown> | null;
+
+  /** Draft investigator recommendation (saved with checklist progress). */
+  @IsOptional()
+  @IsObject()
+  investigation_recommendation?: Record<string, unknown> | null;
+
   /** Patch beneficiary person fields (same shape as create person). */
   @IsOptional()
   @IsObject()

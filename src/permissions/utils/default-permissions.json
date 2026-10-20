@@ -258,8 +258,14 @@
         "view": true,
         "update": true,
         "delete": false,
+        "approve_draft": true,
         "ceo_approve": true,
-        "deliver": true,
+        "deliver": true
+      },
+      "aid_verification": {
+        "list_view": true,
+        "view": true,
+        "update": true,
         "bulk_verify": true
       },
       "aid_people": {
