@@ -20,7 +20,7 @@ import { CreateJobDto } from "./dto/create-job.dto";
 import { UpdateJobDto } from "./dto/update-job.dto";
 import { CreateApplicationDto } from "../applications/dto/create-application.dto";
 import { UpdateApplicationDto } from "../applications/dto/update-application.dto";
-import { JobStatus, JobType } from "./entities/job.entity";
+import { JobStatus, JobType, JobProject } from "./entities/job.entity";
 // import { ConditionalJwtGuard } from '../../../../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from "../../../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../../../permissions";
@@ -38,6 +38,7 @@ export class JobsController {
    * - limit: number (default: 10)
    * - department: string (optional)
    * - type: string - 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' (optional, URL-safe enum keys)
+   * - project: string - 'MTJ Foundation' | 'Aas Lab' | 'Aas Clinics' (or enum keys)
    */
   @Get()
   async findAll(
@@ -45,6 +46,7 @@ export class JobsController {
     @Query("limit") limit?: string,
     @Query("department") department?: string,
     @Query("type") type?: string,
+    @Query("project") project?: string,
     @Res() res?: Response,
   ) {
     try {
@@ -69,12 +71,40 @@ export class JobsController {
         }
       }
 
+      let jobProject: JobProject | undefined;
+      if (project) {
+        const projectMap: { [key: string]: JobProject } = {
+          MTJ_FOUNDATION: JobProject.MTJ_FOUNDATION,
+          "MTJ FOUNDATION": JobProject.MTJ_FOUNDATION,
+          "MTJ Foundation": JobProject.MTJ_FOUNDATION,
+          AAS_LAB: JobProject.AAS_LAB,
+          "AAS LAB": JobProject.AAS_LAB,
+          "Aas Lab": JobProject.AAS_LAB,
+          AAS_CLINICS: JobProject.AAS_CLINICS,
+          "AAS CLINICS": JobProject.AAS_CLINICS,
+          "Aas Clinics": JobProject.AAS_CLINICS,
+        };
+        jobProject =
+          projectMap[project] ||
+          projectMap[project.toUpperCase().replace(/\s+/g, "_")] ||
+          projectMap[project.toUpperCase()];
+        if (!jobProject) {
+          return res.status(HttpStatus.BAD_REQUEST).json({
+            success: false,
+            message:
+              "Invalid project. Must be one of: MTJ Foundation, Aas Lab, Aas Clinics",
+            data: null,
+          });
+        }
+      }
+
       const result = await this.jobsService.findAll(
         pageNum,
         limitNum,
         {
           department,
           type: jobType,
+          project: jobProject,
         },
         null,
       );

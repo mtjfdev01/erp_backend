@@ -6,7 +6,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, Like, LessThan, Not } from "typeorm";
-import { Job, JobType, JobStatus } from "./entities/job.entity";
+import { Job, JobType, JobStatus, JobProject } from "./entities/job.entity";
 import { CreateJobDto } from "./dto/create-job.dto";
 import { UpdateJobDto } from "./dto/update-job.dto";
 
@@ -121,7 +121,7 @@ export class JobsService {
 
   /**
    * Find all jobs with filtering and pagination
-   * Filters: department, type
+   * Filters: department, type, project
    */
   async findAll(
     page: number = 1,
@@ -129,6 +129,7 @@ export class JobsService {
     filters: {
       department?: string;
       type?: JobType;
+      project?: JobProject;
     } = {},
     user?: any,
   ) {
@@ -151,6 +152,13 @@ export class JobsService {
       // Apply type filter
       if (filters.type) {
         queryBuilder.andWhere("job.type = :type", { type: filters.type });
+      }
+
+      // Apply project filter
+      if (filters.project) {
+        queryBuilder.andWhere("job.project = :project", {
+          project: filters.project,
+        });
       }
 
       // Exclude archived jobs
