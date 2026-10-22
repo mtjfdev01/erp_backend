@@ -763,6 +763,41 @@ export class TasksService implements OnModuleInit {
     return reportIds;
   }
 
+  /**
+   * Excludes tasks assigned to any of the given user IDs (negation of the
+   * assignee match used by applyUserIdsFilter). Unassigned tasks always pass.
+   * Used by the "Assigned by Me" tab so tasks a manager assigns to their
+   * direct reports are classified under the Team tab only.
+   */
+  private applyNotAssignedToUsersFilter(
+    qb: SelectQueryBuilder<Task>,
+    userIds: number[],
+    paramSuffix = "",
+  ): void {
+    const ids = Array.from(
+      new Set(
+        (userIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    if (ids.length === 0) return;
+
+    const key = `notAssignedUsers${paramSuffix}`;
+    const alias = `_notAssignee${paramSuffix}`;
+    qb.andWhere(
+      `NOT (
+        COALESCE(task.assigned_user_ids, '{}'::int[]) && :${key}::int[]
+        OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(task.assigned_users_meta, '[]'::jsonb)) AS ${alias}
+          WHERE (${alias}->>'user_id')::int = ANY(:${key}::int[])
+        )
+      )`,
+      { [key]: ids },
+    );
+  }
+
   private applyApprovalResponsibilityFilter(
     qb: SelectQueryBuilder<Task>,
     currentUser: User,
@@ -856,9 +891,16 @@ export class TasksService implements OnModuleInit {
     }
 
     if (viewType === "other_tasks") {
+      // "Assigned by Me": tasks created by the current user, except those
+      // assigned to their direct reports — those belong to the Team tab
+      // (classification is based on the actual reporting relationship).
       qb.andWhere("task.created_by_id = :currentUserId", {
         currentUserId: currentUser.id,
       });
+      const excludedReportIds =
+        directReportIds ??
+        (await this.dataScopeService.getDirectReportIds(currentUser.id));
+      this.applyNotAssignedToUsersFilter(qb, excludedReportIds, "View");
     }
   }
 
@@ -1843,11 +1885,17 @@ export class TasksService implements OnModuleInit {
           assignedToTeamCount = await assignedToTeamQb.getCount();
         }
 
-        // Calculate other_tasks count (assigned by me = created by current user)
+        // Calculate other_tasks count (assigned by me = created by current user,
+        // excluding tasks assigned to direct reports which count under the Team tab)
         const otherTasksQb = countQb.clone();
         otherTasksQb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
         });
+        this.applyNotAssignedToUsersFilter(
+          otherTasksQb,
+          directReportIds,
+          "CountOtherTasks",
+        );
         otherTasksCount = await otherTasksQb.getCount();
 
         // Calculate approval_tasks count (where current user is required approver)
