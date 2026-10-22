@@ -711,6 +711,9 @@ export class AidPeopleService {
         relations: ["person"],
       });
       for (const mate of mates) relatedIds.add(mate.person_id);
+      // Family head counts as a family member even if not on the membership roster
+      const headId = (m.household as any)?.head_person_id;
+      if (headId) relatedIds.add(Number(headId));
     }
     relatedIds.delete(id);
 
@@ -738,6 +741,8 @@ export class AidPeopleService {
     }
 
     const family_tree = this.buildFamilyTree(id, kinship);
+    // Beneficiary (ego) + family head + relatives all count as family members
+    const total_members = relatedPeople.length + 1;
     const family_counts = {
       parents: family_tree.parents.length,
       spouse: family_tree.spouse.length,
@@ -749,6 +754,7 @@ export class AidPeopleService {
       grandchildren: family_tree.grandchildren.length,
       extended: family_tree.extended.length,
       total_linked: relatedPeople.length,
+      total_members,
     };
 
     return {

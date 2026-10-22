@@ -379,8 +379,14 @@ export function buildInvestigationItems(ctx: {
     for (const m of hh.members || []) {
       if (m.person?.id) hhMembers.add(m.person.id);
     }
+    const hhHeadId = (hh as any).head_person?.id || (hh as any).head_person_id;
+    if (hhHeadId) hhMembers.add(Number(hhHeadId));
   }
+  // Beneficiary and family head always count as family members
+  if (beneficiary?.id) hhMembers.add(beneficiary.id);
+  if (head?.id) hhMembers.add(head.id);
   const treeCount =
+    Number(ctx.family_counts?.total_members) ||
     (ctx.family_counts?.total_linked || 0) + (beneficiary ? 1 : 0);
   const size =
     hhMembers.size > 0
