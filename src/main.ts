@@ -83,7 +83,7 @@ async function bootstrap() {
         process.env.NODE_ENV !== "production" &&
         (normalizedOrigin.startsWith("http://localhost:") ||
           normalizedOrigin.startsWith("http://127.0.0.1:") ||
-          normalizedOrigin.startsWith("http://192.168.100.212:") || // Allow local subnet ports during development
+          normalizedOrigin.startsWith("http://192.168.100.218:") || // Allow local subnet ports during development
           normalizedOrigin.startsWith("http://192.168.2.131:"))
       ) {
         console.log("Development mode: Allowing origin:", origin);
