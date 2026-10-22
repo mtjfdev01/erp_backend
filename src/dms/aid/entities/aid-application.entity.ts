@@ -125,14 +125,6 @@ export class AidApplication extends BaseEntity {
   financial_assistance_details: Record<string, unknown> | null;
 
   /**
-   * Clean water aid type only:
-   * existing source, distance from home, duration without clean water,
-   * project location, community contribution amount
-   */
-  @Column({ type: "jsonb", nullable: true, default: null })
-  clean_water_details: Record<string, unknown> | null;
-
-  /**
    * Zakat Permission Letter (اجازت نامہ برائے زکوٰۃ) — all aid types.
    */
   @Column({ type: "jsonb", nullable: true, default: null })

@@ -746,47 +746,6 @@ export class TasksService implements OnModuleInit {
     });
   }
 
-  private async applyAssignedByMeFilter(
-    qb: SelectQueryBuilder<Task>,
-    currentUser: User,
-    paramSuffix = "",
-    directReportIds?: number[],
-  ): Promise<number[]> {
-    const reportIds =
-      directReportIds ??
-      (await this.dataScopeService.getDirectReportIds(currentUser.id));
-
-    const userParam = `assignedByMeUser${paramSuffix}`;
-    const reportsParam = `assignedByMeReports${paramSuffix}`;
-
-    qb.andWhere(`task.created_by_id = :${userParam}`, {
-      [userParam]: currentUser.id,
-    });
-
-    if (reportIds.length > 0) {
-      qb.andWhere(
-        new Brackets((subQb) => {
-          subQb.where(
-            `(task.assigned_user_ids IS NULL OR cardinality(task.assigned_user_ids) = 0)`,
-          );
-          subQb.orWhere(
-            `NOT (task.assigned_user_ids <@ :${reportsParam}::int[])`,
-            { [reportsParam]: reportIds },
-          );
-          subQb.orWhere(
-            `EXISTS (
-              SELECT 1 FROM jsonb_array_elements(COALESCE(task.assigned_users_meta, '[]'::jsonb)) AS _abm_assignee
-              WHERE NOT ((_abm_assignee->>'user_id')::int = ANY(:${reportsParam}::int[]))
-            )`,
-            { [reportsParam]: reportIds },
-          );
-        }),
-      );
-    }
-
-    return reportIds;
-  }
-
   private async applyDirectReportsTaskFilter(
     qb: SelectQueryBuilder<Task>,
     currentUser: User,
@@ -897,13 +856,9 @@ export class TasksService implements OnModuleInit {
     }
 
     if (viewType === "other_tasks") {
-      await this.applyAssignedByMeFilter(
-        qb,
-        currentUser,
-        "View",
-        directReportIds,
-      );
-      return;
+      qb.andWhere("task.created_by_id = :currentUserId", {
+        currentUserId: currentUser.id,
+      });
     }
   }
 
@@ -1444,13 +1399,6 @@ export class TasksService implements OnModuleInit {
         delete safeFilters.view_type;
       }
 
-      const groupByFilter = ["urgency", "status", "priority"].includes(
-        safeFilters.group_by,
-      )
-        ? safeFilters.group_by
-        : undefined;
-      delete safeFilters.group_by;
-
       delete safeFilters.strictDepartment;
 
       // Extract date and calendar-related filter parameters before applyCommonFilters
@@ -1461,9 +1409,6 @@ export class TasksService implements OnModuleInit {
       const dateField = safeFilters.date_field;
       const dueDate = safeFilters.due_date;
       const scheduledDate = safeFilters.scheduled_date;
-      const urgencyToday = safeFilters.today || safeFilters.current_date;
-      delete safeFilters.today;
-      delete safeFilters.current_date;
       delete safeFilters.start_date;
       delete safeFilters.end_date;
       delete safeFilters.date;
@@ -1680,68 +1625,6 @@ export class TasksService implements OnModuleInit {
       }
 
       const [data, total] = await qb.getManyAndCount();
-
-      const pageTaskIds = data.map((task) => task.id);
-      const urgencyTodayFilter = urgencyToday
-        ? "CAST(:urgencyToday AS date)"
-        : "CURRENT_DATE";
-      const groupExpression =
-        groupByFilter === "status"
-          ? "COALESCE(task.status::text, 'no_status')"
-          : groupByFilter === "priority"
-            ? "COALESCE(task.priority, 'medium')"
-            : `CASE
-                WHEN task.status IN (:...groupCompletedStatuses) THEN 'completed'
-                WHEN COALESCE(task.due_date, task.recurrence_next_date) IS NULL THEN 'upcoming'
-                WHEN COALESCE(task.due_date, task.recurrence_next_date) < ${urgencyTodayFilter} THEN 'overdue'
-                WHEN COALESCE(task.due_date, task.recurrence_next_date) = ${urgencyTodayFilter} THEN 'today'
-                ELSE 'upcoming'
-              END`;
-      const groupedRows = groupByFilter && pageTaskIds.length
-        ? await this.taskRepo
-            .createQueryBuilder("task")
-            .select("task.id", "task_id")
-            .addSelect(groupExpression, "group_key")
-            .where("task.id = ANY(CAST(:pageTaskIds AS int[]))", {
-              pageTaskIds,
-            })
-            .setParameters({
-              ...(groupByFilter === "urgency"
-                ? {
-                    groupCompletedStatuses: [
-                      TaskStatus.COMPLETED,
-                      TaskStatus.CLOSED,
-                      TaskStatus.CANCELLED,
-                      TaskStatus.APPROVED,
-                    ],
-                    ...(urgencyToday ? { urgencyToday } : {}),
-                  }
-                : {}),
-            })
-            .getRawMany()
-        : [];
-      const taskGroupById = new Map<number, string>(
-        groupedRows.map((row) => [Number(row.task_id), row.group_key]),
-      );
-      const groupedTasks: Record<string, Task[]> = {};
-      data.forEach((task) => {
-        const groupKey = taskGroupById.get(Number(task.id));
-        if (!groupKey) return;
-        if (!groupedTasks[groupKey]) groupedTasks[groupKey] = [];
-        groupedTasks[groupKey].push(task);
-      });
-      const groupData = groupByFilter
-        ? {
-            by: groupByFilter,
-            counts: Object.fromEntries(
-              Object.entries(groupedTasks).map(([key, tasks]) => [
-                key,
-                tasks.length,
-              ]),
-            ),
-            groups: groupedTasks,
-          }
-        : null;
 
       // Hydrate multi-manager IDs and populate runtime `reported_to_users` array for all returned tasks.
       // This eliminates the need for storing duplicate user metadata in the database.
@@ -1960,14 +1843,11 @@ export class TasksService implements OnModuleInit {
           assignedToTeamCount = await assignedToTeamQb.getCount();
         }
 
-        // Calculate other_tasks count (tasks created by current user and assigned to users who do not report to them)
+        // Calculate other_tasks count (assigned by me = created by current user)
         const otherTasksQb = countQb.clone();
-        await this.applyAssignedByMeFilter(
-          otherTasksQb,
-          currentUser,
-          "Count",
-          directReportIds,
-        );
+        otherTasksQb.andWhere("task.created_by_id = :currentUserId", {
+          currentUserId: currentUser.id,
+        });
         otherTasksCount = await otherTasksQb.getCount();
 
         // Calculate approval_tasks count (where current user is required approver)
@@ -1996,7 +1876,6 @@ export class TasksService implements OnModuleInit {
           other_tasks: otherTasksCount,
           approval_tasks: approvalTasksCount,
         },
-        groupData,
       };
     } catch (e) {
       throw e;
@@ -2553,14 +2432,9 @@ export class TasksService implements OnModuleInit {
         departmentStatusBreakdown[dept] = deptStatusMap[dept] || {};
       });
 
-      const clientToday = filters.today || filters.current_date;
-      const overdueQb = qb.clone();
-      if (clientToday) {
-        overdueQb.andWhere("task.due_date < CAST(:clientToday AS date)", { clientToday });
-      } else {
-        overdueQb.andWhere("task.due_date < CURRENT_DATE");
-      }
-      const overdueTasks = await overdueQb
+      const overdueTasks = await qb
+        .clone()
+        .andWhere("task.due_date < CURRENT_DATE")
         .andWhere("task.status NOT IN (:...completedStatuses)", {
           completedStatuses: [
             TaskStatus.COMPLETED,

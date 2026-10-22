@@ -158,29 +158,6 @@
       "delete": true,
       "view_permissions": true,
       "update_permissions": true
-    },
-    "hr": {
-      "jobs": {
-        "create": true,
-        "list_view": true,
-        "view": true,
-        "update": true,
-        "delete": true
-      },
-      "applications": {
-        "create": true,
-        "list_view": true,
-        "view": true,
-        "update": true,
-        "delete": true
-      },
-      "resume_collection": {
-        "create": true,
-        "list_view": true,
-        "view": true,
-        "update": true,
-        "delete": true
-      }
     }
   },
   "accounts_manager": {
