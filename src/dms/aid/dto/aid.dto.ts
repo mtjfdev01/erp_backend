@@ -714,6 +714,11 @@ export class CreateAidApplicationDto {
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
 
+  /** Clean-water intake payload (source, distance, duration, location, contribution). */
+  @IsOptional()
+  @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
+
   /** Zakat Permission Letter (Urdu/English) — all applications. */
   @IsOptional()
   @IsObject()
@@ -803,6 +808,10 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsObject()

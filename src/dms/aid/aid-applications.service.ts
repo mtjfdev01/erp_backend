@@ -215,6 +215,10 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details ?? null
           : null,
+      clean_water_details:
+        dto.requested_aid_type === AidRequestType.CLEAN_WATER
+          ? dto.clean_water_details ?? null
+          : null,
       zakat_permission: dto.zakat_permission ?? null,
       consent_form: dto.consent_form ?? null,
       status: AidApplicationStatus.DRAFT,
@@ -1315,6 +1319,9 @@ export class AidApplicationsService {
       if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
         app.financial_assistance_details = null;
       }
+      if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
+        app.clean_water_details = null;
+      }
     }
     if (dto.aid_program !== undefined) {
       app.aid_program = dto.aid_program?.trim() || null;
@@ -1359,6 +1366,13 @@ export class AidApplicationsService {
         (dto.requested_aid_type ?? app.requested_aid_type) ===
         AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details
+          : null;
+    }
+    if (dto.clean_water_details !== undefined) {
+      app.clean_water_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.CLEAN_WATER
+          ? dto.clean_water_details
           : null;
     }
     if (dto.zakat_permission !== undefined) {
