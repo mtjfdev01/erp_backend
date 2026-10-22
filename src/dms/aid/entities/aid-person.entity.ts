@@ -130,6 +130,12 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 200, nullable: true, default: null })
   disability_type: string | null;
 
+  @Column({ type: "varchar", length: 500, nullable: true, default: null })
+  disability_certificate_url: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  disability_certificate_name: string | null;
+
   /** Do you have land? */
   @Column({ type: "boolean", default: false })
   has_land: boolean;
@@ -195,7 +201,7 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "varchar", length: 120, nullable: true, default: null })
   vehicle_type: string | null;
 
-  /** Rows: vehicle_type */
+  /** Rows: vehicle_type, quantity?, details? */
   @Column({ type: "jsonb", nullable: true, default: null })
   vehicle_entries: Record<string, unknown>[] | null;
 
@@ -229,6 +235,10 @@ export class AidPerson extends BaseEntity {
 
   @Column({ type: "text", nullable: true, default: null })
   address: string | null;
+
+  /** Where the person currently lives (may differ from CNIC address). */
+  @Column({ type: "text", nullable: true, default: null })
+  current_address: string | null;
 
   @Column({ type: "varchar", length: 100, nullable: true, default: null })
   city: string | null;

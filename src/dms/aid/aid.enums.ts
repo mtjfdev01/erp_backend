@@ -55,6 +55,7 @@ export enum AidLiteracyCategory {
 export enum AidPropertyType {
   AGRI = "agri",
   COMMERCIAL = "commercial",
+  RESIDENTIAL_OWNERSHIP = "residential_ownership",
   PLOT = "plot",
   OTHERS = "others",
 }

@@ -152,6 +152,16 @@ export class CreateAidPersonDto {
   disability_type?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  disability_certificate_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  disability_certificate_name?: string | null;
+
+  @IsOptional()
   @IsBoolean()
   has_land?: boolean;
 
@@ -252,6 +262,10 @@ export class CreateAidPersonDto {
   @IsOptional()
   @IsString()
   address?: string | null;
+
+  @IsOptional()
+  @IsString()
+  current_address?: string | null;
 
   @IsOptional()
   @IsString()
@@ -411,6 +425,16 @@ export class UpdateAidPersonDto {
   disability_type?: string | null;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  disability_certificate_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  disability_certificate_name?: string | null;
+
+  @IsOptional()
   @IsBoolean()
   has_land?: boolean;
 
@@ -511,6 +535,10 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsString()
   address?: string | null;
+
+  @IsOptional()
+  @IsString()
+  current_address?: string | null;
 
   @IsOptional()
   @IsString()
