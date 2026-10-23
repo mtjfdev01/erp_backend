@@ -21,7 +21,7 @@ import { UpdateJobDto } from "./dto/update-job.dto";
 import { CreateApplicationDto } from "../applications/dto/create-application.dto";
 import { UpdateApplicationDto } from "../applications/dto/update-application.dto";
 import { JobStatus, JobType, JobProject } from "./entities/job.entity";
-import { JwtGuard } from "../../../../auth/jwt.guard";
+// import { ConditionalJwtGuard } from '../../../../auth/guards/conditional-jwt.guard';
 import { PermissionsGuard } from "../../../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../../../permissions";
 
@@ -157,7 +157,7 @@ export class JobsController {
    * POST /jobs - Create a new job posting
    */
   @Post()
-  @UseGuards(JwtGuard, PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(["hr.jobs.create", "super_admin"])
   async create(@Body() createJobDto: CreateJobDto, @Res() res: Response) {
     try {
@@ -180,7 +180,7 @@ export class JobsController {
    * PATCH /jobs/:id - Update existing job
    */
   @Patch(":id")
-  @UseGuards(JwtGuard, PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(["hr.jobs.update", "super_admin"])
   async update(
     @Param("id") id: string,
@@ -210,7 +210,7 @@ export class JobsController {
    * DELETE /jobs/:id - Soft delete (archive) a job
    */
   @Delete(":id")
-  @UseGuards(JwtGuard, PermissionsGuard)
+  // @UseGuards( PermissionsGuard)
   @RequiredPermissions(["hr.jobs.delete", "super_admin"])
   async remove(@Param("id") id: string, @Res() res: Response) {
     try {

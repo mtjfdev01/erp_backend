@@ -16,18 +16,31 @@ describe("CeoNoteConversionService", () => {
       create: jest.fn((task) => task),
       save: jest.fn(async (task) => ({ ...task, id: 99 })),
     };
+    // Mock user repository to support both:
+    // 1. Loading assignee with relations: ["managers"] from DMS user management
+    // 2. Querying manager records by ID to verify active and non-archived status
     const userRepository = {
-      find: jest.fn().mockResolvedValue([
-        {
-          id: assignedUserId,
-          department: Department.ADMIN,
-          first_name: "Assigned",
-          last_name: "User",
-        },
-      ]),
+      find: jest.fn().mockImplementation(async (options?: any) => {
+        const whereId = options?.where?.id;
+        const queriedIds = whereId?._value ?? (Array.isArray(whereId) ? whereId : [whereId]);
+        if (Array.isArray(queriedIds) && queriedIds.includes(managerId)) {
+          return [{ id: managerId, isActive: true, is_archived: false }];
+        }
+        return [
+          {
+            id: assignedUserId,
+            department: Department.ADMIN,
+            first_name: "Assigned",
+            last_name: "User",
+            manager_id: managerId,
+            managers: [{ id: managerId, isActive: true, is_archived: false }],
+          },
+        ];
+      }),
       findOne: jest.fn().mockResolvedValue({
         id: assignedUserId,
         manager_id: managerId,
+        managers: [{ id: managerId, isActive: true, is_archived: false }],
       }),
     };
     const noteRepository = {
@@ -63,7 +76,10 @@ describe("CeoNoteConversionService", () => {
       { id: 5 } as User,
     );
 
-    expect(result.task.reported_to_id).toBe(managerId);
-    expect(result.task.reported_to_id).not.toBe(assignedUserId);
+    const task = result.task as Task;
+    expect(task.reported_to).toEqual([managerId]);
+    expect(task.reported_to_ids).toEqual([managerId]);
+    expect(task.reported_to_id).toBe(managerId);
+    expect(task.reported_to_id).not.toBe(assignedUserId);
   });
 });

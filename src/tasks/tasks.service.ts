@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Logger,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, SelectQueryBuilder, IsNull, Not, Brackets, In } from "typeorm";
@@ -57,9 +58,63 @@ import {
 } from "../utils/lookup";
 
 @Injectable()
-export class TasksService {
+export class TasksService implements OnModuleInit {
   private readonly logger = new Logger(TasksService.name);
   private readonly searchableColumns = ["title", "description", "project_name"];
+
+  async onModuleInit() {
+    void this.migrateExistingReportedTo().catch((err) => {
+      this.logger.warn(`Task reported_to migration skipped: ${err?.message || err}`);
+    });
+  }
+
+  private async migrateExistingReportedTo(): Promise<void> {
+    try {
+      await this.taskRepo.query(`
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS "FK_7c8b35981277df842e52dd65f61";
+      `);
+
+      await this.taskRepo.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to' AND data_type != 'ARRAY'
+          ) THEN
+            ALTER TABLE tasks ALTER COLUMN reported_to TYPE integer[] USING CASE 
+              WHEN reported_to IS NULL THEN NULL 
+              ELSE ARRAY[reported_to]::integer[] 
+            END;
+          END IF;
+        END $$;
+      `);
+
+      await this.taskRepo.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to'
+          ) AND EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'tasks' AND column_name = 'reported_to_ids'
+          ) THEN
+            UPDATE tasks
+            SET reported_to = reported_to_ids
+            WHERE (reported_to IS NULL OR cardinality(reported_to) = 0)
+              AND reported_to_ids IS NOT NULL AND cardinality(reported_to_ids) > 0;
+
+            UPDATE tasks
+            SET reported_to_ids = reported_to
+            WHERE (reported_to_ids IS NULL OR cardinality(reported_to_ids) = 0)
+              AND reported_to IS NOT NULL AND cardinality(reported_to) > 0;
+          END IF;
+        END $$;
+      `);
+    } catch (err: any) {
+      this.logger.warn(`migrateExistingReportedTo query note: ${err?.message || err}`);
+    }
+  }
 
   constructor(
     @InjectRepository(Task)
@@ -362,11 +417,36 @@ export class TasksService {
 
     const currentUserId = Number(currentUser.id);
     const role = String(currentUser.role || "").toLowerCase();
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(currentUserId);
     return (
       Number(task.created_by_id) === currentUserId ||
-      Number(task.reported_to_id) === currentUserId ||
+      isReporter ||
       role === UserRole.SUPER_ADMIN.toLowerCase() ||
       role === UserRole.ADMIN.toLowerCase()
+    );
+  }
+
+  /**
+   * Helper to extract all valid reporting manager IDs from a task.
+   * Checks `task.reported_to` (array), `task.reported_to_ids` (array), or legacy `task.reported_to_id`.
+   * Returns a deduplicated array of positive integers.
+   */
+  private getReporterIds(task: Task): number[] {
+    const raw =
+      Array.isArray(task.reported_to) && task.reported_to.length > 0
+        ? task.reported_to
+        : Array.isArray(task.reported_to_ids) && task.reported_to_ids.length > 0
+          ? task.reported_to_ids
+          : task.reported_to_id != null
+            ? [task.reported_to_id]
+            : [];
+    return Array.from(
+      new Set(
+        raw
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
     );
   }
 
@@ -600,7 +680,11 @@ export class TasksService {
       userId: user.id,
     });
     qb.orWhere("task.created_by_id = :userId", { userId: user.id });
-    qb.orWhere("task.reported_to_id = :userId", { userId: user.id });
+    // Match if user is among any of the multiple reporting managers assigned to this task
+    qb.orWhere(
+      "(task.reported_to @> ARRAY[:userId]::int[] OR task.reported_to_ids @> ARRAY[:userId]::int[])",
+      { userId: user.id },
+    );
 
     if (reportingUserIds.length > 0) {
       qb.orWhere("task.assigned_user_ids && :reportingUserIds::int[]", {
@@ -677,6 +761,41 @@ export class TasksService {
       paramKey: `directReports${paramSuffix}`,
     });
     return reportIds;
+  }
+
+  /**
+   * Excludes tasks assigned to any of the given user IDs (negation of the
+   * assignee match used by applyUserIdsFilter). Unassigned tasks always pass.
+   * Used by the "Assigned by Me" tab so tasks a manager assigns to their
+   * direct reports are classified under the Team tab only.
+   */
+  private applyNotAssignedToUsersFilter(
+    qb: SelectQueryBuilder<Task>,
+    userIds: number[],
+    paramSuffix = "",
+  ): void {
+    const ids = Array.from(
+      new Set(
+        (userIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    if (ids.length === 0) return;
+
+    const key = `notAssignedUsers${paramSuffix}`;
+    const alias = `_notAssignee${paramSuffix}`;
+    qb.andWhere(
+      `NOT (
+        COALESCE(task.assigned_user_ids, '{}'::int[]) && :${key}::int[]
+        OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(task.assigned_users_meta, '[]'::jsonb)) AS ${alias}
+          WHERE (${alias}->>'user_id')::int = ANY(:${key}::int[])
+        )
+      )`,
+      { [key]: ids },
+    );
   }
 
   private applyApprovalResponsibilityFilter(
@@ -772,9 +891,16 @@ export class TasksService {
     }
 
     if (viewType === "other_tasks") {
+      // "Assigned by Me": tasks created by the current user, except those
+      // assigned to their direct reports — those belong to the Team tab
+      // (classification is based on the actual reporting relationship).
       qb.andWhere("task.created_by_id = :currentUserId", {
         currentUserId: currentUser.id,
       });
+      const excludedReportIds =
+        directReportIds ??
+        (await this.dataScopeService.getDirectReportIds(currentUser.id));
+      this.applyNotAssignedToUsersFilter(qb, excludedReportIds, "View");
     }
   }
 
@@ -858,19 +984,177 @@ export class TasksService {
     }));
   }
 
-    private async getPrimaryAssigneeManagerId(
-      userIds?: number[] | null,
-    ): Promise<number | null> {
-      const assigneeId = Number(userIds?.[0]);
-      if (!Number.isInteger(assigneeId) || assigneeId <= 0) return null;
+  /**
+   * Retrieves all reporting manager IDs for the specified user IDs.
+   * Traverses both the DMS User Management many-to-many relation (`assignee.managers` from the `user_managers` table)
+   * and the legacy direct `assignee.manager_id` foreign key.
+   * Validates that each manager is active (`isActive !== false`) and not archived (`is_archived === false`).
+   * Returns a deduplicated array of active reporting manager IDs.
+   *
+   * @param userIds List of assigned user IDs
+   * @returns Array of unique manager IDs
+   */
+  private async getReportingManagerIds(
+    userIds?: number[] | null,
+  ): Promise<number[]> {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+    const numericUserIds = userIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (numericUserIds.length === 0) return [];
 
-      const assignee = await this.userRepo.findOne({
-        where: { id: assigneeId },
-        select: ["id", "manager_id"],
-      });
-      const managerId = Number(assignee?.manager_id);
-      return Number.isInteger(managerId) && managerId > 0 ? managerId : null;
+    // Query assignees along with their configured managers from the DMS user management relation
+    const assignees = await this.userRepo.find({
+      where: { id: In(numericUserIds) },
+      relations: ["managers"],
+    });
+
+    const managerIds: number[] = [];
+    for (const assignee of assignees) {
+      // 1. Collect managers from the user_managers join table (configured via DMS Menu)
+      if (Array.isArray(assignee.managers) && assignee.managers.length > 0) {
+        for (const m of assignee.managers) {
+          if (
+            m?.id &&
+            Number.isInteger(Number(m.id)) &&
+            Number(m.id) > 0 &&
+            !m.is_archived &&
+            m.isActive !== false
+          ) {
+            managerIds.push(Number(m.id));
+          }
+        }
+      }
+      // 2. Collect manager from legacy manager_id column
+      if (
+        assignee.manager_id &&
+        Number.isInteger(Number(assignee.manager_id)) &&
+        Number(assignee.manager_id) > 0
+      ) {
+        managerIds.push(Number(assignee.manager_id));
+      }
     }
+
+    if (managerIds.length === 0) return [];
+
+    // Verify all collected managers are valid, active, and not archived in the user table
+    const validManagers = await this.userRepo.find({
+      where: {
+        id: In(Array.from(new Set(managerIds))),
+        is_archived: false,
+        isActive: true,
+      },
+      select: ["id"],
+    });
+    const validIdSet = new Set(validManagers.map((u) => u.id));
+    const result: number[] = [];
+    for (const id of managerIds) {
+      if (validIdSet.has(id) && !result.includes(id)) {
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Helper to retrieve the primary (first) reporting manager ID for a list of user IDs.
+   * Used for backward compatibility with systems expecting a single manager ID.
+   */
+  private async getPrimaryAssigneeManagerId(
+    userIds?: number[] | null,
+  ): Promise<number | null> {
+    const ids = await this.getReportingManagerIds(userIds);
+    return ids.length > 0 ? ids[0] : null;
+  }
+
+  /**
+   * Resolves the reporting manager IDs for a task create/update/assign operation.
+   * Priority:
+   * 1. Automatically derives all reporting managers configured for the assigned users in DMS.
+   * 2. Falls back to explicit DTO reporter IDs if no managers were found or assignees have none.
+   * 3. Falls back to existing task reporting managers during update/reassign.
+   *
+   * Sets both `reported_to` and `reported_to_ids` as arrays of manager IDs, eliminating the need
+   * for a separate `reported_to_users_meta` column.
+   */
+  private async resolveReportingManagers(
+    dto: {
+      reported_to?: number[] | number;
+      reported_to_ids?: number[];
+      reported_to_id?: number;
+      assigned_users?: number[];
+    },
+    existingTask?: Task,
+  ): Promise<{
+    reported_to: number[] | null;
+    reported_to_ids: number[] | null;
+    reported_to_id: number | null;
+  }> {
+    let resolvedIds: number[] = [];
+
+    // 1. If assigned users are present, automatically derive reporting managers
+    // from the user management relationships configured in DMS.
+    if (Array.isArray(dto.assigned_users) && dto.assigned_users.length > 0) {
+      resolvedIds = await this.getReportingManagerIds(dto.assigned_users);
+    }
+
+    // 2. If no managers were found from assigned users (or assigned users was not provided/had no managers),
+    // check explicit reporting managers from DTO
+    if (resolvedIds.length === 0) {
+      if (Array.isArray(dto.reported_to_ids) && dto.reported_to_ids.length > 0) {
+        resolvedIds = dto.reported_to_ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } else if (Array.isArray(dto.reported_to) && dto.reported_to.length > 0) {
+        resolvedIds = dto.reported_to
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } else if (dto.reported_to != null && Number(dto.reported_to) > 0) {
+        resolvedIds = [Number(dto.reported_to)];
+      } else if (dto.reported_to_id != null && Number(dto.reported_to_id) > 0) {
+        resolvedIds = [Number(dto.reported_to_id)];
+      }
+    }
+
+    // 3. Fallback to existing task's reporting managers or existing assignees
+    if (resolvedIds.length === 0 && existingTask) {
+      if (
+        Array.isArray(existingTask.reported_to) &&
+        existingTask.reported_to.length > 0
+      ) {
+        resolvedIds = existingTask.reported_to;
+      } else if (
+        Array.isArray(existingTask.reported_to_ids) &&
+        existingTask.reported_to_ids.length > 0
+      ) {
+        resolvedIds = existingTask.reported_to_ids;
+      } else if (
+        existingTask.reported_to_id != null &&
+        Number(existingTask.reported_to_id) > 0
+      ) {
+        resolvedIds = [Number(existingTask.reported_to_id)];
+      } else if (
+        Array.isArray(existingTask.assigned_user_ids) &&
+        existingTask.assigned_user_ids.length > 0
+      ) {
+        resolvedIds = await this.getReportingManagerIds(existingTask.assigned_user_ids);
+      }
+    }
+
+    const uniqueIds = Array.from(
+      new Set(
+        resolvedIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    const primaryId = uniqueIds.length > 0 ? uniqueIds[0] : null;
+    return {
+      reported_to: uniqueIds.length > 0 ? uniqueIds : null,
+      reported_to_ids: uniqueIds.length > 0 ? uniqueIds : null,
+      reported_to_id: primaryId,
+    };
+  }
 
   /** System/cron task creation — no permission checks; created_by is null. */
   async createSystemTask(dto: CreateTaskDto): Promise<Task> {
@@ -906,6 +1190,9 @@ export class TasksService {
         movItemsFromDto = dto.mov_checklist.map((item) => item.text);
       }
 
+      const { reported_to_ids, reported_to_id, reported_to } =
+        await this.resolveReportingManagers(dto);
+
       const task = this.taskRepo.create({
         title: dto.title,
         description: dto.description || "",
@@ -934,9 +1221,9 @@ export class TasksService {
           ? new Date(dto.recurrence_end_date)
           : null,
         recurrence_end_occurrences: dto.recurrence_end_occurrences || null,
-        reported_to_id: await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        ),
+        reported_to: reported_to_ids,
+        reported_to_id,
+        reported_to_ids,
         created_by_id: currentUser?.id ?? null,
         assigned_user_ids: Array.isArray(dto.assigned_users)
           ? dto.assigned_users
@@ -974,28 +1261,54 @@ export class TasksService {
     }
   }
 
-  public getNextOccurrence(date: Date, rule: string): Date {
-    const next = new Date(date);
-    const ruleLower = (rule || "").toLowerCase();
+  /**
+   * Calculates the next calendar occurrence date for a recurring task based on its cadence rule.
+   *
+   * Converts the reference date to 'YYYY-MM-DD' in Asia/Karachi (PKT) time and evaluates date arithmetic
+   * in UTC to prevent timezone offsets from shifting dates across day boundaries.
+   *
+   * Supported cadence rules:
+   * - 'daily': advances by +1 day
+   * - 'weekly': advances by +7 days
+   * - 'monthly': advances by +1 calendar month
+   * - 'quarterly': advances by +3 calendar months
+   * - 'annually': advances by +1 calendar year
+   * - 'N days' / 'N day' (e.g. '3 days'): advances by +N days
+   * - Fallback: defaults to +1 day for unrecognized rules
+   *
+   * @param date - Base reference date (Date instance or 'YYYY-MM-DD' string)
+   * @param rule - Recurrence cadence rule string
+   * @returns Next occurrence Date object set to UTC midnight
+   */
+  public getNextOccurrence(date: Date | string, rule: string): Date {
+    // Normalize date to YYYY-MM-DD string in PKT timezone
+    const dateStr =
+      typeof date === "string" ? date.slice(0, 10) : formatDateOnlyPkt(date);
+    const [y, m, d] = dateStr.split("-").map(Number);
+    // Instantiate Date in UTC to avoid daylight saving or local timezone shift anomalies
+    const next = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    const ruleLower = (rule || "").toLowerCase().trim();
 
     if (ruleLower === "daily") {
-      next.setDate(next.getDate() + 1);
+      next.setUTCDate(next.getUTCDate() + 1);
     } else if (ruleLower === "weekly") {
-      next.setDate(next.getDate() + 7);
+      next.setUTCDate(next.getUTCDate() + 7);
     } else if (ruleLower === "monthly") {
-      next.setMonth(next.getMonth() + 1);
+      next.setUTCMonth(next.getUTCMonth() + 1);
     } else if (ruleLower === "quarterly") {
-      next.setMonth(next.getMonth() + 3);
+      next.setUTCMonth(next.getUTCMonth() + 3);
     } else if (ruleLower === "annually") {
-      next.setFullYear(next.getFullYear() + 1);
-    } else if (ruleLower.includes("days")) {
+      next.setUTCFullYear(next.getUTCFullYear() + 1);
+    } else if (ruleLower.includes("days") || ruleLower.includes("day")) {
       const days = parseInt(ruleLower.split(" ")[0]);
-      if (!isNaN(days)) {
-        next.setDate(next.getDate() + days);
+      if (!isNaN(days) && days > 0) {
+        next.setUTCDate(next.getUTCDate() + days);
+      } else {
+        next.setUTCDate(next.getUTCDate() + 1);
       }
     } else {
       // Default to daily if rule is unknown
-      next.setDate(next.getDate() + 1);
+      next.setUTCDate(next.getUTCDate() + 1);
     }
     return next;
   }
@@ -1086,7 +1399,6 @@ export class TasksService {
         ? await this.dataScopeService.getDirectReportIds(currentUser.id)
         : [];
       const qb = this.taskRepo.createQueryBuilder("task");
-      qb.leftJoinAndSelect("task.reported_to", "reported_to");
       await this.applyRoleFilters(
         qb,
         currentUser,
@@ -1131,12 +1443,20 @@ export class TasksService {
 
       delete safeFilters.strictDepartment;
 
+      // Extract date and calendar-related filter parameters before applyCommonFilters
+      // to avoid applying standard exact column comparisons on custom-handled date logic.
       const startDate = safeFilters.start_date;
       const endDate = safeFilters.end_date;
       const exactDate = safeFilters.date;
+      const dateField = safeFilters.date_field;
+      const dueDate = safeFilters.due_date;
+      const scheduledDate = safeFilters.scheduled_date;
       delete safeFilters.start_date;
       delete safeFilters.end_date;
       delete safeFilters.date;
+      delete safeFilters.date_field;
+      delete safeFilters.due_date;
+      delete safeFilters.scheduled_date;
 
       const assigneeIdRaw =
         safeFilters.assignee_id ?? safeFilters.assigned_user_id;
@@ -1168,18 +1488,50 @@ export class TasksService {
       const searchTerm = safeFilters.search;
       const userNameFilter = safeFilters.user_name;
 
-      if (startDate) {
-        qb.andWhere("task.created_at >= :start_date", {
-          start_date: startDate,
-        });
-      }
-      if (endDate) {
-        qb.andWhere("task.created_at <= :end_date", { end_date: endDate });
-      }
-      if (exactDate) {
-        qb.andWhere("DATE(task.created_at) = :exact_date", {
-          exact_date: exactDate,
-        });
+      // Date filtering: When filtering by due_date or scheduled_date (e.g., from the task calendar
+      // or date drill-down), match against both task.due_date and task.recurrence_next_date
+      // so recurring tasks are accurately included. Otherwise default to created_at range.
+      if (dateField === "due_date" || dueDate || scheduledDate) {
+        const targetDate = scheduledDate || dueDate || exactDate;
+        if (targetDate) {
+          qb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.due_date = CAST(:targetDate AS date)", { targetDate });
+              dqb.orWhere("task.recurrence_next_date = CAST(:targetDate AS date)", { targetDate });
+            }),
+          );
+        } else {
+          if (startDate) {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date >= :start_date", { start_date: startDate });
+                dqb.orWhere("task.recurrence_next_date >= :start_date", { start_date: startDate });
+              }),
+            );
+          }
+          if (endDate) {
+            qb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date <= CAST(:end_date AS date)", { end_date: endDate });
+                dqb.orWhere("task.recurrence_next_date <= CAST(:end_date AS date)", { end_date: endDate });
+              }),
+            );
+          }
+        }
+      } else {
+        if (startDate) {
+          qb.andWhere("task.created_at >= :start_date", {
+            start_date: startDate,
+          });
+        }
+        if (endDate) {
+          qb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+        }
+        if (exactDate) {
+          qb.andWhere("DATE(task.created_at) = :exact_date", {
+            exact_date: exactDate,
+          });
+        }
       }
 
       if (
@@ -1268,14 +1620,16 @@ export class TasksService {
         );
       }
 
-      // Remove user_name from safeFilters so it's not passed to applyCommonFilters
       delete safeFilters.user_name;
+      delete safeFilters.reported_to;
+      delete safeFilters.reported_to_id;
+      delete safeFilters.reported_to_ids;
 
       // Now make a copy of safeFilters for count query builder
       const countSafeFilters = { ...safeFilters };
       
       // Clean up countSafeFilters to remove any extra fields we don't want (like reported_to)
-      const countExcludeFields = ["reported_to"];
+      const countExcludeFields = ["reported_to", "reported_to_id", "reported_to_ids"];
       countExcludeFields.forEach(field => delete countSafeFilters[field]);
 
       applyCommonFilters(qb, safeFilters, this.searchableColumns, "task");
@@ -1313,6 +1667,34 @@ export class TasksService {
       }
 
       const [data, total] = await qb.getManyAndCount();
+
+      // Hydrate multi-manager IDs and populate runtime `reported_to_users` array for all returned tasks.
+      // This eliminates the need for storing duplicate user metadata in the database.
+      const allReporterUserIds = new Set<number>();
+      data.forEach((task) => {
+        const ids = this.getReporterIds(task);
+        task.reported_to = ids.length > 0 ? ids : null;
+        task.reported_to_ids = ids.length > 0 ? ids : null;
+        task.reported_to_id = ids.length > 0 ? ids[0] : null;
+        ids.forEach((id) => allReporterUserIds.add(id));
+      });
+      if (allReporterUserIds.size > 0) {
+        const reporterUsers = await this.userRepo.find({
+          where: { id: In(Array.from(allReporterUserIds)) },
+        });
+        const reporterUserMap = new Map<number, User>();
+        reporterUsers.forEach((u) => reporterUserMap.set(u.id, u));
+        data.forEach((task) => {
+          const ids = task.reported_to || task.reported_to_ids || [];
+          if (Array.isArray(ids) && ids.length > 0) {
+            (task as any).reported_to_users = ids
+              .map((id) => reporterUserMap.get(Number(id)))
+              .filter(Boolean);
+          } else {
+            (task as any).reported_to_users = [];
+          }
+        });
+      }
 
       if (currentUser) {
         data.forEach((task) => {
@@ -1370,18 +1752,48 @@ export class TasksService {
       }
 
       // Apply all the same filters to countQb as we did to qb
-      if (startDate) {
-        countQb.andWhere("task.created_at >= :start_date", {
-          start_date: startDate,
-        });
-      }
-      if (endDate) {
-        countQb.andWhere("task.created_at <= :end_date", { end_date: endDate });
-      }
-      if (exactDate) {
-        countQb.andWhere("DATE(task.created_at) = :exact_date", {
-          exact_date: exactDate,
-        });
+      // Mirror the scheduled/due date matching on countQb so pagination totals match filtered rows
+      if (dateField === "due_date" || dueDate || scheduledDate) {
+        const targetDate = scheduledDate || dueDate || exactDate;
+        if (targetDate) {
+          countQb.andWhere(
+            new Brackets((dqb) => {
+              dqb.where("task.due_date = CAST(:targetDate AS date)", { targetDate });
+              dqb.orWhere("task.recurrence_next_date = CAST(:targetDate AS date)", { targetDate });
+            }),
+          );
+        } else {
+          if (startDate) {
+            countQb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date >= :start_date", { start_date: startDate });
+                dqb.orWhere("task.recurrence_next_date >= :start_date", { start_date: startDate });
+              }),
+            );
+          }
+          if (endDate) {
+            countQb.andWhere(
+              new Brackets((dqb) => {
+                dqb.where("task.due_date <= CAST(:end_date AS date)", { end_date: endDate });
+                dqb.orWhere("task.recurrence_next_date <= CAST(:end_date AS date)", { end_date: endDate });
+              }),
+            );
+          }
+        }
+      } else {
+        if (startDate) {
+          countQb.andWhere("task.created_at >= :start_date", {
+            start_date: startDate,
+          });
+        }
+        if (endDate) {
+          countQb.andWhere("task.created_at <= :end_date", { end_date: endDate });
+        }
+        if (exactDate) {
+          countQb.andWhere("DATE(task.created_at) = :exact_date", {
+            exact_date: exactDate,
+          });
+        }
       }
 
       if (
@@ -1473,11 +1885,17 @@ export class TasksService {
           assignedToTeamCount = await assignedToTeamQb.getCount();
         }
 
-        // Calculate other_tasks count (assigned by me = created by current user)
+        // Calculate other_tasks count (assigned by me = created by current user,
+        // excluding tasks assigned to direct reports which count under the Team tab)
         const otherTasksQb = countQb.clone();
         otherTasksQb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
         });
+        this.applyNotAssignedToUsersFilter(
+          otherTasksQb,
+          directReportIds,
+          "CountOtherTasks",
+        );
         otherTasksCount = await otherTasksQb.getCount();
 
         // Calculate approval_tasks count (where current user is required approver)
@@ -1542,16 +1960,58 @@ export class TasksService {
           (perms && (perms as any).super_admin === true) ||
           reports.view_all === true);
 
-      if (filters.start_date) {
-        qb.andWhere("task.created_at >= :start_date", {
-          start_date: filters.start_date,
-        });
-      }
-      if (filters.end_date) {
-        // Treat the selected end date as inclusive for timestamped records.
-        qb.andWhere("task.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')", {
-          end_date: filters.end_date,
-        });
+      // Calendar Mode & Single-Day Scheduled View:
+      // - calendarMode: aggregates task counts and status breakdowns per calendar day for the month view.
+      // - isSingleDayDueDate: drill-down query for a specific day (start_date === end_date with date_field=due_date).
+      // Both modes gather candidate tasks and expand recurring occurrences so daily metrics match 1:1.
+      const calendarMode = filters.calendar === true || filters.calendar === "true";
+      const useDueDateFilter = calendarMode || filters.date_field === "due_date";
+      const isSingleDayDueDate =
+        !calendarMode &&
+        useDueDateFilter &&
+        filters.start_date &&
+        filters.start_date === filters.end_date;
+      const filterDateField = useDueDateFilter ? "task.due_date" : "task.created_at";
+
+      if (calendarMode || isSingleDayDueDate) {
+        // Query candidate tasks whose static due_date or recurrence_next_date falls in the window,
+        // or active recurring tasks whose recurrence rules can generate occurrences within this range.
+        qb.andWhere(
+          new Brackets((cqb) => {
+            cqb.where(
+              "(task.due_date >= :calStartDate AND task.due_date <= CAST(:calEndDate AS date))",
+              { calStartDate: filters.start_date, calEndDate: filters.end_date },
+            );
+            cqb.orWhere(
+              "(task.recurrence_next_date >= :calStartDate AND task.recurrence_next_date <= CAST(:calEndDate AS date))",
+              { calStartDate: filters.start_date, calEndDate: filters.end_date },
+            );
+            cqb.orWhere(
+              "(task.task_type = :calRecType AND (task.recurrence_end_date IS NULL OR task.recurrence_end_date >= :calStartDate) AND task.status != :calCancelled)",
+              {
+                calRecType: TaskType.RECURRING,
+                calStartDate: filters.start_date,
+                calCancelled: TaskStatus.CANCELLED,
+              },
+            );
+          }),
+        );
+      } else {
+        if (filters.start_date) {
+          qb.andWhere(`${filterDateField} >= :start_date`, {
+            start_date: filters.start_date,
+          });
+        }
+        if (filters.end_date) {
+          qb.andWhere(
+            useDueDateFilter
+              ? `${filterDateField} <= CAST(:end_date AS date)`
+              : `${filterDateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`,
+            {
+              end_date: filters.end_date,
+            },
+          );
+        }
       }
       if (filters.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -1675,6 +2135,269 @@ export class TasksService {
               }),
             );
           }
+        }
+      }
+
+      if (calendarMode || isSingleDayDueDate) {
+        // Retrieve candidate tasks matching role and scope filters.
+        // We use Postgres TO_CHAR(..., 'YYYY-MM-DD') directly in SQL to format dates as calendar strings.
+        // This avoids JavaScript Date object timezone conversions which could shift dates across day boundaries.
+        const rawTasks = await qb
+          .clone()
+          .select([
+            "task.id",
+            "task.title",
+            "task.status",
+            "task.priority",
+            "task.department",
+            "task.project_name",
+            "task.task_type",
+            "task.recurrence_rule",
+            "task.recurrence_end_type",
+            "task.recurrence_end_occurrences",
+            "task.recurrence_created_count",
+            "task.assigned_users_meta",
+          ])
+          .addSelect("TO_CHAR(task.due_date, 'YYYY-MM-DD')", "due_date")
+          .addSelect("TO_CHAR(task.recurrence_next_date, 'YYYY-MM-DD')", "recurrence_next_date")
+          .addSelect("TO_CHAR(task.recurrence_end_date, 'YYYY-MM-DD')", "recurrence_end_date")
+          .addSelect("TO_CHAR(task.start_date, 'YYYY-MM-DD')", "start_date")
+          .getRawMany();
+
+        const startDateStr = String(filters.start_date || "");
+        const endDateStr = String(filters.end_date || "");
+        const calendarDays = new Map<string, any>();
+
+        // Helper to retrieve or initialize a calendar day entry
+        const getOrCreateDay = (dateStr: string) => {
+          let day = calendarDays.get(dateStr);
+          if (!day) {
+            day = {
+              date: dateStr,
+              total_tasks: 0,
+              completed_tasks: 0,
+              in_progress_tasks: 0,
+              status_counts: {},
+              tasks: [],
+            };
+            calendarDays.set(dateStr, day);
+          }
+          return day;
+        };
+
+        // Helper to register a task under a specific calendar date (dateStr: 'YYYY-MM-DD').
+        // Ensures deduplication by task ID and accumulates total counts, status breakdowns, and task items.
+        const addTaskToDay = (dateStr: string, row: any) => {
+          if (!dateStr) return;
+          if (startDateStr && dateStr < startDateStr) return;
+          if (endDateStr && dateStr > endDateStr) return;
+
+          const day = getOrCreateDay(dateStr);
+          const taskId = Number(row.task_id);
+          // Avoid duplicate entry if task qualifies via multiple date conditions (e.g., due_date & recurrence_next_date)
+          if (day.tasks.some((t: any) => t.id === taskId)) return;
+
+          const status = String(row.task_status || "open");
+          day.total_tasks += 1;
+          day.status_counts[status] = (day.status_counts[status] || 0) + 1;
+
+          // Categorize completed/terminal positive statuses for completion rate metrics
+          if ([TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.APPROVED].includes(status as TaskStatus)) {
+            day.completed_tasks += 1;
+          }
+          if (status === TaskStatus.IN_PROGRESS) {
+            day.in_progress_tasks += 1;
+          }
+
+          let meta = row.task_assigned_users_meta;
+          if (typeof meta === "string") {
+            try {
+              meta = JSON.parse(meta);
+            } catch {
+              meta = [];
+            }
+          }
+
+          day.tasks.push({
+            id: taskId,
+            title: row.task_title,
+            status: status,
+            priority: row.task_priority,
+            department: row.task_department,
+            project_name: row.task_project_name,
+            task_type: row.task_task_type,
+            due_date: row.due_date,
+            recurrence_next_date: row.recurrence_next_date,
+            assigned_users_meta: Array.isArray(meta) ? meta : [],
+          });
+        };
+
+        // Map tasks to their scheduled calendar day(s):
+        // 1. Scheduled on due_date
+        // 2. Scheduled on recurrence_next_date
+        // 3. For recurring tasks with recurrence_rule, project future occurrences across the date window
+        // 4. Fallback to start_date if neither due_date nor recurrence_next_date is set
+        rawTasks.forEach((row) => {
+          // 1. Scheduled on due_date
+          if (row.due_date) {
+            addTaskToDay(row.due_date, row);
+          }
+          // 2. Scheduled on recurrence_next_date
+          if (row.recurrence_next_date) {
+            addTaskToDay(row.recurrence_next_date, row);
+          }
+          // 3. If recurring task with recurrence_rule, project future occurrences in date range
+          if (
+            row.task_task_type === TaskType.RECURRING &&
+            row.task_recurrence_rule &&
+            row.task_status !== TaskStatus.CANCELLED
+          ) {
+            const anchorDateStr = row.recurrence_next_date || row.due_date || row.start_date;
+            if (anchorDateStr) {
+              let currentOccurrence = new Date(`${anchorDateStr}T00:00:00`);
+              let count = row.task_recurrence_created_count || 0;
+              const maxOccurrences =
+                row.task_recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES
+                  ? row.task_recurrence_end_occurrences || Infinity
+                  : Infinity;
+              const recEndDate = row.recurrence_end_date ? new Date(`${row.recurrence_end_date}T23:59:59`) : null;
+
+              for (let i = 0; i < 60; i++) {
+                currentOccurrence = this.getNextOccurrence(currentOccurrence, row.task_recurrence_rule);
+                count++;
+                if (count > maxOccurrences) break;
+                if (recEndDate && currentOccurrence > recEndDate) break;
+
+                const y = currentOccurrence.getFullYear();
+                const m = String(currentOccurrence.getMonth() + 1).padStart(2, "0");
+                const d = String(currentOccurrence.getDate()).padStart(2, "0");
+                const occStr = `${y}-${m}-${d}`;
+
+                if (endDateStr && occStr > endDateStr) break;
+                if (!startDateStr || occStr >= startDateStr) {
+                  addTaskToDay(occStr, row);
+                }
+              }
+            }
+          }
+          // 4. Fallback: if task has no due_date and no recurrence_next_date, but has start_date
+          if (!row.due_date && !row.recurrence_next_date && row.start_date) {
+            addTaskToDay(row.start_date, row);
+          }
+        });
+
+        if (calendarMode) {
+          // Calendar month mode: return all active calendar days sorted chronologically
+          return {
+            calendar_days: Array.from(calendarDays.values()).sort((a, b) => a.date.localeCompare(b.date)),
+          };
+        }
+
+        if (isSingleDayDueDate) {
+          // Single-day drilldown mode (Task Nested Dashboard):
+          // When a user clicks a calendar day, the nested dashboard fetches dashboard stats with:
+          // { start_date: 'YYYY-MM-DD', end_date: 'YYYY-MM-DD', date_field: 'due_date' }.
+          // We compute full dashboard metrics (status breakdown, priority, department distributions,
+          // overdue count, completion rate, and task items) directly from the day's tasks so that
+          // the numbers in the nested dashboard match the calendar day's indicator badge exactly.
+          const targetDayStr = String(filters.start_date);
+          const singleDay = calendarDays.get(targetDayStr) || {
+            date: targetDayStr,
+            total_tasks: 0,
+            completed_tasks: 0,
+            in_progress_tasks: 0,
+            status_counts: {},
+            tasks: [],
+          };
+
+          const pBreakdown: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+          const deptCountMap: Record<string, number> = {};
+          const deptStatusMap: Record<string, Record<string, { count: number; tasks: any[] }>> = {};
+
+          Object.values(Department).forEach((dept) => {
+            deptCountMap[dept] = 0;
+            deptStatusMap[dept] = {};
+          });
+
+          const todayIso = new Date().toISOString().slice(0, 10);
+          let overdueCount = 0;
+
+          for (const task of singleDay.tasks) {
+            const p = String(task.priority || "medium").toLowerCase();
+            if (pBreakdown[p] !== undefined) pBreakdown[p]++;
+            else pBreakdown.medium++;
+
+            const st = String(task.status || "open").toLowerCase();
+            if (
+              targetDayStr < todayIso &&
+              ![TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.APPROVED, TaskStatus.CANCELLED].includes(st as TaskStatus)
+            ) {
+              overdueCount++;
+            }
+
+            const taskAssigneeDepartments = new Set<string>();
+            if (Array.isArray(task.assigned_users_meta) && task.assigned_users_meta.length > 0) {
+              task.assigned_users_meta.forEach((meta: any) => {
+                if (meta.department) taskAssigneeDepartments.add(meta.department.toLowerCase());
+              });
+            }
+            if (taskAssigneeDepartments.size === 0 && task.department) {
+              taskAssigneeDepartments.add(task.department.toLowerCase());
+            }
+
+            taskAssigneeDepartments.forEach((dept) => {
+              deptCountMap[dept] = (deptCountMap[dept] || 0) + 1;
+              if (!deptStatusMap[dept]) deptStatusMap[dept] = {};
+              if (!deptStatusMap[dept][st]) {
+                deptStatusMap[dept][st] = { count: 0, tasks: [] };
+              }
+              deptStatusMap[dept][st].count++;
+              deptStatusMap[dept][st].tasks.push({ id: task.id, title: task.title });
+            });
+          }
+
+          const deptBreakdown = Object.values(Department)
+            .map((dept) => ({
+              department: dept,
+              count: deptCountMap[dept] || 0,
+            }))
+            .filter((item) => item.count > 0);
+
+          const deptStatusBreakdown: Record<string, any> = {};
+          Object.values(Department).forEach((dept) => {
+            deptStatusBreakdown[dept] = deptStatusMap[dept] || {};
+          });
+
+          const completionRate =
+            singleDay.total_tasks > 0
+              ? parseFloat(((singleDay.completed_tasks / singleDay.total_tasks) * 100).toFixed(2))
+              : 0;
+
+          return {
+            total_tasks: singleDay.total_tasks,
+            status_breakdown: {
+              open: singleDay.status_counts.open || 0,
+              in_progress: singleDay.status_counts.in_progress || 0,
+              pending_approval: singleDay.status_counts.pending_approval || 0,
+              approved: singleDay.status_counts.approved || 0,
+              completed: singleDay.status_counts.completed || 0,
+              closed: singleDay.status_counts.closed || 0,
+              rejected: singleDay.status_counts.rejected || 0,
+              cancelled: singleDay.status_counts.cancelled || 0,
+              draft: singleDay.status_counts.draft || 0,
+              blocked: singleDay.status_counts.blocked || 0,
+              ...singleDay.status_counts,
+            },
+            priority_breakdown: pBreakdown,
+            department_breakdown: deptBreakdown.reduce(
+              (acc, item) => ({ ...acc, [item.department]: +item.count }),
+              {},
+            ),
+            department_status_breakdown: deptStatusBreakdown,
+            overdue_tasks: overdueCount,
+            completion_rate: completionRate,
+            tasks: singleDay.tasks,
+          };
         }
       }
 
@@ -1803,6 +2526,32 @@ export class TasksService {
         department_status_breakdown: departmentStatusBreakdown,
         overdue_tasks: overdueTasks,
         completion_rate: parseFloat(completionRate as string),
+        // Format task dates as timezone-neutral 'YYYY-MM-DD' strings for the dashboard task list
+        tasks: allTasks.map((t) => {
+          const formatDate = (d: any) => {
+            if (!d) return null;
+            if (typeof d === "string") return d.slice(0, 10);
+            if (d instanceof Date) {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, "0");
+              const day = String(d.getDate()).padStart(2, "0");
+              return `${y}-${m}-${day}`;
+            }
+            return null;
+          };
+          return {
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            department: t.department,
+            project_name: t.project_name,
+            task_type: t.task_type,
+            due_date: formatDate(t.due_date),
+            recurrence_next_date: formatDate(t.recurrence_next_date),
+            assigned_users_meta: t.assigned_users_meta || [],
+          };
+        }),
       };
     } catch (e) {
       throw e;
@@ -1814,9 +2563,10 @@ export class TasksService {
       const dateField =
         query?.date_field === "completed"
           ? "task.completed_date"
-          : "task.created_at";
+          : query?.date_field === "due_date"
+            ? "task.due_date"
+            : "task.created_at";
       const qb = this.taskRepo.createQueryBuilder("task");
-      qb.leftJoinAndSelect("task.reported_to", "reported_to");
       
       // Org-wide visibility mirrors getDashboardStats logic above (role + perms)
       const perms = currentUser
@@ -1841,16 +2591,40 @@ export class TasksService {
           (perms && (perms as any).super_admin === true) ||
           reportsPerm.view_all === true);
 
-      if (query.start_date) {
-        qb.andWhere(`${dateField} >= :start_date`, {
-          start_date: query.start_date,
-        });
-      }
-      if (query.end_date) {
-        // Use an exclusive next-day bound so the whole end date is included.
-        qb.andWhere(`${dateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`, {
-          end_date: query.end_date,
-        });
+      // Single-day drill-down by due date: match due_date, recurrence_next_date,
+      // or active recurring tasks to ensure reports mirror the calendar view and nested dashboard task lists.
+      if (query.date_field === "due_date" && query.start_date && query.start_date === query.end_date) {
+        qb.andWhere(
+          new Brackets((dqb) => {
+            dqb.where("task.due_date = CAST(:singleDate AS date)", { singleDate: query.start_date });
+            dqb.orWhere("task.recurrence_next_date = CAST(:singleDate AS date)", { singleDate: query.start_date });
+            dqb.orWhere(
+              "(task.task_type = :recType AND (task.recurrence_end_date IS NULL OR task.recurrence_end_date >= CAST(:singleDate AS date)) AND task.status != :recCancelled)",
+              {
+                recType: TaskType.RECURRING,
+                singleDate: query.start_date,
+                recCancelled: TaskStatus.CANCELLED,
+              },
+            );
+          }),
+        );
+      } else {
+        if (query.start_date) {
+          qb.andWhere(`${dateField} >= :start_date`, {
+            start_date: query.start_date,
+          });
+        }
+        if (query.end_date) {
+          // Use an exclusive next-day bound so the whole end date is included.
+          qb.andWhere(
+            query.date_field === "due_date"
+              ? `${dateField} <= CAST(:end_date AS date)`
+              : `${dateField} < (CAST(:end_date AS date) + INTERVAL '1 day')`,
+            {
+              end_date: query.end_date,
+            },
+          );
+        }
       }
       if (query.project_id) {
         qb.andWhere("task.project_id = :project_id", {
@@ -2293,13 +3067,29 @@ export class TasksService {
         .leftJoinAndSelect("comments.author", "comment_author")
         .leftJoinAndSelect("task.activities", "activities")
         .leftJoinAndSelect("activities.performed_by", "activity_performed_by")
-        .leftJoinAndSelect("task.reported_to", "reported_to")
         .leftJoinAndSelect("task.created_by", "created_by")
         .leftJoinAndSelect("task.updated_by", "updated_by");
 
       const task = await qb.getOne();
       if (!task) {
         throw new NotFoundException("Task not found");
+      }
+
+      // Retrieve all reporting manager IDs for the task and hydrate full User entities
+      // into `reported_to_users` for frontend display (without requiring `reported_to_users_meta` column).
+      const reporterIds = this.getReporterIds(task);
+
+      task.reported_to = reporterIds.length > 0 ? reporterIds : null;
+      task.reported_to_ids = reporterIds.length > 0 ? reporterIds : null;
+      task.reported_to_id = reporterIds.length > 0 ? reporterIds[0] : null;
+
+      if (reporterIds.length > 0) {
+        const reporterUsers = await this.userRepo.find({
+          where: { id: In(reporterIds) },
+        });
+        (task as any).reported_to_users = reporterUsers;
+      } else {
+        (task as any).reported_to_users = [];
       }
 
       if (currentUser) {
@@ -2318,8 +3108,7 @@ export class TasksService {
         const isAssignee = assignedIds.includes(userId);
         const isApprover = approverIds.includes(userId);
         const isReporterOrCreator =
-          (task.reported_to_id != null &&
-            Number(task.reported_to_id) === userId) ||
+          reporterIds.includes(userId) ||
           (task.created_by_id != null && Number(task.created_by_id) === userId);
 
         // E. Check if user is a manager of any assigned user's department
@@ -2407,9 +3196,11 @@ export class TasksService {
     const approverIds = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map(Number)
       : [];
+    // Allow any of the task's reporting managers full visibility of MOV checklist items
+    const reporterIds = this.getReporterIds(task);
     return (
       Number(task.created_by_id) === userId ||
-      Number(task.reported_to_id) === userId ||
+      reporterIds.includes(userId) ||
       approverIds.includes(userId)
     );
   }
@@ -2493,8 +3284,11 @@ export class TasksService {
         task.status === TaskStatus.COMPLETED &&
         dto.status === TaskStatus.CLOSED
       ) {
-        const isCreator = task.created_by_id === currentUser.id;
-        const isReporter = task.reported_to_id === currentUser.id;
+        const currentUserId = Number(currentUser.id);
+        const isCreator = Number(task.created_by_id) === currentUserId;
+        // Verify if user is any of the multiple reporting managers configured for this task
+        const reporterIds = this.getReporterIds(task);
+        const isReporter = reporterIds.includes(currentUserId);
         const isAdmin =
           currentUser.role === UserRole.SUPER_ADMIN ||
           currentUser.role === UserRole.ADMIN;
@@ -2682,9 +3476,8 @@ export class TasksService {
         task.overdue_email_sent = false;
       }
 
-      const reportedToId = Array.isArray(dto.assigned_users)
-        ? await this.getPrimaryAssigneeManagerId(dto.assigned_users)
-        : task.reported_to_id;
+      const { reported_to_ids, reported_to_id } =
+        await this.resolveReportingManagers(dto, task);
 
       const oldProgress = task.progress;
       Object.assign(task, {
@@ -2716,7 +3509,10 @@ export class TasksService {
         recurrence_end_occurrences:
           dto.recurrence_end_occurrences ?? task.recurrence_end_occurrences,
         progress: newProgress,
-        reported_to_id: reportedToId,
+        // Save reporting manager IDs (supports multiple managers from DMS; no reported_to_users_meta needed)
+        reported_to: reported_to_ids,
+        reported_to_id,
+        reported_to_ids,
         approval_required_user_ids: Array.isArray(
           dto.approval_required_user_ids,
         )
@@ -2851,8 +3647,9 @@ export class TasksService {
     const isAssignee = allAssignedIds.includes(currentUserId);
     // Enforce assignment at the API boundary; client drag guards are not authorization.
     this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
-    const isCreator = task.created_by_id === currentUserId;
-    const isReporter = task.reported_to_id === currentUserId;
+    const isCreator = Number(task.created_by_id) === currentUserId;
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(currentUserId);
     const approvers = Array.isArray(task.approval_required_user_ids)
       ? task.approval_required_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
       : [];
@@ -2966,9 +3763,23 @@ export class TasksService {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
-        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        );
+        // Automatically derive all configured reporting managers from the new assignees (DMS user_managers & manager_id)
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
+      } else if (
+        dto.reported_to !== undefined ||
+        dto.reported_to_ids !== undefined ||
+        dto.reported_to_id !== undefined
+      ) {
+        // Explicit reporting manager updates (without changing assignees)
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
       }
 
       if (
@@ -3045,9 +3856,12 @@ export class TasksService {
         task.assigned_users_meta = await this.getAssignedUsersMeta(
           dto.assigned_users,
         );
-        task.reported_to_id = await this.getPrimaryAssigneeManagerId(
-          dto.assigned_users,
-        );
+        // Automatically derive all configured reporting managers for the reassigned users
+        const { reported_to_ids, reported_to_id } =
+          await this.resolveReportingManagers(dto, task);
+        task.reported_to = reported_to_ids;
+        task.reported_to_id = reported_to_id;
+        task.reported_to_ids = reported_to_ids;
       }
 
       const saved = await this.taskRepo.save(task);
@@ -4269,9 +5083,18 @@ export class TasksService {
           project_name: master.project_name,
           assigned_user_ids: master.assigned_user_ids,
           assigned_users_meta: master.assigned_users_meta,
-          reported_to_id: await this.getPrimaryAssigneeManagerId(
-            master.assigned_user_ids,
-          ),
+          // Propagate multiple reporting manager IDs from master task or re-derive from DMS assignees
+          reported_to:
+            master.reported_to ??
+            master.reported_to_ids ??
+            (await this.getReportingManagerIds(master.assigned_user_ids)),
+          reported_to_id:
+            master.reported_to_id ??
+            (await this.getPrimaryAssigneeManagerId(master.assigned_user_ids)),
+          reported_to_ids:
+            master.reported_to_ids ??
+            master.reported_to ??
+            (await this.getReportingManagerIds(master.assigned_user_ids)),
           created_by_id: master.created_by_id,
           approval_required_user_ids: master.approval_required_user_ids,
           // Reuse the MOV definitions and assignments, but start the new
@@ -4313,6 +5136,22 @@ export class TasksService {
           }
         }
 
+        // Reset master task MOV items and status workflow for the new recurrence cycle.
+        // Clears checked tokens from last_progress_notes ([indices:...] and [ownership:...])
+        // while preserving master checklist definitions (mov_items) and per-item user assignments (mov_assignments).
+        master.progress = 0;
+        master.last_progress_notes = null;
+        master.status = TaskStatus.OPEN;
+        master.completed_date = null;
+        master.overdue_email_sent = false;
+        // Re-initialize approval workflow states if required so new occurrence can request approval afresh
+        if (master.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
+          master.approved_by_id = null;
+          master.rejected_by_id = null;
+          await this.upsertTaskApprovalState(master);
+          await this.setTaskApprovalMeta(master.id, null);
+        }
+
         await this.taskRepo.save(master);
         createdCount++;
 
@@ -4342,58 +5181,207 @@ export class TasksService {
     }
   }
 
+  /**
+   * Finalizes recurring tasks at the 12:00 PM (noon) Asia/Karachi cutoff before the next cycle begins.
+   *
+   * Evaluates hourly via cron. When the next recurrence occurrence begins tomorrow and the current PKT time
+   * is 12:00 PM or later (or if a cutoff reset was missed while the service was offline), this method:
+   * 1. Records an audit log in task history if the previous cycle was left unfinished.
+   * 2. Resets Means of Verification (MOV) checklist items to unchecked state (progress = 0%) while preserving definitions and assignments.
+   * 3. Resets task workflow status to OPEN and clears completion dates, overdue flags, and approvals.
+   * 4. Updates cycle start_date and due_date for the new cycle, advances recurrence_next_date, and evaluates end limits.
+   * 5. Records a dedicated 'recurrence_reset' activity audit entry to preserve complete historical lineage.
+   *
+   * @returns Total number of recurring tasks successfully reset for the new cycle.
+   */
   async finalizeRecurringCutoffs(): Promise<number> {
     const now = new Date();
-    const karachiParts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Karachi",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      hour12: false,
-    }).formatToParts(now);
-    const parts = Object.fromEntries(
-      karachiParts.map((part) => [part.type, part.value]),
-    );
-    const today = `${parts.year}-${parts.month}-${parts.day}`;
-    const cutoffHour = Number(parts.hour);
+    const today = formatDateOnlyPkt(now);
+    const cutoffHour = getPktHour(now);
+
+    // Reset window opens at 12:00 PM (noon) Asia/Karachi (PKT) before the next recurrence cycle starts
     if (!Number.isFinite(cutoffHour) || cutoffHour < 12) return 0;
 
-    const tomorrow = new Date(`${today}T00:00:00Z`);
+    const tomorrow = new Date(`${today}T12:00:00Z`);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+
     const recurringTasks = await this.taskRepo.find({
       where: { task_type: TaskType.RECURRING },
     });
 
-    let finalized = 0;
+    let processedCount = 0;
     for (const task of recurringTasks) {
-      const nextDate = task.recurrence_next_date
-        ? new Date(task.recurrence_next_date).toISOString().slice(0, 10)
-        : null;
-      if (nextDate !== tomorrowDate) continue;
-      if (
-        [TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.CANCELLED].includes(
-          task.status,
-        )
-      ) {
+      if (!task.recurrence_rule || !task.recurrence_next_date) continue;
+      if (task.status === TaskStatus.CANCELLED) continue;
+
+      const nextDateStr = dueDateToPktDateString(task.recurrence_next_date);
+
+      // Check whether this task is due for reset before the next recurrence:
+      // Case 1: Next recurrence begins tomorrow, and current time is >= 12:00 PM (noon) today.
+      // Case 2: Missed reset catch-up where nextDateStr <= today and hasn't been reset yet.
+      const isDueTomorrowNoon = nextDateStr === tomorrowDate && cutoffHour >= 12;
+      const isPastOrTodayDue = nextDateStr <= today;
+
+      if (!isDueTomorrowNoon && !isPastOrTodayDue) {
         continue;
       }
 
-      const oldStatus = task.status;
-      task.status = TaskStatus.COMPLETED;
-      if (task.workflow_type === TaskWorkflowType.STANDARD) {
-        task.completed_date = task.completed_date ?? now;
+      // Guard: If the task was created today after 12:00 PM noon, do not reset it on the same day
+      if (task.created_at) {
+        const createdDateStr = formatDateOnlyPkt(task.created_at);
+        const createdHour = getPktHour(task.created_at);
+        if (
+          createdDateStr === today &&
+          createdHour >= 12 &&
+          nextDateStr === tomorrowDate
+        ) {
+          continue;
+        }
       }
+
+      // Check termination end conditions before executing reset:
+      // Condition A: Limited by fixed occurrence count (AFTER_OCCURRENCES)
+      if (
+        task.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES &&
+        task.recurrence_end_occurrences &&
+        task.recurrence_created_count >= task.recurrence_end_occurrences
+      ) {
+        task.recurrence_next_date = null;
+        await this.taskRepo.save(task);
+        continue;
+      }
+
+      // Condition B: Limited by fixed end date (ON_DATE)
+      if (
+        task.recurrence_end_type === RecurrenceEndType.ON_DATE &&
+        task.recurrence_end_date &&
+        nextDateStr > dueDateToPktDateString(task.recurrence_end_date)
+      ) {
+        task.recurrence_next_date = null;
+        await this.taskRepo.save(task);
+        continue;
+      }
+
+      // Idempotency check: Ensure the reset executes exactly once per recurrence cycle date.
+      // Queries the activity log for an existing 'recurrence_reset' matching this cycleDate.
+      const alreadyReset = await this.activityRepo
+        .createQueryBuilder("activity")
+        .where("activity.task_id = :taskId", { taskId: task.id })
+        .andWhere("activity.action = :action", { action: "recurrence_reset" })
+        .andWhere(
+          "activity.details ::jsonb ->> 'recurrence_cycle_date' = :cycleDate",
+          {
+            cycleDate: nextDateStr,
+          },
+        )
+        .getOne();
+
+      if (alreadyReset) {
+        continue;
+      }
+
+      // Capture previous cycle state
+      const oldStatus = task.status;
+      const oldProgress = task.progress || 0;
+      const oldStartDate = task.start_date ? new Date(task.start_date) : null;
+      const oldDueDate = task.due_date ? new Date(task.due_date) : null;
+
+      // 1. If previous cycle was not completed/closed, record cutoff finalization in history
+      if (
+        ![
+          TaskStatus.COMPLETED,
+          TaskStatus.CLOSED,
+          TaskStatus.CANCELLED,
+        ].includes(oldStatus)
+      ) {
+        await this.logActivity(task, null, "recurrence_cutoff_finalized", {
+          from_status: oldStatus,
+          progress: oldProgress,
+          cutoff: "12:00 Asia/Karachi",
+          ended_cycle_date: oldStartDate
+            ? dueDateToPktDateString(oldStartDate)
+            : today,
+        });
+      }
+
+      // 2. Reset MOV items to initial unchecked state
+      // Reset progress notes (removes checked indices [indices:...] and ownership tags)
+      task.last_progress_notes = null;
+      // Recalculate progress to 0%
+      task.progress = 0;
+      // Definitions, descriptions, and assignments of mov_items remain preserved
+
+      // 3. Reset Task Status Workflow to initial state (OPEN)
+      task.status = TaskStatus.OPEN;
+      task.completed_date = null;
+      task.overdue_email_sent = false;
+
+      // Reset approvals if this task has approval workflow
+      if (task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
+        task.approved_by_id = null;
+        task.rejected_by_id = null;
+        await this.upsertTaskApprovalState(task);
+        await this.setTaskApprovalMeta(task.id, null);
+      }
+
+      // 4. Update recurrence dates for the new cycle:
+      // Preserves original cycle duration if start_date and due_date were both defined;
+      // otherwise computes the new due date using the recurrence rule.
+      const newStartDate = new Date(`${nextDateStr}T00:00:00Z`);
+      let durationMs = 0;
+      if (oldStartDate && oldDueDate) {
+        durationMs = oldDueDate.getTime() - oldStartDate.getTime();
+      }
+      task.start_date = newStartDate;
+      task.due_date =
+        durationMs > 0
+          ? new Date(newStartDate.getTime() + durationMs)
+          : this.getNextOccurrence(newStartDate, task.recurrence_rule);
+
+      // Advance recurrence_next_date to the subsequent occurrence after newStartDate
+      const upcomingNextDate = this.getNextOccurrence(
+        newStartDate,
+        task.recurrence_rule,
+      );
+      task.recurrence_next_date = upcomingNextDate;
+      task.recurrence_created_count = (task.recurrence_created_count || 0) + 1;
+
+      // Re-evaluate termination end conditions for the newly scheduled occurrence date
+      if (
+        task.recurrence_end_type === RecurrenceEndType.AFTER_OCCURRENCES &&
+        task.recurrence_end_occurrences &&
+        task.recurrence_created_count >= task.recurrence_end_occurrences
+      ) {
+        task.recurrence_next_date = null;
+      } else if (
+        task.recurrence_end_type === RecurrenceEndType.ON_DATE &&
+        task.recurrence_end_date &&
+        upcomingNextDate > new Date(task.recurrence_end_date)
+      ) {
+        task.recurrence_next_date = null;
+      }
+
+      // Persist the updated task state for the new cycle
       const saved = await this.taskRepo.save(task);
-      await this.logActivity(saved, null, "recurrence_cutoff_finalized", {
+
+      // 5. Log audit entry in Task Activity Progress History documenting the recurrence reset.
+      // This maintains complete auditability across all recurring cycles in the timeline view.
+      await this.logActivity(saved, null, "recurrence_reset", {
+        notes:
+          "Recurrence cycle reset: MOV checklist items reset to unchecked, status reset to Open for next recurrence.",
+        progress: 0,
         from_status: oldStatus,
+        to_status: TaskStatus.OPEN,
+        recurrence_cycle_date: nextDateStr,
+        previous_progress: oldProgress,
         cutoff: "12:00 Asia/Karachi",
-        next_recurrence_date: nextDate,
       });
-      finalized++;
+
+      processedCount++;
     }
-    return finalized;
+
+    return processedCount;
   }
 
   private async createNotification(
