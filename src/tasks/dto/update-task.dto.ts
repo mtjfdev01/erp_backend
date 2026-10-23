@@ -69,6 +69,29 @@ export class UpdateTaskDto {
   @IsArray()
   assigned_users_meta?: Array<{ user_id: number; department: Department }>;
 
+  /**
+   * Reporting Manager IDs (Multi-manager support):
+   * Updated reporting manager IDs. If assigned_users are updated and reported_to_ids are omitted,
+   * reporting managers are automatically re-derived from the assigned users' DMS configuration.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  reported_to_ids?: number[];
+
+  /**
+   * Accepts multiple manager IDs (number[]) or a legacy single manager ID (number).
+   */
+  @IsOptional()
+  reported_to?: number[] | number;
+
+  /**
+   * Legacy single reporting manager ID field (mapped to reported_to_ids internally).
+   */
+  @IsOptional()
+  @IsInt()
+  reported_to_id?: number;
+
   @IsOptional()
   @IsString()
   recurrence_rule?: string;

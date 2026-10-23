@@ -215,10 +215,6 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details ?? null
           : null,
-      clean_water_details:
-        dto.requested_aid_type === AidRequestType.CLEAN_WATER
-          ? dto.clean_water_details ?? null
-          : null,
       zakat_permission: dto.zakat_permission ?? null,
       consent_form: dto.consent_form ?? null,
       status: AidApplicationStatus.DRAFT,
@@ -603,24 +599,21 @@ export class AidApplicationsService {
           .filter((id): id is number => id != null && id > 0),
       ),
     ];
-    /** person_ids per household — beneficiary + family head always count */
-    const memberIdsByHousehold = new Map<number, Set<number>>();
+    const memberByHousehold = new Map<number, number>();
     if (householdIds.length) {
       const raw = await this.memberRepo
         .createQueryBuilder("m")
         .select("m.household_id", "household_id")
-        .addSelect("m.person_id", "person_id")
+        .addSelect("COUNT(*)", "cnt")
         .where("m.household_id IN (:...ids)", { ids: householdIds })
         .andWhere("m.is_archived = :arch", { arch: false })
+        .groupBy("m.household_id")
         .getRawMany();
       for (const row of raw) {
-        const hid = Number(row.household_id);
-        const pid = Number(row.person_id);
-        if (!hid || !pid) continue;
-        if (!memberIdsByHousehold.has(hid)) {
-          memberIdsByHousehold.set(hid, new Set());
-        }
-        memberIdsByHousehold.get(hid)!.add(pid);
+        memberByHousehold.set(
+          Number(row.household_id),
+          Number(row.cnt) || 0,
+        );
       }
     }
 
@@ -629,15 +622,8 @@ export class AidApplicationsService {
     );
 
     const data = rows.map((app) => {
-      const ids = new Set<number>(
-        app.household_id
-          ? [...(memberIdsByHousehold.get(app.household_id) || [])]
-          : [],
-      );
-      if (app.beneficiary_person_id) ids.add(app.beneficiary_person_id);
-      const head = this.pickListFamilyHead(app, kinshipHeads);
-      if (head?.id) ids.add(head.id);
-      const members = Math.max(ids.size, 1);
+      const members =
+        (app.household_id && memberByHousehold.get(app.household_id)) || 1;
       return this.summarizeListRow(app, members, kinshipHeads);
     });
 
@@ -775,17 +761,10 @@ export class AidApplicationsService {
       for (const m of hh.members || []) {
         if (m.person?.id) memberIds.add(m.person.id);
       }
-      const hhHeadId = hh.head_person?.id || hh.head_person_id;
-      if (hhHeadId) memberIds.add(Number(hhHeadId));
     }
-    // Beneficiary and family head always count as family members
-    if (beneficiary?.id) memberIds.add(beneficiary.id);
-    if (head?.id) memberIds.add(head.id);
     if (memberIds.size) members = memberIds.size;
     else {
-      members =
-        Number(familyCounts.total_members) ||
-        Number(familyCounts.total_linked || 0) + (beneficiary ? 1 : 0);
+      members = Number(familyCounts.total_linked || 0) + (beneficiary ? 1 : 0);
     }
     if (members < 1) members = 1;
 
@@ -1319,9 +1298,6 @@ export class AidApplicationsService {
       if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
         app.financial_assistance_details = null;
       }
-      if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
-        app.clean_water_details = null;
-      }
     }
     if (dto.aid_program !== undefined) {
       app.aid_program = dto.aid_program?.trim() || null;
@@ -1366,13 +1342,6 @@ export class AidApplicationsService {
         (dto.requested_aid_type ?? app.requested_aid_type) ===
         AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details
-          : null;
-    }
-    if (dto.clean_water_details !== undefined) {
-      app.clean_water_details =
-        (dto.requested_aid_type ?? app.requested_aid_type) ===
-        AidRequestType.CLEAN_WATER
-          ? dto.clean_water_details
           : null;
     }
     if (dto.zakat_permission !== undefined) {

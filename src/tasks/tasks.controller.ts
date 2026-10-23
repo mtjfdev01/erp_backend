@@ -141,6 +141,14 @@ export class TasksController {
         user_name: query.user_name || "",
         assignee_id: query.assignee_id || "",
         view_type: query.view_type || "",
+        // Date & calendar filter fields forwarded to tasksService.findAll:
+        // Supports filtering tasks by exact date, date ranges, due dates, or recurrence schedules
+        date: query.date || "",
+        start_date: query.start_date || "",
+        end_date: query.end_date || "",
+        due_date: query.due_date || "",
+        scheduled_date: query.scheduled_date || "",
+        date_field: query.date_field || "",
       },
       strictDepartment: query.strictDepartment === "true" || false,
     };

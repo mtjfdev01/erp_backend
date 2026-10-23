@@ -165,16 +165,7 @@ export class AidPeopleService {
     if (mapped.disability_type !== undefined) {
       person.disability_type = mapped.disability_type;
     }
-    if (mapped.disability_certificate_url !== undefined) {
-      person.disability_certificate_url = mapped.disability_certificate_url;
-    }
-    if (mapped.disability_certificate_name !== undefined) {
-      person.disability_certificate_name = mapped.disability_certificate_name;
-    }
     if (mapped.address !== undefined) person.address = mapped.address;
-    if (mapped.current_address !== undefined) {
-      person.current_address = mapped.current_address;
-    }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
     if (mapped.district !== undefined) person.district = mapped.district;
@@ -223,13 +214,7 @@ export class AidPeopleService {
     raw: Record<string, unknown>[] | null | undefined,
   ): Record<string, unknown>[] | null {
     if (!Array.isArray(raw)) return null;
-    const allowedTypes = new Set([
-      "agri",
-      "commercial",
-      "residential_ownership",
-      "plot",
-      "others",
-    ]);
+    const allowedTypes = new Set(["agri", "commercial", "plot", "others"]);
     const rows = raw
       .map((row) => {
         const property_type = String(row?.property_type || "")
@@ -294,14 +279,7 @@ export class AidPeopleService {
       .map((row) => {
         const vehicle_type = String(row?.vehicle_type || "").trim();
         if (!vehicle_type) return null;
-        const entry: Record<string, unknown> = { vehicle_type };
-        const qty = Number(row?.quantity);
-        if (Number.isFinite(qty) && qty > 0) {
-          entry.quantity = Math.floor(qty);
-        }
-        const details = String(row?.details || "").trim();
-        if (details) entry.details = details;
-        return entry;
+        return { vehicle_type };
       })
       .filter(Boolean) as Record<string, unknown>[];
     return rows.length ? rows : null;
@@ -372,14 +350,6 @@ export class AidPeopleService {
         dto.disability_type !== undefined
           ? dto.disability_type?.trim() || null
           : undefined,
-      disability_certificate_url:
-        dto.disability_certificate_url !== undefined
-          ? dto.disability_certificate_url?.trim() || null
-          : undefined,
-      disability_certificate_name:
-        dto.disability_certificate_name !== undefined
-          ? dto.disability_certificate_name?.trim() || null
-          : undefined,
       has_land: dto.has_land !== undefined ? !!dto.has_land : undefined,
       property_type:
         dto.property_type !== undefined ? dto.property_type : undefined,
@@ -445,10 +415,6 @@ export class AidPeopleService {
       health_notes:
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
       address: dto.address !== undefined ? dto.address?.trim() || null : undefined,
-      current_address:
-        dto.current_address !== undefined
-          ? dto.current_address?.trim() || null
-          : undefined,
       city: dto.city !== undefined ? dto.city?.trim() || null : undefined,
       province:
         dto.province !== undefined ? dto.province?.trim() || null : undefined,
@@ -507,8 +473,6 @@ export class AidPeopleService {
       monthly_income: mapped.monthly_income ?? null,
       has_disability: mapped.has_disability === true,
       disability_type: mapped.disability_type ?? null,
-      disability_certificate_url: mapped.disability_certificate_url ?? null,
-      disability_certificate_name: mapped.disability_certificate_name ?? null,
       has_land: mapped.has_land === true,
       property_type: mapped.has_land === true ? mapped.property_type ?? null : null,
       property_details:
@@ -540,7 +504,6 @@ export class AidPeopleService {
       is_alive: mapped.is_alive !== false,
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
-      current_address: mapped.current_address ?? null,
       city: mapped.city ?? null,
       province: mapped.province ?? null,
       district: mapped.district ?? null,
@@ -748,9 +711,6 @@ export class AidPeopleService {
         relations: ["person"],
       });
       for (const mate of mates) relatedIds.add(mate.person_id);
-      // Family head counts as a family member even if not on the membership roster
-      const headId = (m.household as any)?.head_person_id;
-      if (headId) relatedIds.add(Number(headId));
     }
     relatedIds.delete(id);
 
@@ -778,8 +738,6 @@ export class AidPeopleService {
     }
 
     const family_tree = this.buildFamilyTree(id, kinship);
-    // Beneficiary (ego) + family head + relatives all count as family members
-    const total_members = relatedPeople.length + 1;
     const family_counts = {
       parents: family_tree.parents.length,
       spouse: family_tree.spouse.length,
@@ -791,7 +749,6 @@ export class AidPeopleService {
       grandchildren: family_tree.grandchildren.length,
       extended: family_tree.extended.length,
       total_linked: relatedPeople.length,
-      total_members,
     };
 
     return {
@@ -856,12 +813,6 @@ export class AidPeopleService {
     }
     if (mapped.disability_type !== undefined) {
       person.disability_type = mapped.disability_type;
-    }
-    if (mapped.disability_certificate_url !== undefined) {
-      person.disability_certificate_url = mapped.disability_certificate_url;
-    }
-    if (mapped.disability_certificate_name !== undefined) {
-      person.disability_certificate_name = mapped.disability_certificate_name;
     }
     if (mapped.has_land !== undefined) {
       person.has_land = mapped.has_land;
@@ -992,9 +943,6 @@ export class AidPeopleService {
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive;
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;
     if (mapped.address !== undefined) person.address = mapped.address;
-    if (mapped.current_address !== undefined) {
-      person.current_address = mapped.current_address;
-    }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
     if (mapped.district !== undefined) person.district = mapped.district;

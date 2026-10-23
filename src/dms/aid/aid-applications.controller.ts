@@ -130,13 +130,12 @@ export class AidApplicationsController {
       "image/jpg",
       "image/png",
       "image/webp",
-      "application/pdf",
     ]);
-    const allowedExt = /\.(jpe?g|png|webp|pdf)$/;
+    const allowedExt = /\.(jpe?g|png|webp)$/;
     if (!allowedMime.has(mime) && !allowedExt.test(name)) {
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
-        message: "Only JPG, JPEG, PNG, WEBP, or PDF files are allowed",
+        message: "Only JPG, JPEG, PNG, or WEBP images are allowed",
       });
     }
     const data = await this.applicationsService.uploadLooseDocument(

@@ -152,16 +152,6 @@ export class CreateAidPersonDto {
   disability_type?: string | null;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  disability_certificate_url?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  disability_certificate_name?: string | null;
-
-  @IsOptional()
   @IsBoolean()
   has_land?: boolean;
 
@@ -262,10 +252,6 @@ export class CreateAidPersonDto {
   @IsOptional()
   @IsString()
   address?: string | null;
-
-  @IsOptional()
-  @IsString()
-  current_address?: string | null;
 
   @IsOptional()
   @IsString()
@@ -425,16 +411,6 @@ export class UpdateAidPersonDto {
   disability_type?: string | null;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  disability_certificate_url?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  disability_certificate_name?: string | null;
-
-  @IsOptional()
   @IsBoolean()
   has_land?: boolean;
 
@@ -535,10 +511,6 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsString()
   address?: string | null;
-
-  @IsOptional()
-  @IsString()
-  current_address?: string | null;
 
   @IsOptional()
   @IsString()
@@ -742,11 +714,6 @@ export class CreateAidApplicationDto {
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
 
-  /** Clean-water intake payload (source, distance, duration, location, contribution). */
-  @IsOptional()
-  @IsObject()
-  clean_water_details?: Record<string, unknown> | null;
-
   /** Zakat Permission Letter (Urdu/English) — all applications. */
   @IsOptional()
   @IsObject()
@@ -836,10 +803,6 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
-
-  @IsOptional()
-  @IsObject()
-  clean_water_details?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsObject()
