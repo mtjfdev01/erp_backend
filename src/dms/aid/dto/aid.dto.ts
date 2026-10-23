@@ -19,6 +19,9 @@ import {
   AidCaseSource,
   AidCeoApprovalStatus,
   AidDeliveryStatus,
+  AidDisbursementMode,
+  AidDisbursementRecipientType,
+  AidDisbursementStatus,
   AidEducationLevel,
   AidHouseholdRole,
   AidKinshipRelation,
@@ -983,4 +986,96 @@ export class UploadAidAttachmentDto {
   @IsOptional()
   @IsInt()
   person_id?: number | null;
+}
+
+export class CreateAidDisbursementPlanDto {
+  @Type(() => Number)
+  @IsInt()
+  application_id: number;
+
+  /** Override installment count; otherwise derived from recommendation. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  total_installments?: number | null;
+
+  @IsOptional()
+  @IsString()
+  fund_source?: string | null;
+
+  @IsOptional()
+  @IsString()
+  office_name?: string | null;
+}
+
+export class RecordAidDisbursementDeliveryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  quantity?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  value?: number | null;
+
+  @IsEnum(AidDisbursementMode)
+  mode: AidDisbursementMode;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  reference_no?: string | null;
+
+  @IsDateString()
+  delivery_date: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  delivery_location: string;
+
+  @IsEnum(AidDisbursementRecipientType)
+  recipient_type: AidDisbursementRecipientType;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  recipient_name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  recipient_cnic?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recipient_relation?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  otp_verified?: boolean;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
+
+  /** When true, mark installment awaiting verification instead of delivered. */
+  @IsOptional()
+  @IsBoolean()
+  submit_for_verification?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  has_proof?: boolean;
+}
+
+export class UpdateAidDisbursementStatusDto {
+  @IsEnum(AidDisbursementStatus)
+  status: AidDisbursementStatus;
+
+  @IsOptional()
+  @IsString()
+  notes?: string | null;
 }

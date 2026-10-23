@@ -1,5 +1,5 @@
 /**
- * Aid Beneficiaries / Applications / Drafts / Verification / Overview permissions.
+ * Aid Beneficiaries / Applications / Drafts / Verification / Disbursements / Overview.
  * Primary: program.aid_* — legacy: fund_raising.aid_* (both accepted).
  */
 const PEOPLE = "program.aid_people";
@@ -10,6 +10,8 @@ const DRAFTS = "program.aid_drafts";
 const DRAFTS_LEGACY = "fund_raising.aid_drafts";
 const VERIFY = "program.aid_verification";
 const VERIFY_LEGACY = "fund_raising.aid_verification";
+const DISB = "program.aid_disbursements";
+const DISB_LEGACY = "fund_raising.aid_disbursements";
 const OVERVIEW = "program.aid_overview";
 const OVERVIEW_LEGACY = "fund_raising.aid_overview";
 
@@ -26,6 +28,9 @@ const drafts = (action: string) =>
 
 const verify = (action: string) =>
   [`${VERIFY}.${action}`, `${VERIFY_LEGACY}.${action}`] as const;
+
+const disb = (action: string) =>
+  [`${DISB}.${action}`, `${DISB_LEGACY}.${action}`] as const;
 
 const overview = (action: string) =>
   [`${OVERVIEW}.${action}`, `${OVERVIEW_LEGACY}.${action}`] as const;
@@ -151,6 +156,7 @@ export const AID_APPLICATIONS_CEO_GUARD = [
 /** Mark delivery after successful CEO approval */
 export const AID_APPLICATIONS_DELIVER_GUARD = [
   ...apps("deliver"),
+  ...disb("deliver"),
   ...STAFF,
 ] as const;
 
@@ -158,5 +164,41 @@ export const AID_APPLICATIONS_DELIVER_GUARD = [
 export const AID_APPLICATIONS_BULK_VERIFY_GUARD = [
   ...verify("bulk_verify"),
   ...apps("bulk_verify"),
+  ...STAFF,
+] as const;
+
+/** Disbursements queue list */
+export const AID_DISBURSEMENTS_LIST_GUARD = [
+  ...disb("list_view"),
+  ...disb("view"),
+  ...disb("deliver"),
+  ...apps("deliver"),
+  ...apps("list_view"),
+  ...STAFF,
+] as const;
+
+/** Disbursement installment detail / record form */
+export const AID_DISBURSEMENTS_VIEW_GUARD = [
+  ...disb("view"),
+  ...disb("list_view"),
+  ...disb("deliver"),
+  ...apps("deliver"),
+  ...apps("view"),
+  ...STAFF,
+] as const;
+
+/** Create / ensure installment plan for an approved application */
+export const AID_DISBURSEMENTS_CREATE_GUARD = [
+  ...disb("create"),
+  ...disb("deliver"),
+  ...apps("deliver"),
+  ...STAFF,
+] as const;
+
+/** Record delivery / update installment status */
+export const AID_DISBURSEMENTS_DELIVER_GUARD = [
+  ...disb("deliver"),
+  ...disb("update"),
+  ...apps("deliver"),
   ...STAFF,
 ] as const;

@@ -297,6 +297,13 @@
         "update": true,
         "bulk_verify": true
       },
+      "aid_disbursements": {
+        "list_view": true,
+        "view": true,
+        "create": true,
+        "update": true,
+        "deliver": true
+      },
       "aid_people": {
         "create": true,
         "list_view": true,

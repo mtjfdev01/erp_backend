@@ -201,4 +201,32 @@ export enum AidAttachmentContext {
   E_STAMP_PAPER = "e_stamp_paper",
   ZAKAT = "zakat",
   CONSENT = "consent",
+  /** Disbursement proof uploads */
+  DISBURSEMENT_HANDOVER = "disbursement_handover",
+  DISBURSEMENT_RECEIPT = "disbursement_receipt",
+  DISBURSEMENT_CNIC = "disbursement_cnic",
+}
+
+/** Installment / disbursement ledger status (child of approved application). */
+export enum AidDisbursementStatus {
+  QUEUED = "queued",
+  DUE = "due",
+  OVERDUE = "overdue",
+  DELIVERED = "delivered",
+  AWAITING_VERIFICATION = "awaiting_verification",
+  ON_HOLD = "on_hold",
+  CANCELLED = "cancelled",
+}
+
+export enum AidDisbursementMode {
+  CASH = "cash",
+  BANK = "bank",
+  IN_KIND_STORE = "in_kind_store",
+  LAB_VOUCHER = "lab_voucher",
+  OTHER = "other",
+}
+
+export enum AidDisbursementRecipientType {
+  BENEFICIARY = "beneficiary",
+  FAMILY_MEMBER = "family_member",
 }
