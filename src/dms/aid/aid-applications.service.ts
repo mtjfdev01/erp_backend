@@ -41,6 +41,8 @@ import {
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
+  InvestigationRecommendationDto,
+  ManagerForwardAidApplicationDto,
   RejectAidApplicationDto,
   UpdateAidApplicationDto,
   VerifyAidApplicationDto,
@@ -73,6 +75,99 @@ export class AidApplicationsService {
     private readonly permissionsService: PermissionsService,
     private readonly s3: S3StorageService,
   ) {}
+
+  /** Program manager in Program dept (or super admin) — can skip/forward to CEO. */
+  private async isProgramDepartmentManager(user?: User): Promise<boolean> {
+    if (!user?.id) return false;
+    if (Number(user.id) === -1) return true;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return true;
+    }
+    if (user.department !== Department.PROGRAM) return false;
+    return this.permissionsService.hasPermission(
+      Number(user.id),
+      "program_manager",
+    );
+  }
+
+  private assertRecommendationValid(
+    rec: InvestigationRecommendationDto | null | undefined,
+    label = "Recommendation",
+  ): {
+    decision: string;
+    amount: number | null;
+    period_months: number | null;
+    remarks: string;
+    found_monthly_income: number | null;
+    ration_options: Array<"full" | "half" | "monthly" | "alternate">;
+  } {
+    const allowedRation = new Set(["full", "half", "monthly", "alternate"]);
+    const ration_options = (Array.isArray(rec?.ration_options) ? rec!.ration_options : [])
+      .map((v) => String(v || "").trim().toLowerCase())
+      .filter((v): v is "full" | "half" | "monthly" | "alternate" =>
+        allowedRation.has(v),
+      );
+    const uniqueRation = [...new Set(ration_options)];
+    const isRationPackage = uniqueRation.length > 0;
+
+    if (!rec?.decision && !isRationPackage) {
+      throw new BadRequestException(
+        `${label} is required (approve as requested / with changes / reject)`,
+      );
+    }
+    const remarks = String(rec?.remarks || "").trim();
+    if (remarks.length < 3) {
+      throw new BadRequestException(
+        `${label} remarks are required (min 3 characters)`,
+      );
+    }
+
+    const decision =
+      rec?.decision ||
+      (isRationPackage ? "approve_as_requested" : "");
+
+    let amount: number | null = rec?.amount ?? null;
+    let period_months: number | null = rec?.period_months ?? null;
+
+    if (isRationPackage) {
+      // Manager/CEO ration picks — no amount/period required
+      amount = Number.isFinite(Number(rec?.amount)) && Number(rec?.amount) > 0
+        ? Number(rec?.amount)
+        : null;
+      period_months = null;
+    } else if (decision !== "reject") {
+      const amt = Number(rec?.amount);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        throw new BadRequestException(
+          `Recommended amount (PKR) is required for approval recommendations`,
+        );
+      }
+      amount = amt;
+      if (decision === "approve_with_changes") {
+        const months = Number(rec?.period_months);
+        if (!Number.isFinite(months) || months <= 0) {
+          throw new BadRequestException(
+            "Period (months) is required when approving with changes",
+          );
+        }
+        period_months = months;
+      }
+    } else {
+      amount = null;
+    }
+    const found = rec?.found_monthly_income;
+    return {
+      decision,
+      amount,
+      period_months,
+      remarks,
+      found_monthly_income:
+        found != null && Number.isFinite(Number(found)) ? Number(found) : null,
+      ration_options: uniqueRation,
+    };
+  }
 
   /**
    * Investigation (checklist / verify / site-visit attach):
@@ -270,6 +365,11 @@ export class AidApplicationsService {
           st: AidApplicationStatus.UNDER_REVIEW,
         });
         break;
+      case "manager_review":
+        qb.andWhere("a.status = :st", {
+          st: AidApplicationStatus.MANAGER_REVIEW,
+        });
+        break;
       case "pending_approval":
         qb.andWhere("a.status = :st", {
           st: AidApplicationStatus.CEO_APPROVAL_REQUIRED,
@@ -332,6 +432,8 @@ export class AidApplicationsService {
         return "submitted";
       case AidApplicationStatus.UNDER_REVIEW:
         return "investigation";
+      case AidApplicationStatus.MANAGER_REVIEW:
+        return "manager_review";
       case AidApplicationStatus.CEO_APPROVAL_REQUIRED:
         return "pending_approval";
       case AidApplicationStatus.SUCCESSFUL:
@@ -372,6 +474,7 @@ export class AidApplicationsService {
       draft,
       submitted,
       investigation,
+      manager_review,
       pending_approval,
       approved,
       returned,
@@ -379,6 +482,7 @@ export class AidApplicationsService {
       countFor("draft"),
       countFor("submitted"),
       countFor("investigation"),
+      countFor("manager_review"),
       countFor("pending_approval"),
       countFor("approved"),
       countFor("returned"),
@@ -388,6 +492,7 @@ export class AidApplicationsService {
       draft,
       submitted,
       investigation,
+      manager_review,
       pending_approval,
       approved,
       returned,
@@ -1497,34 +1602,10 @@ export class AidApplicationsService {
       );
     }
 
-    const rec = dto.recommendation;
-    if (!rec?.decision) {
-      throw new BadRequestException(
-        "Investigation recommendation is required (approve as requested / with changes / reject)",
-      );
-    }
-    const remarks = String(rec.remarks || "").trim();
-    if (remarks.length < 3) {
-      throw new BadRequestException(
-        "Investigator remarks are required (min 3 characters)",
-      );
-    }
-    if (rec.decision !== "reject") {
-      const amount = Number(rec.amount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new BadRequestException(
-          "Recommended amount (PKR) is required for approval recommendations",
-        );
-      }
-      if (rec.decision === "approve_with_changes") {
-        const months = Number(rec.period_months);
-        if (!Number.isFinite(months) || months <= 0) {
-          throw new BadRequestException(
-            "Period (months) is required when approving with changes",
-          );
-        }
-      }
-    }
+    const recNorm = this.assertRecommendationValid(
+      dto.recommendation,
+      "Investigation recommendation",
+    );
 
     await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
 
@@ -1542,29 +1623,134 @@ export class AidApplicationsService {
       app,
       personDetail,
       checklistPayload,
-      rec as unknown as Record<string, unknown>,
+      recNorm as unknown as Record<string, unknown>,
     );
 
-    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
-    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    const skipToCeo = await this.isProgramDepartmentManager(user);
+    if (skipToCeo) {
+      app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+      app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    } else {
+      app.status = AidApplicationStatus.MANAGER_REVIEW;
+      app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
+    }
     app.verification_notes =
-      dto.verification_notes?.trim() || remarks || app.verification_notes;
+      dto.verification_notes?.trim() ||
+      recNorm.remarks ||
+      app.verification_notes;
     app.verification_checklist = checklistPayload;
     app.investigation_recommendation = {
-      decision: rec.decision,
-      amount: rec.amount ?? null,
-      period_months: rec.period_months ?? null,
-      remarks,
-      found_monthly_income: rec.found_monthly_income ?? null,
+      decision: recNorm.decision,
+      amount: recNorm.amount,
+      period_months: recNorm.period_months,
+      remarks: recNorm.remarks,
+      found_monthly_income: recNorm.found_monthly_income,
+      ration_options: recNorm.ration_options,
       vulnerability_score_declared: vulnerability.declared.total,
       vulnerability_score_after_visit: vulnerability.after_visit.total,
       vulnerability_deltas: vulnerability.deltas,
       vulnerability_declared: vulnerability.declared,
       vulnerability_after_visit: vulnerability.after_visit,
       submitted_at: new Date().toISOString(),
+      submitted_by_role: skipToCeo ? "program_manager" : "investigator",
+      submitted_by_id: user?.id ?? null,
     };
     app.verified_at = new Date();
     app.verified_by_id = user?.id ?? null;
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
+  /**
+   * Program manager (Program dept): manager_review → CEO, with optional recommendation override.
+   */
+  async managerForward(
+    id: number,
+    dto: ManagerForwardAidApplicationDto,
+    user?: User,
+  ) {
+    if (!(await this.isProgramDepartmentManager(user))) {
+      throw new ForbiddenException(
+        "Only a Program department manager can forward to CEO",
+      );
+    }
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary"],
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.status !== AidApplicationStatus.MANAGER_REVIEW) {
+      throw new BadRequestException(
+        "Only applications in Manager Review can be forwarded to CEO",
+      );
+    }
+
+    const prev = (app.investigation_recommendation ||
+      {}) as Record<string, unknown>;
+    const incoming = dto.recommendation;
+    const hasIncoming =
+      !!incoming &&
+      (!!incoming.decision ||
+        (Array.isArray(incoming.ration_options) &&
+          incoming.ration_options.length > 0) ||
+        String(incoming.remarks || "").trim().length > 0);
+    const recSource: InvestigationRecommendationDto = hasIncoming
+      ? incoming!
+      : {
+          decision: prev.decision as InvestigationRecommendationDto["decision"],
+          amount: (prev.amount as number | null) ?? null,
+          period_months: (prev.period_months as number | null) ?? null,
+          remarks: (prev.remarks as string | null) ?? null,
+          found_monthly_income:
+            (prev.found_monthly_income as number | null) ?? null,
+          ration_options: Array.isArray(prev.ration_options)
+            ? (prev.ration_options as InvestigationRecommendationDto["ration_options"])
+            : undefined,
+        };
+    const recNorm = this.assertRecommendationValid(
+      recSource,
+      "Recommendation",
+    );
+
+    await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
+
+    const prevRation = Array.isArray(prev.ration_options)
+      ? [...(prev.ration_options as string[])].map(String).sort().join(",")
+      : "";
+    const nextRation = [...recNorm.ration_options].sort().join(",");
+    const overridden =
+      hasIncoming &&
+      (String(incoming?.decision || "") !== String(prev.decision || "") ||
+        Number(incoming?.amount ?? 0) !== Number(prev.amount ?? 0) ||
+        Number(incoming?.period_months ?? 0) !==
+          Number(prev.period_months ?? 0) ||
+        String(incoming?.remarks || "").trim() !==
+          String(prev.remarks || "").trim() ||
+        nextRation !== prevRation);
+
+    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    app.investigation_recommendation = {
+      ...prev,
+      decision: recNorm.decision,
+      amount: recNorm.amount,
+      period_months: recNorm.period_months,
+      remarks: recNorm.remarks,
+      found_monthly_income: recNorm.found_monthly_income,
+      ration_options: recNorm.ration_options,
+      investigator_snapshot: {
+        decision: prev.decision ?? null,
+        amount: prev.amount ?? null,
+        period_months: prev.period_months ?? null,
+        remarks: prev.remarks ?? null,
+        ration_options: prev.ration_options ?? null,
+      },
+      manager_override: overridden,
+      manager_forwarded_at: new Date().toISOString(),
+      manager_forwarded_by_id: user?.id ?? null,
+      submitted_by_role: "program_manager",
+    };
     app.updated_by = user || null;
     await this.appRepo.save(app);
     return this.findOne(id);
@@ -1585,6 +1771,32 @@ export class AidApplicationsService {
 
     if (dto.decision === AidCeoApprovalStatus.APPROVED) {
       await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
+    }
+
+    if (
+      dto.recommendation &&
+      (dto.recommendation.decision ||
+        (Array.isArray(dto.recommendation.ration_options) &&
+          dto.recommendation.ration_options.length > 0) ||
+        String(dto.recommendation.remarks || "").trim().length >= 3)
+    ) {
+      const prev = (app.investigation_recommendation ||
+        {}) as Record<string, unknown>;
+      const recNorm = this.assertRecommendationValid(
+        dto.recommendation,
+        "CEO recommendation",
+      );
+      app.investigation_recommendation = {
+        ...prev,
+        decision: recNorm.decision,
+        amount: recNorm.amount,
+        period_months: recNorm.period_months,
+        remarks: recNorm.remarks,
+        found_monthly_income: recNorm.found_monthly_income,
+        ration_options: recNorm.ration_options,
+        ceo_edited_at: new Date().toISOString(),
+        ceo_edited_by_id: user?.id ?? null,
+      };
     }
 
     app.ceo_decided_at = new Date();

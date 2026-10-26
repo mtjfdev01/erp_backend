@@ -39,6 +39,7 @@ import {
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
+  ManagerForwardAidApplicationDto,
   RejectAidApplicationDto,
   UpdateAidApplicationDto,
   VerifyAidApplicationDto,
@@ -347,9 +348,32 @@ export class AidApplicationsController {
       dto,
       req?.user,
     );
+    const awaitingManager = data?.status === "manager_review";
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: "Verification recorded — awaiting CEO approval",
+      message: awaitingManager
+        ? "Verification recorded — awaiting Manager Review"
+        : "Verification recorded — awaiting CEO approval",
+      data,
+    });
+  }
+
+  @Post(":id/manager-forward")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async managerForward(
+    @Param("id") id: string,
+    @Body() dto: ManagerForwardAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.managerForward(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Forwarded for CEO approval",
       data,
     });
   }

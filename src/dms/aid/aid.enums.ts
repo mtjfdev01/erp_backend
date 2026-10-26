@@ -165,6 +165,8 @@ export enum AidApplicationStatus {
   DRAFT = "draft",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
+  /** Investigator submitted — awaiting Program manager review. */
+  MANAGER_REVIEW = "manager_review",
   REJECTED = "rejected",
   CEO_APPROVAL_REQUIRED = "ceo_approval_required",
   SUCCESSFUL = "successful",

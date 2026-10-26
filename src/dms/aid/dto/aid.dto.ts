@@ -885,6 +885,15 @@ export class InvestigationRecommendationDto {
   @IsOptional()
   @IsNumber()
   found_monthly_income?: number | null;
+
+  /**
+   * Ration aid — manager/CEO package picks (Full / Half / Monthly / Alternate).
+   * When present and non-empty, amount/period are not required.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsIn(["full", "half", "monthly", "alternate"], { each: true })
+  ration_options?: Array<"full" | "half" | "monthly" | "alternate">;
 }
 
 export class VerifyAidApplicationDto {
@@ -922,6 +931,25 @@ export class CeoDecideAidApplicationDto {
   ceo_rejection_reason?: string | null;
 
   /** Required on approve when leakage flags are active and not yet overridden. */
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  leakage_override_reason?: string | null;
+
+  /** Optional CEO edit of investigator/manager recommendation before decide. */
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+}
+
+/** Program manager forwards manager_review → CEO, with optional override. */
+export class ManagerForwardAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+
   @IsOptional()
   @IsString()
   @MinLength(5)
