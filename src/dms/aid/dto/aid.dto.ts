@@ -717,6 +717,11 @@ export class CreateAidApplicationDto {
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
 
+  /** Clean Water survey payload (EN/UR). */
+  @IsOptional()
+  @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
+
   /** Zakat Permission Letter (Urdu/English) — all applications. */
   @IsOptional()
   @IsObject()
@@ -809,6 +814,10 @@ export class UpdateAidApplicationDto {
 
   @IsOptional()
   @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
   zakat_permission?: Record<string, unknown> | null;
 
   @IsOptional()
@@ -855,6 +864,14 @@ export class RejectAidApplicationDto {
   @IsString()
   @MinLength(2)
   rejection_reason: string;
+}
+
+/** Mark application incomplete (needs more details). */
+export class MarkIncompleteAidApplicationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reason?: string | null;
 }
 
 /** Approve draft → submitted; must assign a program-department user. */

@@ -163,6 +163,11 @@ export enum AidRequestType {
 export enum AidApplicationStatus {
   /** Intake saved; not yet in verification pipeline. */
   DRAFT = "draft",
+  /**
+   * Missing required details / returned for completion.
+   * Editable; can be resubmitted or considered again for verification.
+   */
+  INCOMPLETE = "incomplete",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
   /** Investigator submitted — awaiting Program manager review. */
