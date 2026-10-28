@@ -168,6 +168,8 @@ export enum AidApplicationStatus {
    * Editable; can be resubmitted or considered again for verification.
    */
   INCOMPLETE = "incomplete",
+  /** One or more required documents flagged as missing. */
+  INCOMPLETE_DOCS = "incomplete_docs",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
   /** Investigator submitted — awaiting Program manager review. */

@@ -42,6 +42,8 @@ import {
   ManagerForwardAidApplicationDto,
   MarkIncompleteAidApplicationDto,
   RejectAidApplicationDto,
+  SetAidAttachmentMissingDto,
+  SetAidMissingDocumentsDto,
   UpdateAidApplicationDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
@@ -219,6 +221,51 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Attachment removed",
+      data,
+    });
+  }
+
+  @Patch("attachments/:attachmentId/missing")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async setAttachmentMissing(
+    @Param("attachmentId") attachmentId: string,
+    @Body() dto: SetAidAttachmentMissingDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.setAttachmentMissing(
+      Number(attachmentId),
+      !!dto?.is_missing,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: dto?.is_missing
+        ? "Attachment marked missing; status set to Incomplete Docs"
+        : "Attachment missing flag cleared",
+      data,
+    });
+  }
+
+  @Patch(":id/missing-documents")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async setMissingDocuments(
+    @Param("id") id: string,
+    @Body() dto: SetAidMissingDocumentsDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.setMissingDocuments(
+      Number(id),
+      dto?.missing_documents || [],
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message:
+        (dto?.missing_documents || []).length > 0
+          ? "Missing documents updated; status set to Incomplete Docs"
+          : "Missing documents cleared",
       data,
     });
   }

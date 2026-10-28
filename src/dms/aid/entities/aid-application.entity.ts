@@ -155,6 +155,13 @@ export class AidApplication extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   verification_notes: string | null;
 
+  /**
+   * Document context keys flagged as missing on the Attachments intake
+   * (e.g. mepco_bill, cnic, bay_form).
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  missing_documents: string[] | null;
+
   /** Home-visit checklist answers (booleans by item key). No geo/photo in this phase. */
   @Column({ type: "jsonb", nullable: true, default: null })
   verification_checklist: Record<string, unknown> | null;

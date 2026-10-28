@@ -370,6 +370,8 @@ export class AidApplicationsService {
         ? AidWriterRelation.SELF
         : dto.writer_relation || AidWriterRelation.OTHER;
 
+    const missingDocs = this.normalizeMissingDocuments(dto.missing_documents);
+
     const row = this.appRepo.create({
       application_no: await this.nextApplicationNo(),
       beneficiary_person_id: beneficiaryId,
@@ -412,7 +414,10 @@ export class AidApplicationsService {
           : null,
       zakat_permission: dto.zakat_permission ?? null,
       consent_form: dto.consent_form ?? null,
-      status: AidApplicationStatus.DRAFT,
+      missing_documents: missingDocs.length ? missingDocs : null,
+      status: missingDocs.length
+        ? AidApplicationStatus.INCOMPLETE_DOCS
+        : AidApplicationStatus.DRAFT,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
       // Assignment is done by the draft approver (program user), not at intake
@@ -485,8 +490,11 @@ export class AidApplicationsService {
         qb.andWhere("a.updated_at >= :monthStart", { monthStart });
         break;
       case "incomplete":
-        qb.andWhere("a.status = :st", {
-          st: AidApplicationStatus.INCOMPLETE,
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.INCOMPLETE,
+            AidApplicationStatus.INCOMPLETE_DOCS,
+          ],
         });
         break;
       case "returned":
@@ -534,6 +542,7 @@ export class AidApplicationsService {
       case AidApplicationStatus.DRAFT:
         return "draft";
       case AidApplicationStatus.INCOMPLETE:
+      case AidApplicationStatus.INCOMPLETE_DOCS:
         return "incomplete";
       case AidApplicationStatus.SUBMITTED:
         return "submitted";
@@ -1630,6 +1639,9 @@ export class AidApplicationsService {
     if (dto.consent_form !== undefined) {
       app.consent_form = dto.consent_form;
     }
+    if (dto.missing_documents !== undefined) {
+      this.applyMissingDocumentsToApp(app, dto.missing_documents);
+    }
     if (
       dto.assigned_to_user_id !== undefined &&
       app.status !== AidApplicationStatus.DRAFT
@@ -1724,7 +1736,8 @@ export class AidApplicationsService {
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     if (
       app.status !== AidApplicationStatus.DRAFT &&
-      app.status !== AidApplicationStatus.INCOMPLETE
+      app.status !== AidApplicationStatus.INCOMPLETE &&
+      app.status !== AidApplicationStatus.INCOMPLETE_DOCS
     ) {
       throw new BadRequestException(
         "Only draft or incomplete applications can be approved for verification",
@@ -1769,6 +1782,7 @@ export class AidApplicationsService {
       [
         AidApplicationStatus.DRAFT,
         AidApplicationStatus.INCOMPLETE,
+        AidApplicationStatus.INCOMPLETE_DOCS,
         AidApplicationStatus.SUCCESSFUL,
         AidApplicationStatus.DELIVERED,
         AidApplicationStatus.REJECTED,
@@ -1789,7 +1803,7 @@ export class AidApplicationsService {
   }
 
   /**
-   * Resume incomplete → submitted (keeps assignee when present).
+   * Resume incomplete / incomplete_docs → submitted (keeps assignee when present).
    * Without assignee, stays incomplete until Consider & assign.
    */
   async resumeIncomplete(id: number, user?: User) {
@@ -1797,7 +1811,10 @@ export class AidApplicationsService {
       where: { id, is_archived: false },
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
-    if (app.status !== AidApplicationStatus.INCOMPLETE) {
+    if (
+      app.status !== AidApplicationStatus.INCOMPLETE &&
+      app.status !== AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
       throw new BadRequestException(
         "Only incomplete applications can be resumed",
       );
@@ -2237,6 +2254,136 @@ export class AidApplicationsService {
     row.is_archived = true;
     row.updated_by = user || null;
     return this.attachmentRepo.save(row);
+  }
+
+  private normalizeMissingDocuments(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+      const key = String(item || "")
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    }
+    return out;
+  }
+
+  private applyMissingDocumentsToApp(
+    app: AidApplication,
+    raw: unknown,
+  ) {
+    const keys = this.normalizeMissingDocuments(raw);
+    app.missing_documents = keys.length ? keys : null;
+    if (
+      keys.length &&
+      ![
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+      ].includes(app.status)
+    ) {
+      app.status = AidApplicationStatus.INCOMPLETE_DOCS;
+      const note = `Missing documents: ${keys.join(", ")}`;
+      const existing = String(app.verification_notes || "").trim();
+      if (!existing.includes("Missing documents:")) {
+        app.verification_notes = existing ? `${existing}\n${note}` : note;
+      } else {
+        app.verification_notes = existing.replace(
+          /Missing documents:.*$/m,
+          note,
+        );
+      }
+    }
+  }
+
+  /** Replace missing document keys; sets Incomplete Docs when any remain. */
+  async setMissingDocuments(
+    id: number,
+    missingDocuments: string[],
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      [
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "Cannot update missing documents on a closed application",
+      );
+    }
+    this.applyMissingDocumentsToApp(app, missingDocuments);
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
+  /**
+   * Flag (or clear) an attachment as missing.
+   * When marked missing, application status becomes Incomplete Docs
+   * (unless already successful / delivered / rejected).
+   */
+  async setAttachmentMissing(
+    attachmentId: number,
+    isMissing: boolean,
+    user?: User,
+  ) {
+    const row = await this.attachmentRepo.findOne({
+      where: { id: attachmentId, is_archived: false },
+    });
+    if (!row) {
+      throw new NotFoundException(`Attachment #${attachmentId} not found`);
+    }
+    row.is_missing = !!isMissing;
+    row.updated_by = user || null;
+    await this.attachmentRepo.save(row);
+
+    if (!row.application_id) {
+      return { attachment: row, application: null };
+    }
+
+    const app = await this.appRepo.findOne({
+      where: { id: row.application_id, is_archived: false },
+    });
+    if (!app) {
+      return { attachment: row, application: null };
+    }
+
+    if (isMissing) {
+      if (
+        ![
+          AidApplicationStatus.SUCCESSFUL,
+          AidApplicationStatus.DELIVERED,
+          AidApplicationStatus.REJECTED,
+        ].includes(app.status)
+      ) {
+        app.status = AidApplicationStatus.INCOMPLETE_DOCS;
+        const note = `Missing document: ${row.file_name || row.context || `#${row.id}`}`;
+        const existing = String(app.verification_notes || "").trim();
+        if (!existing.includes(note)) {
+          app.verification_notes = existing ? `${existing}\n${note}` : note;
+        }
+        app.updated_by = user || null;
+        await this.appRepo.save(app);
+      }
+      return {
+        attachment: row,
+        application: await this.findOne(app.id),
+      };
+    }
+
+    return {
+      attachment: row,
+      application: await this.findOne(app.id),
+    };
   }
 
   async listPersonAttachments(personId: number) {

@@ -732,6 +732,12 @@ export class CreateAidApplicationDto {
   @IsObject()
   consent_form?: Record<string, unknown> | null;
 
+  /** Attachment context keys flagged as missing (intake). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents?: string[] | null;
+
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsInt()
@@ -823,6 +829,12 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsObject()
   consent_form?: Record<string, unknown> | null;
+
+  /** Attachment context keys flagged as missing (intake). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents?: string[] | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
@@ -994,6 +1006,19 @@ export class UploadAidAttachmentDto {
   @IsOptional()
   @IsInt()
   person_id?: number | null;
+}
+
+/** Flag an attachment as missing / clear the flag. */
+export class SetAidAttachmentMissingDto {
+  @IsBoolean()
+  is_missing: boolean;
+}
+
+/** Replace the list of missing document context keys on an application. */
+export class SetAidMissingDocumentsDto {
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents: string[];
 }
 
 export class CreateAidDisbursementPlanDto {
