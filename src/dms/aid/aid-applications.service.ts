@@ -490,11 +490,8 @@ export class AidApplicationsService {
         qb.andWhere("a.updated_at >= :monthStart", { monthStart });
         break;
       case "incomplete":
-        qb.andWhere("a.status IN (:...sts)", {
-          sts: [
-            AidApplicationStatus.INCOMPLETE,
-            AidApplicationStatus.INCOMPLETE_DOCS,
-          ],
+        qb.andWhere("a.status = :st", {
+          st: AidApplicationStatus.INCOMPLETE,
         });
         break;
       case "returned":
@@ -540,9 +537,9 @@ export class AidApplicationsService {
   private mapStatusToStage(status: string | null | undefined): string {
     switch (String(status || "").toLowerCase()) {
       case AidApplicationStatus.DRAFT:
+      case AidApplicationStatus.INCOMPLETE_DOCS:
         return "draft";
       case AidApplicationStatus.INCOMPLETE:
-      case AidApplicationStatus.INCOMPLETE_DOCS:
         return "incomplete";
       case AidApplicationStatus.SUBMITTED:
         return "submitted";
@@ -737,7 +734,7 @@ export class AidApplicationsService {
     /**
      * approvals = verified & not rejected (CEO queue + decided non-rejects)
      * entry = Beneficiary Registration board (excludes drafts)
-     * drafts = Drafts board (status = draft only)
+     * drafts = Drafts board (status = draft or incomplete_docs)
      */
     queue?: string;
     page?: number;
@@ -783,20 +780,30 @@ export class AidApplicationsService {
       qb.andWhere("a.status != :rejected", {
         rejected: AidApplicationStatus.REJECTED,
       });
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
       if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
     } else if (isDraftsBoard) {
-      qb.andWhere("a.status = :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Drafts + Incomplete Docs (missing attachments flagged at intake)
+      qb.andWhere("a.status IN (:...draftLike)", {
+        draftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
     } else if (isEntryBoard) {
-      // Registration board: live applications only (not drafts)
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Registration board: live applications only (not drafts / incomplete docs)
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
       if (params.stage) {
         this.applyStageFilter(qb, params.stage);
@@ -808,9 +815,12 @@ export class AidApplicationsService {
     } else if (params.status) {
       qb.andWhere("a.status = :status", { status: params.status });
     } else {
-      // Verification Process default: hide registration drafts
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Verification Process default: hide registration drafts / incomplete docs
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
     }
 
