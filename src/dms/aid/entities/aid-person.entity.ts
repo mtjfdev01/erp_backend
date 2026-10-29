@@ -230,6 +230,10 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   address: string | null;
 
+  /** Where the person lives now (may differ from CNIC address). */
+  @Column({ type: "text", nullable: true, default: null })
+  current_address: string | null;
+
   @Column({ type: "varchar", length: 100, nullable: true, default: null })
   city: string | null;
 

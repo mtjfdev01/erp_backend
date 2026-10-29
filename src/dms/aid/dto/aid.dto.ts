@@ -258,6 +258,10 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  current_address?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(100)
   city?: string | null;
 
@@ -514,6 +518,10 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsString()
   address?: string | null;
+
+  @IsOptional()
+  @IsString()
+  current_address?: string | null;
 
   @IsOptional()
   @IsString()
