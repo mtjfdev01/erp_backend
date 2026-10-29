@@ -261,6 +261,14 @@ export class CreateAidPersonDto {
   current_address?: string | null;
 
   @IsOptional()
+  @IsObject()
+  thumb_impression?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  signature?: Record<string, unknown> | null;
+
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   city?: string | null;
@@ -522,6 +530,14 @@ export class UpdateAidPersonDto {
   @IsOptional()
   @IsString()
   current_address?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  thumb_impression?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  signature?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsString()

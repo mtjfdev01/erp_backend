@@ -412,8 +412,19 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.CLEAN_WATER
           ? dto.clean_water_details ?? null
           : null,
-      zakat_permission: dto.zakat_permission ?? null,
-      consent_form: dto.consent_form ?? null,
+      zakat_permission: dto.zakat_permission ?? {
+        lang: "ur",
+        declaration_accepted: false,
+        applicant_thumb: null,
+        applicant_signature: null,
+      },
+      consent_form: dto.consent_form ?? {
+        variant: "media",
+        lang: "ur",
+        consent_accepted: false,
+        applicant_thumb: null,
+        applicant_signature: null,
+      },
       missing_documents: missingDocs.length ? missingDocs : null,
       status: missingDocs.length
         ? AidApplicationStatus.INCOMPLETE_DOCS

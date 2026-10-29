@@ -234,6 +234,20 @@ export class AidPerson extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   current_address: string | null;
 
+  /**
+   * SecuGen (or uploaded) thumb impression capture object.
+   * Reused on Zakat / Consent forms wherever this person is the form subject.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  thumb_impression: Record<string, unknown> | null;
+
+  /**
+   * ePad (or uploaded) signature capture object.
+   * Reused on Zakat / Consent forms wherever this person is the form subject.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  signature: Record<string, unknown> | null;
+
   @Column({ type: "varchar", length: 100, nullable: true, default: null })
   city: string | null;
 

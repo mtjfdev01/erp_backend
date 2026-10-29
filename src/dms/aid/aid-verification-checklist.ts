@@ -9,12 +9,20 @@ export const AID_INVESTIGATION_STATUSES = [
 export type AidInvestigationStatus =
   (typeof AID_INVESTIGATION_STATUSES)[number];
 
+export type AidInvestigationAttachment = {
+  id?: number | null;
+  url: string;
+  name?: string | null;
+};
+
 export type AidInvestigationItemResult = {
   status: AidInvestigationStatus;
   note?: string | null;
   attachment_url?: string | null;
   attachment_name?: string | null;
   attachment_id?: number | null;
+  /** Site Visit (and similar) may carry multiple supporting files. */
+  attachments?: AidInvestigationAttachment[];
 };
 
 /** Which application view tab this claim belongs to (case = all / process). */
@@ -647,9 +655,68 @@ export function normalizeInvestigationEntry(
       raw.attachment_id != null && Number.isFinite(Number(raw.attachment_id))
         ? Number(raw.attachment_id)
         : null;
-    return { status, note, attachment_url, attachment_name, attachment_id };
+    const attachments: AidInvestigationAttachment[] = [];
+    if (Array.isArray(raw.attachments)) {
+      for (const file of raw.attachments) {
+        if (!file || typeof file !== "object") continue;
+        const f = file as Record<string, unknown>;
+        const url = String(
+          f.url || f.attachment_url || f.file_url || "",
+        ).trim();
+        if (!url) continue;
+        const id =
+          f.id != null && Number.isFinite(Number(f.id))
+            ? Number(f.id)
+            : f.attachment_id != null &&
+                Number.isFinite(Number(f.attachment_id))
+              ? Number(f.attachment_id)
+              : null;
+        attachments.push({
+          id,
+          url,
+          name:
+            typeof f.name === "string"
+              ? f.name
+              : typeof f.attachment_name === "string"
+                ? f.attachment_name
+                : typeof f.file_name === "string"
+                  ? f.file_name
+                  : null,
+        });
+      }
+    }
+    if (
+      attachment_url &&
+      !attachments.some(
+        (a) =>
+          a.url === attachment_url ||
+          (attachment_id != null && a.id === attachment_id),
+      )
+    ) {
+      attachments.unshift({
+        id: attachment_id,
+        url: attachment_url,
+        name: attachment_name,
+      });
+    }
+    const primary = attachments[0];
+    return {
+      status,
+      note,
+      attachments,
+      attachment_url: primary?.url || attachment_url,
+      attachment_name: primary?.name || attachment_name,
+      attachment_id: primary?.id ?? attachment_id,
+    };
   }
   return { status: "not_checked", note: null };
+}
+
+function hasInvestigationFile(entry: AidInvestigationItemResult): boolean {
+  if (Array.isArray(entry.attachments) && entry.attachments.length > 0) {
+    return entry.attachments.some((a) => !!String(a?.url || "").trim());
+  }
+  return !!String(entry.attachment_url || "").trim();
 }
 
 export function isInvestigationItemComplete(
@@ -664,7 +731,7 @@ export function isInvestigationItemComplete(
 ): boolean {
   const hasNote = String(entry.note || "").trim().length >= 3;
   if (item.accepts_file) {
-    const hasFile = !!String(entry.attachment_url || "").trim();
+    const hasFile = hasInvestigationFile(entry);
     if (!hasFile || entry.status !== "verified") return false;
     // Field process (e.g. Site Visit): Found note required with any status path
     if (item.kind === "process" && !hasNote) return false;
@@ -726,6 +793,9 @@ export function assertInvestigationComplete(
       attachment_url: entry.attachment_url || null,
       attachment_name: entry.attachment_name || null,
       attachment_id: entry.attachment_id ?? null,
+      ...(Array.isArray(entry.attachments) && entry.attachments.length
+        ? { attachments: entry.attachments }
+        : {}),
     };
     if (!isInvestigationItemComplete(item, payload[item.key])) {
       missing.push(

@@ -169,6 +169,12 @@ export class AidPeopleService {
     if (mapped.current_address !== undefined) {
       person.current_address = mapped.current_address;
     }
+    if (mapped.thumb_impression !== undefined) {
+      person.thumb_impression = mapped.thumb_impression;
+    }
+    if (mapped.signature !== undefined) {
+      person.signature = mapped.signature;
+    }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
     if (mapped.district !== undefined) person.district = mapped.district;
@@ -422,6 +428,18 @@ export class AidPeopleService {
         dto.current_address !== undefined
           ? dto.current_address?.trim() || null
           : undefined,
+      thumb_impression:
+        dto.thumb_impression !== undefined
+          ? dto.thumb_impression && typeof dto.thumb_impression === "object"
+            ? dto.thumb_impression
+            : null
+          : undefined,
+      signature:
+        dto.signature !== undefined
+          ? dto.signature && typeof dto.signature === "object"
+            ? dto.signature
+            : null
+          : undefined,
       city: dto.city !== undefined ? dto.city?.trim() || null : undefined,
       province:
         dto.province !== undefined ? dto.province?.trim() || null : undefined,
@@ -512,6 +530,8 @@ export class AidPeopleService {
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
       current_address: mapped.current_address ?? null,
+      thumb_impression: mapped.thumb_impression ?? null,
+      signature: mapped.signature ?? null,
       city: mapped.city ?? null,
       province: mapped.province ?? null,
       district: mapped.district ?? null,
@@ -953,6 +973,12 @@ export class AidPeopleService {
     if (mapped.address !== undefined) person.address = mapped.address;
     if (mapped.current_address !== undefined) {
       person.current_address = mapped.current_address;
+    }
+    if (mapped.thumb_impression !== undefined) {
+      person.thumb_impression = mapped.thumb_impression;
+    }
+    if (mapped.signature !== undefined) {
+      person.signature = mapped.signature;
     }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
