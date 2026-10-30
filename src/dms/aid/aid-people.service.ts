@@ -288,7 +288,14 @@ export class AidPeopleService {
       .map((row) => {
         const vehicle_type = String(row?.vehicle_type || "").trim();
         if (!vehicle_type) return null;
-        return { vehicle_type };
+        const entry: Record<string, unknown> = { vehicle_type };
+        const qty = Number(row?.quantity);
+        if (Number.isFinite(qty) && qty > 0) {
+          entry.quantity = Math.floor(qty);
+        }
+        const details = String(row?.details || "").trim();
+        if (details) entry.details = details;
+        return entry;
       })
       .filter(Boolean) as Record<string, unknown>[];
     return rows.length ? rows : null;

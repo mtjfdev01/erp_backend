@@ -978,6 +978,10 @@ export class AidApplicationsService {
       aid_history,
       investigation_items,
       vulnerability,
+      /** Embedded for edit hydrate — avoids a second people call that can empty the tree. */
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      kinship: personDetail?.kinship || null,
       /** @deprecated use investigation_items */
       verification_checklist_items: investigation_items,
     };
@@ -1593,21 +1597,25 @@ export class AidApplicationsService {
       app.case_source = dto.case_source || null;
     }
     if (dto.requested_aid_type !== undefined) {
+      const prevType = app.requested_aid_type;
       app.requested_aid_type = dto.requested_aid_type;
-      if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
-        app.education_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.RATION) {
-        app.ration_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
-        app.marriage_gift_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
-        app.financial_assistance_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
-        app.clean_water_details = null;
+      // Only clear other program JSON when the type actually changes
+      if (prevType !== dto.requested_aid_type) {
+        if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
+          app.education_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.RATION) {
+          app.ration_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
+          app.marriage_gift_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
+          app.financial_assistance_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
+          app.clean_water_details = null;
+        }
       }
     }
     if (dto.aid_program !== undefined) {
@@ -1700,10 +1708,26 @@ export class AidApplicationsService {
       ) {
         const prev = (app.investigation_recommendation ||
           {}) as Record<string, unknown>;
+        const incoming = dto.investigation_recommendation as Record<
+          string,
+          unknown
+        >;
         const recNorm = this.assertRecommendationValid(
           dto.investigation_recommendation as unknown as InvestigationRecommendationDto,
           "Recommendation",
         );
+        // Progress saves often omit ration_options — never wipe prior manager/CEO picks
+        const prevRation = Array.isArray(prev.ration_options)
+          ? prev.ration_options
+          : [];
+        const ration_options = Object.prototype.hasOwnProperty.call(
+          incoming,
+          "ration_options",
+        )
+          ? recNorm.ration_options
+          : prevRation.length
+            ? prevRation
+            : recNorm.ration_options;
         app.investigation_recommendation = {
           ...prev,
           decision: recNorm.decision,
@@ -1711,7 +1735,7 @@ export class AidApplicationsService {
           period_months: recNorm.period_months,
           remarks: recNorm.remarks,
           found_monthly_income: recNorm.found_monthly_income,
-          ration_options: recNorm.ration_options,
+          ration_options,
           updated_at: new Date().toISOString(),
           updated_by_id: user?.id ?? null,
         };
@@ -2325,6 +2349,14 @@ export class AidApplicationsService {
           note,
         );
       }
+    } else if (
+      !keys.length &&
+      app.status === AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
+      // All missing keys cleared — restore pipeline status (do not leave stuck Incomplete Docs)
+      app.status = app.submitted_at
+        ? AidApplicationStatus.UNDER_REVIEW
+        : AidApplicationStatus.DRAFT;
     }
   }
 
