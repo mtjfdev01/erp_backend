@@ -152,6 +152,14 @@ export class RecurringDonationsLedgerService {
         billingInterval: filters.billing_interval,
       });
     }
+    const donationMethodFilter = String(filters.donation_method || "")
+      .trim()
+      .toLowerCase();
+    if (donationMethodFilter) {
+      qb.andWhere("LOWER(COALESCE(rd.donation_method, '')) = :donationMethod", {
+        donationMethod: donationMethodFilter,
+      });
+    }
     // Online = Stripe / website; Offline = staff/manual (no website/stripe signal)
     const sourceFilter = String(filters.source || "")
       .trim()

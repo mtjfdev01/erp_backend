@@ -71,7 +71,7 @@ export class ReceiptAiExtractionService {
       "currency (ISO 4217 string like PKR/USD or null),",
       "donation_date (YYYY-MM-DD or null),",
       "donor_name (string or null),",
-      "donation_method (one of: bank_transfer, cash, cheque, card, other — or null),",
+      "donation_method (one of: bank_transfer, cash, cheque, card, whatsapp, other — or null),",
       "transaction_id (string or null),",
       "bank_name (string or null),",
       "notes (short string or null).",
@@ -132,6 +132,7 @@ export class ReceiptAiExtractionService {
       cheque: "cheque",
       check: "cheque",
       card: "card",
+      whatsapp: "whatsapp",
       other: "other",
     };
     if (donation_method) {

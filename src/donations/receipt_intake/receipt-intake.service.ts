@@ -93,10 +93,21 @@ export class ReceiptIntakeService {
       card: "credit_card",
       credit_card: "credit_card",
       online: "online",
+      whatsapp: "whatsapp",
       other: "bank_transfer",
     };
     if (raw && map[raw]) return map[raw];
-    if (raw && ["cash", "bank_transfer", "credit_card", "cheque", "online"].includes(raw)) {
+    if (
+      raw &&
+      [
+        "cash",
+        "bank_transfer",
+        "credit_card",
+        "cheque",
+        "online",
+        "whatsapp",
+      ].includes(raw)
+    ) {
       return raw;
     }
     return RECEIPT_INTAKE_DEFAULT_METHOD;

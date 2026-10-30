@@ -29,7 +29,7 @@ x-api-key: YOUR_API_KEY
 | `currency` | no | e.g. `PKR` (default if missing) |
 | `donation_date` | no | `YYYY-MM-DD` |
 | `donor_name` | no | Override OCR name |
-| `donation_method` | no | e.g. `bank_transfer`, `cash`, `cheque` |
+| `donation_method` | no | e.g. `bank_transfer`, `cash`, `cheque`, `whatsapp` |
 | `transaction_id` | no | |
 | `bank_name` | no | |
 | `notes` | no | |
