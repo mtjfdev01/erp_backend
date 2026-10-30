@@ -446,6 +446,14 @@ export class AidApplicationsService {
         (fm.person && String(fm.person.full_name || "").trim());
       if (!hasPerson) continue;
       try {
+        // Persist intake fields when linking an existing relative (same as update()).
+        if (fm.existing_person_id && fm.person) {
+          await this.peopleService.update(
+            Number(fm.existing_person_id),
+            fm.person as any,
+            user,
+          );
+        }
         await this.peopleService.addFamilyMember(beneficiaryId, fm, user);
       } catch (err) {
         if (err instanceof ConflictException) continue;

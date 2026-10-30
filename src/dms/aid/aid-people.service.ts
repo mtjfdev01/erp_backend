@@ -1095,6 +1095,7 @@ export class AidPeopleService {
   ) {
     await this.findOne(fromPersonId);
     let toPersonId = dto.existing_person_id;
+    let linkedExisting = !!toPersonId;
     if (!toPersonId && dto.person) {
       try {
         const created = await this.create(dto.person, user);
@@ -1107,7 +1108,10 @@ export class AidPeopleService {
             const existing = await this.findByCnicDigits(cnic, {
               activeOnly: true,
             });
-            if (existing) toPersonId = existing.id;
+            if (existing) {
+              toPersonId = existing.id;
+              linkedExisting = true;
+            }
           }
         }
         if (!toPersonId) throw err;
@@ -1117,6 +1121,10 @@ export class AidPeopleService {
       throw new BadRequestException(
         "Provide existing_person_id or person payload for the relative",
       );
+    }
+    // Existing / CNIC-reused rows must still receive intake fields (e.g. current_address).
+    if (linkedExisting && dto.person) {
+      await this.update(toPersonId, dto.person as UpdateAidPersonDto, user);
     }
     const edge = await this.addKinship(
       fromPersonId,
