@@ -23,6 +23,8 @@ export type AidInvestigationItemResult = {
   attachment_id?: number | null;
   /** Site Visit (and similar) may carry multiple supporting files. */
   attachments?: AidInvestigationAttachment[];
+  /** Free-text GPS paste from field app (e.g. "24.8607, 67.0011"). */
+  gps_coordinates?: string | null;
 };
 
 /** Which application view tab this claim belongs to (case = all / process). */
@@ -618,17 +620,35 @@ export function buildInvestigationItems(ctx: {
   ];
 }
 
+function normalizeGpsCoordinates(raw: Record<string, unknown>): string | null {
+  const direct = String(raw.gps_coordinates || "").trim();
+  if (direct.length >= 3) return direct;
+  const lat = raw.gps_latitude;
+  const lng = raw.gps_longitude;
+  if (lat != null && lat !== "" && lng != null && lng !== "") {
+    const paired = `${lat}, ${lng}`.trim();
+    return paired.length >= 3 ? paired : null;
+  }
+  return null;
+}
+
+export function hasInvestigationGps(
+  entry: AidInvestigationItemResult | null | undefined,
+): boolean {
+  return String(entry?.gps_coordinates || "").trim().length >= 3;
+}
+
 export function normalizeInvestigationEntry(
   value: unknown,
 ): AidInvestigationItemResult {
   if (value === true || value === "verified") {
-    return { status: "verified", note: null };
+    return { status: "verified", note: null, gps_coordinates: null };
   }
   if (value === false || value === "not_checked" || value == null) {
-    return { status: "not_checked", note: null };
+    return { status: "not_checked", note: null, gps_coordinates: null };
   }
   if (value === "mismatch") {
-    return { status: "mismatch", note: null };
+    return { status: "mismatch", note: null, gps_coordinates: null };
   }
   if (typeof value === "object" && value !== null) {
     const raw = value as Record<string, unknown>;
@@ -707,9 +727,10 @@ export function normalizeInvestigationEntry(
       attachment_url: primary?.url || attachment_url,
       attachment_name: primary?.name || attachment_name,
       attachment_id: primary?.id ?? attachment_id,
+      gps_coordinates: normalizeGpsCoordinates(raw),
     };
   }
-  return { status: "not_checked", note: null };
+  return { status: "not_checked", note: null, gps_coordinates: null };
 }
 
 function hasInvestigationFile(entry: AidInvestigationItemResult): boolean {
@@ -735,6 +756,7 @@ export function isInvestigationItemComplete(
     if (!hasFile || entry.status !== "verified") return false;
     // Field process (e.g. Site Visit): Found note required with any status path
     if (item.kind === "process" && !hasNote) return false;
+    if (item.key === "site_visit" && !hasInvestigationGps(entry)) return false;
     return true;
   }
   if (item.kind === "process" || item.allow_mismatch === false) {
@@ -781,6 +803,7 @@ export function assertInvestigationComplete(
       checklistEntryForItem(checklist, item.key),
     );
     const noteTrimmed = entry.note ? String(entry.note).trim() : "";
+    const gpsTrimmed = String(entry.gps_coordinates || "").trim();
     payload[item.key] = {
       status: entry.status,
       // Persist Found notes for field process at any status, and for claim mismatches
@@ -796,14 +819,19 @@ export function assertInvestigationComplete(
       ...(Array.isArray(entry.attachments) && entry.attachments.length
         ? { attachments: entry.attachments }
         : {}),
+      ...(item.key === "site_visit" || gpsTrimmed
+        ? { gps_coordinates: gpsTrimmed || null }
+        : {}),
     };
     if (!isInvestigationItemComplete(item, payload[item.key])) {
       missing.push(
-        item.accepts_file
-          ? `${item.label} (file + Found note required)`
-          : item.kind === "process"
-            ? `${item.label} (Verified + Found note)`
-            : item.label,
+        item.key === "site_visit"
+          ? `${item.label} (file + Found note + GPS required)`
+          : item.accepts_file
+            ? `${item.label} (file + Found note required)`
+            : item.kind === "process"
+              ? `${item.label} (Verified + Found note)`
+              : item.label,
       );
     }
   }

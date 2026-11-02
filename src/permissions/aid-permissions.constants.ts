@@ -167,6 +167,12 @@ export const AID_APPLICATIONS_BULK_VERIFY_GUARD = [
   ...STAFF,
 ] as const;
 
+/** MEAL section on Preview tab (edit verification / recommendation / remarks). */
+export const AID_APPLICATIONS_MEAL_EDIT_GUARD = [
+  ...apps("meal_edit"),
+  ...STAFF,
+] as const;
+
 /** Disbursements queue list */
 export const AID_DISBURSEMENTS_LIST_GUARD = [
   ...disb("list_view"),

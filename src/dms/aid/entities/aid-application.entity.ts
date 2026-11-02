@@ -173,6 +173,20 @@ export class AidApplication extends BaseEntity {
   @Column({ type: "jsonb", nullable: true, default: null })
   investigation_recommendation: Record<string, unknown> | null;
 
+  /**
+   * MEAL review (Preview tab):
+   * verification_status, recommendation_status, remarks, locked.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  meal_review: Record<string, unknown> | null;
+
+  /**
+   * Approval block on Preview tab (draft until locked):
+   * decision, remarks, approved_support, approved_amount, locked.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  preview_approval: Record<string, unknown> | null;
+
   /** Required when approving/verifying despite cooldown or same-year prior success. */
   @Column({ type: "text", nullable: true, default: null })
   leakage_override_reason: string | null;

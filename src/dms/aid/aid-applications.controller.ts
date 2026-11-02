@@ -25,6 +25,7 @@ import {
   AID_APPLICATIONS_DELETE_GUARD,
   AID_APPLICATIONS_DELIVER_GUARD,
   AID_APPLICATIONS_LIST_GUARD,
+  AID_APPLICATIONS_MEAL_EDIT_GUARD,
   AID_APPLICATIONS_UPDATE_GUARD,
   AID_APPLICATIONS_VIEW_GUARD,
   AID_PEOPLE_UPDATE_GUARD,
@@ -45,6 +46,8 @@ import {
   SetAidAttachmentMissingDto,
   SetAidMissingDocumentsDto,
   UpdateAidApplicationDto,
+  UpdateMealReviewDto,
+  UpdatePreviewApprovalDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 
@@ -338,6 +341,46 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Application updated",
+      data,
+    });
+  }
+
+  @Patch(":id/meal")
+  @RequiredPermissions([...AID_APPLICATIONS_MEAL_EDIT_GUARD])
+  async updateMeal(
+    @Param("id") id: string,
+    @Body() dto: UpdateMealReviewDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.updateMealReview(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "MEAL review saved",
+      data,
+    });
+  }
+
+  @Patch(":id/preview-approval")
+  @RequiredPermissions([...AID_APPLICATIONS_CEO_GUARD])
+  async updatePreviewApproval(
+    @Param("id") id: string,
+    @Body() dto: UpdatePreviewApprovalDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.updatePreviewApproval(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Approval section saved",
       data,
     });
   }

@@ -45,6 +45,8 @@ import {
   ManagerForwardAidApplicationDto,
   RejectAidApplicationDto,
   UpdateAidApplicationDto,
+  UpdateMealReviewDto,
+  UpdatePreviewApprovalDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 import { AidApplication } from "./entities/aid-application.entity";
@@ -208,6 +210,189 @@ export class AidApplicationsService {
     throw new ForbiddenException(
       "You do not have permission to edit this recommendation",
     );
+  }
+
+  /** MEAL Preview section: meal_edit permission or staff elevated. */
+  private async assertCanEditMeal(user?: User) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising_manager",
+      )
+    ) {
+      return;
+    }
+    const keys = [
+      "program.aid_applications.meal_edit",
+      "fund_raising.aid_applications.meal_edit",
+    ];
+    for (const key of keys) {
+      if (await this.permissionsService.hasPermission(Number(user.id), key)) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      "You do not have permission to edit the MEAL section",
+    );
+  }
+
+  private normalizeMealReview(
+    raw: Record<string, unknown> | null | undefined,
+    previous: Record<string, unknown> | null = null,
+  ): Record<string, unknown> | null {
+    if (raw == null) return null;
+    const prev = previous && typeof previous === "object" ? previous : {};
+    if (prev.locked === true) {
+      throw new BadRequestException(
+        "MEAL section is locked and cannot be edited",
+      );
+    }
+    const verificationAllowed = new Set([
+      "verified",
+      "not_verified",
+      "skipped",
+    ]);
+    const recommendationAllowed = new Set([
+      "recommended",
+      "not_recommended",
+    ]);
+
+    let verification_status: string | null =
+      prev.verification_status != null
+        ? String(prev.verification_status)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "verification_status")) {
+      const v = raw.verification_status;
+      if (v == null || v === "") verification_status = null;
+      else {
+        const s = String(v).toLowerCase();
+        verification_status = verificationAllowed.has(s) ? s : null;
+      }
+    }
+
+    let recommendation_status: string | null =
+      prev.recommendation_status != null
+        ? String(prev.recommendation_status)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "recommendation_status")) {
+      const v = raw.recommendation_status;
+      if (v == null || v === "") recommendation_status = null;
+      else {
+        const s = String(v).toLowerCase();
+        recommendation_status = recommendationAllowed.has(s) ? s : null;
+      }
+    }
+
+    let remarks: string | null =
+      prev.remarks != null ? String(prev.remarks) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "remarks")) {
+      const r = raw.remarks;
+      remarks =
+        r == null || String(r).trim() === "" ? null : String(r).trim();
+    }
+
+    const locked =
+      raw.locked === true || prev.locked === true ? true : false;
+
+    return {
+      verification_status,
+      recommendation_status,
+      remarks,
+      locked,
+      ...(locked
+        ? { locked_at: new Date().toISOString() }
+        : {}),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  private normalizePreviewApproval(
+    raw: Record<string, unknown> | null | undefined,
+    previous: Record<string, unknown> | null = null,
+  ): Record<string, unknown> | null {
+    if (raw == null) return null;
+    const prev = previous && typeof previous === "object" ? previous : {};
+    if (prev.locked === true) {
+      throw new BadRequestException(
+        "Approval section is locked and cannot be edited",
+      );
+    }
+    const decisionAllowed = new Set([
+      "approved",
+      "approved_with_changes",
+      "rejected",
+      "re_investigate",
+    ]);
+
+    let decision: string | null =
+      prev.decision != null ? String(prev.decision) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "decision")) {
+      const v = raw.decision;
+      if (v == null || v === "") decision = null;
+      else {
+        const s = String(v).toLowerCase();
+        decision = decisionAllowed.has(s) ? s : null;
+      }
+    }
+
+    let remarks: string | null =
+      prev.remarks != null ? String(prev.remarks) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "remarks")) {
+      const r = raw.remarks;
+      remarks =
+        r == null || String(r).trim() === "" ? null : String(r).trim();
+    }
+
+    let approved_support: string | null =
+      prev.approved_support != null ? String(prev.approved_support) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "approved_support")) {
+      const s = raw.approved_support;
+      approved_support =
+        s == null || String(s).trim() === "" ? null : String(s).trim();
+    }
+
+    let approved_amount: number | null =
+      prev.approved_amount != null && Number.isFinite(Number(prev.approved_amount))
+        ? Number(prev.approved_amount)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "approved_amount")) {
+      const a = raw.approved_amount;
+      if (a == null || a === "") approved_amount = null;
+      else {
+        const n = Number(a);
+        approved_amount = Number.isFinite(n) ? n : null;
+      }
+    }
+
+    const locked =
+      raw.locked === true || prev.locked === true ? true : false;
+
+    return {
+      decision,
+      remarks,
+      approved_support,
+      approved_amount,
+      locked,
+      ...(locked ? { locked_at: new Date().toISOString() } : {}),
+      updated_at: new Date().toISOString(),
+    };
   }
 
   /**
@@ -1701,6 +1886,14 @@ export class AidApplicationsService {
           ? dto.verification_checklist
           : null;
     }
+    if (dto.meal_review !== undefined) {
+      await this.assertCanEditMeal(user);
+      app.meal_review = this.normalizeMealReview(
+        dto.meal_review as Record<string, unknown> | null,
+        (app.meal_review as Record<string, unknown> | null) || null,
+      );
+    }
+
     if (dto.investigation_recommendation !== undefined) {
       if (
         dto.investigation_recommendation &&
@@ -1771,6 +1964,46 @@ export class AidApplicationsService {
       }
     }
 
+    return this.findOne(id);
+  }
+
+  /** Save MEAL review from Preview tab (requires meal_edit). */
+  async updateMealReview(
+    id: number,
+    dto: UpdateMealReviewDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    await this.assertCanEditMeal(user);
+    app.meal_review = this.normalizeMealReview(
+      dto as unknown as Record<string, unknown>,
+      (app.meal_review as Record<string, unknown> | null) || null,
+    );
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
+  /** Save Approval block on Preview tab (requires ceo_approve). */
+  async updatePreviewApproval(
+    id: number,
+    dto: UpdatePreviewApprovalDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    await this.assertCanCeoEditRecommendation(user);
+    app.preview_approval = this.normalizePreviewApproval(
+      dto as unknown as Record<string, unknown>,
+      (app.preview_approval as Record<string, unknown> | null) || null,
+    );
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
     return this.findOne(id);
   }
 

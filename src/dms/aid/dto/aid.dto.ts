@@ -881,6 +881,11 @@ export class UpdateAidApplicationDto {
   @IsObject()
   investigation_recommendation?: Record<string, unknown> | null;
 
+  /** MEAL review on Preview tab (also use PATCH :id/meal). */
+  @IsOptional()
+  @IsObject()
+  meal_review?: UpdateMealReviewDto | Record<string, unknown> | null;
+
   /** Patch beneficiary person fields (same shape as create person). */
   @IsOptional()
   @IsObject()
@@ -894,6 +899,67 @@ export class UpdateAidApplicationDto {
   /** Add new family members (existing links are ignored on conflict). */
   @IsOptional()
   family_members?: CreateAidFamilyMemberDto[];
+}
+
+/** MEAL section on application Preview tab. */
+export class UpdateMealReviewDto {
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn(["verified", "not_verified", "skipped"])
+  verification_status?: "verified" | "not_verified" | "skipped" | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn(["recommended", "not_recommended"])
+  recommendation_status?: "recommended" | "not_recommended" | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  remarks?: string | null;
+
+  /** When true, section is frozen (no further edits). */
+  @IsOptional()
+  @IsBoolean()
+  locked?: boolean;
+}
+
+/** Approval block on Preview tab (editable until locked). */
+export class UpdatePreviewApprovalDto {
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn([
+    "approved",
+    "approved_with_changes",
+    "rejected",
+    "re_investigate",
+  ])
+  decision?:
+    | "approved"
+    | "approved_with_changes"
+    | "rejected"
+    | "re_investigate"
+    | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  remarks?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  approved_support?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @Type(() => Number)
+  @IsNumber()
+  approved_amount?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  locked?: boolean;
 }
 
 export class RejectAidApplicationDto {
