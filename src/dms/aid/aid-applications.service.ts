@@ -1800,9 +1800,16 @@ export class AidApplicationsService {
   async update(id: number, dto: UpdateAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
+    const programManagerReopeningRejected =
+      app.status === AidApplicationStatus.REJECTED &&
+      dto.investigation_recommendation !== undefined &&
+      (await this.isProgramDepartmentManager(user));
+    if (app.status === AidApplicationStatus.DELIVERED) {
+      throw new BadRequestException("Cannot edit a closed application");
+    }
     if (
-      app.status === AidApplicationStatus.REJECTED ||
-      app.status === AidApplicationStatus.DELIVERED
+      app.status === AidApplicationStatus.REJECTED &&
+      !programManagerReopeningRejected
     ) {
       throw new BadRequestException("Cannot edit a closed application");
     }
@@ -1835,10 +1842,18 @@ export class AidApplicationsService {
     };
 
     if (dto.verification_checklist !== undefined) {
+      if (programManagerReopeningRejected) {
+        // Checklist edits not allowed while reopening a rejected case — recommendation only.
+        throw new BadRequestException(
+          "Reopen rejected applications by updating recommendation only",
+        );
+      }
       await this.assertCanPerformInvestigation(app, user);
     } else if (dto.investigation_recommendation !== undefined) {
       // Manager / CEO may edit recommendation from listing popup without being assignee
-      if (
+      if (programManagerReopeningRejected) {
+        /* Program manager overrides investigator reject (old flow) */
+      } else if (
         app.status === AidApplicationStatus.MANAGER_REVIEW ||
         app.status === AidApplicationStatus.VERIFICATION_COMPLETED
       ) {
@@ -2037,9 +2052,21 @@ export class AidApplicationsService {
           ration_options,
           updated_at: new Date().toISOString(),
           updated_by_id: user?.id ?? null,
+          ...(programManagerReopeningRejected
+            ? {
+                manager_override: true,
+                reopened_from_rejected_at: new Date().toISOString(),
+                reopened_from_rejected_by_id: user?.id ?? null,
+              }
+            : {}),
         };
       } else {
         app.investigation_recommendation = null;
+      }
+      // Old-flow investigator Reject closed the case — manager edit reopens pipeline.
+      if (programManagerReopeningRejected) {
+        app.status = AidApplicationStatus.MANAGER_REVIEW;
+        app.rejection_reason = null;
       }
     }
     if (app.status === AidApplicationStatus.SUBMITTED) {
@@ -2649,11 +2676,15 @@ export class AidApplicationsService {
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     if (
       app.status !== AidApplicationStatus.MANAGER_REVIEW &&
-      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED
+      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED &&
+      app.status !== AidApplicationStatus.REJECTED
     ) {
       throw new BadRequestException(
-        "Only applications in Verification Completed or Manager Review can be forwarded to CEO",
+        "Only applications in Verification Completed, Manager Review, or Rejected (manager override) can be forwarded to CEO",
       );
+    }
+    if (app.status === AidApplicationStatus.REJECTED) {
+      app.rejection_reason = null;
     }
 
     const prev = (app.investigation_recommendation ||
