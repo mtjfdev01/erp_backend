@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { ApiKeysModule } from "../../api-keys/api-keys.module";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { UsersModule } from "../../users/users.module";
 import { S3StorageModule } from "../../utils/storage/s3-storage.module";
@@ -24,6 +25,8 @@ import { AidPerson } from "./entities/aid-person.entity";
 import { AidAuditController } from "./audit/aid-audit.controller";
 import { AidAuditService } from "./audit/aid-audit.service";
 import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-log.entity";
+import { AskClinicBeneficiariesController } from "./integrations/ask-clinic-beneficiaries.controller";
+import { AskClinicBeneficiariesService } from "./integrations/ask-clinic-beneficiaries.service";
 
 @Module({
   imports: [
@@ -44,6 +47,7 @@ import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-l
     PermissionsModule,
     UsersModule,
     S3StorageModule,
+    ApiKeysModule,
   ],
   controllers: [
     AidPeopleController,
@@ -52,6 +56,7 @@ import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-l
     AidApplicationsController,
     AidDisbursementsController,
     AidAuditController,
+    AskClinicBeneficiariesController,
   ],
   providers: [
     AidPeopleService,
@@ -60,6 +65,7 @@ import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-l
     AidOverviewService,
     AidDisbursementsService,
     AidAuditService,
+    AskClinicBeneficiariesService,
   ],
   exports: [
     AidPeopleService,
@@ -68,6 +74,7 @@ import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-l
     AidOverviewService,
     AidDisbursementsService,
     AidAuditService,
+    AskClinicBeneficiariesService,
     TypeOrmModule,
   ],
 })

@@ -21,6 +21,6 @@ import { JwtModule } from "@nestjs/jwt";
   ],
   controllers: [ExternalController, ExternalApiKeysController],
   providers: [ExternalApiKeyGuard, ExternalApiKeysService],
-  exports: [ExternalApiKeysService],
+  exports: [ExternalApiKeysService, ExternalApiKeyGuard],
 })
 export class ExternalModule {}
