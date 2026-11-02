@@ -29,6 +29,11 @@ curl -X GET "https://mtjf-erp-backend.up.railway.app/external/v1/beneficiaries?q
 
 ## Create an Ask Clinic API key (staff)
 
+**UI:** Admin sidebar → **API Keys** → `/admin/api-keys`  
+(Create key, copy once, activate/deactivate, revoke.)
+
+Or via API:
+
 ```http
 POST /api-keys
 Authorization: (ERP JWT cookie)
