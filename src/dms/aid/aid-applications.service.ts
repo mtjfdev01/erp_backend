@@ -131,9 +131,20 @@ export class AidApplicationsService {
       return true;
     }
     if (user.department !== Department.PROGRAM) return false;
-    return this.permissionsService.hasPermission(
-      Number(user.id),
-      "program_manager",
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return true;
+    }
+    // Department managers often have role=manager without the program_manager flag
+    const role = String(user.role || "").toLowerCase();
+    return (
+      role === "manager" ||
+      role === "assistant_manager" ||
+      role === "dept_head"
     );
   }
 
