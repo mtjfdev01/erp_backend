@@ -39,6 +39,7 @@ import { AidPeopleService } from "./aid-people.service";
 import {
   ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
+  CompleteVerificationAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
   InvestigationRecommendationDto,
@@ -60,6 +61,20 @@ import {
   type EntityLookupParams,
   type LookupOption,
 } from "../../utils/lookup";
+import { AidAuditService } from "./audit/aid-audit.service";
+import {
+  AID_AUDIT_ACTIONS,
+  AID_AUDIT_SOURCE,
+} from "./audit/aid-audit.constants";
+import {
+  aidAuditUserId,
+  buildAidFieldChanges,
+  buildAidStatusChange,
+  buildChecklistStatusChanges,
+  buildJsonObjectChanges,
+  serializeAidAuditValue,
+} from "./audit/aid-audit.util";
+import type { AidAuditChange } from "./audit/aid-audit.types";
 
 @Injectable()
 export class AidApplicationsService {
@@ -76,7 +91,35 @@ export class AidApplicationsService {
     private readonly usersService: UsersService,
     private readonly permissionsService: PermissionsService,
     private readonly s3: S3StorageService,
+    private readonly aidAudit: AidAuditService,
   ) {}
+
+  private async safeAudit(params: {
+    app: Pick<AidApplication, "id" | "application_no">;
+    action: string;
+    changes: AidAuditChange[];
+    user?: User | null;
+    metadata?: Record<string, unknown> | null;
+  }) {
+    if (!params.changes?.length && !params.metadata) return;
+    await this.aidAudit.log({
+      applicationId: Number(params.app.id),
+      applicationNo: params.app.application_no ?? null,
+      action: params.action,
+      source: AID_AUDIT_SOURCE.STAFF_UI,
+      changes: params.changes?.length
+        ? params.changes
+        : [
+            {
+              field: "record",
+              old_value: null,
+              new_value: params.action,
+            },
+          ],
+      performedByUserId: aidAuditUserId(params.user?.id),
+      metadata: params.metadata ?? null,
+    });
+  }
 
   /** Program manager in Program dept (or super admin) — can skip/forward to CEO. */
   private async isProgramDepartmentManager(user?: User): Promise<boolean> {
@@ -646,6 +689,28 @@ export class AidApplicationsService {
       }
     }
 
+    await this.safeAudit({
+      app: saved,
+      action: AID_AUDIT_ACTIONS.CREATED,
+      user,
+      changes: [
+        {
+          field: "status",
+          old_value: null,
+          new_value: serializeAidAuditValue(saved.status),
+        },
+        {
+          field: "application_no",
+          old_value: null,
+          new_value: serializeAidAuditValue(saved.application_no),
+        },
+      ],
+      metadata: {
+        requested_aid_type: saved.requested_aid_type,
+        aid_program: saved.aid_program,
+      },
+    });
+
     return this.findOne(saved.id);
   }
 
@@ -670,13 +735,19 @@ export class AidApplicationsService {
         qb.andWhere("a.status = :st", { st: AidApplicationStatus.SUBMITTED });
         break;
       case "investigation":
-        qb.andWhere("a.status = :st", {
-          st: AidApplicationStatus.UNDER_REVIEW,
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.UNDER_REVIEW,
+            AidApplicationStatus.VERIFICATION_COMPLETED,
+          ],
         });
         break;
       case "manager_review":
-        qb.andWhere("a.status = :st", {
-          st: AidApplicationStatus.MANAGER_REVIEW,
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.MANAGER_REVIEW,
+            AidApplicationStatus.VERIFICATION_COMPLETED,
+          ],
         });
         break;
       case "pending_approval":
@@ -749,6 +820,7 @@ export class AidApplicationsService {
         return "submitted";
       case AidApplicationStatus.UNDER_REVIEW:
         return "investigation";
+      case AidApplicationStatus.VERIFICATION_COMPLETED:
       case AidApplicationStatus.MANAGER_REVIEW:
         return "manager_review";
       case AidApplicationStatus.CEO_APPROVAL_REQUIRED:
@@ -1735,12 +1807,46 @@ export class AidApplicationsService {
       throw new BadRequestException("Cannot edit a closed application");
     }
 
+    const beforeSnapshot: Record<string, unknown> = {
+      status: app.status,
+      title: app.title,
+      request_summary: app.request_summary,
+      case_source: app.case_source,
+      requested_aid_type: app.requested_aid_type,
+      aid_program: app.aid_program,
+      expected_amount: app.expected_amount,
+      expected_amount_max: app.expected_amount_max,
+      assigned_to_user_id: app.assigned_to_user_id,
+      writer_person_id: app.writer_person_id,
+      writer_relation: app.writer_relation,
+      verification_notes: app.verification_notes,
+      rejection_reason: app.rejection_reason,
+      leakage_override_reason: app.leakage_override_reason,
+      household_id: app.household_id,
+      verification_checklist: app.verification_checklist
+        ? JSON.parse(JSON.stringify(app.verification_checklist))
+        : null,
+      investigation_recommendation: app.investigation_recommendation
+        ? JSON.parse(JSON.stringify(app.investigation_recommendation))
+        : null,
+      meal_review: app.meal_review
+        ? JSON.parse(JSON.stringify(app.meal_review))
+        : null,
+    };
+
     if (dto.verification_checklist !== undefined) {
       await this.assertCanPerformInvestigation(app, user);
     } else if (dto.investigation_recommendation !== undefined) {
       // Manager / CEO may edit recommendation from listing popup without being assignee
-      if (app.status === AidApplicationStatus.MANAGER_REVIEW) {
-        await this.assertCanAssignApplication(user);
+      if (
+        app.status === AidApplicationStatus.MANAGER_REVIEW ||
+        app.status === AidApplicationStatus.VERIFICATION_COMPLETED
+      ) {
+        if (await this.isProgramDepartmentManager(user)) {
+          /* Program manager recommendation after field process */
+        } else {
+          await this.assertCanAssignApplication(user);
+        }
       } else if (app.status === AidApplicationStatus.CEO_APPROVAL_REQUIRED) {
         await this.assertCanCeoEditRecommendation(user);
       } else {
@@ -1964,6 +2070,72 @@ export class AidApplicationsService {
       }
     }
 
+    const afterSnapshot: Record<string, unknown> = {
+      status: app.status,
+      title: app.title,
+      request_summary: app.request_summary,
+      case_source: app.case_source,
+      requested_aid_type: app.requested_aid_type,
+      aid_program: app.aid_program,
+      expected_amount: app.expected_amount,
+      expected_amount_max: app.expected_amount_max,
+      assigned_to_user_id: app.assigned_to_user_id,
+      writer_person_id: app.writer_person_id,
+      writer_relation: app.writer_relation,
+      verification_notes: app.verification_notes,
+      rejection_reason: app.rejection_reason,
+      leakage_override_reason: app.leakage_override_reason,
+      household_id: app.household_id,
+    };
+    const fieldChanges = buildAidFieldChanges(beforeSnapshot, afterSnapshot);
+    const checklistChanges = buildChecklistStatusChanges(
+      beforeSnapshot.verification_checklist as Record<string, unknown> | null,
+      (app.verification_checklist as Record<string, unknown> | null) || null,
+    );
+    const recChanges = buildJsonObjectChanges(
+      "recommendation",
+      beforeSnapshot.investigation_recommendation as
+        | Record<string, unknown>
+        | null,
+      (app.investigation_recommendation as Record<string, unknown> | null) ||
+        null,
+      ["decision", "amount", "period_months", "remarks", "ration_options"],
+    );
+    const mealChanges = buildJsonObjectChanges(
+      "meal_review",
+      beforeSnapshot.meal_review as Record<string, unknown> | null,
+      (app.meal_review as Record<string, unknown> | null) || null,
+      [
+        "verification_status",
+        "recommendation_status",
+        "remarks",
+        "locked",
+      ],
+    );
+    const allChanges = [
+      ...fieldChanges,
+      ...checklistChanges,
+      ...recChanges,
+      ...mealChanges,
+    ];
+    if (allChanges.length) {
+      const statusOnly =
+        allChanges.length === 1 && allChanges[0].field === "status";
+      const assigneeOnly =
+        allChanges.length === 1 &&
+        allChanges[0].field === "assigned_to_user_id";
+      await this.safeAudit({
+        app,
+        action: statusOnly
+          ? AID_AUDIT_ACTIONS.STATUS_CHANGED
+          : assigneeOnly
+            ? AID_AUDIT_ACTIONS.ASSIGNEE_CHANGED
+            : AID_AUDIT_ACTIONS.UPDATED,
+        user,
+        changes: allChanges,
+      });
+    }
+
     return this.findOne(id);
   }
 
@@ -1978,12 +2150,38 @@ export class AidApplicationsService {
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     await this.assertCanEditMeal(user);
+    const before = (app.meal_review as Record<string, unknown> | null) || null;
     app.meal_review = this.normalizeMealReview(
       dto as unknown as Record<string, unknown>,
-      (app.meal_review as Record<string, unknown> | null) || null,
+      before,
     );
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    const mealChanges = buildJsonObjectChanges(
+      "meal_review",
+      before,
+      (app.meal_review as Record<string, unknown> | null) || null,
+      [
+        "verification_status",
+        "recommendation_status",
+        "remarks",
+        "locked",
+      ],
+    );
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MEAL_UPDATED,
+      user,
+      changes: mealChanges.length
+        ? mealChanges
+        : [
+            {
+              field: "meal_review",
+              old_value: serializeAidAuditValue(before),
+              new_value: serializeAidAuditValue(app.meal_review),
+            },
+          ],
+    });
     return this.findOne(id);
   }
 
@@ -1998,12 +2196,40 @@ export class AidApplicationsService {
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     await this.assertCanCeoEditRecommendation(user);
+    const before =
+      (app.preview_approval as Record<string, unknown> | null) || null;
     app.preview_approval = this.normalizePreviewApproval(
       dto as unknown as Record<string, unknown>,
-      (app.preview_approval as Record<string, unknown> | null) || null,
+      before,
     );
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    const approvalChanges = buildJsonObjectChanges(
+      "preview_approval",
+      before,
+      (app.preview_approval as Record<string, unknown> | null) || null,
+      [
+        "decision",
+        "remarks",
+        "approved_support",
+        "approved_amount",
+        "locked",
+      ],
+    );
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.PREVIEW_APPROVAL_UPDATED,
+      user,
+      changes: approvalChanges.length
+        ? approvalChanges
+        : [
+            {
+              field: "preview_approval",
+              old_value: serializeAidAuditValue(before),
+              new_value: serializeAidAuditValue(app.preview_approval),
+            },
+          ],
+    });
     return this.findOne(id);
   }
 
@@ -2043,11 +2269,26 @@ export class AidApplicationsService {
       );
     }
 
+    const prevStatus = app.status;
+    const prevAssignee = app.assigned_to_user_id;
     app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
     app.submitted_at = new Date();
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.DRAFT_APPROVED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "assigned_to_user_id",
+          old_value: serializeAidAuditValue(prevAssignee),
+          new_value: serializeAidAuditValue(assigneeId),
+        },
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -2079,12 +2320,30 @@ export class AidApplicationsService {
       );
     }
     const reason = String(dto?.reason || "").trim();
+    const prevStatus = app.status;
     app.status = AidApplicationStatus.INCOMPLETE;
     if (reason) {
       app.verification_notes = reason;
     }
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MARKED_INCOMPLETE,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...(reason
+          ? [
+              {
+                field: "verification_notes",
+                old_value: null,
+                new_value: reason,
+              } as AidAuditChange,
+            ]
+          : []),
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -2110,10 +2369,17 @@ export class AidApplicationsService {
         "Assign a program user via Consider before resuming to verification",
       );
     }
+    const prevStatus = app.status;
     app.status = AidApplicationStatus.SUBMITTED;
     if (!app.submitted_at) app.submitted_at = new Date();
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.RESUMED,
+      user,
+      changes: buildAidStatusChange(prevStatus, app.status),
+    });
     return this.findOne(id);
   }
 
@@ -2132,10 +2398,91 @@ export class AidApplicationsService {
     if (reason.length < 2) {
       throw new BadRequestException("rejection_reason is required");
     }
+    const prevStatus = app.status;
     app.status = AidApplicationStatus.REJECTED;
     app.rejection_reason = reason;
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.REJECTED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "rejection_reason",
+          old_value: null,
+          new_value: reason,
+        },
+      ],
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Field Process done — status → verification_completed (awaiting Program manager).
+   * Does not require recommendation (manager fills that next).
+   */
+  async markVerificationCompleted(
+    id: number,
+    dto: CompleteVerificationAidApplicationDto = {},
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      ![
+        AidApplicationStatus.SUBMITTED,
+        AidApplicationStatus.UNDER_REVIEW,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "Only submitted/under_review applications can be marked verification completed",
+      );
+    }
+    await this.assertCanPerformInvestigation(app, user);
+    const investigationItems = await this.buildInvestigationForApp(app);
+    const checklistSource =
+      (dto.verification_checklist as Record<string, unknown> | undefined) ||
+      (app.verification_checklist as Record<string, unknown> | null) ||
+      {};
+    let checklistPayload: Record<string, unknown>;
+    try {
+      checklistPayload = assertInvestigationComplete(
+        investigationItems,
+        checklistSource,
+      );
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message ||
+          "Complete field process / investigation checklist before marking verification completed",
+      );
+    }
+
+    const prevStatus = app.status;
+    const prevChecklist =
+      (app.verification_checklist as Record<string, unknown> | null) || null;
+    app.verification_checklist = checklistPayload;
+    if (dto.verification_notes !== undefined) {
+      const notes = String(dto.verification_notes || "").trim();
+      app.verification_notes = notes || app.verification_notes;
+    }
+    app.status = AidApplicationStatus.VERIFICATION_COMPLETED;
+    app.verified_at = app.verified_at || new Date();
+    app.verified_by_id = app.verified_by_id ?? user?.id ?? null;
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFICATION_COMPLETED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...buildChecklistStatusChanges(prevChecklist, checklistPayload),
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -2149,13 +2496,17 @@ export class AidApplicationsService {
       ![
         AidApplicationStatus.SUBMITTED,
         AidApplicationStatus.UNDER_REVIEW,
+        AidApplicationStatus.VERIFICATION_COMPLETED,
       ].includes(app.status)
     ) {
       throw new BadRequestException(
-        "Only submitted/under_review applications can be verified",
+        "Only submitted/under_review/verification_completed applications can be verified",
       );
     }
     await this.assertCanPerformInvestigation(app, user);
+    const prevStatus = app.status;
+    const prevChecklist =
+      (app.verification_checklist as Record<string, unknown> | null) || null;
     const investigationItems = await this.buildInvestigationForApp(app);
     let checklistPayload: Record<string, unknown>;
     try {
@@ -2169,10 +2520,35 @@ export class AidApplicationsService {
       );
     }
 
-    const recNorm = this.assertRecommendationValid(
-      dto.recommendation,
-      "Investigation recommendation",
-    );
+    const skipToCeo = await this.isProgramDepartmentManager(user);
+    // Recommendation is Program-dept manager only (same rule as Consider & assign).
+    // Investigators may verify checklist without filling recommendation.
+    const hasIncomingRec =
+      !!dto.recommendation &&
+      (!!dto.recommendation.decision ||
+        (Array.isArray(dto.recommendation.ration_options) &&
+          dto.recommendation.ration_options.length > 0) ||
+        String(dto.recommendation.remarks || "").trim().length >= 3);
+    const recNorm = skipToCeo
+      ? this.assertRecommendationValid(
+          dto.recommendation,
+          "Investigation recommendation",
+        )
+      : hasIncomingRec
+        ? this.assertRecommendationValid(
+            dto.recommendation,
+            "Investigation recommendation",
+          )
+        : {
+            decision: "approve_as_requested" as const,
+            amount: null,
+            period_months: null,
+            remarks: "Awaiting program manager recommendation",
+            found_monthly_income: null,
+            ration_options: [] as Array<
+              "full" | "half" | "monthly" | "alternate"
+            >,
+          };
 
     await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
 
@@ -2192,8 +2568,6 @@ export class AidApplicationsService {
       checklistPayload,
       recNorm as unknown as Record<string, unknown>,
     );
-
-    const skipToCeo = await this.isProgramDepartmentManager(user);
     if (skipToCeo) {
       app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
       app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
@@ -2226,6 +2600,32 @@ export class AidApplicationsService {
     app.verified_by_id = user?.id ?? null;
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    const verifyChanges = [
+      ...buildAidStatusChange(prevStatus, app.status),
+      ...buildChecklistStatusChanges(prevChecklist, checklistPayload),
+      {
+        field: "recommendation.decision",
+        old_value: null,
+        new_value: serializeAidAuditValue(recNorm.decision),
+      },
+    ];
+    if (dto.leakage_override_reason) {
+      verifyChanges.push({
+        field: "leakage_override_reason",
+        old_value: null,
+        new_value: String(dto.leakage_override_reason).trim(),
+      });
+    }
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFIED,
+      user,
+      changes: verifyChanges,
+      metadata: {
+        skip_to_ceo: skipToCeo,
+        vulnerability_after_visit: vulnerability.after_visit?.total ?? null,
+      },
+    });
     return this.findOne(id);
   }
 
@@ -2247,9 +2647,12 @@ export class AidApplicationsService {
       relations: ["beneficiary"],
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
-    if (app.status !== AidApplicationStatus.MANAGER_REVIEW) {
+    if (
+      app.status !== AidApplicationStatus.MANAGER_REVIEW &&
+      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED
+    ) {
       throw new BadRequestException(
-        "Only applications in Manager Review can be forwarded to CEO",
+        "Only applications in Verification Completed or Manager Review can be forwarded to CEO",
       );
     }
 
@@ -2296,6 +2699,7 @@ export class AidApplicationsService {
           String(prev.remarks || "").trim() ||
         nextRation !== prevRation);
 
+    const prevStatus = app.status;
     app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
     app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
     app.investigation_recommendation = {
@@ -2320,6 +2724,20 @@ export class AidApplicationsService {
     };
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MANAGER_FORWARDED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "recommendation.decision",
+          old_value: serializeAidAuditValue(prev.decision ?? null),
+          new_value: serializeAidAuditValue(recNorm.decision),
+        },
+      ],
+      metadata: { manager_override: overridden },
+    });
     return this.findOne(id);
   }
 
@@ -2339,6 +2757,8 @@ export class AidApplicationsService {
     if (dto.decision === AidCeoApprovalStatus.APPROVED) {
       await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
     }
+
+    const prevStatus = app.status;
 
     if (
       dto.recommendation &&
@@ -2385,6 +2805,23 @@ export class AidApplicationsService {
       app.rejection_reason = reason;
     }
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.CEO_DECIDED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "ceo_approval_status",
+          old_value: null,
+          new_value: serializeAidAuditValue(app.ceo_approval_status),
+        },
+      ],
+      metadata: {
+        decision: dto.decision,
+        ceo_rejection_reason: app.ceo_rejection_reason ?? null,
+      },
+    });
     return this.findOne(id);
   }
 
@@ -2399,6 +2836,8 @@ export class AidApplicationsService {
         "Delivery can only be updated after CEO approval (successful)",
       );
     }
+    const prevStatus = app.status;
+    const prevDelivery = app.delivery_status;
     app.delivery_status = dto.delivery_status;
     app.delivery_notes = dto.delivery_notes?.trim() || app.delivery_notes;
     app.updated_by = user || null;
@@ -2413,6 +2852,19 @@ export class AidApplicationsService {
       app.status = AidApplicationStatus.DELIVERED;
     }
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.DELIVERY_UPDATED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "delivery_status",
+          old_value: serializeAidAuditValue(prevDelivery),
+          new_value: serializeAidAuditValue(app.delivery_status),
+        },
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -2421,7 +2873,20 @@ export class AidApplicationsService {
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     app.is_archived = true;
     app.updated_by = user || null;
-    return this.appRepo.save(app);
+    const saved = await this.appRepo.save(app);
+    await this.safeAudit({
+      app: saved,
+      action: AID_AUDIT_ACTIONS.ARCHIVED,
+      user,
+      changes: [
+        {
+          field: "is_archived",
+          old_value: false,
+          new_value: true,
+        },
+      ],
+    });
+    return saved;
   }
 
   async addAttachment(params: {
@@ -2518,6 +2983,32 @@ export class AidApplicationsService {
       }
     }
 
+    if (params.applicationId) {
+      const appRef = await this.appRepo.findOne({
+        where: { id: params.applicationId },
+        select: ["id", "application_no"],
+      });
+      if (appRef) {
+        await this.safeAudit({
+          app: appRef,
+          action: AID_AUDIT_ACTIONS.ATTACHMENT_UPLOADED,
+          user: params.user,
+          changes: [
+            {
+              field: "attachment",
+              old_value: null,
+              new_value: serializeAidAuditValue(params.file.originalname),
+            },
+          ],
+          metadata: {
+            attachment_id: saved.id,
+            context: params.context,
+            description: params.description?.trim() || null,
+          },
+        });
+      }
+    }
+
     return saved;
   }
 
@@ -2539,7 +3030,32 @@ export class AidApplicationsService {
     if (!row) throw new NotFoundException(`Attachment #${attachmentId} not found`);
     row.is_archived = true;
     row.updated_by = user || null;
-    return this.attachmentRepo.save(row);
+    const saved = await this.attachmentRepo.save(row);
+    if (row.application_id) {
+      const appRef = await this.appRepo.findOne({
+        where: { id: row.application_id },
+        select: ["id", "application_no"],
+      });
+      if (appRef) {
+        await this.safeAudit({
+          app: appRef,
+          action: AID_AUDIT_ACTIONS.ATTACHMENT_DELETED,
+          user,
+          changes: [
+            {
+              field: "attachment",
+              old_value: serializeAidAuditValue(row.file_name),
+              new_value: "archived",
+            },
+          ],
+          metadata: {
+            attachment_id: row.id,
+            context: row.context,
+          },
+        });
+      }
+    }
+    return saved;
   }
 
   private normalizeMissingDocuments(raw: unknown): string[] {

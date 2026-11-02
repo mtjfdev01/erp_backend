@@ -172,6 +172,11 @@ export enum AidApplicationStatus {
   INCOMPLETE_DOCS = "incomplete_docs",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
+  /**
+   * Field process / investigation finished by assignee.
+   * Awaiting Program manager recommendation / forward.
+   */
+  VERIFICATION_COMPLETED = "verification_completed",
   /** Investigator submitted — awaiting Program manager review. */
   MANAGER_REVIEW = "manager_review",
   REJECTED = "rejected",

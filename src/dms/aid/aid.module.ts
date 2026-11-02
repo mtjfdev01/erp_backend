@@ -21,6 +21,9 @@ import { AidHouseholdMember } from "./entities/aid-household-member.entity";
 import { AidHousehold } from "./entities/aid-household.entity";
 import { AidKinshipEdge } from "./entities/aid-kinship-edge.entity";
 import { AidPerson } from "./entities/aid-person.entity";
+import { AidAuditController } from "./audit/aid-audit.controller";
+import { AidAuditService } from "./audit/aid-audit.service";
+import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-log.entity";
 
 @Module({
   imports: [
@@ -32,6 +35,7 @@ import { AidPerson } from "./entities/aid-person.entity";
       AidApplication,
       AidAttachment,
       AidDisbursement,
+      AidApplicationAuditLog,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -47,6 +51,7 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidOverviewController,
     AidApplicationsController,
     AidDisbursementsController,
+    AidAuditController,
   ],
   providers: [
     AidPeopleService,
@@ -54,6 +59,7 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidApplicationsService,
     AidOverviewService,
     AidDisbursementsService,
+    AidAuditService,
   ],
   exports: [
     AidPeopleService,
@@ -61,6 +67,7 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidApplicationsService,
     AidOverviewService,
     AidDisbursementsService,
+    AidAuditService,
     TypeOrmModule,
   ],
 })

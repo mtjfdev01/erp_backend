@@ -976,6 +976,17 @@ export class MarkIncompleteAidApplicationDto {
   reason?: string | null;
 }
 
+/** Field Process → verification_completed (checklist required; recommendation not). */
+export class CompleteVerificationAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  verification_checklist?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  verification_notes?: string | null;
+}
+
 /** Approve draft → submitted; must assign a program-department user. */
 export class ApproveDraftAidApplicationDto {
   @Type(() => Number)

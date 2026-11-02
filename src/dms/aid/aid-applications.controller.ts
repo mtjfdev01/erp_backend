@@ -45,6 +45,7 @@ import {
   RejectAidApplicationDto,
   SetAidAttachmentMissingDto,
   SetAidMissingDocumentsDto,
+  CompleteVerificationAidApplicationDto,
   UpdateAidApplicationDto,
   UpdateMealReviewDto,
   UpdatePreviewApprovalDto,
@@ -460,6 +461,26 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Incomplete application resumed for verification",
+      data,
+    });
+  }
+
+  @Post(":id/verification-complete")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async verificationComplete(
+    @Param("id") id: string,
+    @Body() dto: CompleteVerificationAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.markVerificationCompleted(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Verification completed — awaiting Program manager",
       data,
     });
   }
