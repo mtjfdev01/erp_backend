@@ -726,6 +726,11 @@ export class CreateAidApplicationDto {
   @IsObject()
   education_details?: Record<string, unknown> | null;
 
+  /** Health-aid intake payload (shared across all Health SubPrograms). */
+  @IsOptional()
+  @IsObject()
+  health_details?: Record<string, unknown> | null;
+
   /** Ration-aid intake payload (persons, wheat, duration, questions). */
   @IsOptional()
   @IsObject()
@@ -829,6 +834,10 @@ export class UpdateAidApplicationDto {
   @IsOptional()
   @IsObject()
   education_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  health_details?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsObject()

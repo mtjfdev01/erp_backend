@@ -105,6 +105,13 @@ export class AidApplication extends BaseEntity {
   education_details: Record<string, unknown> | null;
 
   /**
+   * Health aid type (all SubPrograms):
+   * patient, diagnosis, hospital, treatment, cost, alternatives
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  health_details: Record<string, unknown> | null;
+
+  /**
    * Ration aid type only:
    * persons (male/female/kids), wheat, how_know_mtjf, arrangements, duration, alternative plan
    */

@@ -649,6 +649,10 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.EDUCATION
           ? dto.education_details ?? null
           : null,
+      health_details:
+        dto.requested_aid_type === AidRequestType.HEALTH
+          ? dto.health_details ?? null
+          : null,
       ration_details:
         dto.requested_aid_type === AidRequestType.RATION
           ? dto.ration_details ?? null
@@ -1989,6 +1993,9 @@ export class AidApplicationsService {
         if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
           app.education_details = null;
         }
+        if (dto.requested_aid_type !== AidRequestType.HEALTH) {
+          app.health_details = null;
+        }
         if (dto.requested_aid_type !== AidRequestType.RATION) {
           app.ration_details = null;
         }
@@ -2025,6 +2032,13 @@ export class AidApplicationsService {
         (dto.requested_aid_type ?? app.requested_aid_type) ===
         AidRequestType.EDUCATION
           ? dto.education_details
+          : null;
+    }
+    if (dto.health_details !== undefined) {
+      app.health_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.HEALTH
+          ? dto.health_details
           : null;
     }
     if (dto.ration_details !== undefined) {
