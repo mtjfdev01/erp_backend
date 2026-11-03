@@ -30,6 +30,42 @@ export class AidAuditController {
     private readonly applicationsService: AidApplicationsService,
   ) {}
 
+  @Get("user-interactions")
+  @RequiredPermissions([...AID_AUDIT_LIST_GUARD])
+  async userInteractions(
+    @Query("user_id") user_id: string,
+    @Query("search") search: string,
+    @Query("status") status: string,
+    @Query("stage") stage: string,
+    @Query("requested_aid_type") requested_aid_type: string,
+    @Query("district") district: string,
+    @Query("date") date: string,
+    @Query("start_date") start_date: string,
+    @Query("end_date") end_date: string,
+    @Query("page") page: string,
+    @Query("pageSize") pageSize: string,
+    @Res() res: Response,
+  ) {
+    const result = await this.auditService.findUserInteractions({
+      user_id,
+      search,
+      status,
+      stage,
+      requested_aid_type,
+      district,
+      date,
+      start_date,
+      end_date,
+      page: page ? Number(page) : 1,
+      pageSize: pageSize ? Number(pageSize) : 50,
+    });
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Aid user interaction report retrieved",
+      ...result,
+    });
+  }
+
   @Get("applications")
   @RequiredPermissions([...AID_AUDIT_LIST_GUARD])
   async listApplications(
