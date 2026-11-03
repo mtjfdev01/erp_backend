@@ -809,6 +809,10 @@ export class AidApplicationsService {
       requested_aid_type?: string;
       district?: string;
       assigned_to_user_id?: number | string;
+      /** Exact calendar day on updated_at (YYYY-MM-DD). Wins over start/end when set. */
+      date?: string;
+      start_date?: string;
+      end_date?: string;
     },
   ) {
     const search = String(params.search || "").trim();
@@ -831,6 +835,27 @@ export class AidApplicationsService {
     const assignee = Number(params.assigned_to_user_id);
     if (Number.isFinite(assignee) && assignee > 0) {
       qb.andWhere("a.assigned_to_user_id = :assignee", { assignee });
+    }
+
+    const day = String(params.date || "").trim();
+    const startDate = String(params.start_date || "").trim();
+    const endDate = String(params.end_date || "").trim();
+    if (day) {
+      qb.andWhere("a.updated_at >= :dayStart AND a.updated_at <= :dayEnd", {
+        dayStart: `${day} 00:00:00`,
+        dayEnd: `${day} 23:59:59.999`,
+      });
+    } else {
+      if (startDate) {
+        qb.andWhere("a.updated_at >= :listStart", {
+          listStart: `${startDate} 00:00:00`,
+        });
+      }
+      if (endDate) {
+        qb.andWhere("a.updated_at <= :listEnd", {
+          listEnd: `${endDate} 23:59:59.999`,
+        });
+      }
     }
   }
 
@@ -1032,10 +1057,14 @@ export class AidApplicationsService {
     requested_aid_type?: string;
     district?: string;
     assigned_to_user_id?: number | string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     /**
      * approvals = verified & not rejected (CEO queue + decided non-rejects)
      * entry = Beneficiary Registration board (excludes drafts)
      * drafts = Drafts board (status = draft or incomplete_docs)
+     * audit = Aid Audit Logs (all statuses; optional status/stage)
      */
     queue?: string;
     page?: number;
@@ -1088,6 +1117,12 @@ export class AidApplicationsService {
         ],
       });
       if (params.status) {
+        qb.andWhere("a.status = :status", { status: params.status });
+      }
+    } else if (params.queue === "audit") {
+      if (params.stage) {
+        this.applyStageFilter(qb, params.stage);
+      } else if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
     } else if (isDraftsBoard) {
