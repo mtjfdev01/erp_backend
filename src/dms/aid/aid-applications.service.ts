@@ -809,6 +809,11 @@ export class AidApplicationsService {
       requested_aid_type?: string;
       district?: string;
       assigned_to_user_id?: number | string;
+      /**
+       * Applications where this user appears on an audit log row
+       * (created / verified / forwarded / CEO decide / etc.).
+       */
+      interacted_by_user_id?: number | string;
       /** Exact calendar day on updated_at (YYYY-MM-DD). Wins over start/end when set. */
       date?: string;
       start_date?: string;
@@ -835,6 +840,19 @@ export class AidApplicationsService {
     const assignee = Number(params.assigned_to_user_id);
     if (Number.isFinite(assignee) && assignee > 0) {
       qb.andWhere("a.assigned_to_user_id = :assignee", { assignee });
+    }
+
+    const interactedBy = Number(params.interacted_by_user_id);
+    if (Number.isFinite(interactedBy) && interactedBy > 0) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM aid_application_audit_logs aal
+          WHERE aal.application_id = a.id
+            AND aal.performed_by_id = :interactedBy
+        )`,
+        { interactedBy },
+      );
     }
 
     const day = String(params.date || "").trim();
@@ -1057,6 +1075,7 @@ export class AidApplicationsService {
     requested_aid_type?: string;
     district?: string;
     assigned_to_user_id?: number | string;
+    interacted_by_user_id?: number | string;
     date?: string;
     start_date?: string;
     end_date?: string;
