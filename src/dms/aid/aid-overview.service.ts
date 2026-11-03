@@ -359,7 +359,8 @@ export class AidOverviewService {
         return false;
       }
       const rec = a.investigation_recommendation as Record<string, unknown> | null;
-      return String(rec?.decision || "") === "reject";
+      const d = String(rec?.decision || "");
+      return d === "not_recommend" || d === "reject";
     }).length;
 
     // Duplicate CNIC: people sharing same CNIC (blocked attempts proxy)

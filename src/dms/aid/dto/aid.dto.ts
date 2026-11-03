@@ -995,8 +995,24 @@ export class ApproveDraftAidApplicationDto {
 }
 
 export class InvestigationRecommendationDto {
-  @IsIn(["approve_as_requested", "approve_with_changes", "reject"])
-  decision: "approve_as_requested" | "approve_with_changes" | "reject";
+  /**
+   * Program manager recommendation.
+   * Canonical: recommend | not_recommend.
+   * Legacy (still accepted): approve_as_requested | approve_with_changes | reject.
+   */
+  @IsIn([
+    "recommend",
+    "not_recommend",
+    "approve_as_requested",
+    "approve_with_changes",
+    "reject",
+  ])
+  decision:
+    | "recommend"
+    | "not_recommend"
+    | "approve_as_requested"
+    | "approve_with_changes"
+    | "reject";
 
   @IsOptional()
   @IsNumber()

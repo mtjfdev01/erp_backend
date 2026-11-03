@@ -148,6 +148,21 @@ export class AidApplicationsService {
     );
   }
 
+  /** Canonical PM recommendation: recommend | not_recommend (legacy mapped). */
+  private normalizeRecommendationDecision(raw?: string | null): string {
+    const d = String(raw || "").trim();
+    if (!d) return "";
+    if (d === "reject" || d === "not_recommend") return "not_recommend";
+    if (
+      d === "recommend" ||
+      d === "approve_as_requested" ||
+      d === "approve_with_changes"
+    ) {
+      return "recommend";
+    }
+    return d;
+  }
+
   private assertRecommendationValid(
     rec: InvestigationRecommendationDto | null | undefined,
     label = "Recommendation",
@@ -170,7 +185,7 @@ export class AidApplicationsService {
 
     if (!rec?.decision && !isRationPackage) {
       throw new BadRequestException(
-        `${label} is required (approve as requested / with changes / reject)`,
+        `${label} is required (Recommend / Not Recommend)`,
       );
     }
     const remarks = String(rec?.remarks || "").trim();
@@ -180,9 +195,14 @@ export class AidApplicationsService {
       );
     }
 
-    const decision =
-      rec?.decision ||
-      (isRationPackage ? "approve_as_requested" : "");
+    const decision = this.normalizeRecommendationDecision(
+      rec?.decision || (isRationPackage ? "recommend" : ""),
+    );
+    if (decision !== "recommend" && decision !== "not_recommend") {
+      throw new BadRequestException(
+        `${label} must be Recommend or Not Recommend`,
+      );
+    }
 
     let amount: number | null = rec?.amount ?? null;
     let period_months: number | null = rec?.period_months ?? null;
@@ -193,23 +213,17 @@ export class AidApplicationsService {
         ? Number(rec?.amount)
         : null;
       period_months = null;
-    } else if (decision !== "reject") {
+    } else if (decision === "recommend") {
       const amt = Number(rec?.amount);
       if (!Number.isFinite(amt) || amt <= 0) {
         throw new BadRequestException(
-          `Recommended amount (PKR) is required for approval recommendations`,
+          `Recommended amount (PKR) is required when recommending`,
         );
       }
       amount = amt;
-      if (decision === "approve_with_changes") {
-        const months = Number(rec?.period_months);
-        if (!Number.isFinite(months) || months <= 0) {
-          throw new BadRequestException(
-            "Period (months) is required when approving with changes",
-          );
-        }
-        period_months = months;
-      }
+      const months = Number(rec?.period_months);
+      period_months =
+        Number.isFinite(months) && months > 0 ? months : period_months;
     } else {
       amount = null;
     }
@@ -2578,7 +2592,7 @@ export class AidApplicationsService {
             "Investigation recommendation",
           )
         : {
-            decision: "approve_as_requested" as const,
+            decision: "recommend" as const,
             amount: null,
             period_months: null,
             remarks: "Awaiting program manager recommendation",

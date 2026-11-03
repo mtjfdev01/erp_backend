@@ -95,7 +95,7 @@ These are separate columns / JSON fields, not the main `status`:
 |---|---|
 | `ceo_approval_status` | `not_required` / `pending` / `approved` / `rejected` — CEO decision detail |
 | `delivery_status` | Delivery progress (`not_started`, `pending`, `delivered`, …) |
-| `investigation_recommendation` | Approve / approve with changes / reject + remarks (and ration options) |
+| `investigation_recommendation` | Program manager: Recommend / Not Recommend + remarks (and ration options). CEO decision is separate: Approve / Not Approve. |
 | `meal_review` | Preview MEAL verification / recommendation / remarks (can lock) |
 | `preview_approval` | Preview Approval section (can lock) |
 
@@ -113,8 +113,8 @@ Disbursement installments use their own statuses (`queued`, `due`, `delivered`, 
 | `under_review` / `verification_completed` | Program manager verify + recommend (skip path) | `ceo_approval_required` |
 | `under_review` | Investigator verify (legacy / non-manager) | `manager_review` |
 | `verification_completed` / `manager_review` | Manager forward | `ceo_approval_required` |
-| `ceo_approval_required` | CEO approve | `successful` |
-| `ceo_approval_required` | CEO reject | `rejected` |
+| `ceo_approval_required` | CEO Approve | `successful` |
+| `ceo_approval_required` | CEO Not Approve | `rejected` |
 | any open pipeline | Reject application | `rejected` |
 | open pipeline | Mark incomplete | `incomplete` |
 | `incomplete` | Resume after assign | `submitted` |
