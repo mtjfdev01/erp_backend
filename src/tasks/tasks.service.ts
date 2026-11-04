@@ -1374,6 +1374,68 @@ export class TasksService implements OnModuleInit {
     };
   }
 
+  // Apply the KPI card's category on both row and count queries so pagination totals stay accurate.
+  private applyKpiReportCategoryFilter(
+    queryBuilder: SelectQueryBuilder<Task>,
+    category: string | undefined,
+    overdueDate: string | undefined,
+    overdueInclusive: boolean,
+  ): void {
+    // Keep KPI category conditions on both the page query and count query so pagination totals agree.
+    const completedStatuses = [
+      TaskStatus.COMPLETED,
+      TaskStatus.CLOSED,
+      TaskStatus.APPROVED,
+    ];
+
+    if (category === "pending") {
+      queryBuilder.andWhere("task.status NOT IN (:...kpiCompletedStatuses)", {
+        kpiCompletedStatuses: completedStatuses,
+      });
+    } else if (category === "completed") {
+      queryBuilder.andWhere("task.status IN (:...kpiCompletedStatuses)", {
+        kpiCompletedStatuses: completedStatuses,
+      });
+    } else if (category === "overdue") {
+      const parsedOverdueDate =
+        typeof overdueDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(overdueDate)
+          ? new Date(`${overdueDate}T00:00:00.000Z`)
+          : null;
+      if (
+        !parsedOverdueDate ||
+        Number.isNaN(parsedOverdueDate.getTime()) ||
+        parsedOverdueDate.toISOString().slice(0, 10) !== overdueDate
+      ) {
+        throw new BadRequestException("A valid overdue date is required");
+      }
+
+      // Match the modal's overdue rule: exclude terminal tasks and check the due date (or recurrence date).
+      const operator = overdueInclusive ? "<=" : "<";
+      queryBuilder
+        .andWhere("task.status NOT IN (:...kpiTerminalStatuses)", {
+          kpiTerminalStatuses: [
+            ...completedStatuses,
+            TaskStatus.CANCELLED,
+          ],
+        })
+        .andWhere(
+          new Brackets((dateQb) => {
+            dateQb.where(
+              `task.due_date ${operator} CAST(:kpiOverdueDate AS date)`,
+              { kpiOverdueDate: overdueDate },
+            );
+            dateQb.orWhere(
+              `(task.due_date IS NULL AND task.recurrence_next_date ${operator} CAST(:kpiOverdueDate AS date))`,
+              { kpiOverdueDate: overdueDate },
+            );
+          }),
+        );
+    } else if (category && category !== "total") {
+      throw new BadRequestException("Invalid KPI report category");
+    }
+  }
+
   async findAll(payload: any, currentUser?: User) {
     try {
       const page = +(payload?.pagination?.page || payload?.page || 1);
@@ -1440,6 +1502,16 @@ export class TasksService implements OnModuleInit {
         viewTypeFilter = safeFilters.view_type;
         delete safeFilters.view_type;
       }
+
+      // Remove modal-only parameters before common filters, then apply the category explicitly below.
+      const reportCategory = safeFilters.report_category;
+      const overdueDate = safeFilters.overdue_date;
+      const overdueInclusive =
+        safeFilters.overdue_inclusive === true ||
+        safeFilters.overdue_inclusive === "true";
+      delete safeFilters.report_category;
+      delete safeFilters.overdue_date;
+      delete safeFilters.overdue_inclusive;
 
       delete safeFilters.strictDepartment;
 
@@ -1588,7 +1660,7 @@ export class TasksService implements OnModuleInit {
       if (searchTerm && searchTerm.trim() !== "") {
         qb.andWhere(
           new Brackets((searchQb) => {
-            // Search in task fields
+            // Match the KPI modal's searchable task fields before the database applies pagination.
             searchQb.where("LOWER(task.title) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
@@ -1598,9 +1670,21 @@ export class TasksService implements OnModuleInit {
             searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
+            searchQb.orWhere("LOWER(task.department::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.priority::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.status::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("CAST(task.id AS TEXT) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
             // Search in assigned user names from assigned_users_meta
             searchQb.orWhere(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm OR CAST(assignee->>'user_id' AS TEXT) LIKE :searchTerm)",
               { searchTerm: `%${searchTerm.toLowerCase()}%` },
             );
           }),
@@ -1639,6 +1723,12 @@ export class TasksService implements OnModuleInit {
           projectNameFilter,
         });
       }
+      this.applyKpiReportCategoryFilter(
+        qb,
+        reportCategory,
+        overdueDate,
+        overdueInclusive,
+      );
 
       await this.applyViewTypeFilter(
         qb,
@@ -1829,8 +1919,20 @@ export class TasksService implements OnModuleInit {
             searchQb.orWhere("LOWER(task.project_name) LIKE :searchTerm", {
               searchTerm: `%${searchTerm.toLowerCase()}%`,
             });
+            searchQb.orWhere("LOWER(task.department::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.priority::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("LOWER(task.status::text) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
+            searchQb.orWhere("CAST(task.id AS TEXT) LIKE :searchTerm", {
+              searchTerm: `%${searchTerm.toLowerCase()}%`,
+            });
             searchQb.orWhere(
-              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm)",
+              "EXISTS (SELECT 1 FROM jsonb_array_elements(task.assigned_users_meta) AS assignee WHERE LOWER(assignee->>'name') LIKE :searchTerm OR CAST(assignee->>'user_id' AS TEXT) LIKE :searchTerm)",
               { searchTerm: `%${searchTerm.toLowerCase()}%` },
             );
           }),
@@ -1854,6 +1956,12 @@ export class TasksService implements OnModuleInit {
           projectNameFilter,
         });
       }
+      this.applyKpiReportCategoryFilter(
+        countQb,
+        reportCategory,
+        overdueDate,
+        overdueInclusive,
+      );
 
       await this.applyDepartmentUsersFilter(countQb, departmentFilter, "Count");
 

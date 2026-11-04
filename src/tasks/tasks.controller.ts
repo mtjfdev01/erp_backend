@@ -141,6 +141,12 @@ export class TasksController {
         user_name: query.user_name || "",
         assignee_id: query.assignee_id || "",
         view_type: query.view_type || "",
+        // Preserve the dashboard's direct-report scope in paginated list queries.
+        team_performance: query.team_performance || "",
+        // Keep KPI filters in the database query so page totals match the modal category/search.
+        report_category: query.report_category || "",
+        overdue_date: query.overdue_date || "",
+        overdue_inclusive: query.overdue_inclusive || "",
         // Date & calendar filter fields forwarded to tasksService.findAll:
         // Supports filtering tasks by exact date, date ranges, due dates, or recurrence schedules
         date: query.date || "",
