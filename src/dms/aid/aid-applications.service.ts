@@ -1883,6 +1883,11 @@ export class AidApplicationsService {
   async update(id: number, dto: UpdateAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
+      throw new BadRequestException(
+        "Application was rejected by CEO and recommendation is locked",
+      );
+    }
     const programManagerReopeningRejected =
       app.status === AidApplicationStatus.REJECTED &&
       dto.investigation_recommendation !== undefined &&
@@ -2767,17 +2772,18 @@ export class AidApplicationsService {
       relations: ["beneficiary"],
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
-    if (
-      app.status !== AidApplicationStatus.MANAGER_REVIEW &&
-      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED &&
-      app.status !== AidApplicationStatus.REJECTED
-    ) {
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
       throw new BadRequestException(
-        "Only applications in Verification Completed, Manager Review, or Rejected (manager override) can be forwarded to CEO",
+        "Application was rejected by CEO and cannot be forwarded",
       );
     }
-    if (app.status === AidApplicationStatus.REJECTED) {
-      app.rejection_reason = null;
+    if (
+      app.status !== AidApplicationStatus.MANAGER_REVIEW &&
+      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED
+    ) {
+      throw new BadRequestException(
+        "Only applications in Verification Completed or Manager Review can be forwarded to CEO",
+      );
     }
 
     const prev = (app.investigation_recommendation ||

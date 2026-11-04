@@ -212,6 +212,7 @@ export enum AidAttachmentContext {
   MARRIAGE_CERTIFICATE = "marriage_certificate",
   EDUCATION_CERTIFICATE = "education_certificate",
   E_STAMP_PAPER = "e_stamp_paper",
+  OTHERS = "others",
   ZAKAT = "zakat",
   CONSENT = "consent",
   /** Disbursement proof uploads */

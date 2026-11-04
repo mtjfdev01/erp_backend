@@ -13,6 +13,7 @@ import { DonationsService } from "../donations.service";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
 import {
+  advanceByFrequency,
   billingIntervalToFrequency,
   getPeriodKeyForFrequency,
   listPeriodKeysBetween,
@@ -2705,6 +2706,253 @@ export class RecurringDonationsLedgerService {
     }
 
     return map;
+  }
+
+  /**
+   * Staff: add N installments to an existing non-Stripe subscription.
+   * Allocates the next unused period keys after existing installments.
+   * Optional shared attachment is cloned onto each new installment (same file URL).
+   */
+  async addStaffInstallmentsBulk(
+    subscriptionId: number,
+    opts: {
+      count: number;
+      status?: string | null;
+      amount?: number | null;
+      attachment?: AddRecurringDonationAttachmentDto | null;
+    },
+    userId?: number | null,
+  ): Promise<{
+    created: number;
+    installment_ids: number[];
+    attachments_created: number;
+    installments: RecurringDonation[];
+  }> {
+    const count = Math.floor(Number(opts.count));
+    if (!Number.isFinite(count) || count < 1 || count > 36) {
+      throw new BadRequestException("count must be between 1 and 36");
+    }
+
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+    if (subscription.stripe_subscription_id) {
+      throw new BadRequestException(
+        "Cannot manually add installments to a Stripe subscription",
+      );
+    }
+
+    const statusRaw = String(opts.status || "pending")
+      .trim()
+      .toLowerCase();
+    const status = ["pending", "completed", "failed"].includes(statusRaw)
+      ? statusRaw
+      : "pending";
+
+    await assertRecurringReconciler(
+      this.permissionsService,
+      { id: userId },
+      status,
+    );
+
+    const amountRaw = Number(opts.amount);
+    const amount =
+      Number.isFinite(amountRaw) && amountRaw > 0
+        ? Math.round(amountRaw)
+        : Math.round(Number(subscription.amount) || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException("amount must be greater than 0");
+    }
+
+    const periodKeys = await this.allocateNextInstallmentPeriodKeys(
+      subscription,
+      count,
+    );
+    if (periodKeys.length < count) {
+      throw new BadRequestException(
+        `Could only allocate ${periodKeys.length} period(s); check billing interval`,
+      );
+    }
+
+    const paidAt = status === "completed" ? new Date() : null;
+    const actor =
+      userId && userId > 0
+        ? { created_by: { id: userId } as any, updated_by: { id: userId } as any }
+        : {};
+
+    const createdRows: RecurringDonation[] = [];
+    for (const periodKey of periodKeys) {
+      const row = await this.recurringDonationRepo.save(
+        this.recurringDonationRepo.create({
+          record_type: "installment",
+          parent_id: subscription.id,
+          initial_donation_id: subscription.initial_donation_id,
+          donor_id: subscription.donor_id,
+          stripe_subscription_id: null,
+          stripe_invoice_id: null,
+          billing_interval: subscription.billing_interval,
+          billing_interval_count: 1,
+          amount,
+          currency: subscription.currency || "PKR",
+          status,
+          donation_method: subscription.donation_method,
+          project_id: subscription.project_id,
+          campaign_id: subscription.campaign_id,
+          donation_type: subscription.donation_type,
+          paid_at: paidAt,
+          period_key: periodKey,
+          stripe_billing_reason: "staff_bulk_add",
+          ...actor,
+        }),
+      );
+      createdRows.push(row);
+    }
+
+    let attachments_created = 0;
+    if (opts.attachment?.file_url && opts.attachment?.file_name) {
+      const result = await this.addAttachmentToInstallments(
+        subscription.id,
+        createdRows.map((r) => r.id),
+        opts.attachment,
+        userId && userId > 0 ? ({ id: userId } as User) : null,
+      );
+      attachments_created = result.created;
+    }
+
+    return {
+      created: createdRows.length,
+      installment_ids: createdRows.map((r) => r.id),
+      attachments_created,
+      installments: createdRows,
+    };
+  }
+
+  /**
+   * Next unused period keys after the latest existing installment (or from start/now).
+   */
+  private async allocateNextInstallmentPeriodKeys(
+    subscription: RecurringDonation,
+    count: number,
+  ): Promise<string[]> {
+    const frequency = billingIntervalToFrequency(subscription.billing_interval);
+    if (!frequency) {
+      throw new BadRequestException(
+        "Subscription billing_interval is missing or unsupported",
+      );
+    }
+
+    const existing = await this.recurringDonationRepo.find({
+      where: {
+        parent_id: subscription.id,
+        record_type: "installment",
+        is_archived: false,
+      },
+      select: ["period_key"],
+    });
+    const keyed = new Set(
+      existing
+        .map((r) => String(r.period_key || "").trim())
+        .filter(Boolean),
+    );
+
+    const keysWithOrder = [...keyed].sort();
+    let cursor: Date;
+    if (keysWithOrder.length) {
+      const lastKey = keysWithOrder[keysWithOrder.length - 1];
+      cursor = advanceByFrequency(
+        this.resolvePeriodKeyEndRef(frequency, lastKey, new Date()),
+        frequency,
+      );
+    } else {
+      cursor = this.resolveSubscriptionPeriodStart(subscription);
+    }
+
+    const out: string[] = [];
+    let guard = 0;
+    while (out.length < count && guard < count + 80) {
+      guard += 1;
+      const key = getPeriodKeyForFrequency(frequency, cursor);
+      if (!keyed.has(key)) {
+        keyed.add(key);
+        out.push(key);
+      }
+      cursor = advanceByFrequency(cursor, frequency);
+    }
+    return out;
+  }
+
+  /**
+   * Attach the same file (one S3 URL) to many installments under a subscription.
+   * Creates one attachment row per installment — existing single-target upload unchanged.
+   */
+  async addAttachmentToInstallments(
+    subscriptionId: number,
+    installmentIds: number[],
+    dto: AddRecurringDonationAttachmentDto,
+    currentUser?: User | null,
+  ): Promise<{ created: number; attachment_ids: number[] }> {
+    const ids = [
+      ...new Set(
+        (installmentIds || [])
+          .map((n) => Number(n))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ];
+    if (!ids.length) {
+      throw new BadRequestException("Select at least one installment");
+    }
+    if (!dto?.file_url || !dto?.file_name) {
+      throw new BadRequestException("file_name and file_url are required");
+    }
+
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+
+    const installments = await this.recurringDonationRepo
+      .createQueryBuilder("inst")
+      .where("inst.id IN (:...ids)", { ids })
+      .andWhere("inst.parent_id = :parentId", { parentId: subscriptionId })
+      .andWhere("inst.record_type = :type", { type: "installment" })
+      .andWhere("inst.is_archived = false")
+      .getMany();
+
+    if (!installments.length) {
+      throw new BadRequestException(
+        "No matching installments found for this subscription",
+      );
+    }
+
+    const savedIds: number[] = [];
+    for (const inst of installments) {
+      const row = await this.recurringDonationAttachmentRepo.save(
+        this.recurringDonationAttachmentRepo.create({
+          recurring_donation: inst,
+          file_name: dto.file_name,
+          file_url: dto.file_url,
+          file_type: dto.file_type || null,
+          description: dto.description || null,
+          uploaded_by: currentUser || null,
+        }),
+      );
+      savedIds.push(row.id);
+    }
+
+    return { created: savedIds.length, attachment_ids: savedIds };
   }
 
   async addAttachment(

@@ -74,7 +74,12 @@ export class AidDisbursementsService {
       toNum(rec.amount, 0) ||
       toNum(app.expected_amount, 0) ||
       toNum(app.expected_amount_max, 0);
-    const months = Math.max(1, Math.min(36, Math.round(toNum(rec.period_months, 1))));
+    // 9999 = Life Time recommendation — treat as a single installment plan
+    const rawMonths = Math.round(toNum(rec.period_months, 1));
+    const months =
+      rawMonths >= 9999
+        ? 1
+        : Math.max(1, Math.min(36, rawMonths > 0 ? rawMonths : 1));
     const ration = (app.ration_details as Record<string, unknown>) || {};
     const packs = Math.max(
       0,
