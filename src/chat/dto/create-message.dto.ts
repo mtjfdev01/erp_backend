@@ -13,6 +13,11 @@ export class CreateChatMessageDto {
   linkedTaskId?: string;
   mentions?: string[];
   reactions?: any[];
+  isEncrypted?: boolean;
+  keyVersion?: number;
+  participantIds?: string[];
+  conversationName?: string;
+  conversationType?: 'direct' | 'group' | 'channel';
 }
 
 export class ReactMessageDto {

@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -22,13 +23,53 @@ import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
+  
+  @Get('users')
+  async getChatUsers(@Res() res: Response) {
+    try {
+      const users = await this.chatService.getChatUsers();
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: users,
+      });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        message: err?.message || 'Failed to fetch team users',
+        data: [],
+      });
+    }
+  }
+
+  @Get('departments')
+  async getDepartments(@Res() res: Response) {
+    try {
+      const depts = await this.chatService.getDepartments();
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: depts,
+      });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        message: err?.message || 'Failed to fetch departments',
+        data: [],
+      });
+    }
+  }
+
   @Get('conversations')
-  async getConversations(@Req() req: any, @Res() res: Response) {
+  async getConversations(
+    @Query('userId') queryUserId: string,
+    @Query('nocache') noCache: string,
+    @Req() req: any,
+    @Res() res: Response
+  ) {
     try {
       const user = req?.user;
-      const conversations = await this.chatService.getConversations(
-        user?.id ? String(user.id) : undefined
-      );
+      const activeUserId = (queryUserId && queryUserId.trim()) || (user?.id ? String(user.id) : undefined);
+      const forceRefresh = noCache === 'true' || noCache === '1';
+      const conversations = await this.chatService.getConversations(activeUserId, forceRefresh);
       return res.status(HttpStatus.OK).json({
         success: true,
         data: conversations,
@@ -38,6 +79,27 @@ export class ChatController {
         success: false,
         message: err?.message || 'Failed to fetch conversations',
         data: [],
+      });
+    }
+  }
+
+  @Delete('conversations/:id')
+  async deleteConversation(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const result = await this.chatService.deleteConversation(id, user?.id ? String(user.id) : undefined);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: err?.message || 'Failed to delete conversation',
       });
     }
   }
@@ -66,11 +128,18 @@ export class ChatController {
   @Get('messages')
   async getAllMessages(
     @Query('limit') limitStr: string,
+    @Query('userId') queryUserId: string,
+    @Req() req: any,
     @Res() res: Response
   ) {
     try {
+      const user = req?.user;
+      const activeUserId = (queryUserId && queryUserId.trim()) || (user?.id ? String(user.id) : undefined);
       const limit = limitStr ? parseInt(limitStr, 10) : 2000;
-      const messages = await this.chatService.getAllMessages(limit);
+      const messages = await this.chatService.getAllMessages(
+        activeUserId,
+        limit
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
         data: messages,
@@ -88,21 +157,135 @@ export class ChatController {
   async getMessagesByChat(
     @Param('chatId') chatId: string,
     @Query('limit') limitStr: string,
+    @Query('before') before: string,
+    @Req() req: any,
     @Res() res: Response
   ) {
     try {
-      const limit = limitStr ? parseInt(limitStr, 10) : 500;
-      const messages = await this.chatService.getMessagesByChat(chatId, limit);
+      const user = req?.user;
+      const limit = limitStr ? parseInt(limitStr, 10) : 50;
+      const messages = await this.chatService.getMessagesByChat(
+        chatId,
+        user?.id ? String(user.id) : undefined,
+        limit,
+        before
+      );
       return res.status(HttpStatus.OK).json({
         success: true,
         data: messages,
       });
     } catch (err: any) {
-      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      const status = err?.status || (err?.message?.includes('Access denied') ? HttpStatus.FORBIDDEN : HttpStatus.INTERNAL_SERVER_ERROR);
+      return res.status(status).json({
         success: false,
         message: err?.message || 'Failed to fetch messages for chat',
         data: [],
       });
+    }
+  }
+
+  // --- E2EE Cryptographic Key Management Endpoints ---
+
+  @Post('keys/identity')
+  async publishIdentityKey(
+    @Body() body: { userId?: string; publicKey: string; keyType?: string; encryptedPrivateKey?: string; salt?: string },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const userId = body.userId ? String(body.userId) : (user?.id ? String(user.id) : null);
+      if (!userId) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({ success: false, message: 'User not authenticated' });
+      }
+      const saved = await this.chatService.saveUserPublicKey(
+        userId,
+        body.publicKey,
+        body.keyType || 'RSA-OAEP',
+        body.encryptedPrivateKey,
+        body.salt
+      );
+      return res.status(HttpStatus.OK).json({ success: true, data: saved });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Get('keys/identity/:userId')
+  async getUserIdentityKey(@Param('userId') targetUserId: string, @Res() res: Response) {
+    try {
+      const key = await this.chatService.getUserPublicKey(targetUserId);
+      return res.status(HttpStatus.OK).json({ success: true, data: key });
+    } catch (err: any) {
+      return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('keys/identities')
+  async getUsersIdentityKeys(@Body() body: { userIds: string[] }, @Res() res: Response) {
+    try {
+      const keys = await this.chatService.getUsersPublicKeys(body.userIds || []);
+      return res.status(HttpStatus.OK).json({ success: true, data: keys });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('keys/bundle')
+  async saveKeyBundle(
+    @Body() body: { conversationId: string; keyVersion: number; bundles: Array<{ userId: string; encryptedKey: string }> },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const createdBy = user?.id ? String(user.id) : 'system';
+      const result = await this.chatService.saveKeyBundle(
+        body.conversationId,
+        body.keyVersion || 1,
+        body.bundles || [],
+        createdBy
+      );
+      return res.status(HttpStatus.CREATED).json({ success: true, data: result });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Get('keys/bundle/:conversationId')
+  async getKeyBundle(
+    @Param('conversationId') conversationId: string,
+    @Query('version') versionStr: string,
+    @Query('userId') queryUserId: string,
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const targetUserId = queryUserId ? String(queryUserId) : (user?.id ? String(user.id) : undefined);
+      if (!targetUserId) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({ success: false, message: 'Authentication required' });
+      }
+      const version = versionStr ? parseInt(versionStr, 10) : undefined;
+      const bundle = await this.chatService.getKeyBundleForUser(conversationId, targetUserId, version);
+      return res.status(HttpStatus.OK).json({ success: true, data: bundle });
+    } catch (err: any) {
+      const status = err?.status || HttpStatus.FORBIDDEN;
+      return res.status(status).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Get('keys/bundles')
+  async getAllKeyBundles(@Req() req: any, @Res() res: Response) {
+    try {
+      const user = req?.user;
+      if (!user?.id) {
+        return res.status(HttpStatus.UNAUTHORIZED).json({ success: false, message: 'Authentication required' });
+      }
+      const bundles = await this.chatService.getAllKeyBundlesForUser(String(user.id));
+      return res.status(HttpStatus.OK).json({ success: true, data: bundles });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ success: false, message: err?.message, data: [] });
     }
   }
 
@@ -151,9 +334,16 @@ export class ChatController {
   }
 
   @Patch('messages/:id/read')
-  async markRead(@Param('id') id: string, @Res() res: Response) {
+  async markRead(
+    @Param('id') id: string,
+    @Body() body: { userId?: string },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
     try {
-      const result = await this.chatService.markMessageRead(id);
+      const user = req?.user;
+      const userId = body?.userId ? String(body.userId) : (user?.id ? String(user.id) : undefined);
+      const result = await this.chatService.markMessageRead(id, userId);
       return res.status(HttpStatus.OK).json({
         success: true,
         data: result,
@@ -162,6 +352,52 @@ export class ChatController {
       return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: err?.message || 'Failed to mark message read',
+      });
+    }
+  }
+
+  @Post('conversations/:id/read')
+  async markConversationRead(
+    @Param('id') id: string,
+    @Body() body: { userId?: string },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const userId = body?.userId ? String(body.userId) : (user?.id ? String(user.id) : '5');
+      const result = await this.chatService.markConversationRead(id, userId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: err?.message || 'Failed to mark conversation read',
+      });
+    }
+  }
+
+  @Post('conversations/:id/delivered')
+  async markConversationDelivered(
+    @Param('id') id: string,
+    @Body() body: { userId?: string },
+    @Req() req: any,
+    @Res() res: Response
+  ) {
+    try {
+      const user = req?.user;
+      const userId = body?.userId ? String(body.userId) : (user?.id ? String(user.id) : '5');
+      const result = await this.chatService.markConversationDelivered(id, userId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: result,
+      });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: err?.message || 'Failed to mark conversation delivered',
       });
     }
   }

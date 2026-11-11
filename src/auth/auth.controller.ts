@@ -14,6 +14,7 @@ import { AuthService } from "./auth.service";
 import { JwtGuard } from "./jwt.guard";
 import { UsersService } from "../users/users.service";
 import { ResetPasswordDto } from "../users/dto/reset-password.dto";
+import { extractJwtFromCookie } from "./jwt-user.util";
 
 interface LoginDto {
   email: string;
@@ -99,7 +100,11 @@ export class AuthController {
   @UseGuards(JwtGuard)
   async getProfile(@Req() request: Request) {
     console.log("Profile request received, cookies:", request.cookies);
-    const token = request.cookies?.jwt;
+    // Support dual token extraction:
+    // 1. HTTP-only cookies ('jwt') for same-origin ERP web frontend (mtjf_erp_fe).
+    // 2. Authorization 'Bearer <token>' header for decoupled apps (ChatTask) and mobile/REST API clients.
+    // extractJwtFromCookie aligns this endpoint with JwtGuard behavior.
+    const token = extractJwtFromCookie(request) || request.cookies?.jwt;
     const user = await this.authService.validateToken(token);
 
     // Extract permissions from the user relation

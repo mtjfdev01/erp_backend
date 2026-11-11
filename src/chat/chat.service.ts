@@ -1,20 +1,83 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ChatMessageEntity } from './entities/chat-message.entity';
 import { ConversationEntity } from './entities/conversation.entity';
+import { UserE2eeKeyEntity } from './entities/user-e2ee-key.entity';
+import { ConversationKeyBundleEntity } from './entities/conversation-key-bundle.entity';
 import { CreateChatMessageDto, ReactMessageDto } from './dto/create-message.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { ChatGateway } from './chat.gateway';
 
 @Injectable()
 export class ChatService implements OnModuleInit {
   private readonly logger = new Logger(ChatService.name);
+
+  // In-memory cache for fast sub-millisecond retrieval with mutation-based invalidation
+  private conversationsCache = new Map<string, { data: any[]; expiresAt: number }>();
+  private keysCache = new Map<string, { data: string; expiresAt: number }>();
+  private readonly CACHE_TTL_MS = 15000; // 15 seconds
+
+  public invalidateCache(userId?: string) {
+    if (userId) {
+      this.conversationsCache.delete(userId);
+    } else {
+      this.conversationsCache.clear();
+    }
+  }
+
+  async getChatUsers(): Promise<any[]> {
+    try {
+      const rawUsers = await this.messageRepo.manager.query(
+        'SELECT id, first_name, last_name, email, role, department, phone, manager_id, "isActive" FROM "user" WHERE "is_archived" = false OR "is_archived" IS NULL ORDER BY id ASC'
+      );
+      return rawUsers;
+    } catch (err) {
+      this.logger.warn('Could not fetch chat users: ' + err);
+      return [];
+    }
+  }
+
+  async getDepartments(): Promise<string[]> {
+    try {
+      const adminModule = await import('../utils/admin');
+      if (Array.isArray(adminModule.departments) && adminModule.departments.length > 0) {
+        return adminModule.departments;
+      }
+    } catch {}
+
+    return [
+      'admin',
+      'store',
+      'procurements',
+      'accounts_and_finance',
+      'program',
+      'it',
+      'hr',
+      'marketing',
+      'audio_video',
+      'fund_raising',
+      'meal',
+      'health',
+      'executive_office',
+      'ceo',
+      'internal_audit',
+      'crd',
+      'aas_lab',
+    ];
+  }
 
   constructor(
     @InjectRepository(ChatMessageEntity)
     private readonly messageRepo: Repository<ChatMessageEntity>,
     @InjectRepository(ConversationEntity)
     private readonly conversationRepo: Repository<ConversationEntity>,
+    @InjectRepository(UserE2eeKeyEntity)
+    private readonly userKeyRepo: Repository<UserE2eeKeyEntity>,
+    @InjectRepository(ConversationKeyBundleEntity)
+    private readonly keyBundleRepo: Repository<ConversationKeyBundleEntity>,
+    @Inject(forwardRef(() => ChatGateway))
+    private readonly chatGateway: ChatGateway,
   ) {}
 
   async onModuleInit() {
@@ -156,12 +219,88 @@ export class ChatService implements OnModuleInit {
 
   // --- Conversations ---
 
-  async getConversations(userId?: string): Promise<any[]> {
-    const list = await this.conversationRepo.find({
-      order: { updated_at: 'DESC' },
+  async getConversations(userId?: string, forceRefresh: boolean = false): Promise<any[]> {
+    const cacheKey = userId ? String(userId) : '__all__';
+    if (!forceRefresh) {
+      const cached = this.conversationsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+    }
+
+    const qb = this.conversationRepo
+      .createQueryBuilder('c')
+      .select([
+        'c.id',
+        'c.name',
+        'c.title',
+        'c.type',
+        'c.avatar_bg',
+        'c.avatar_url',
+        'c.participant_ids',
+        'c.admin_ids',
+        'c.department',
+        'c.department_id',
+        'c.created_by',
+        'c.is_readonly',
+        'c.linked_task_id',
+        'c.is_pinned',
+        'c.description',
+        'c.last_message',
+        'c.unread_counts',
+        'c.updated_at',
+        'c.created_at',
+      ])
+      .orderBy('c.updated_at', 'DESC');
+
+    const list = await qb.getMany();
+
+    let result: any[];
+    if (!userId) {
+      result = list
+        .filter((c) => {
+          const isChannelOrAnnouncement = c.type === 'channel' || c.type === 'announcement';
+          const hasMessages = Boolean(c.last_message && (c.last_message.text || c.last_message.type));
+          return isChannelOrAnnouncement || hasMessages || Boolean(c.linked_task_id);
+        })
+        .map((c) => this.mapConversation(c));
+    } else {
+      const uid = String(userId);
+      const authorized = list.filter((c) => {
+        // Conversation has had at least one message exchanged
+        const hasMessages = Boolean(c.last_message && (c.last_message.text || c.last_message.type));
+
+        // 1. Direct 1:1 chats: user MUST be an explicit participant AND must have at least one message
+        if (c.type === 'direct') {
+          return (
+            Array.isArray(c.participant_ids) &&
+            c.participant_ids.map(String).includes(uid) &&
+            hasMessages
+          );
+        }
+        // 2. Group / Task chats: user must be in participant_ids or admin_ids AND (has messages or linked task)
+        if (c.type === 'group') {
+          const inParticipants = Array.isArray(c.participant_ids) && c.participant_ids.map(String).includes(uid);
+          const inAdmins = Array.isArray(c.admin_ids) && c.admin_ids.map(String).includes(uid);
+          const isLinkedTask = Boolean(c.linked_task_id);
+          return (inParticipants || inAdmins) && (hasMessages || isLinkedTask);
+        }
+        // 3. Departmental channels / announcements:
+        if (c.type === 'channel' || c.type === 'announcement') {
+          if (!c.participant_ids || c.participant_ids.length === 0) return true;
+          return c.participant_ids.map(String).includes(uid);
+        }
+        return Array.isArray(c.participant_ids) && c.participant_ids.map(String).includes(uid) && hasMessages;
+      });
+      result = authorized.map((c) => this.mapConversation(c));
+    }
+
+    this.conversationsCache.set(cacheKey, {
+      data: result,
+      expiresAt: Date.now() + this.CACHE_TTL_MS,
     });
 
-    return list.map((c) => this.mapConversation(c));
+    return result;
   }
 
   async saveConversation(dto: CreateConversationDto, user?: any): Promise<any> {
@@ -222,12 +361,102 @@ export class ChatService implements OnModuleInit {
     }
 
     const saved = await this.conversationRepo.save(existing);
-    return this.mapConversation(saved);
+    const mapped = this.mapConversation(saved);
+    this.invalidateCache();
+
+    // Only broadcast over Socket.IO if the conversation has a message or is a channel/announcement.
+    // Selecting a user or creating an empty conversation must NEVER broadcast or show in the recipient's Chat List.
+    const shouldBroadcast =
+      Boolean(saved.last_message && (saved.last_message.text || saved.last_message.type)) ||
+      saved.type === 'channel' ||
+      saved.type === 'announcement';
+
+    if (shouldBroadcast) {
+      this.chatGateway.broadcastConversationUpdate(mapped);
+    }
+    return mapped;
+  }
+
+  async deleteConversation(id: string, userId?: string): Promise<{ success: boolean; id: string }> {
+    const conv = await this.conversationRepo.findOne({ where: { id } });
+    if (!conv) {
+      // If already deleted in database, still ensure cache and sockets are invalidated
+      this.invalidateCache();
+      this.chatGateway.broadcastConversationDeleted(id);
+      return { success: true, id };
+    }
+
+    const pids = (conv.participant_ids || []).map(String);
+
+    // Delete associated messages, key bundles, and the conversation entity
+    await this.messageRepo.delete({ chat_id: id });
+    await this.keyBundleRepo.delete({ conversation_id: id });
+    await this.conversationRepo.delete({ id });
+
+    // Invalidate in-memory cache so subsequent fetches hit fresh database state
+    this.invalidateCache();
+
+    // Broadcast deletion over Socket.IO to all participants and connected tabs
+    this.chatGateway.broadcastConversationDeleted(id, pids);
+
+    this.logger.log(`Conversation ${id} deleted by user ${userId || 'system'}`);
+    return { success: true, id };
   }
 
   // --- Messages ---
 
-  async getAllMessages(limit: number = 2000): Promise<any[]> {
+  async getAllMessages(userId?: string, limit: number = 2000): Promise<any[]> {
+    if (userId) {
+      // Find all conversations where userId is an authorized participant
+      const allConvs = await this.conversationRepo.find();
+      const authorizedChatIds = allConvs
+        .filter(
+          (c) =>
+            !c.participant_ids ||
+            c.participant_ids.length === 0 ||
+            c.participant_ids.includes(String(userId)) ||
+            c.type === 'channel'
+        )
+        .map((c) => c.id);
+
+      if (authorizedChatIds.length === 0) {
+        return [];
+      }
+
+      const messages = await this.messageRepo
+        .createQueryBuilder('m')
+        .where('m.chat_id IN (:...authorizedChatIds) OR m.conversation_id IN (:...authorizedChatIds)', {
+          authorizedChatIds,
+        })
+        .orderBy('m.created_at', 'ASC')
+        .take(limit)
+        .getMany();
+
+      // Automatically mark messages delivered to this user
+      const nowIso = new Date().toISOString();
+      const updatedMessagesToSave: ChatMessageEntity[] = [];
+      for (const msg of messages) {
+        if (String(msg.sender_id) === String(userId)) continue;
+        const deliveredTo = msg.delivered_to || {};
+        if (!deliveredTo[userId]) {
+          deliveredTo[userId] = nowIso;
+          msg.delivered_to = deliveredTo;
+          if (msg.status === 'sent') {
+            msg.status = 'delivered';
+            msg.delivery_status = 'delivered';
+          }
+          updatedMessagesToSave.push(msg);
+        }
+      }
+      if (updatedMessagesToSave.length > 0) {
+        this.messageRepo.save(updatedMessagesToSave).catch((err) => {
+          this.logger.warn(`Could not save auto-delivered statuses: ${err}`);
+        });
+      }
+
+      return messages.map((m) => this.mapMessage(m));
+    }
+
     const messages = await this.messageRepo.find({
       order: { created_at: 'ASC' },
       take: limit,
@@ -235,12 +464,75 @@ export class ChatService implements OnModuleInit {
     return messages.map((m) => this.mapMessage(m));
   }
 
-  async getMessagesByChat(chatId: string, limit: number = 500): Promise<any[]> {
-    const messages = await this.messageRepo.find({
-      where: [{ chat_id: chatId }, { conversation_id: chatId }],
-      order: { created_at: 'ASC' },
-      take: limit,
-    });
+  async getMessagesByChat(
+    chatId: string,
+    userId?: string,
+    limit: number = 50,
+    before?: string
+  ): Promise<any[]> {
+    if (userId) {
+      const conv = await this.conversationRepo
+        .createQueryBuilder('c')
+        .select(['c.id', 'c.type', 'c.participant_ids'])
+        .where('c.id = :id', { id: chatId })
+        .getOne();
+
+      if (
+        conv &&
+        conv.type !== 'channel' &&
+        conv.participant_ids &&
+        conv.participant_ids.length > 0 &&
+        !conv.participant_ids.includes(String(userId))
+      ) {
+        throw new ForbiddenException('Access denied. You are not an authorized participant of this conversation.');
+      }
+      this.markConversationDelivered(chatId, userId).catch(() => {});
+    }
+
+    const qb = this.messageRepo
+      .createQueryBuilder('m')
+      .select([
+        'm.id',
+        'm.chat_id',
+        'm.conversation_id',
+        'm.sender_id',
+        'm.text',
+        'm.content',
+        'm.type',
+        'm.status',
+        'm.delivery_status',
+        'm.timestamp',
+        'm.created_at',
+        'm.read_at',
+        'm.read_by',
+        'm.delivered_to',
+        'm.reply_to',
+        'm.parent_message_id',
+        'm.attachment',
+        'm.attachments',
+        'm.voice_duration',
+        'm.task_id',
+        'm.linked_task_id',
+        'm.mentions',
+        'm.reactions',
+        'm.is_edited',
+        'm.is_deleted',
+        'm.is_encrypted',
+        'm.key_version',
+      ])
+      .where('(m.chat_id = :chatId OR m.conversation_id = :chatId)', { chatId });
+
+    if (before) {
+      qb.andWhere('m.created_at < :before', { before: new Date(before) });
+    }
+
+    const messages = await qb
+      .orderBy('m.created_at', 'DESC')
+      .take(limit)
+      .getMany();
+
+    // Reverse to chronological order (oldest to newest)
+    messages.reverse();
     return messages.map((m) => this.mapMessage(m));
   }
 
@@ -249,10 +541,15 @@ export class ChatService implements OnModuleInit {
     const id = dto.id || 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const senderId = dto.senderId || (user?.id ? String(user.id) : '5');
     const text = dto.text || (dto as any).content || '';
-    const status = dto.status || (dto as any).deliveryStatus || 'delivered';
+    const status = dto.status || (dto as any).deliveryStatus || 'sent';
     const parentMsgId = dto.replyTo?.id || (dto as any).parentMessageId || null;
     const attachment = dto.attachment || ((dto as any).attachments?.[0] || null);
     const attachments = (dto as any).attachments || (dto.attachment ? [dto.attachment] : null);
+    const isEncrypted = Boolean(
+      (dto as any).isEncrypted ||
+      (text && text.startsWith('e2ee:v1:'))
+    );
+    const keyVersion = (dto as any).keyVersion || 1;
 
     const entity = this.messageRepo.create({
       id,
@@ -276,31 +573,74 @@ export class ChatService implements OnModuleInit {
       reactions: dto.reactions || [],
       is_edited: false,
       is_deleted: false,
+      is_encrypted: isEncrypted,
+      key_version: keyVersion,
+      delivered_to: {},
+      read_by: {},
     });
 
     const saved = await this.messageRepo.save(entity);
 
-    // Update conversation last_message
+    // Update conversation last_message & increment unread_counts for recipients
+    const displaySnippet = isEncrypted
+      ? '🔒 End-to-end encrypted message'
+      : (text || (dto.voiceDuration ? 'Voice message' : 'Shared an attachment'));
+
+    /**
+     * Update conversation metadata and recipient unread counts in PostgreSQL.
+     * Rule 1: Only increment unread count for other participants (never for the sender).
+     * Rule 2: Pass updated unread counts to the gateway for targeted real-time delivery.
+     */
+    let unreadCountsPayload: Record<string, number> = {};
+    let participantIdsPayload: string[] = [];
+
     try {
       const conv = await this.conversationRepo.findOne({ where: { id: dto.chatId } });
       if (conv) {
         conv.last_message = {
-          text: text || (dto.voiceDuration ? 'Voice message' : 'Shared an attachment'),
+          text: displaySnippet,
           timestamp: nowIso,
           senderId,
           type: dto.type || 'text',
+          status,
         };
+        const currentUnread = conv.unread_counts || {};
+        const participants = (conv.participant_ids || []).map(String);
+        for (const p of participants) {
+          if (String(p) !== String(senderId)) {
+            const current = Number(currentUnread[p] ?? currentUnread[Number(p)] ?? 0);
+            currentUnread[p] = current + 1;
+          }
+        }
+        conv.unread_counts = currentUnread;
+        unreadCountsPayload = currentUnread;
+        participantIdsPayload = participants;
         await this.conversationRepo.save(conv);
+
+        // Broadcast conversation update so both sender and recipient Chat Lists show latest message & timestamp
+        const mappedConv = this.mapConversation(conv);
+        this.chatGateway.broadcastConversationUpdate(mappedConv);
       } else {
         const isTaskChat = dto.chatId.startsWith('task_chat_');
+        const participants = Array.isArray((dto as any).participantIds) && (dto as any).participantIds.length > 0
+          ? [...new Set([String(senderId), ...(dto as any).participantIds.map(String)])]
+          : [String(senderId)];
+        participantIdsPayload = participants;
+        const initialUnread: Record<string, number> = {};
+        for (const p of participants) {
+          if (String(p) !== String(senderId)) {
+            initialUnread[p] = 1;
+          }
+        }
+        unreadCountsPayload = initialUnread;
         const newConv = this.conversationRepo.create({
           id: dto.chatId,
-          name: isTaskChat ? `Task Discussion (${dto.taskId || 'Linked'})` : 'Discussion',
-          title: isTaskChat ? `Task Discussion (${dto.taskId || 'Linked'})` : 'Discussion',
-          type: 'group',
+          name: (dto as any).conversationName || (isTaskChat ? `Task Discussion (${dto.taskId || 'Linked'})` : 'Discussion'),
+          title: (dto as any).conversationName || (isTaskChat ? `Task Discussion (${dto.taskId || 'Linked'})` : 'Discussion'),
+          type: (dto as any).conversationType || (isTaskChat ? 'group' : 'direct'),
           avatar_bg: 'bg-indigo-600',
           avatar_url: 'bg-indigo-600',
-          participant_ids: [senderId],
+          participant_ids: participants,
           admin_ids: [senderId],
           department: null,
           department_id: null,
@@ -308,19 +648,158 @@ export class ChatService implements OnModuleInit {
           is_readonly: false,
           linked_task_id: dto.taskId || dto.linkedTaskId || null,
           last_message: {
-            text: text || 'Message sent',
+            text: displaySnippet,
             timestamp: nowIso,
             senderId,
             type: dto.type || 'text',
+            status,
           },
+          unread_counts: initialUnread,
         });
-        await this.conversationRepo.save(newConv);
+        const savedNewConv = await this.conversationRepo.save(newConv);
+        const mappedConv = this.mapConversation(savedNewConv);
+        this.chatGateway.broadcastConversationUpdate(mappedConv);
       }
     } catch (cErr) {
       this.logger.warn(`Could not update last_message for chat ${dto.chatId}: ${cErr}`);
     }
 
-    return this.mapMessage(saved);
+    const mapped = this.mapMessage(saved);
+    // Broadcast message and per-user unread counts to all participant personal rooms via Socket.IO
+    this.chatGateway.broadcastNewMessage(dto.chatId, mapped, unreadCountsPayload, participantIdsPayload);
+    this.invalidateCache();
+    return mapped;
+  }
+
+  // --- E2EE Key Management ---
+
+  async saveUserPublicKey(
+    userId: string,
+    publicKey: string,
+    keyType: string = 'RSA-OAEP',
+    encryptedPrivateKey?: string,
+    keyDerivationSalt?: string,
+  ): Promise<UserE2eeKeyEntity> {
+    let keyRecord = await this.userKeyRepo.findOne({ where: { user_id: userId } });
+    if (!keyRecord) {
+      keyRecord = this.userKeyRepo.create({
+        user_id: userId,
+        public_key: publicKey,
+        key_type: keyType,
+        encrypted_private_key: encryptedPrivateKey,
+        key_derivation_salt: keyDerivationSalt,
+      });
+    } else {
+      keyRecord.public_key = publicKey;
+      keyRecord.key_type = keyType;
+      if (encryptedPrivateKey) {
+        keyRecord.encrypted_private_key = encryptedPrivateKey;
+      }
+      if (keyDerivationSalt) {
+        keyRecord.key_derivation_salt = keyDerivationSalt;
+      }
+    }
+    const saved = await this.userKeyRepo.save(keyRecord);
+    this.keysCache.delete(userId);
+    return saved;
+  }
+
+  async getUserPublicKey(userId: string): Promise<UserE2eeKeyEntity | null> {
+    return this.userKeyRepo.findOne({ where: { user_id: userId } });
+  }
+
+  async getUsersPublicKeys(userIds: string[]): Promise<Record<string, string>> {
+    if (!userIds || userIds.length === 0) return {};
+    const missingIds: string[] = [];
+    const result: Record<string, string> = {};
+
+    const now = Date.now();
+    for (const id of userIds) {
+      const cached = this.keysCache.get(id);
+      if (cached && cached.expiresAt > now) {
+        result[id] = cached.data;
+      } else {
+        missingIds.push(id);
+      }
+    }
+
+    if (missingIds.length > 0) {
+      const keys = await this.userKeyRepo.createQueryBuilder('k')
+        .select(['k.user_id', 'k.public_key'])
+        .where('k.user_id IN (:...missingIds)', { missingIds })
+        .getMany();
+
+      for (const k of keys) {
+        result[k.user_id] = k.public_key;
+        this.keysCache.set(k.user_id, {
+          data: k.public_key,
+          expiresAt: now + 60000,
+        });
+      }
+    }
+    return result;
+  }
+
+  async saveKeyBundle(
+    conversationId: string,
+    keyVersion: number,
+    bundles: Array<{ userId: string; encryptedKey: string }>,
+    createdBy: string,
+  ): Promise<any[]> {
+    const saved: ConversationKeyBundleEntity[] = [];
+    for (const item of bundles) {
+      let bundle = await this.keyBundleRepo.findOne({
+        where: {
+          conversation_id: conversationId,
+          key_version: keyVersion,
+          user_id: String(item.userId),
+        },
+      });
+      if (!bundle) {
+        bundle = this.keyBundleRepo.create({
+          conversation_id: conversationId,
+          key_version: keyVersion,
+          user_id: String(item.userId),
+          encrypted_key: item.encryptedKey,
+          created_by: createdBy,
+        });
+      } else {
+        bundle.encrypted_key = item.encryptedKey;
+        bundle.created_by = createdBy;
+      }
+      saved.push(await this.keyBundleRepo.save(bundle));
+    }
+    return saved;
+  }
+
+  async getKeyBundleForUser(conversationId: string, userId: string, keyVersion?: number): Promise<any | null> {
+    // 1. Authorization: verify user is in conversation participants if conversation is tracked
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    if (conv && conv.participant_ids && conv.participant_ids.length > 0 && !conv.participant_ids.includes(String(userId))) {
+      throw new ForbiddenException('Access denied. You are not a participant of this conversation.');
+    }
+
+    const whereClause: any = {
+      conversation_id: conversationId,
+      user_id: String(userId),
+    };
+    if (keyVersion) {
+      whereClause.key_version = keyVersion;
+    }
+
+    const bundle = await this.keyBundleRepo.findOne({
+      where: whereClause,
+      order: { key_version: 'DESC' },
+    });
+    return bundle;
+  }
+
+  async getAllKeyBundlesForUser(userId: string): Promise<any[]> {
+    const bundles = await this.keyBundleRepo.find({
+      where: { user_id: String(userId) },
+      order: { conversation_id: 'ASC', key_version: 'DESC' },
+    });
+    return bundles;
   }
 
   async reactToMessage(messageId: string, emoji: string, userId: string): Promise<any> {
@@ -354,13 +833,197 @@ export class ChatService implements OnModuleInit {
 
     msg.reactions = updatedReactions;
     const saved = await this.messageRepo.save(msg);
-    return this.mapMessage(saved);
+    const mapped = this.mapMessage(saved);
+    this.chatGateway.broadcastNewMessage(mapped.chatId, mapped);
+    return mapped;
   }
 
-  async markMessageRead(messageId: string): Promise<any> {
-    await this.messageRepo.update({ id: messageId }, { status: 'read', delivery_status: 'read' });
-    const updated = await this.messageRepo.findOne({ where: { id: messageId } });
-    return updated ? this.mapMessage(updated) : null;
+  async markMessageRead(messageId: string, userId?: string): Promise<any> {
+    const msg = await this.messageRepo.findOne({ where: { id: messageId } });
+    if (!msg) return null;
+
+    const nowIso = new Date().toISOString();
+    const readBy = msg.read_by || {};
+    const deliveredTo = msg.delivered_to || {};
+
+    if (userId) {
+      readBy[userId] = nowIso;
+      deliveredTo[userId] = deliveredTo[userId] || nowIso;
+      msg.read_by = readBy;
+      msg.delivered_to = deliveredTo;
+    }
+
+    msg.status = 'read';
+    msg.delivery_status = 'read';
+    msg.read_at = new Date();
+    const saved = await this.messageRepo.save(msg);
+    const mapped = this.mapMessage(saved);
+    this.chatGateway.broadcastReceiptUpdate(mapped.chatId, {
+      messageId: mapped.id,
+      status: 'read',
+      userId: userId || String(msg.sender_id),
+      timestamp: nowIso,
+    });
+    return mapped;
+  }
+
+  async markConversationDelivered(conversationId: string, userId: string): Promise<any> {
+    if (!conversationId || !userId) return { success: false };
+
+    const conv = await this.conversationRepo
+      .createQueryBuilder('c')
+      .select(['c.id', 'c.participant_ids', 'c.last_message'])
+      .where('c.id = :id', { id: conversationId })
+      .getOne();
+
+    const participants = conv?.participant_ids || [];
+
+    const messages = await this.messageRepo
+      .createQueryBuilder('m')
+      .where('(m.chat_id = :cid OR m.conversation_id = :cid)', { cid: conversationId })
+      .andWhere('m.sender_id != :uid', { uid: String(userId) })
+      .getMany();
+
+    const nowIso = new Date().toISOString();
+    const toUpdate: ChatMessageEntity[] = [];
+
+    for (const msg of messages) {
+      const deliveredTo = msg.delivered_to || {};
+      if (!deliveredTo[userId]) {
+        deliveredTo[userId] = nowIso;
+        msg.delivered_to = deliveredTo;
+
+        const otherParticipants = participants.filter((p) => String(p) !== String(msg.sender_id));
+        const allDelivered = otherParticipants.length === 0 || otherParticipants.every((p) => Boolean(deliveredTo[p]));
+
+        if (allDelivered && msg.status !== 'read') {
+          msg.status = 'delivered';
+          msg.delivery_status = 'delivered';
+        }
+        toUpdate.push(msg);
+      }
+    }
+
+    if (toUpdate.length > 0) {
+      await this.messageRepo.save(toUpdate, { chunk: 100 });
+    }
+
+    if (conv && conv.last_message && String(conv.last_message.senderId) !== String(userId)) {
+      if (conv.last_message.status !== 'read') {
+        conv.last_message.status = 'delivered';
+        await this.conversationRepo.save(conv);
+      }
+    }
+
+    this.chatGateway.broadcastReceiptUpdate(conversationId, {
+      status: 'delivered',
+      userId,
+      timestamp: nowIso,
+    });
+
+    return { success: true, conversationId, deliveredCount: toUpdate.length };
+  }
+
+  async markConversationRead(conversationId: string, userId: string): Promise<any> {
+    if (!conversationId || !userId) return { success: false };
+
+    const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
+    const participants = conv?.participant_ids || [];
+
+    /**
+     * Reset unread message count for the viewing user in PostgreSQL.
+     * Persisted so that page reloads or new logins reflect zero unread.
+     */
+    if (conv) {
+      const unreadCounts = conv.unread_counts || {};
+      unreadCounts[userId] = 0;
+      unreadCounts[String(userId)] = 0;
+      conv.unread_counts = unreadCounts;
+      await this.conversationRepo.save(conv);
+    }
+
+    const messages = await this.messageRepo
+      .createQueryBuilder('m')
+      .where('(m.chat_id = :cid OR m.conversation_id = :cid)', { cid: conversationId })
+      .andWhere('m.sender_id != :uid', { uid: String(userId) })
+      .getMany();
+
+    const nowIso = new Date().toISOString();
+    const nowDate = new Date();
+    const toUpdate: ChatMessageEntity[] = [];
+
+    for (const msg of messages) {
+      const readBy = msg.read_by || {};
+      const deliveredTo = msg.delivered_to || {};
+
+      let changed = false;
+      if (!deliveredTo[userId]) {
+        deliveredTo[userId] = nowIso;
+        msg.delivered_to = deliveredTo;
+        changed = true;
+      }
+
+      if (!readBy[userId]) {
+        readBy[userId] = nowIso;
+        msg.read_by = readBy;
+        changed = true;
+      }
+
+      const otherParticipants = participants.filter((p) => String(p) !== String(msg.sender_id));
+      const allRead = otherParticipants.length === 0 || otherParticipants.every((p) => Boolean(readBy[p]));
+
+      if (allRead) {
+        if (msg.status !== 'read') {
+          msg.status = 'read';
+          msg.delivery_status = 'read';
+          msg.read_at = nowDate;
+          changed = true;
+        }
+      } else if (msg.status !== 'read') {
+        msg.status = 'delivered';
+        msg.delivery_status = 'delivered';
+        changed = true;
+      }
+
+      if (changed) {
+        toUpdate.push(msg);
+      }
+    }
+
+    if (toUpdate.length > 0) {
+      await this.messageRepo.save(toUpdate, { chunk: 100 });
+    }
+
+    if (conv) {
+      if (conv.last_message && String(conv.last_message.senderId) !== String(userId)) {
+        conv.last_message.status = 'read';
+      }
+      await this.conversationRepo.save(conv);
+    }
+
+    this.invalidateCache(userId);
+
+    /**
+     * Real-time Multi-Session Synchronization via Socket.IO:
+     * 1. Broadcasts unread count reset (0) to this user's personal room `user_${userId}`
+     *    so all active tabs/devices immediately clear their unread badge without refreshing.
+     * 2. Broadcasts read receipt update (`read`) to conversation participants
+     *    so the sender instantly sees double blue ticks.
+     */
+    this.chatGateway.broadcastUnreadCount(
+      String(userId),
+      conversationId,
+      0,
+      conv?.unread_counts || {}
+    );
+
+    this.chatGateway.broadcastReceiptUpdate(conversationId, {
+      status: 'read',
+      userId,
+      timestamp: nowIso,
+    });
+
+    return { success: true, conversationId, readCount: toUpdate.length };
   }
 
   // --- Notifications in task_db ---
@@ -506,6 +1169,9 @@ export class ChatService implements OnModuleInit {
       status: entity.status,
       deliveryStatus: entity.delivery_status || entity.status,
       timestamp: entity.timestamp || entity.created_at.toISOString(),
+      readAt: entity.read_at ? entity.read_at.toISOString() : undefined,
+      readBy: entity.read_by || {},
+      deliveredTo: entity.delivered_to || {},
       replyTo: entity.reply_to || undefined,
       parentMessageId: entity.parent_message_id || entity.reply_to?.id || undefined,
       attachment: entity.attachment || undefined,
@@ -517,6 +1183,8 @@ export class ChatService implements OnModuleInit {
       reactions: entity.reactions || [],
       isEdited: Boolean(entity.is_edited),
       isDeleted: Boolean(entity.is_deleted),
+      isEncrypted: Boolean(entity.is_encrypted),
+      keyVersion: entity.key_version || 1,
     };
   }
 }

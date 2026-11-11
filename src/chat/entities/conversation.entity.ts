@@ -8,6 +8,8 @@ import {
 } from 'typeorm';
 
 @Entity('chat_conversations')
+@Index(['type', 'updated_at'])
+@Index(['updated_at'])
 export class ConversationEntity {
   @PrimaryColumn({ type: 'varchar', length: 120 })
   id: string;

@@ -8,6 +8,9 @@ import {
 } from 'typeorm';
 
 @Entity('chat_messages')
+@Index(['chat_id', 'created_at'])
+@Index(['conversation_id', 'created_at'])
+@Index(['created_at'])
 export class ChatMessageEntity {
   @PrimaryColumn({ type: 'varchar', length: 120 })
   id: string;
@@ -69,11 +72,26 @@ export class ChatMessageEntity {
   @Column({ type: 'jsonb', nullable: true })
   reactions: Array<{ emoji: string; userIds: string[] }> | null;
 
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  read_at: Date | null;
+
+  @Column({ type: 'jsonb', default: {} })
+  read_by: Record<string, string>;
+
+  @Column({ type: 'jsonb', default: {} })
+  delivered_to: Record<string, string>;
+
   @Column({ type: 'boolean', default: false })
   is_edited: boolean;
 
   @Column({ type: 'boolean', default: false })
   is_deleted: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  is_encrypted: boolean;
+
+  @Column({ type: 'int', default: 1 })
+  key_version: number;
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   created_at: Date;

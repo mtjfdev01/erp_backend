@@ -52,10 +52,19 @@ export class UsersController {
 
   @Get()
   @RequiredPermissions([
+    // Core User Management & Admin permissions
     "users.list_view",
     "read_only_user_manager",
     "read_only_super_admin",
     "super_admin",
+    // Task Management & ChatTask permissions:
+    // Allows authenticated team members and managers to fetch the colleague directory
+    // for task assignments, resolver lookups, and starting direct/group chats.
+    // Sensitive operations (create, update, delete, reveal password) remain strictly guarded.
+    "tasking.tasks.list_view",
+    "tasking.tasks.view",
+    "user",
+    "manager",
   ])
   async findAll(
     @Query("page") page: string = "1",
