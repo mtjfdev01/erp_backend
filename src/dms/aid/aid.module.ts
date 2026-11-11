@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { ApiKeysModule } from "../../api-keys/api-keys.module";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { UsersModule } from "../../users/users.module";
 import { S3StorageModule } from "../../utils/storage/s3-storage.module";
@@ -21,6 +22,11 @@ import { AidHouseholdMember } from "./entities/aid-household-member.entity";
 import { AidHousehold } from "./entities/aid-household.entity";
 import { AidKinshipEdge } from "./entities/aid-kinship-edge.entity";
 import { AidPerson } from "./entities/aid-person.entity";
+import { AidAuditController } from "./audit/aid-audit.controller";
+import { AidAuditService } from "./audit/aid-audit.service";
+import { AidApplicationAuditLog } from "./audit/entities/aid-application-audit-log.entity";
+import { AskClinicBeneficiariesController } from "./integrations/ask-clinic-beneficiaries.controller";
+import { AskClinicBeneficiariesService } from "./integrations/ask-clinic-beneficiaries.service";
 
 @Module({
   imports: [
@@ -32,6 +38,7 @@ import { AidPerson } from "./entities/aid-person.entity";
       AidApplication,
       AidAttachment,
       AidDisbursement,
+      AidApplicationAuditLog,
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || "your-secret-key",
@@ -40,6 +47,7 @@ import { AidPerson } from "./entities/aid-person.entity";
     PermissionsModule,
     UsersModule,
     S3StorageModule,
+    ApiKeysModule,
   ],
   controllers: [
     AidPeopleController,
@@ -47,6 +55,8 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidOverviewController,
     AidApplicationsController,
     AidDisbursementsController,
+    AidAuditController,
+    AskClinicBeneficiariesController,
   ],
   providers: [
     AidPeopleService,
@@ -54,6 +64,8 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidApplicationsService,
     AidOverviewService,
     AidDisbursementsService,
+    AidAuditService,
+    AskClinicBeneficiariesService,
   ],
   exports: [
     AidPeopleService,
@@ -61,6 +73,8 @@ import { AidPerson } from "./entities/aid-person.entity";
     AidApplicationsService,
     AidOverviewService,
     AidDisbursementsService,
+    AidAuditService,
+    AskClinicBeneficiariesService,
     TypeOrmModule,
   ],
 })

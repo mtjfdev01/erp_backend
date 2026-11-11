@@ -39,6 +39,10 @@ import { DonationPendingFollowUpService } from "./donation-pending-follow-up.ser
 import { Task } from "../tasks/entities/task.entity";
 import { TasksModule } from "../tasks/tasks.module";
 import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.module";
+import { ReceiptIntakeController } from "./receipt_intake/receipt-intake.controller";
+import { ReceiptIntakeService } from "./receipt_intake/receipt-intake.service";
+import { ReceiptAiExtractionService } from "./receipt_intake/receipt-ai-extraction.service";
+import { ReceiptIntakeApiKeyGuard } from "./receipt_intake/receipt-intake-api-key.guard";
 
 @Module({
   imports: [
@@ -72,6 +76,7 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
   controllers: [
     DonationsController,
     PublicDonationsController,
+    ReceiptIntakeController,
     MigrationController,
     DonationsSummaryController,
     CommunicationController,
@@ -90,6 +95,9 @@ import { ManualRecurringModule } from "../dms/manual_recurring/manual-recurring.
     DonationIdBackfillService,
     DonationIdBackfillRunner,
     DonationPendingFollowUpService,
+    ReceiptAiExtractionService,
+    ReceiptIntakeService,
+    ReceiptIntakeApiKeyGuard,
   ],
   exports: [DonationsService, DonationPendingFollowUpService],
 })

@@ -1477,6 +1477,7 @@ export class EmailService implements OnModuleInit {
     user: any,
     task: any,
     master?: any,
+    creator?: any,
   ): Promise<boolean> {
     try {
       const fromEmail = this.configService.get<string>(
@@ -1492,6 +1493,16 @@ export class EmailService implements OnModuleInit {
         this.logger.error("Resend is not configured - cannot send email");
         return false;
       }
+
+      // Resolve creator name from optional creator argument, task.created_by relation, master relation, or raw fields
+      const creatorObj = creator || task.created_by || master?.created_by;
+      const creatorName =
+        task.creator_name ||
+        (creatorObj
+          ? `${creatorObj.first_name || ""} ${creatorObj.last_name || ""}`.trim() ||
+            creatorObj.name ||
+            creatorObj.email
+          : null);
 
       let recurrenceInfo = "";
       if (master && master.task_type === "recurring") {
@@ -1520,12 +1531,13 @@ export class EmailService implements OnModuleInit {
         subject: `New Task Assigned: ${task.title}`,
         html: `
           <h1>New Task Assigned</h1>
-          <p>Hi ${user.first_name || user.email},</p>
+          <p>Dear ${user.first_name || user.email},</p>
           <p>You have been assigned a new task: <strong>${task.title}</strong></p>
+          ${creatorName ? `<p><strong>Created By:</strong> ${creatorName}</p>` : ""}
           <p><strong>Priority:</strong> ${task.priority}</p>
           <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : "N/A"}</p>
-          ${recurrenceInfo}
-          <p>Please log in to the ERP to view more details.</p>
+          ${recurrenceInfo} 
+          <a href="https://erp.mtjfoundation.pk/" target="_blank" rel="noopener noreferrer">Log in and View Task Details</a>
         `,
       });
 

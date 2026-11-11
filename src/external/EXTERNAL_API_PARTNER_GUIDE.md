@@ -3,9 +3,11 @@
 Version: `v1`  
 Base URL: **`https://mtjf-erp-backend.up.railway.app`**  
 Partner write endpoint: **`POST /external/v1`**  
-Staff key management: **`/external/api-keys`**
+Staff key management: **`/external/api-keys`** (`external_api_keys` table)
 
 One donation-style payload. Donor + donation + recurring are handled inside `DonationsService.create`.
+
+> **New integrations (Ask Clinic, etc.):** use the dedicated **`/api-keys`** module (`api_keys` table + scopes). Do not create new donation-partner keys for non-donation APIs. See `docs/ask-clinic-dms-api.md`.
 
 ---
 

@@ -39,10 +39,15 @@ import { AidPeopleService } from "./aid-people.service";
 import {
   ApproveDraftAidApplicationDto,
   CeoDecideAidApplicationDto,
+  CompleteVerificationAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
+  InvestigationRecommendationDto,
+  ManagerForwardAidApplicationDto,
   RejectAidApplicationDto,
   UpdateAidApplicationDto,
+  UpdateMealReviewDto,
+  UpdatePreviewApprovalDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 import { AidApplication } from "./entities/aid-application.entity";
@@ -56,6 +61,20 @@ import {
   type EntityLookupParams,
   type LookupOption,
 } from "../../utils/lookup";
+import { AidAuditService } from "./audit/aid-audit.service";
+import {
+  AID_AUDIT_ACTIONS,
+  AID_AUDIT_SOURCE,
+} from "./audit/aid-audit.constants";
+import {
+  aidAuditUserId,
+  buildAidFieldChanges,
+  buildAidStatusChange,
+  buildChecklistStatusChanges,
+  buildJsonObjectChanges,
+  serializeAidAuditValue,
+} from "./audit/aid-audit.util";
+import type { AidAuditChange } from "./audit/aid-audit.types";
 
 @Injectable()
 export class AidApplicationsService {
@@ -72,7 +91,423 @@ export class AidApplicationsService {
     private readonly usersService: UsersService,
     private readonly permissionsService: PermissionsService,
     private readonly s3: S3StorageService,
+    private readonly aidAudit: AidAuditService,
   ) {}
+
+  private async safeAudit(params: {
+    app: Pick<AidApplication, "id" | "application_no">;
+    action: string;
+    changes: AidAuditChange[];
+    user?: User | null;
+    metadata?: Record<string, unknown> | null;
+  }) {
+    if (!params.changes?.length && !params.metadata) return;
+    await this.aidAudit.log({
+      applicationId: Number(params.app.id),
+      applicationNo: params.app.application_no ?? null,
+      action: params.action,
+      source: AID_AUDIT_SOURCE.STAFF_UI,
+      changes: params.changes?.length
+        ? params.changes
+        : [
+            {
+              field: "record",
+              old_value: null,
+              new_value: params.action,
+            },
+          ],
+      performedByUserId: aidAuditUserId(params.user?.id),
+      metadata: params.metadata ?? null,
+    });
+  }
+
+  /** Program manager in Program dept (or super admin) — can skip/forward to CEO. */
+  private async isProgramDepartmentManager(user?: User): Promise<boolean> {
+    if (!user?.id) return false;
+    if (Number(user.id) === -1) return true;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return true;
+    }
+    if (user.department !== Department.PROGRAM) return false;
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return true;
+    }
+    // Department managers often have role=manager without the program_manager flag
+    const role = String(user.role || "").toLowerCase();
+    return (
+      role === "manager" ||
+      role === "assistant_manager" ||
+      role === "dept_head"
+    );
+  }
+
+  /** Canonical PM recommendation: recommend | not_recommend (legacy mapped). */
+  private normalizeRecommendationDecision(raw?: string | null): string {
+    const d = String(raw || "").trim();
+    if (!d) return "";
+    if (d === "reject" || d === "not_recommend") return "not_recommend";
+    if (
+      d === "recommend" ||
+      d === "approve_as_requested" ||
+      d === "approve_with_changes"
+    ) {
+      return "recommend";
+    }
+    return d;
+  }
+
+  private assertRecommendationValid(
+    rec: InvestigationRecommendationDto | null | undefined,
+    label = "Recommendation",
+  ): {
+    decision: string;
+    amount: number | null;
+    period_months: number | null;
+    remarks: string;
+    found_monthly_income: number | null;
+    ration_options: Array<"full" | "half" | "monthly" | "alternate">;
+  } {
+    const allowedRation = new Set(["full", "half", "monthly", "alternate"]);
+    const ration_options = (Array.isArray(rec?.ration_options) ? rec!.ration_options : [])
+      .map((v) => String(v || "").trim().toLowerCase())
+      .filter((v): v is "full" | "half" | "monthly" | "alternate" =>
+        allowedRation.has(v),
+      );
+    const uniqueRation = [...new Set(ration_options)];
+    const isRationPackage = uniqueRation.length > 0;
+
+    if (!rec?.decision && !isRationPackage) {
+      throw new BadRequestException(
+        `${label} is required (Recommend / Not Recommend)`,
+      );
+    }
+    const remarks = String(rec?.remarks || "").trim();
+    if (remarks.length < 3) {
+      throw new BadRequestException(
+        `${label} remarks are required (min 3 characters)`,
+      );
+    }
+
+    const decision = this.normalizeRecommendationDecision(
+      rec?.decision || (isRationPackage ? "recommend" : ""),
+    );
+    if (decision !== "recommend" && decision !== "not_recommend") {
+      throw new BadRequestException(
+        `${label} must be Recommend or Not Recommend`,
+      );
+    }
+
+    let amount: number | null = rec?.amount ?? null;
+    let period_months: number | null = rec?.period_months ?? null;
+
+    if (isRationPackage) {
+      // Manager/CEO ration picks — no amount/period required
+      amount = Number.isFinite(Number(rec?.amount)) && Number(rec?.amount) > 0
+        ? Number(rec?.amount)
+        : null;
+      period_months = null;
+    } else if (decision === "recommend") {
+      const amt = Number(rec?.amount);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        throw new BadRequestException(
+          `Recommended amount (PKR) is required when recommending`,
+        );
+      }
+      amount = amt;
+      const months = Number(rec?.period_months);
+      period_months =
+        Number.isFinite(months) && months > 0 ? months : period_months;
+    } else {
+      amount = null;
+    }
+    const found = rec?.found_monthly_income;
+    return {
+      decision,
+      amount,
+      period_months,
+      remarks,
+      found_monthly_income:
+        found != null && Number.isFinite(Number(found)) ? Number(found) : null,
+      ration_options: uniqueRation,
+    };
+  }
+
+  /** CEO (or staff elevated) may edit recommendation while awaiting CEO approval. */
+  private async assertCanCeoEditRecommendation(user?: User) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising_manager",
+      )
+    ) {
+      return;
+    }
+    const keys = [
+      "program.aid_applications.ceo_approve",
+      "fund_raising.aid_applications.ceo_approve",
+    ];
+    for (const key of keys) {
+      if (await this.permissionsService.hasPermission(Number(user.id), key)) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      "You do not have permission to edit this recommendation",
+    );
+  }
+
+  /** MEAL Preview section: meal_edit permission or staff elevated. */
+  private async assertCanEditMeal(user?: User) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising_manager",
+      )
+    ) {
+      return;
+    }
+    const keys = [
+      "program.aid_applications.meal_edit",
+      "fund_raising.aid_applications.meal_edit",
+    ];
+    for (const key of keys) {
+      if (await this.permissionsService.hasPermission(Number(user.id), key)) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      "You do not have permission to edit the MEAL section",
+    );
+  }
+
+  private normalizeMealReview(
+    raw: Record<string, unknown> | null | undefined,
+    previous: Record<string, unknown> | null = null,
+  ): Record<string, unknown> | null {
+    if (raw == null) return null;
+    const prev = previous && typeof previous === "object" ? previous : {};
+    if (prev.locked === true) {
+      throw new BadRequestException(
+        "MEAL section is locked and cannot be edited",
+      );
+    }
+    const verificationAllowed = new Set([
+      "verified",
+      "not_verified",
+      "skipped",
+    ]);
+    const recommendationAllowed = new Set([
+      "recommended",
+      "not_recommended",
+    ]);
+
+    let verification_status: string | null =
+      prev.verification_status != null
+        ? String(prev.verification_status)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "verification_status")) {
+      const v = raw.verification_status;
+      if (v == null || v === "") verification_status = null;
+      else {
+        const s = String(v).toLowerCase();
+        verification_status = verificationAllowed.has(s) ? s : null;
+      }
+    }
+
+    let recommendation_status: string | null =
+      prev.recommendation_status != null
+        ? String(prev.recommendation_status)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "recommendation_status")) {
+      const v = raw.recommendation_status;
+      if (v == null || v === "") recommendation_status = null;
+      else {
+        const s = String(v).toLowerCase();
+        recommendation_status = recommendationAllowed.has(s) ? s : null;
+      }
+    }
+
+    let remarks: string | null =
+      prev.remarks != null ? String(prev.remarks) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "remarks")) {
+      const r = raw.remarks;
+      remarks =
+        r == null || String(r).trim() === "" ? null : String(r).trim();
+    }
+
+    const locked =
+      raw.locked === true || prev.locked === true ? true : false;
+
+    return {
+      verification_status,
+      recommendation_status,
+      remarks,
+      locked,
+      ...(locked
+        ? { locked_at: new Date().toISOString() }
+        : {}),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  private normalizePreviewApproval(
+    raw: Record<string, unknown> | null | undefined,
+    previous: Record<string, unknown> | null = null,
+  ): Record<string, unknown> | null {
+    if (raw == null) return null;
+    const prev = previous && typeof previous === "object" ? previous : {};
+    if (prev.locked === true) {
+      throw new BadRequestException(
+        "Approval section is locked and cannot be edited",
+      );
+    }
+    const decisionAllowed = new Set([
+      "approved",
+      "approved_with_changes",
+      "rejected",
+      "re_investigate",
+    ]);
+
+    let decision: string | null =
+      prev.decision != null ? String(prev.decision) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "decision")) {
+      const v = raw.decision;
+      if (v == null || v === "") decision = null;
+      else {
+        const s = String(v).toLowerCase();
+        decision = decisionAllowed.has(s) ? s : null;
+      }
+    }
+
+    let remarks: string | null =
+      prev.remarks != null ? String(prev.remarks) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "remarks")) {
+      const r = raw.remarks;
+      remarks =
+        r == null || String(r).trim() === "" ? null : String(r).trim();
+    }
+
+    let approved_support: string | null =
+      prev.approved_support != null ? String(prev.approved_support) : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "approved_support")) {
+      const s = raw.approved_support;
+      approved_support =
+        s == null || String(s).trim() === "" ? null : String(s).trim();
+    }
+
+    let approved_amount: number | null =
+      prev.approved_amount != null && Number.isFinite(Number(prev.approved_amount))
+        ? Number(prev.approved_amount)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "approved_amount")) {
+      const a = raw.approved_amount;
+      if (a == null || a === "") approved_amount = null;
+      else {
+        const n = Number(a);
+        approved_amount = Number.isFinite(n) ? n : null;
+      }
+    }
+
+    const locked =
+      raw.locked === true || prev.locked === true ? true : false;
+
+    return {
+      decision,
+      remarks,
+      approved_support,
+      approved_amount,
+      locked,
+      ...(locked ? { locked_at: new Date().toISOString() } : {}),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Reassign case owner (non-draft): approve_draft capability or super admin.
+   * Investigators with only verification update must not reassign.
+   */
+  private async assertCanAssignApplication(user?: User) {
+    if (!user?.id) {
+      throw new ForbiddenException("Authentication required");
+    }
+    if (Number(user.id) === -1) return;
+    if (
+      await this.permissionsService.hasPermission(Number(user.id), "super_admin")
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "program_manager",
+      )
+    ) {
+      return;
+    }
+    if (
+      await this.permissionsService.hasPermission(
+        Number(user.id),
+        "fund_raising_manager",
+      )
+    ) {
+      return;
+    }
+    const keys = [
+      "program.aid_drafts.approve_draft",
+      "program.aid_applications.approve_draft",
+      "fund_raising.aid_drafts.approve_draft",
+      "fund_raising.aid_applications.approve_draft",
+    ];
+    for (const key of keys) {
+      if (await this.permissionsService.hasPermission(Number(user.id), key)) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      "You do not have permission to assign this application",
+    );
+  }
 
   /**
    * Investigation (checklist / verify / site-visit attach):
@@ -159,10 +594,19 @@ export class AidApplicationsService {
     if (dto.beneficiary && !beneficiaryId) {
       const b = await this.peopleService.create(dto.beneficiary, user);
       beneficiaryId = b.id;
+    } else if (dto.beneficiary && beneficiaryId) {
+      // Existing person linked at create — persist photo_url and other form fields
+      await this.peopleService.update(
+        beneficiaryId,
+        dto.beneficiary as any,
+        user,
+      );
     }
     if (dto.writer && !writerId) {
       const w = await this.peopleService.create(dto.writer, user);
       writerId = w.id;
+    } else if (dto.writer && writerId) {
+      await this.peopleService.update(writerId, dto.writer as any, user);
     }
     if (!beneficiaryId) {
       throw new BadRequestException("beneficiary_person_id is required");
@@ -178,6 +622,8 @@ export class AidApplicationsService {
       writerId === beneficiaryId
         ? AidWriterRelation.SELF
         : dto.writer_relation || AidWriterRelation.OTHER;
+
+    const missingDocs = this.normalizeMissingDocuments(dto.missing_documents);
 
     const row = this.appRepo.create({
       application_no: await this.nextApplicationNo(),
@@ -203,6 +649,10 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.EDUCATION
           ? dto.education_details ?? null
           : null,
+      health_details:
+        dto.requested_aid_type === AidRequestType.HEALTH
+          ? dto.health_details ?? null
+          : null,
       ration_details:
         dto.requested_aid_type === AidRequestType.RATION
           ? dto.ration_details ?? null
@@ -215,9 +665,27 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
           ? dto.financial_assistance_details ?? null
           : null,
-      zakat_permission: dto.zakat_permission ?? null,
-      consent_form: dto.consent_form ?? null,
-      status: AidApplicationStatus.DRAFT,
+      clean_water_details:
+        dto.requested_aid_type === AidRequestType.CLEAN_WATER
+          ? dto.clean_water_details ?? null
+          : null,
+      zakat_permission: dto.zakat_permission ?? {
+        lang: "ur",
+        declaration_accepted: false,
+        applicant_thumb: null,
+        applicant_signature: null,
+      },
+      consent_form: dto.consent_form ?? {
+        variant: "media",
+        lang: "ur",
+        consent_accepted: false,
+        applicant_thumb: null,
+        applicant_signature: null,
+      },
+      missing_documents: missingDocs.length ? missingDocs : null,
+      status: missingDocs.length
+        ? AidApplicationStatus.INCOMPLETE_DOCS
+        : AidApplicationStatus.DRAFT,
       ceo_approval_status: AidCeoApprovalStatus.NOT_REQUIRED,
       delivery_status: AidDeliveryStatus.NOT_STARTED,
       // Assignment is done by the draft approver (program user), not at intake
@@ -235,12 +703,42 @@ export class AidApplicationsService {
         (fm.person && String(fm.person.full_name || "").trim());
       if (!hasPerson) continue;
       try {
+        // Persist intake fields when linking an existing relative (same as update()).
+        if (fm.existing_person_id && fm.person) {
+          await this.peopleService.update(
+            Number(fm.existing_person_id),
+            fm.person as any,
+            user,
+          );
+        }
         await this.peopleService.addFamilyMember(beneficiaryId, fm, user);
       } catch (err) {
         if (err instanceof ConflictException) continue;
         throw err;
       }
     }
+
+    await this.safeAudit({
+      app: saved,
+      action: AID_AUDIT_ACTIONS.CREATED,
+      user,
+      changes: [
+        {
+          field: "status",
+          old_value: null,
+          new_value: serializeAidAuditValue(saved.status),
+        },
+        {
+          field: "application_no",
+          old_value: null,
+          new_value: serializeAidAuditValue(saved.application_no),
+        },
+      ],
+      metadata: {
+        requested_aid_type: saved.requested_aid_type,
+        aid_program: saved.aid_program,
+      },
+    });
 
     return this.findOne(saved.id);
   }
@@ -266,8 +764,19 @@ export class AidApplicationsService {
         qb.andWhere("a.status = :st", { st: AidApplicationStatus.SUBMITTED });
         break;
       case "investigation":
-        qb.andWhere("a.status = :st", {
-          st: AidApplicationStatus.UNDER_REVIEW,
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.UNDER_REVIEW,
+            AidApplicationStatus.VERIFICATION_COMPLETED,
+          ],
+        });
+        break;
+      case "manager_review":
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.MANAGER_REVIEW,
+            AidApplicationStatus.VERIFICATION_COMPLETED,
+          ],
         });
         break;
       case "pending_approval":
@@ -284,6 +793,11 @@ export class AidApplicationsService {
         });
         qb.andWhere("a.updated_at >= :monthStart", { monthStart });
         break;
+      case "incomplete":
+        qb.andWhere("a.status = :st", {
+          st: AidApplicationStatus.INCOMPLETE,
+        });
+        break;
       case "returned":
         qb.andWhere("a.status = :st", { st: AidApplicationStatus.REJECTED });
         break;
@@ -299,6 +813,15 @@ export class AidApplicationsService {
       requested_aid_type?: string;
       district?: string;
       assigned_to_user_id?: number | string;
+      /**
+       * Applications where this user appears on an audit log row
+       * (created / verified / forwarded / CEO decide / etc.).
+       */
+      interacted_by_user_id?: number | string;
+      /** Exact calendar day on updated_at (YYYY-MM-DD). Wins over start/end when set. */
+      date?: string;
+      start_date?: string;
+      end_date?: string;
     },
   ) {
     const search = String(params.search || "").trim();
@@ -322,16 +845,56 @@ export class AidApplicationsService {
     if (Number.isFinite(assignee) && assignee > 0) {
       qb.andWhere("a.assigned_to_user_id = :assignee", { assignee });
     }
+
+    const interactedBy = Number(params.interacted_by_user_id);
+    if (Number.isFinite(interactedBy) && interactedBy > 0) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM aid_application_audit_logs aal
+          WHERE aal.application_id = a.id
+            AND aal.performed_by_id = :interactedBy
+        )`,
+        { interactedBy },
+      );
+    }
+
+    const day = String(params.date || "").trim();
+    const startDate = String(params.start_date || "").trim();
+    const endDate = String(params.end_date || "").trim();
+    if (day) {
+      qb.andWhere("a.updated_at >= :dayStart AND a.updated_at <= :dayEnd", {
+        dayStart: `${day} 00:00:00`,
+        dayEnd: `${day} 23:59:59.999`,
+      });
+    } else {
+      if (startDate) {
+        qb.andWhere("a.updated_at >= :listStart", {
+          listStart: `${startDate} 00:00:00`,
+        });
+      }
+      if (endDate) {
+        qb.andWhere("a.updated_at <= :listEnd", {
+          listEnd: `${endDate} 23:59:59.999`,
+        });
+      }
+    }
   }
 
   private mapStatusToStage(status: string | null | undefined): string {
     switch (String(status || "").toLowerCase()) {
       case AidApplicationStatus.DRAFT:
+      case AidApplicationStatus.INCOMPLETE_DOCS:
         return "draft";
+      case AidApplicationStatus.INCOMPLETE:
+        return "incomplete";
       case AidApplicationStatus.SUBMITTED:
         return "submitted";
       case AidApplicationStatus.UNDER_REVIEW:
         return "investigation";
+      case AidApplicationStatus.VERIFICATION_COMPLETED:
+      case AidApplicationStatus.MANAGER_REVIEW:
+        return "manager_review";
       case AidApplicationStatus.CEO_APPROVAL_REQUIRED:
         return "pending_approval";
       case AidApplicationStatus.SUCCESSFUL:
@@ -370,15 +933,19 @@ export class AidApplicationsService {
 
     const [
       draft,
+      incomplete,
       submitted,
       investigation,
+      manager_review,
       pending_approval,
       approved,
       returned,
     ] = await Promise.all([
       countFor("draft"),
+      countFor("incomplete"),
       countFor("submitted"),
       countFor("investigation"),
+      countFor("manager_review"),
       countFor("pending_approval"),
       countFor("approved"),
       countFor("returned"),
@@ -386,8 +953,10 @@ export class AidApplicationsService {
 
     return {
       draft,
+      incomplete,
       submitted,
       investigation,
+      manager_review,
       pending_approval,
       approved,
       returned,
@@ -510,10 +1079,15 @@ export class AidApplicationsService {
     requested_aid_type?: string;
     district?: string;
     assigned_to_user_id?: number | string;
+    interacted_by_user_id?: number | string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     /**
      * approvals = verified & not rejected (CEO queue + decided non-rejects)
      * entry = Beneficiary Registration board (excludes drafts)
-     * drafts = Drafts board (status = draft only)
+     * drafts = Drafts board (status = draft or incomplete_docs)
+     * audit = Aid Audit Logs (all statuses; optional status/stage)
      */
     queue?: string;
     page?: number;
@@ -559,20 +1133,36 @@ export class AidApplicationsService {
       qb.andWhere("a.status != :rejected", {
         rejected: AidApplicationStatus.REJECTED,
       });
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
       if (params.status) {
         qb.andWhere("a.status = :status", { status: params.status });
       }
+    } else if (params.queue === "audit") {
+      if (params.stage) {
+        this.applyStageFilter(qb, params.stage);
+      } else if (params.status) {
+        qb.andWhere("a.status = :status", { status: params.status });
+      }
     } else if (isDraftsBoard) {
-      qb.andWhere("a.status = :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Drafts + Incomplete Docs (missing attachments flagged at intake)
+      qb.andWhere("a.status IN (:...draftLike)", {
+        draftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
     } else if (isEntryBoard) {
-      // Registration board: live applications only (not drafts)
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Registration board: live applications only (not drafts / incomplete docs)
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
       if (params.stage) {
         this.applyStageFilter(qb, params.stage);
@@ -584,9 +1174,12 @@ export class AidApplicationsService {
     } else if (params.status) {
       qb.andWhere("a.status = :status", { status: params.status });
     } else {
-      // Verification Process default: hide registration drafts
-      qb.andWhere("a.status != :draft", {
-        draft: AidApplicationStatus.DRAFT,
+      // Verification Process default: hide registration drafts / incomplete docs
+      qb.andWhere("a.status NOT IN (:...hideDraftLike)", {
+        hideDraftLike: [
+          AidApplicationStatus.DRAFT,
+          AidApplicationStatus.INCOMPLETE_DOCS,
+        ],
       });
     }
 
@@ -706,17 +1299,70 @@ export class AidApplicationsService {
       (app.investigation_recommendation as Record<string, unknown>) || null,
     );
 
+    const beneficiary = await this.withResolvedPhoto(
+      (personDetail?.person || (app as any).beneficiary) as AidPerson | null,
+      attachments,
+    );
+    const writer = await this.withResolvedPhoto(
+      (app as any).writer as AidPerson | null,
+      attachments,
+    );
+
     return {
       ...app,
+      beneficiary,
+      writer,
       created_by: this.pickAuditActor((app as any).created_by),
       attachments,
       duplicate_flags,
       aid_history,
       investigation_items,
       vulnerability,
+      /** Embedded for edit hydrate — avoids a second people call that can empty the tree. */
+      family_tree: personDetail?.family_tree || null,
+      family_counts: personDetail?.family_counts || null,
+      kinship: personDetail?.kinship || null,
       /** @deprecated use investigation_items */
       verification_checklist_items: investigation_items,
     };
+  }
+
+  /** Prefer person.photo_url; else latest PROFILE attachment (person or app). */
+  private async withResolvedPhoto(
+    person: AidPerson | null | undefined,
+    appAttachments: AidAttachment[] = [],
+  ): Promise<AidPerson | null | undefined> {
+    if (!person?.id) return person;
+    if (person.photo_url) return person;
+
+    const fromApp = appAttachments.find(
+      (a) =>
+        a.context === AidAttachmentContext.PROFILE &&
+        !!a.file_url &&
+        (!a.person_id || Number(a.person_id) === Number(person.id)),
+    );
+    if (fromApp?.file_url) {
+      return Object.assign(person, {
+        photo_url: fromApp.file_url,
+        photo_name: person.photo_name || fromApp.file_name,
+      });
+    }
+
+    const fromPerson = await this.attachmentRepo.findOne({
+      where: {
+        person_id: person.id,
+        context: AidAttachmentContext.PROFILE,
+        is_archived: false,
+      },
+      order: { created_at: "DESC" },
+    });
+    if (fromPerson?.file_url) {
+      return Object.assign(person, {
+        photo_url: fromPerson.file_url,
+        photo_name: person.photo_name || fromPerson.file_name,
+      });
+    }
+    return person;
   }
 
   private buildVulnerabilityInputs(
@@ -1237,18 +1883,78 @@ export class AidApplicationsService {
   async update(id: number, dto: UpdateAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
+      throw new BadRequestException(
+        "Application was rejected by CEO and recommendation is locked",
+      );
+    }
+    const programManagerReopeningRejected =
+      app.status === AidApplicationStatus.REJECTED &&
+      dto.investigation_recommendation !== undefined &&
+      (await this.isProgramDepartmentManager(user));
+    if (app.status === AidApplicationStatus.DELIVERED) {
+      throw new BadRequestException("Cannot edit a closed application");
+    }
     if (
-      app.status === AidApplicationStatus.REJECTED ||
-      app.status === AidApplicationStatus.DELIVERED
+      app.status === AidApplicationStatus.REJECTED &&
+      !programManagerReopeningRejected
     ) {
       throw new BadRequestException("Cannot edit a closed application");
     }
 
-    if (
-      dto.verification_checklist !== undefined ||
-      dto.investigation_recommendation !== undefined
-    ) {
+    const beforeSnapshot: Record<string, unknown> = {
+      status: app.status,
+      title: app.title,
+      request_summary: app.request_summary,
+      case_source: app.case_source,
+      requested_aid_type: app.requested_aid_type,
+      aid_program: app.aid_program,
+      expected_amount: app.expected_amount,
+      expected_amount_max: app.expected_amount_max,
+      assigned_to_user_id: app.assigned_to_user_id,
+      writer_person_id: app.writer_person_id,
+      writer_relation: app.writer_relation,
+      verification_notes: app.verification_notes,
+      rejection_reason: app.rejection_reason,
+      leakage_override_reason: app.leakage_override_reason,
+      household_id: app.household_id,
+      verification_checklist: app.verification_checklist
+        ? JSON.parse(JSON.stringify(app.verification_checklist))
+        : null,
+      investigation_recommendation: app.investigation_recommendation
+        ? JSON.parse(JSON.stringify(app.investigation_recommendation))
+        : null,
+      meal_review: app.meal_review
+        ? JSON.parse(JSON.stringify(app.meal_review))
+        : null,
+    };
+
+    if (dto.verification_checklist !== undefined) {
+      if (programManagerReopeningRejected) {
+        // Checklist edits not allowed while reopening a rejected case — recommendation only.
+        throw new BadRequestException(
+          "Reopen rejected applications by updating recommendation only",
+        );
+      }
       await this.assertCanPerformInvestigation(app, user);
+    } else if (dto.investigation_recommendation !== undefined) {
+      // Manager / CEO may edit recommendation from listing popup without being assignee
+      if (programManagerReopeningRejected) {
+        /* Program manager overrides investigator reject (old flow) */
+      } else if (
+        app.status === AidApplicationStatus.MANAGER_REVIEW ||
+        app.status === AidApplicationStatus.VERIFICATION_COMPLETED
+      ) {
+        if (await this.isProgramDepartmentManager(user)) {
+          /* Program manager recommendation after field process */
+        } else {
+          await this.assertCanAssignApplication(user);
+        }
+      } else if (app.status === AidApplicationStatus.CEO_APPROVAL_REQUIRED) {
+        await this.assertCanCeoEditRecommendation(user);
+      } else {
+        await this.assertCanPerformInvestigation(app, user);
+      }
     }
 
     if (dto.beneficiary && app.beneficiary_person_id) {
@@ -1285,18 +1991,28 @@ export class AidApplicationsService {
       app.case_source = dto.case_source || null;
     }
     if (dto.requested_aid_type !== undefined) {
+      const prevType = app.requested_aid_type;
       app.requested_aid_type = dto.requested_aid_type;
-      if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
-        app.education_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.RATION) {
-        app.ration_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
-        app.marriage_gift_details = null;
-      }
-      if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
-        app.financial_assistance_details = null;
+      // Only clear other program JSON when the type actually changes
+      if (prevType !== dto.requested_aid_type) {
+        if (dto.requested_aid_type !== AidRequestType.EDUCATION) {
+          app.education_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.HEALTH) {
+          app.health_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.RATION) {
+          app.ration_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
+          app.marriage_gift_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
+          app.financial_assistance_details = null;
+        }
+        if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
+          app.clean_water_details = null;
+        }
       }
     }
     if (dto.aid_program !== undefined) {
@@ -1323,6 +2039,13 @@ export class AidApplicationsService {
           ? dto.education_details
           : null;
     }
+    if (dto.health_details !== undefined) {
+      app.health_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.HEALTH
+          ? dto.health_details
+          : null;
+    }
     if (dto.ration_details !== undefined) {
       app.ration_details =
         (dto.requested_aid_type ?? app.requested_aid_type) ===
@@ -1344,16 +2067,31 @@ export class AidApplicationsService {
           ? dto.financial_assistance_details
           : null;
     }
+    if (dto.clean_water_details !== undefined) {
+      app.clean_water_details =
+        (dto.requested_aid_type ?? app.requested_aid_type) ===
+        AidRequestType.CLEAN_WATER
+          ? dto.clean_water_details
+          : null;
+    }
     if (dto.zakat_permission !== undefined) {
       app.zakat_permission = dto.zakat_permission;
     }
     if (dto.consent_form !== undefined) {
       app.consent_form = dto.consent_form;
     }
+    if (dto.missing_documents !== undefined) {
+      this.applyMissingDocumentsToApp(app, dto.missing_documents);
+    }
     if (
       dto.assigned_to_user_id !== undefined &&
       app.status !== AidApplicationStatus.DRAFT
     ) {
+      const prev = Number(app.assigned_to_user_id) || 0;
+      const next = Number(dto.assigned_to_user_id) || 0;
+      if (prev !== next) {
+        await this.assertCanAssignApplication(user);
+      }
       // Draft assignment is only set via approve-draft
       app.assigned_to_user_id = dto.assigned_to_user_id;
     }
@@ -1367,12 +2105,67 @@ export class AidApplicationsService {
           ? dto.verification_checklist
           : null;
     }
+    if (dto.meal_review !== undefined) {
+      await this.assertCanEditMeal(user);
+      app.meal_review = this.normalizeMealReview(
+        dto.meal_review as Record<string, unknown> | null,
+        (app.meal_review as Record<string, unknown> | null) || null,
+      );
+    }
+
     if (dto.investigation_recommendation !== undefined) {
-      app.investigation_recommendation =
+      if (
         dto.investigation_recommendation &&
         typeof dto.investigation_recommendation === "object"
-          ? dto.investigation_recommendation
-          : null;
+      ) {
+        const prev = (app.investigation_recommendation ||
+          {}) as Record<string, unknown>;
+        const incoming = dto.investigation_recommendation as Record<
+          string,
+          unknown
+        >;
+        const recNorm = this.assertRecommendationValid(
+          dto.investigation_recommendation as unknown as InvestigationRecommendationDto,
+          "Recommendation",
+        );
+        // Progress saves often omit ration_options — never wipe prior manager/CEO picks
+        const prevRation = Array.isArray(prev.ration_options)
+          ? prev.ration_options
+          : [];
+        const ration_options = Object.prototype.hasOwnProperty.call(
+          incoming,
+          "ration_options",
+        )
+          ? recNorm.ration_options
+          : prevRation.length
+            ? prevRation
+            : recNorm.ration_options;
+        app.investigation_recommendation = {
+          ...prev,
+          decision: recNorm.decision,
+          amount: recNorm.amount,
+          period_months: recNorm.period_months,
+          remarks: recNorm.remarks,
+          found_monthly_income: recNorm.found_monthly_income,
+          ration_options,
+          updated_at: new Date().toISOString(),
+          updated_by_id: user?.id ?? null,
+          ...(programManagerReopeningRejected
+            ? {
+                manager_override: true,
+                reopened_from_rejected_at: new Date().toISOString(),
+                reopened_from_rejected_by_id: user?.id ?? null,
+              }
+            : {}),
+        };
+      } else {
+        app.investigation_recommendation = null;
+      }
+      // Old-flow investigator Reject closed the case — manager edit reopens pipeline.
+      if (programManagerReopeningRejected) {
+        app.status = AidApplicationStatus.MANAGER_REVIEW;
+        app.rejection_reason = null;
+      }
     }
     if (app.status === AidApplicationStatus.SUBMITTED) {
       app.status = AidApplicationStatus.UNDER_REVIEW;
@@ -1402,11 +2195,171 @@ export class AidApplicationsService {
       }
     }
 
+    const afterSnapshot: Record<string, unknown> = {
+      status: app.status,
+      title: app.title,
+      request_summary: app.request_summary,
+      case_source: app.case_source,
+      requested_aid_type: app.requested_aid_type,
+      aid_program: app.aid_program,
+      expected_amount: app.expected_amount,
+      expected_amount_max: app.expected_amount_max,
+      assigned_to_user_id: app.assigned_to_user_id,
+      writer_person_id: app.writer_person_id,
+      writer_relation: app.writer_relation,
+      verification_notes: app.verification_notes,
+      rejection_reason: app.rejection_reason,
+      leakage_override_reason: app.leakage_override_reason,
+      household_id: app.household_id,
+    };
+    const fieldChanges = buildAidFieldChanges(beforeSnapshot, afterSnapshot);
+    const checklistChanges = buildChecklistStatusChanges(
+      beforeSnapshot.verification_checklist as Record<string, unknown> | null,
+      (app.verification_checklist as Record<string, unknown> | null) || null,
+    );
+    const recChanges = buildJsonObjectChanges(
+      "recommendation",
+      beforeSnapshot.investigation_recommendation as
+        | Record<string, unknown>
+        | null,
+      (app.investigation_recommendation as Record<string, unknown> | null) ||
+        null,
+      ["decision", "amount", "period_months", "remarks", "ration_options"],
+    );
+    const mealChanges = buildJsonObjectChanges(
+      "meal_review",
+      beforeSnapshot.meal_review as Record<string, unknown> | null,
+      (app.meal_review as Record<string, unknown> | null) || null,
+      [
+        "verification_status",
+        "recommendation_status",
+        "remarks",
+        "locked",
+      ],
+    );
+    const allChanges = [
+      ...fieldChanges,
+      ...checklistChanges,
+      ...recChanges,
+      ...mealChanges,
+    ];
+    if (allChanges.length) {
+      const statusOnly =
+        allChanges.length === 1 && allChanges[0].field === "status";
+      const assigneeOnly =
+        allChanges.length === 1 &&
+        allChanges[0].field === "assigned_to_user_id";
+      await this.safeAudit({
+        app,
+        action: statusOnly
+          ? AID_AUDIT_ACTIONS.STATUS_CHANGED
+          : assigneeOnly
+            ? AID_AUDIT_ACTIONS.ASSIGNEE_CHANGED
+            : AID_AUDIT_ACTIONS.UPDATED,
+        user,
+        changes: allChanges,
+      });
+    }
+
+    return this.findOne(id);
+  }
+
+  /** Save MEAL review from Preview tab (requires meal_edit). */
+  async updateMealReview(
+    id: number,
+    dto: UpdateMealReviewDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    await this.assertCanEditMeal(user);
+    const before = (app.meal_review as Record<string, unknown> | null) || null;
+    app.meal_review = this.normalizeMealReview(
+      dto as unknown as Record<string, unknown>,
+      before,
+    );
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    const mealChanges = buildJsonObjectChanges(
+      "meal_review",
+      before,
+      (app.meal_review as Record<string, unknown> | null) || null,
+      [
+        "verification_status",
+        "recommendation_status",
+        "remarks",
+        "locked",
+      ],
+    );
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MEAL_UPDATED,
+      user,
+      changes: mealChanges.length
+        ? mealChanges
+        : [
+            {
+              field: "meal_review",
+              old_value: serializeAidAuditValue(before),
+              new_value: serializeAidAuditValue(app.meal_review),
+            },
+          ],
+    });
+    return this.findOne(id);
+  }
+
+  /** Save Approval block on Preview tab (requires ceo_approve). */
+  async updatePreviewApproval(
+    id: number,
+    dto: UpdatePreviewApprovalDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    await this.assertCanCeoEditRecommendation(user);
+    const before =
+      (app.preview_approval as Record<string, unknown> | null) || null;
+    app.preview_approval = this.normalizePreviewApproval(
+      dto as unknown as Record<string, unknown>,
+      before,
+    );
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    const approvalChanges = buildJsonObjectChanges(
+      "preview_approval",
+      before,
+      (app.preview_approval as Record<string, unknown> | null) || null,
+      [
+        "decision",
+        "remarks",
+        "approved_support",
+        "approved_amount",
+        "locked",
+      ],
+    );
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.PREVIEW_APPROVAL_UPDATED,
+      user,
+      changes: approvalChanges.length
+        ? approvalChanges
+        : [
+            {
+              field: "preview_approval",
+              old_value: serializeAidAuditValue(before),
+              new_value: serializeAidAuditValue(app.preview_approval),
+            },
+          ],
+    });
     return this.findOne(id);
   }
 
   /**
-   * Registration approval: draft → submitted (enters Verification Process).
+   * Registration approval: draft/incomplete → submitted (enters Verification Process).
    * Requires assigning a program-department user as case owner.
    */
   async approveDraft(
@@ -1418,9 +2371,13 @@ export class AidApplicationsService {
       where: { id, is_archived: false },
     });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
-    if (app.status !== AidApplicationStatus.DRAFT) {
+    if (
+      app.status !== AidApplicationStatus.DRAFT &&
+      app.status !== AidApplicationStatus.INCOMPLETE &&
+      app.status !== AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
       throw new BadRequestException(
-        "Only draft applications can be approved for verification",
+        "Only draft or incomplete applications can be approved for verification",
       );
     }
 
@@ -1437,11 +2394,117 @@ export class AidApplicationsService {
       );
     }
 
+    const prevStatus = app.status;
+    const prevAssignee = app.assigned_to_user_id;
     app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
     app.submitted_at = new Date();
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.DRAFT_APPROVED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "assigned_to_user_id",
+          old_value: serializeAidAuditValue(prevAssignee),
+          new_value: serializeAidAuditValue(assigneeId),
+        },
+      ],
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Mark application incomplete (missing details / needs completion).
+   * Allowed from active pipeline statuses (not draft/successful/delivered/rejected).
+   */
+  async markIncomplete(
+    id: number,
+    dto: { reason?: string | null },
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      [
+        AidApplicationStatus.DRAFT,
+        AidApplicationStatus.INCOMPLETE,
+        AidApplicationStatus.INCOMPLETE_DOCS,
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "This application cannot be marked incomplete in its current status",
+      );
+    }
+    const reason = String(dto?.reason || "").trim();
+    const prevStatus = app.status;
+    app.status = AidApplicationStatus.INCOMPLETE;
+    if (reason) {
+      app.verification_notes = reason;
+    }
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MARKED_INCOMPLETE,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...(reason
+          ? [
+              {
+                field: "verification_notes",
+                old_value: null,
+                new_value: reason,
+              } as AidAuditChange,
+            ]
+          : []),
+      ],
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Resume incomplete / incomplete_docs → submitted (keeps assignee when present).
+   * Without assignee, stays incomplete until Consider & assign.
+   */
+  async resumeIncomplete(id: number, user?: User) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      app.status !== AidApplicationStatus.INCOMPLETE &&
+      app.status !== AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
+      throw new BadRequestException(
+        "Only incomplete applications can be resumed",
+      );
+    }
+    if (!app.assigned_to_user_id) {
+      throw new BadRequestException(
+        "Assign a program user via Consider before resuming to verification",
+      );
+    }
+    const prevStatus = app.status;
+    app.status = AidApplicationStatus.SUBMITTED;
+    if (!app.submitted_at) app.submitted_at = new Date();
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.RESUMED,
+      user,
+      changes: buildAidStatusChange(prevStatus, app.status),
+    });
     return this.findOne(id);
   }
 
@@ -1460,10 +2523,91 @@ export class AidApplicationsService {
     if (reason.length < 2) {
       throw new BadRequestException("rejection_reason is required");
     }
+    const prevStatus = app.status;
     app.status = AidApplicationStatus.REJECTED;
     app.rejection_reason = reason;
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.REJECTED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "rejection_reason",
+          old_value: null,
+          new_value: reason,
+        },
+      ],
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Field Process done — status → verification_completed (awaiting Program manager).
+   * Does not require recommendation (manager fills that next).
+   */
+  async markVerificationCompleted(
+    id: number,
+    dto: CompleteVerificationAidApplicationDto = {},
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      ![
+        AidApplicationStatus.SUBMITTED,
+        AidApplicationStatus.UNDER_REVIEW,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "Only submitted/under_review applications can be marked verification completed",
+      );
+    }
+    await this.assertCanPerformInvestigation(app, user);
+    const investigationItems = await this.buildInvestigationForApp(app);
+    const checklistSource =
+      (dto.verification_checklist as Record<string, unknown> | undefined) ||
+      (app.verification_checklist as Record<string, unknown> | null) ||
+      {};
+    let checklistPayload: Record<string, unknown>;
+    try {
+      checklistPayload = assertInvestigationComplete(
+        investigationItems,
+        checklistSource,
+      );
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message ||
+          "Complete field process / investigation checklist before marking verification completed",
+      );
+    }
+
+    const prevStatus = app.status;
+    const prevChecklist =
+      (app.verification_checklist as Record<string, unknown> | null) || null;
+    app.verification_checklist = checklistPayload;
+    if (dto.verification_notes !== undefined) {
+      const notes = String(dto.verification_notes || "").trim();
+      app.verification_notes = notes || app.verification_notes;
+    }
+    app.status = AidApplicationStatus.VERIFICATION_COMPLETED;
+    app.verified_at = app.verified_at || new Date();
+    app.verified_by_id = app.verified_by_id ?? user?.id ?? null;
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFICATION_COMPLETED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...buildChecklistStatusChanges(prevChecklist, checklistPayload),
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -1477,13 +2621,17 @@ export class AidApplicationsService {
       ![
         AidApplicationStatus.SUBMITTED,
         AidApplicationStatus.UNDER_REVIEW,
+        AidApplicationStatus.VERIFICATION_COMPLETED,
       ].includes(app.status)
     ) {
       throw new BadRequestException(
-        "Only submitted/under_review applications can be verified",
+        "Only submitted/under_review/verification_completed applications can be verified",
       );
     }
     await this.assertCanPerformInvestigation(app, user);
+    const prevStatus = app.status;
+    const prevChecklist =
+      (app.verification_checklist as Record<string, unknown> | null) || null;
     const investigationItems = await this.buildInvestigationForApp(app);
     let checklistPayload: Record<string, unknown>;
     try {
@@ -1497,34 +2645,35 @@ export class AidApplicationsService {
       );
     }
 
-    const rec = dto.recommendation;
-    if (!rec?.decision) {
-      throw new BadRequestException(
-        "Investigation recommendation is required (approve as requested / with changes / reject)",
-      );
-    }
-    const remarks = String(rec.remarks || "").trim();
-    if (remarks.length < 3) {
-      throw new BadRequestException(
-        "Investigator remarks are required (min 3 characters)",
-      );
-    }
-    if (rec.decision !== "reject") {
-      const amount = Number(rec.amount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        throw new BadRequestException(
-          "Recommended amount (PKR) is required for approval recommendations",
-        );
-      }
-      if (rec.decision === "approve_with_changes") {
-        const months = Number(rec.period_months);
-        if (!Number.isFinite(months) || months <= 0) {
-          throw new BadRequestException(
-            "Period (months) is required when approving with changes",
-          );
-        }
-      }
-    }
+    const skipToCeo = await this.isProgramDepartmentManager(user);
+    // Recommendation is Program-dept manager only (same rule as Consider & assign).
+    // Investigators may verify checklist without filling recommendation.
+    const hasIncomingRec =
+      !!dto.recommendation &&
+      (!!dto.recommendation.decision ||
+        (Array.isArray(dto.recommendation.ration_options) &&
+          dto.recommendation.ration_options.length > 0) ||
+        String(dto.recommendation.remarks || "").trim().length >= 3);
+    const recNorm = skipToCeo
+      ? this.assertRecommendationValid(
+          dto.recommendation,
+          "Investigation recommendation",
+        )
+      : hasIncomingRec
+        ? this.assertRecommendationValid(
+            dto.recommendation,
+            "Investigation recommendation",
+          )
+        : {
+            decision: "recommend" as const,
+            amount: null,
+            period_months: null,
+            remarks: "Awaiting program manager recommendation",
+            found_monthly_income: null,
+            ration_options: [] as Array<
+              "full" | "half" | "monthly" | "alternate"
+            >,
+          };
 
     await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
 
@@ -1542,31 +2691,183 @@ export class AidApplicationsService {
       app,
       personDetail,
       checklistPayload,
-      rec as unknown as Record<string, unknown>,
+      recNorm as unknown as Record<string, unknown>,
     );
-
-    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
-    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    if (skipToCeo) {
+      app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+      app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    } else {
+      app.status = AidApplicationStatus.MANAGER_REVIEW;
+      app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
+    }
     app.verification_notes =
-      dto.verification_notes?.trim() || remarks || app.verification_notes;
+      dto.verification_notes?.trim() ||
+      recNorm.remarks ||
+      app.verification_notes;
     app.verification_checklist = checklistPayload;
     app.investigation_recommendation = {
-      decision: rec.decision,
-      amount: rec.amount ?? null,
-      period_months: rec.period_months ?? null,
-      remarks,
-      found_monthly_income: rec.found_monthly_income ?? null,
+      decision: recNorm.decision,
+      amount: recNorm.amount,
+      period_months: recNorm.period_months,
+      remarks: recNorm.remarks,
+      found_monthly_income: recNorm.found_monthly_income,
+      ration_options: recNorm.ration_options,
       vulnerability_score_declared: vulnerability.declared.total,
       vulnerability_score_after_visit: vulnerability.after_visit.total,
       vulnerability_deltas: vulnerability.deltas,
       vulnerability_declared: vulnerability.declared,
       vulnerability_after_visit: vulnerability.after_visit,
       submitted_at: new Date().toISOString(),
+      submitted_by_role: skipToCeo ? "program_manager" : "investigator",
+      submitted_by_id: user?.id ?? null,
     };
     app.verified_at = new Date();
     app.verified_by_id = user?.id ?? null;
     app.updated_by = user || null;
     await this.appRepo.save(app);
+    const verifyChanges = [
+      ...buildAidStatusChange(prevStatus, app.status),
+      ...buildChecklistStatusChanges(prevChecklist, checklistPayload),
+      {
+        field: "recommendation.decision",
+        old_value: null,
+        new_value: serializeAidAuditValue(recNorm.decision),
+      },
+    ];
+    if (dto.leakage_override_reason) {
+      verifyChanges.push({
+        field: "leakage_override_reason",
+        old_value: null,
+        new_value: String(dto.leakage_override_reason).trim(),
+      });
+    }
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFIED,
+      user,
+      changes: verifyChanges,
+      metadata: {
+        skip_to_ceo: skipToCeo,
+        vulnerability_after_visit: vulnerability.after_visit?.total ?? null,
+      },
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Program manager (Program dept): manager_review → CEO, with optional recommendation override.
+   */
+  async managerForward(
+    id: number,
+    dto: ManagerForwardAidApplicationDto,
+    user?: User,
+  ) {
+    if (!(await this.isProgramDepartmentManager(user))) {
+      throw new ForbiddenException(
+        "Only a Program department manager can forward to CEO",
+      );
+    }
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary"],
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
+      throw new BadRequestException(
+        "Application was rejected by CEO and cannot be forwarded",
+      );
+    }
+    if (
+      app.status !== AidApplicationStatus.MANAGER_REVIEW &&
+      app.status !== AidApplicationStatus.VERIFICATION_COMPLETED
+    ) {
+      throw new BadRequestException(
+        "Only applications in Verification Completed or Manager Review can be forwarded to CEO",
+      );
+    }
+
+    const prev = (app.investigation_recommendation ||
+      {}) as Record<string, unknown>;
+    const incoming = dto.recommendation;
+    const hasIncoming =
+      !!incoming &&
+      (!!incoming.decision ||
+        (Array.isArray(incoming.ration_options) &&
+          incoming.ration_options.length > 0) ||
+        String(incoming.remarks || "").trim().length > 0);
+    const recSource: InvestigationRecommendationDto = hasIncoming
+      ? incoming!
+      : {
+          decision: prev.decision as InvestigationRecommendationDto["decision"],
+          amount: (prev.amount as number | null) ?? null,
+          period_months: (prev.period_months as number | null) ?? null,
+          remarks: (prev.remarks as string | null) ?? null,
+          found_monthly_income:
+            (prev.found_monthly_income as number | null) ?? null,
+          ration_options: Array.isArray(prev.ration_options)
+            ? (prev.ration_options as InvestigationRecommendationDto["ration_options"])
+            : undefined,
+        };
+    const recNorm = this.assertRecommendationValid(
+      recSource,
+      "Recommendation",
+    );
+
+    await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
+
+    const prevRation = Array.isArray(prev.ration_options)
+      ? [...(prev.ration_options as string[])].map(String).sort().join(",")
+      : "";
+    const nextRation = [...recNorm.ration_options].sort().join(",");
+    const overridden =
+      hasIncoming &&
+      (String(incoming?.decision || "") !== String(prev.decision || "") ||
+        Number(incoming?.amount ?? 0) !== Number(prev.amount ?? 0) ||
+        Number(incoming?.period_months ?? 0) !==
+          Number(prev.period_months ?? 0) ||
+        String(incoming?.remarks || "").trim() !==
+          String(prev.remarks || "").trim() ||
+        nextRation !== prevRation);
+
+    const prevStatus = app.status;
+    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    app.investigation_recommendation = {
+      ...prev,
+      decision: recNorm.decision,
+      amount: recNorm.amount,
+      period_months: recNorm.period_months,
+      remarks: recNorm.remarks,
+      found_monthly_income: recNorm.found_monthly_income,
+      ration_options: recNorm.ration_options,
+      investigator_snapshot: {
+        decision: prev.decision ?? null,
+        amount: prev.amount ?? null,
+        period_months: prev.period_months ?? null,
+        remarks: prev.remarks ?? null,
+        ration_options: prev.ration_options ?? null,
+      },
+      manager_override: overridden,
+      manager_forwarded_at: new Date().toISOString(),
+      manager_forwarded_by_id: user?.id ?? null,
+      submitted_by_role: "program_manager",
+    };
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MANAGER_FORWARDED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "recommendation.decision",
+          old_value: serializeAidAuditValue(prev.decision ?? null),
+          new_value: serializeAidAuditValue(recNorm.decision),
+        },
+      ],
+      metadata: { manager_override: overridden },
+    });
     return this.findOne(id);
   }
 
@@ -1585,6 +2886,34 @@ export class AidApplicationsService {
 
     if (dto.decision === AidCeoApprovalStatus.APPROVED) {
       await this.assertLeakageOverrideAllowed(app, dto.leakage_override_reason, user);
+    }
+
+    const prevStatus = app.status;
+
+    if (
+      dto.recommendation &&
+      (dto.recommendation.decision ||
+        (Array.isArray(dto.recommendation.ration_options) &&
+          dto.recommendation.ration_options.length > 0) ||
+        String(dto.recommendation.remarks || "").trim().length >= 3)
+    ) {
+      const prev = (app.investigation_recommendation ||
+        {}) as Record<string, unknown>;
+      const recNorm = this.assertRecommendationValid(
+        dto.recommendation,
+        "CEO recommendation",
+      );
+      app.investigation_recommendation = {
+        ...prev,
+        decision: recNorm.decision,
+        amount: recNorm.amount,
+        period_months: recNorm.period_months,
+        remarks: recNorm.remarks,
+        found_monthly_income: recNorm.found_monthly_income,
+        ration_options: recNorm.ration_options,
+        ceo_edited_at: new Date().toISOString(),
+        ceo_edited_by_id: user?.id ?? null,
+      };
     }
 
     app.ceo_decided_at = new Date();
@@ -1606,6 +2935,23 @@ export class AidApplicationsService {
       app.rejection_reason = reason;
     }
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.CEO_DECIDED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "ceo_approval_status",
+          old_value: null,
+          new_value: serializeAidAuditValue(app.ceo_approval_status),
+        },
+      ],
+      metadata: {
+        decision: dto.decision,
+        ceo_rejection_reason: app.ceo_rejection_reason ?? null,
+      },
+    });
     return this.findOne(id);
   }
 
@@ -1620,6 +2966,8 @@ export class AidApplicationsService {
         "Delivery can only be updated after CEO approval (successful)",
       );
     }
+    const prevStatus = app.status;
+    const prevDelivery = app.delivery_status;
     app.delivery_status = dto.delivery_status;
     app.delivery_notes = dto.delivery_notes?.trim() || app.delivery_notes;
     app.updated_by = user || null;
@@ -1634,6 +2982,19 @@ export class AidApplicationsService {
       app.status = AidApplicationStatus.DELIVERED;
     }
     await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.DELIVERY_UPDATED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "delivery_status",
+          old_value: serializeAidAuditValue(prevDelivery),
+          new_value: serializeAidAuditValue(app.delivery_status),
+        },
+      ],
+    });
     return this.findOne(id);
   }
 
@@ -1642,7 +3003,20 @@ export class AidApplicationsService {
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     app.is_archived = true;
     app.updated_by = user || null;
-    return this.appRepo.save(app);
+    const saved = await this.appRepo.save(app);
+    await this.safeAudit({
+      app: saved,
+      action: AID_AUDIT_ACTIONS.ARCHIVED,
+      user,
+      changes: [
+        {
+          field: "is_archived",
+          old_value: false,
+          new_value: true,
+        },
+      ],
+    });
+    return saved;
   }
 
   async addAttachment(params: {
@@ -1693,9 +3067,22 @@ export class AidApplicationsService {
       params.file,
       params.context,
     );
+    let personId = params.personId ?? null;
+    if (
+      !personId &&
+      params.applicationId &&
+      params.context === AidAttachmentContext.PROFILE
+    ) {
+      const appRow = await this.appRepo.findOne({
+        where: { id: params.applicationId, is_archived: false },
+        select: ["id", "beneficiary_person_id"],
+      });
+      personId = appRow?.beneficiary_person_id ?? null;
+    }
+
     const row = this.attachmentRepo.create({
       application_id: params.applicationId ?? null,
-      person_id: params.personId ?? null,
+      person_id: personId,
       context: params.context,
       file_name: params.file.originalname,
       file_url: uploaded.url,
@@ -1705,7 +3092,54 @@ export class AidApplicationsService {
       created_by: params.user || null,
       updated_by: params.user || null,
     });
-    return this.attachmentRepo.save(row);
+    const saved = await this.attachmentRepo.save(row);
+
+    if (
+      personId &&
+      params.context === AidAttachmentContext.PROFILE &&
+      uploaded.url
+    ) {
+      try {
+        await this.peopleService.update(
+          personId,
+          {
+            photo_url: uploaded.url,
+            photo_name: params.file.originalname,
+          } as any,
+          params.user,
+        );
+      } catch {
+        /* attachment saved; photo sync is best-effort */
+      }
+    }
+
+    if (params.applicationId) {
+      const appRef = await this.appRepo.findOne({
+        where: { id: params.applicationId },
+        select: ["id", "application_no"],
+      });
+      if (appRef) {
+        await this.safeAudit({
+          app: appRef,
+          action: AID_AUDIT_ACTIONS.ATTACHMENT_UPLOADED,
+          user: params.user,
+          changes: [
+            {
+              field: "attachment",
+              old_value: null,
+              new_value: serializeAidAuditValue(params.file.originalname),
+            },
+          ],
+          metadata: {
+            attachment_id: saved.id,
+            context: params.context,
+            description: params.description?.trim() || null,
+          },
+        });
+      }
+    }
+
+    return saved;
   }
 
   /** Upload a document to S3 and return URL (no person/app link yet — e.g. NECTA on create). */
@@ -1726,7 +3160,170 @@ export class AidApplicationsService {
     if (!row) throw new NotFoundException(`Attachment #${attachmentId} not found`);
     row.is_archived = true;
     row.updated_by = user || null;
-    return this.attachmentRepo.save(row);
+    const saved = await this.attachmentRepo.save(row);
+    if (row.application_id) {
+      const appRef = await this.appRepo.findOne({
+        where: { id: row.application_id },
+        select: ["id", "application_no"],
+      });
+      if (appRef) {
+        await this.safeAudit({
+          app: appRef,
+          action: AID_AUDIT_ACTIONS.ATTACHMENT_DELETED,
+          user,
+          changes: [
+            {
+              field: "attachment",
+              old_value: serializeAidAuditValue(row.file_name),
+              new_value: "archived",
+            },
+          ],
+          metadata: {
+            attachment_id: row.id,
+            context: row.context,
+          },
+        });
+      }
+    }
+    return saved;
+  }
+
+  private normalizeMissingDocuments(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+      const key = String(item || "")
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    }
+    return out;
+  }
+
+  private applyMissingDocumentsToApp(
+    app: AidApplication,
+    raw: unknown,
+  ) {
+    const keys = this.normalizeMissingDocuments(raw);
+    app.missing_documents = keys.length ? keys : null;
+    if (
+      keys.length &&
+      ![
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+      ].includes(app.status)
+    ) {
+      app.status = AidApplicationStatus.INCOMPLETE_DOCS;
+      const note = `Missing documents: ${keys.join(", ")}`;
+      const existing = String(app.verification_notes || "").trim();
+      if (!existing.includes("Missing documents:")) {
+        app.verification_notes = existing ? `${existing}\n${note}` : note;
+      } else {
+        app.verification_notes = existing.replace(
+          /Missing documents:.*$/m,
+          note,
+        );
+      }
+    } else if (
+      !keys.length &&
+      app.status === AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
+      // All missing keys cleared — restore pipeline status (do not leave stuck Incomplete Docs)
+      app.status = app.submitted_at
+        ? AidApplicationStatus.UNDER_REVIEW
+        : AidApplicationStatus.DRAFT;
+    }
+  }
+
+  /** Replace missing document keys; sets Incomplete Docs when any remain. */
+  async setMissingDocuments(
+    id: number,
+    missingDocuments: string[],
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      [
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "Cannot update missing documents on a closed application",
+      );
+    }
+    this.applyMissingDocumentsToApp(app, missingDocuments);
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    return this.findOne(id);
+  }
+
+  /**
+   * Flag (or clear) an attachment as missing.
+   * When marked missing, application status becomes Incomplete Docs
+   * (unless already successful / delivered / rejected).
+   */
+  async setAttachmentMissing(
+    attachmentId: number,
+    isMissing: boolean,
+    user?: User,
+  ) {
+    const row = await this.attachmentRepo.findOne({
+      where: { id: attachmentId, is_archived: false },
+    });
+    if (!row) {
+      throw new NotFoundException(`Attachment #${attachmentId} not found`);
+    }
+    row.is_missing = !!isMissing;
+    row.updated_by = user || null;
+    await this.attachmentRepo.save(row);
+
+    if (!row.application_id) {
+      return { attachment: row, application: null };
+    }
+
+    const app = await this.appRepo.findOne({
+      where: { id: row.application_id, is_archived: false },
+    });
+    if (!app) {
+      return { attachment: row, application: null };
+    }
+
+    if (isMissing) {
+      if (
+        ![
+          AidApplicationStatus.SUCCESSFUL,
+          AidApplicationStatus.DELIVERED,
+          AidApplicationStatus.REJECTED,
+        ].includes(app.status)
+      ) {
+        app.status = AidApplicationStatus.INCOMPLETE_DOCS;
+        const note = `Missing document: ${row.file_name || row.context || `#${row.id}`}`;
+        const existing = String(app.verification_notes || "").trim();
+        if (!existing.includes(note)) {
+          app.verification_notes = existing ? `${existing}\n${note}` : note;
+        }
+        app.updated_by = user || null;
+        await this.appRepo.save(app);
+      }
+      return {
+        attachment: row,
+        application: await this.findOne(app.id),
+      };
+    }
+
+    return {
+      attachment: row,
+      application: await this.findOne(app.id),
+    };
   }
 
   async listPersonAttachments(personId: number) {

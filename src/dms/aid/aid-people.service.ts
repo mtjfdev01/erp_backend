@@ -166,6 +166,15 @@ export class AidPeopleService {
       person.disability_type = mapped.disability_type;
     }
     if (mapped.address !== undefined) person.address = mapped.address;
+    if (mapped.current_address !== undefined) {
+      person.current_address = mapped.current_address;
+    }
+    if (mapped.thumb_impression !== undefined) {
+      person.thumb_impression = mapped.thumb_impression;
+    }
+    if (mapped.signature !== undefined) {
+      person.signature = mapped.signature;
+    }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
     if (mapped.district !== undefined) person.district = mapped.district;
@@ -279,7 +288,14 @@ export class AidPeopleService {
       .map((row) => {
         const vehicle_type = String(row?.vehicle_type || "").trim();
         if (!vehicle_type) return null;
-        return { vehicle_type };
+        const entry: Record<string, unknown> = { vehicle_type };
+        const qty = Number(row?.quantity);
+        if (Number.isFinite(qty) && qty > 0) {
+          entry.quantity = Math.floor(qty);
+        }
+        const details = String(row?.details || "").trim();
+        if (details) entry.details = details;
+        return entry;
       })
       .filter(Boolean) as Record<string, unknown>[];
     return rows.length ? rows : null;
@@ -415,6 +431,22 @@ export class AidPeopleService {
       health_notes:
         dto.health_notes !== undefined ? dto.health_notes?.trim() || null : undefined,
       address: dto.address !== undefined ? dto.address?.trim() || null : undefined,
+      current_address:
+        dto.current_address !== undefined
+          ? dto.current_address?.trim() || null
+          : undefined,
+      thumb_impression:
+        dto.thumb_impression !== undefined
+          ? dto.thumb_impression && typeof dto.thumb_impression === "object"
+            ? dto.thumb_impression
+            : null
+          : undefined,
+      signature:
+        dto.signature !== undefined
+          ? dto.signature && typeof dto.signature === "object"
+            ? dto.signature
+            : null
+          : undefined,
       city: dto.city !== undefined ? dto.city?.trim() || null : undefined,
       province:
         dto.province !== undefined ? dto.province?.trim() || null : undefined,
@@ -504,6 +536,9 @@ export class AidPeopleService {
       is_alive: mapped.is_alive !== false,
       health_notes: mapped.health_notes ?? null,
       address: mapped.address ?? null,
+      current_address: mapped.current_address ?? null,
+      thumb_impression: mapped.thumb_impression ?? null,
+      signature: mapped.signature ?? null,
       city: mapped.city ?? null,
       province: mapped.province ?? null,
       district: mapped.district ?? null,
@@ -943,6 +978,15 @@ export class AidPeopleService {
     if (mapped.is_alive !== undefined) person.is_alive = mapped.is_alive;
     if (mapped.health_notes !== undefined) person.health_notes = mapped.health_notes;
     if (mapped.address !== undefined) person.address = mapped.address;
+    if (mapped.current_address !== undefined) {
+      person.current_address = mapped.current_address;
+    }
+    if (mapped.thumb_impression !== undefined) {
+      person.thumb_impression = mapped.thumb_impression;
+    }
+    if (mapped.signature !== undefined) {
+      person.signature = mapped.signature;
+    }
     if (mapped.city !== undefined) person.city = mapped.city;
     if (mapped.province !== undefined) person.province = mapped.province;
     if (mapped.district !== undefined) person.district = mapped.district;
@@ -973,17 +1017,72 @@ export class AidPeopleService {
     if (fromPersonId === dto.to_person_id) {
       throw new BadRequestException("Cannot link a person to themselves");
     }
-    const existing = await this.kinshipRepo.findOne({
+    // Include archived rows: uq_aid_kinship_edge is global (not partial on is_archived).
+    const allPairEdges = await this.kinshipRepo.find({
       where: {
         from_person_id: fromPersonId,
         to_person_id: dto.to_person_id,
-        relation_type: dto.relation_type,
-        is_archived: false,
       },
+      order: { id: "ASC" },
     });
-    if (existing) {
-      throw new ConflictException("This kinship edge already exists");
+    const activePairEdges = allPairEdges.filter((e) => !e.is_archived);
+    const target =
+      allPairEdges.find(
+        (e) => !e.is_archived && e.relation_type === dto.relation_type,
+      ) ||
+      allPairEdges.find((e) => e.relation_type === dto.relation_type);
+
+    const archiveExtras = async (keepId: number) => {
+      for (const extra of activePairEdges) {
+        if (extra.id === keepId) continue;
+        extra.is_archived = true;
+        extra.updated_by = user || null;
+        await this.kinshipRepo.save(extra);
+      }
+    };
+
+    if (target) {
+      target.is_archived = false;
+      if (dto.notes !== undefined) {
+        target.notes = dto.notes?.trim() || null;
+      }
+      target.updated_by = user || null;
+      const saved = await this.kinshipRepo.save(target);
+      await archiveExtras(saved.id);
+      return saved;
     }
+
+    if (activePairEdges.length > 0) {
+      const keep = activePairEdges[0];
+      // Free the unique key before retargeting (archived rows still occupy it).
+      for (const conflict of allPairEdges) {
+        if (conflict.id === keep.id) continue;
+        if (conflict.relation_type !== dto.relation_type) continue;
+        await this.kinshipRepo.delete(conflict.id);
+      }
+      keep.relation_type = dto.relation_type;
+      if (dto.notes !== undefined) {
+        keep.notes = dto.notes?.trim() || null;
+      }
+      keep.updated_by = user || null;
+      const saved = await this.kinshipRepo.save(keep);
+      await archiveExtras(saved.id);
+      return saved;
+    }
+
+    // Soft-deleted exact match may still exist — reactivate instead of insert.
+    const archivedTarget = allPairEdges.find(
+      (e) => e.relation_type === dto.relation_type,
+    );
+    if (archivedTarget) {
+      archivedTarget.is_archived = false;
+      if (dto.notes !== undefined) {
+        archivedTarget.notes = dto.notes?.trim() || null;
+      }
+      archivedTarget.updated_by = user || null;
+      return this.kinshipRepo.save(archivedTarget);
+    }
+
     const edge = this.kinshipRepo.create({
       from_person_id: fromPersonId,
       to_person_id: dto.to_person_id,
@@ -1003,6 +1102,7 @@ export class AidPeopleService {
   ) {
     await this.findOne(fromPersonId);
     let toPersonId = dto.existing_person_id;
+    let linkedExisting = !!toPersonId;
     if (!toPersonId && dto.person) {
       try {
         const created = await this.create(dto.person, user);
@@ -1015,7 +1115,10 @@ export class AidPeopleService {
             const existing = await this.findByCnicDigits(cnic, {
               activeOnly: true,
             });
-            if (existing) toPersonId = existing.id;
+            if (existing) {
+              toPersonId = existing.id;
+              linkedExisting = true;
+            }
           }
         }
         if (!toPersonId) throw err;
@@ -1025,6 +1128,10 @@ export class AidPeopleService {
       throw new BadRequestException(
         "Provide existing_person_id or person payload for the relative",
       );
+    }
+    // Existing / CNIC-reused rows must still receive intake fields (e.g. current_address).
+    if (linkedExisting && dto.person) {
+      await this.update(toPersonId, dto.person as UpdateAidPersonDto, user);
     }
     const edge = await this.addKinship(
       fromPersonId,

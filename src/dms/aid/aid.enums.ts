@@ -163,8 +163,22 @@ export enum AidRequestType {
 export enum AidApplicationStatus {
   /** Intake saved; not yet in verification pipeline. */
   DRAFT = "draft",
+  /**
+   * Missing required details / returned for completion.
+   * Editable; can be resubmitted or considered again for verification.
+   */
+  INCOMPLETE = "incomplete",
+  /** One or more required documents flagged as missing. */
+  INCOMPLETE_DOCS = "incomplete_docs",
   SUBMITTED = "submitted",
   UNDER_REVIEW = "under_review",
+  /**
+   * Field process / investigation finished by assignee.
+   * Awaiting Program manager recommendation / forward.
+   */
+  VERIFICATION_COMPLETED = "verification_completed",
+  /** Investigator submitted — awaiting Program manager review. */
+  MANAGER_REVIEW = "manager_review",
   REJECTED = "rejected",
   CEO_APPROVAL_REQUIRED = "ceo_approval_required",
   SUCCESSFUL = "successful",
@@ -198,6 +212,7 @@ export enum AidAttachmentContext {
   MARRIAGE_CERTIFICATE = "marriage_certificate",
   EDUCATION_CERTIFICATE = "education_certificate",
   E_STAMP_PAPER = "e_stamp_paper",
+  OTHERS = "others",
   ZAKAT = "zakat",
   CONSENT = "consent",
   /** Disbursement proof uploads */

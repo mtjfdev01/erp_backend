@@ -42,6 +42,10 @@ export class AidAttachment extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   description: string | null;
 
+  /** Flagged by investigator/officer as missing / not acceptable. */
+  @Column({ type: "boolean", default: false })
+  is_missing: boolean;
+
   @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "uploaded_by" })
   uploaded_by: User | null;

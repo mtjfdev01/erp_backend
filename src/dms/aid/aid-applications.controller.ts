@@ -25,6 +25,7 @@ import {
   AID_APPLICATIONS_DELETE_GUARD,
   AID_APPLICATIONS_DELIVER_GUARD,
   AID_APPLICATIONS_LIST_GUARD,
+  AID_APPLICATIONS_MEAL_EDIT_GUARD,
   AID_APPLICATIONS_UPDATE_GUARD,
   AID_APPLICATIONS_VIEW_GUARD,
   AID_PEOPLE_UPDATE_GUARD,
@@ -39,8 +40,15 @@ import {
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
+  ManagerForwardAidApplicationDto,
+  MarkIncompleteAidApplicationDto,
   RejectAidApplicationDto,
+  SetAidAttachmentMissingDto,
+  SetAidMissingDocumentsDto,
+  CompleteVerificationAidApplicationDto,
   UpdateAidApplicationDto,
+  UpdateMealReviewDto,
+  UpdatePreviewApprovalDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 
@@ -221,6 +229,51 @@ export class AidApplicationsController {
     });
   }
 
+  @Patch("attachments/:attachmentId/missing")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async setAttachmentMissing(
+    @Param("attachmentId") attachmentId: string,
+    @Body() dto: SetAidAttachmentMissingDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.setAttachmentMissing(
+      Number(attachmentId),
+      !!dto?.is_missing,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: dto?.is_missing
+        ? "Attachment marked missing; status set to Incomplete Docs"
+        : "Attachment missing flag cleared",
+      data,
+    });
+  }
+
+  @Patch(":id/missing-documents")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async setMissingDocuments(
+    @Param("id") id: string,
+    @Body() dto: SetAidMissingDocumentsDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.setMissingDocuments(
+      Number(id),
+      dto?.missing_documents || [],
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message:
+        (dto?.missing_documents || []).length > 0
+          ? "Missing documents updated; status set to Incomplete Docs"
+          : "Missing documents cleared",
+      data,
+    });
+  }
+
   /** Selection lookup — authenticated only (no module permissions), same as /users/lookup. */
   @Get("lookup")
   async lookup(
@@ -293,6 +346,46 @@ export class AidApplicationsController {
     });
   }
 
+  @Patch(":id/meal")
+  @RequiredPermissions([...AID_APPLICATIONS_MEAL_EDIT_GUARD])
+  async updateMeal(
+    @Param("id") id: string,
+    @Body() dto: UpdateMealReviewDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.updateMealReview(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "MEAL review saved",
+      data,
+    });
+  }
+
+  @Patch(":id/preview-approval")
+  @RequiredPermissions([...AID_APPLICATIONS_CEO_GUARD])
+  async updatePreviewApproval(
+    @Param("id") id: string,
+    @Body() dto: UpdatePreviewApprovalDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.updatePreviewApproval(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Approval section saved",
+      data,
+    });
+  }
+
   @Post(":id/approve-draft")
   @RequiredPermissions([...AID_APPLICATIONS_APPROVE_DRAFT_GUARD])
   async approveDraft(
@@ -334,6 +427,64 @@ export class AidApplicationsController {
     });
   }
 
+  @Post(":id/mark-incomplete")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async markIncomplete(
+    @Param("id") id: string,
+    @Body() dto: MarkIncompleteAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.markIncomplete(
+      Number(id),
+      dto || {},
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Application marked incomplete",
+      data,
+    });
+  }
+
+  @Post(":id/resume-incomplete")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async resumeIncomplete(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.resumeIncomplete(
+      Number(id),
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Incomplete application resumed for verification",
+      data,
+    });
+  }
+
+  @Post(":id/verification-complete")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async verificationComplete(
+    @Param("id") id: string,
+    @Body() dto: CompleteVerificationAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.markVerificationCompleted(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Verification completed — awaiting Program manager",
+      data,
+    });
+  }
+
   @Post(":id/verify")
   @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
   async verify(
@@ -347,9 +498,32 @@ export class AidApplicationsController {
       dto,
       req?.user,
     );
+    const awaitingManager = data?.status === "manager_review";
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: "Verification recorded — awaiting CEO approval",
+      message: awaitingManager
+        ? "Verification recorded — awaiting Manager Review"
+        : "Verification recorded — awaiting CEO approval",
+      data,
+    });
+  }
+
+  @Post(":id/manager-forward")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async managerForward(
+    @Param("id") id: string,
+    @Body() dto: ManagerForwardAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.managerForward(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Forwarded for CEO approval",
       data,
     });
   }

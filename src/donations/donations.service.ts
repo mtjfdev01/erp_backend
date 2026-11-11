@@ -101,6 +101,7 @@ export class DonationsService {
     "cheque",
     "in_kind",
     "online",
+    "whatsapp",
     "reconciliation",
   ] as const;
 

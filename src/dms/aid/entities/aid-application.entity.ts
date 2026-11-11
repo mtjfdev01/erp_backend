@@ -105,6 +105,13 @@ export class AidApplication extends BaseEntity {
   education_details: Record<string, unknown> | null;
 
   /**
+   * Health aid type (all SubPrograms):
+   * patient, diagnosis, hospital, treatment, cost, alternatives
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  health_details: Record<string, unknown> | null;
+
+  /**
    * Ration aid type only:
    * persons (male/female/kids), wheat, how_know_mtjf, arrangements, duration, alternative plan
    */
@@ -123,6 +130,12 @@ export class AidApplication extends BaseEntity {
    */
   @Column({ type: "jsonb", nullable: true, default: null })
   financial_assistance_details: Record<string, unknown> | null;
+
+  /**
+   * Clean Water / Water Program survey (EN/UR) — site, TDS, project specs, beneficiaries.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  clean_water_details: Record<string, unknown> | null;
 
   /**
    * Zakat Permission Letter (اجازت نامہ برائے زکوٰۃ) — all aid types.
@@ -149,6 +162,13 @@ export class AidApplication extends BaseEntity {
   @Column({ type: "text", nullable: true, default: null })
   verification_notes: string | null;
 
+  /**
+   * Document context keys flagged as missing on the Attachments intake
+   * (e.g. mepco_bill, cnic, bay_form).
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  missing_documents: string[] | null;
+
   /** Home-visit checklist answers (booleans by item key). No geo/photo in this phase. */
   @Column({ type: "jsonb", nullable: true, default: null })
   verification_checklist: Record<string, unknown> | null;
@@ -159,6 +179,20 @@ export class AidApplication extends BaseEntity {
    */
   @Column({ type: "jsonb", nullable: true, default: null })
   investigation_recommendation: Record<string, unknown> | null;
+
+  /**
+   * MEAL review (Preview tab):
+   * verification_status, recommendation_status, remarks, locked.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  meal_review: Record<string, unknown> | null;
+
+  /**
+   * Approval block on Preview tab (draft until locked):
+   * decision, remarks, approved_support, approved_amount, locked.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  preview_approval: Record<string, unknown> | null;
 
   /** Required when approving/verifying despite cooldown or same-year prior success. */
   @Column({ type: "text", nullable: true, default: null })

@@ -14,6 +14,8 @@ const DISB = "program.aid_disbursements";
 const DISB_LEGACY = "fund_raising.aid_disbursements";
 const OVERVIEW = "program.aid_overview";
 const OVERVIEW_LEGACY = "fund_raising.aid_overview";
+const AUDIT = "program.aid_audit";
+const AUDIT_LEGACY = "fund_raising.aid_audit";
 
 const STAFF = ["program_manager", "fund_raising_manager", "super_admin"] as const;
 
@@ -34,6 +36,9 @@ const disb = (action: string) =>
 
 const overview = (action: string) =>
   [`${OVERVIEW}.${action}`, `${OVERVIEW_LEGACY}.${action}`] as const;
+
+const audit = (action: string) =>
+  [`${AUDIT}.${action}`, `${AUDIT_LEGACY}.${action}`] as const;
 
 /** Welfare Overview dashboard */
 export const AID_OVERVIEW_VIEW_GUARD = [
@@ -165,6 +170,29 @@ export const AID_APPLICATIONS_BULK_VERIFY_GUARD = [
   ...verify("bulk_verify"),
   ...apps("bulk_verify"),
   ...STAFF,
+] as const;
+
+/** MEAL section on Preview tab (edit verification / recommendation / remarks). */
+export const AID_APPLICATIONS_MEAL_EDIT_GUARD = [
+  ...apps("meal_edit"),
+  ...STAFF,
+] as const;
+
+/**
+ * Aid audit logs — separate screens only.
+ * Intentionally NO program_manager / fund_raising_manager bypass:
+ * users must have aid_audit.list_view / view (or super_admin).
+ */
+export const AID_AUDIT_LIST_GUARD = [
+  ...audit("list_view"),
+  ...audit("view"),
+  "super_admin",
+] as const;
+
+export const AID_AUDIT_VIEW_GUARD = [
+  ...audit("view"),
+  ...audit("list_view"),
+  "super_admin",
 ] as const;
 
 /** Disbursements queue list */

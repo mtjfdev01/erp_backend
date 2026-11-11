@@ -298,6 +298,88 @@ export class RecurringDonationsController {
     }
   }
 
+  /**
+   * Staff: add N installments to a subscription.
+   * Optional file is uploaded once and attached to every new installment.
+   */
+  @Post(":id/installments/bulk")
+  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  @UseInterceptors(FileInterceptor("file", recurringDonationFileUploadOptions))
+  async bulkAddInstallments(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body("count") countRaw: string,
+    @Body("status") statusRaw: string,
+    @Body("amount") amountRaw: string,
+    @Body("description") description: string,
+    @Body("name") name: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    try {
+      const userId = req?.user?.id > 0 ? req.user.id : null;
+      const count = Number(countRaw);
+      if (!Number.isFinite(count) || count < 1) {
+        throw new BadRequestException("count is required (1–36)");
+      }
+
+      let attachment: {
+        file_name: string;
+        file_url: string;
+        file_type: string;
+        description?: string;
+      } | null = null;
+      if (file) {
+        const uploaded = await this.s3Storage.uploadDonationAttachment(file);
+        const attachmentName =
+          String(description || name || "").trim() || undefined;
+        attachment = {
+          file_name: file.originalname,
+          file_url: uploaded.url,
+          file_type: file.mimetype,
+          description: attachmentName,
+        };
+      }
+
+      const amountNum =
+        amountRaw != null && String(amountRaw).trim() !== ""
+          ? Number(amountRaw)
+          : null;
+
+      const data = await this.ledgerService.addStaffInstallmentsBulk(
+        +id,
+        {
+          count,
+          status: statusRaw,
+          amount: amountNum,
+          attachment,
+        },
+        userId,
+      );
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: `Added ${data.created} installment(s)${
+          data.attachments_created
+            ? ` with shared attachment on each`
+            : ""
+        }`,
+        data,
+      });
+    } catch (error: any) {
+      const status =
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to add installments",
+        data: null,
+      });
+    }
+  }
+
   /** Staff: edit one installment (status / amount / period). Non-Stripe only. */
   @Patch(":id/installments/:installmentId")
   @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
@@ -342,6 +424,11 @@ export class RecurringDonationsController {
     }
   }
 
+  /**
+   * Upload attachment to subscription/installment `:id`.
+   * Optional `installment_ids` (comma-separated or JSON array): when `:id` is the
+   * subscription, the same file is attached to each listed installment.
+   */
   @Post(":id/attachments/upload")
   @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
   @UseInterceptors(FileInterceptor("file", recurringDonationFileUploadOptions))
@@ -350,6 +437,7 @@ export class RecurringDonationsController {
     @UploadedFile() file: Express.Multer.File,
     @Body("description") description: string,
     @Body("name") name: string,
+    @Body("installment_ids") installmentIdsRaw: string,
     @CurrentUser() user: any,
     @Res() res: Response,
   ) {
@@ -360,16 +448,56 @@ export class RecurringDonationsController {
       const uploaded = await this.s3Storage.uploadDonationAttachment(file);
       const attachmentName =
         String(description || name || "").trim() || undefined;
-      const result = await this.ledgerService.addAttachment(
-        +id,
-        {
-          file_name: file.originalname,
-          file_url: uploaded.url,
-          file_type: file.mimetype,
-          description: attachmentName,
-        },
-        user,
-      );
+      const dto = {
+        file_name: file.originalname,
+        file_url: uploaded.url,
+        file_type: file.mimetype,
+        description: attachmentName,
+      };
+
+      const parseIds = (raw: unknown): number[] => {
+        if (raw == null || raw === "") return [];
+        if (Array.isArray(raw)) {
+          return raw
+            .map((v) => Number(v))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        }
+        const text = String(raw).trim();
+        if (!text) return [];
+        if (text.startsWith("[")) {
+          try {
+            const parsed = JSON.parse(text);
+            return Array.isArray(parsed)
+              ? parsed
+                  .map((v) => Number(v))
+                  .filter((n) => Number.isFinite(n) && n > 0)
+              : [];
+          } catch {
+            /* fall through */
+          }
+        }
+        return text
+          .split(",")
+          .map((v) => Number(v.trim()))
+          .filter((n) => Number.isFinite(n) && n > 0);
+      };
+
+      const installmentIds = parseIds(installmentIdsRaw);
+      if (installmentIds.length) {
+        const result = await this.ledgerService.addAttachmentToInstallments(
+          +id,
+          installmentIds,
+          dto,
+          user,
+        );
+        return res.status(HttpStatus.OK).json({
+          success: true,
+          message: `Attachment linked to ${result.created} installment(s)`,
+          data: result,
+        });
+      }
+
+      const result = await this.ledgerService.addAttachment(+id, dto, user);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Attachment uploaded successfully",

@@ -331,13 +331,32 @@ export class TasksService implements OnModuleInit {
         return;
       }
 
+      // Ensure creator user is resolved so the assignment email includes "Created By"
+      let creatorUser: User | null = task.created_by || null;
+      const creatorId = task.created_by_id || (master && master.created_by_id);
+      if (!creatorUser && creatorId) {
+        try {
+          creatorUser = await this.userRepo.findOne({
+            where: { id: creatorId },
+          });
+          if (creatorUser) {
+            task.created_by = creatorUser;
+          }
+        } catch {}
+      }
+
       for (const userId of task.assigned_user_ids) {
         try {
           const user = await this.userRepo.findOne({
             where: { id: userId },
           });
           if (user && user.email) {
-            await this.emailService.sendTaskAssignmentEmail(user, task, master);
+            await this.emailService.sendTaskAssignmentEmail(
+              user,
+              task,
+              master,
+              creatorUser,
+            );
           }
         } catch (emailErr: any) {
           this.logger.warn(
@@ -5265,6 +5284,14 @@ export class TasksService implements OnModuleInit {
 
         // Send notification to assignees
         if (Array.isArray(master.assigned_user_ids)) {
+          let creatorUser: User | null = master.created_by || null;
+          if (!creatorUser && master.created_by_id) {
+            try {
+              creatorUser = await this.userRepo.findOne({
+                where: { id: master.created_by_id },
+              });
+            } catch {}
+          }
           const users = await this.userRepo
             .createQueryBuilder("user")
             .where("user.id IN (:...ids)", { ids: master.assigned_user_ids })
@@ -5276,7 +5303,12 @@ export class TasksService implements OnModuleInit {
               TaskNotificationType.ASSIGNED,
             );
             // Also send email
-            await this.emailService.sendTaskAssignmentEmail(u, child, master);
+            await this.emailService.sendTaskAssignmentEmail(
+              u,
+              child,
+              master,
+              creatorUser,
+            );
           }
         }
       }

@@ -258,6 +258,18 @@ export class CreateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  current_address?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  thumb_impression?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  signature?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(100)
   city?: string | null;
 
@@ -517,6 +529,18 @@ export class UpdateAidPersonDto {
 
   @IsOptional()
   @IsString()
+  current_address?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  thumb_impression?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
+  signature?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(100)
   city?: string | null;
 
@@ -702,6 +726,11 @@ export class CreateAidApplicationDto {
   @IsObject()
   education_details?: Record<string, unknown> | null;
 
+  /** Health-aid intake payload (shared across all Health SubPrograms). */
+  @IsOptional()
+  @IsObject()
+  health_details?: Record<string, unknown> | null;
+
   /** Ration-aid intake payload (persons, wheat, duration, questions). */
   @IsOptional()
   @IsObject()
@@ -717,6 +746,11 @@ export class CreateAidApplicationDto {
   @IsObject()
   financial_assistance_details?: Record<string, unknown> | null;
 
+  /** Clean Water survey payload (EN/UR). */
+  @IsOptional()
+  @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
+
   /** Zakat Permission Letter (Urdu/English) — all applications. */
   @IsOptional()
   @IsObject()
@@ -726,6 +760,12 @@ export class CreateAidApplicationDto {
   @IsOptional()
   @IsObject()
   consent_form?: Record<string, unknown> | null;
+
+  /** Attachment context keys flagged as missing (intake). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents?: string[] | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
@@ -797,6 +837,10 @@ export class UpdateAidApplicationDto {
 
   @IsOptional()
   @IsObject()
+  health_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
   ration_details?: Record<string, unknown> | null;
 
   @IsOptional()
@@ -809,11 +853,21 @@ export class UpdateAidApplicationDto {
 
   @IsOptional()
   @IsObject()
+  clean_water_details?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsObject()
   zakat_permission?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsObject()
   consent_form?: Record<string, unknown> | null;
+
+  /** Attachment context keys flagged as missing (intake). */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents?: string[] | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
@@ -836,6 +890,11 @@ export class UpdateAidApplicationDto {
   @IsObject()
   investigation_recommendation?: Record<string, unknown> | null;
 
+  /** MEAL review on Preview tab (also use PATCH :id/meal). */
+  @IsOptional()
+  @IsObject()
+  meal_review?: UpdateMealReviewDto | Record<string, unknown> | null;
+
   /** Patch beneficiary person fields (same shape as create person). */
   @IsOptional()
   @IsObject()
@@ -851,10 +910,90 @@ export class UpdateAidApplicationDto {
   family_members?: CreateAidFamilyMemberDto[];
 }
 
+/** MEAL section on application Preview tab. */
+export class UpdateMealReviewDto {
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn(["verified", "not_verified", "skipped"])
+  verification_status?: "verified" | "not_verified" | "skipped" | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn(["recommended", "not_recommended"])
+  recommendation_status?: "recommended" | "not_recommended" | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  remarks?: string | null;
+
+  /** When true, section is frozen (no further edits). */
+  @IsOptional()
+  @IsBoolean()
+  locked?: boolean;
+}
+
+/** Approval block on Preview tab (editable until locked). */
+export class UpdatePreviewApprovalDto {
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @IsIn([
+    "approved",
+    "approved_with_changes",
+    "rejected",
+    "re_investigate",
+  ])
+  decision?:
+    | "approved"
+    | "approved_with_changes"
+    | "rejected"
+    | "re_investigate"
+    | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  remarks?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  approved_support?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @Type(() => Number)
+  @IsNumber()
+  approved_amount?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  locked?: boolean;
+}
+
 export class RejectAidApplicationDto {
   @IsString()
   @MinLength(2)
   rejection_reason: string;
+}
+
+/** Mark application incomplete (needs more details). */
+export class MarkIncompleteAidApplicationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reason?: string | null;
+}
+
+/** Field Process → verification_completed (checklist required; recommendation not). */
+export class CompleteVerificationAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  verification_checklist?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  verification_notes?: string | null;
 }
 
 /** Approve draft → submitted; must assign a program-department user. */
@@ -865,8 +1004,24 @@ export class ApproveDraftAidApplicationDto {
 }
 
 export class InvestigationRecommendationDto {
-  @IsIn(["approve_as_requested", "approve_with_changes", "reject"])
-  decision: "approve_as_requested" | "approve_with_changes" | "reject";
+  /**
+   * Program manager recommendation.
+   * Canonical: recommend | not_recommend.
+   * Legacy (still accepted): approve_as_requested | approve_with_changes | reject.
+   */
+  @IsIn([
+    "recommend",
+    "not_recommend",
+    "approve_as_requested",
+    "approve_with_changes",
+    "reject",
+  ])
+  decision:
+    | "recommend"
+    | "not_recommend"
+    | "approve_as_requested"
+    | "approve_with_changes"
+    | "reject";
 
   @IsOptional()
   @IsNumber()
@@ -885,6 +1040,15 @@ export class InvestigationRecommendationDto {
   @IsOptional()
   @IsNumber()
   found_monthly_income?: number | null;
+
+  /**
+   * Ration aid — manager/CEO package picks (Full / Half / Monthly / Alternate).
+   * When present and non-empty, amount/period are not required.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsIn(["full", "half", "monthly", "alternate"], { each: true })
+  ration_options?: Array<"full" | "half" | "monthly" | "alternate">;
 }
 
 export class VerifyAidApplicationDto {
@@ -926,6 +1090,25 @@ export class CeoDecideAidApplicationDto {
   @IsString()
   @MinLength(5)
   leakage_override_reason?: string | null;
+
+  /** Optional CEO edit of investigator/manager recommendation before decide. */
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+}
+
+/** Program manager forwards manager_review → CEO, with optional override. */
+export class ManagerForwardAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  leakage_override_reason?: string | null;
 }
 
 export class DeliverAidApplicationDto {
@@ -949,6 +1132,19 @@ export class UploadAidAttachmentDto {
   @IsOptional()
   @IsInt()
   person_id?: number | null;
+}
+
+/** Flag an attachment as missing / clear the flag. */
+export class SetAidAttachmentMissingDto {
+  @IsBoolean()
+  is_missing: boolean;
+}
+
+/** Replace the list of missing document context keys on an application. */
+export class SetAidMissingDocumentsDto {
+  @IsArray()
+  @IsString({ each: true })
+  missing_documents: string[];
 }
 
 export class CreateAidDisbursementPlanDto {
