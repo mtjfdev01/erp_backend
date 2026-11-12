@@ -10,24 +10,45 @@ import { Organization } from "./organization.entity";
 import { OrganizationBranch } from "./organization-branch.entity";
 import { Donor } from "../../donor/entities/donor.entity";
 import { OrganizationAffiliationRole } from "./donor-organization-affiliation.entity";
+import { DEFAULT_POC_TYPE } from "../constants/poc-types.constants";
+import { DonationBox } from "../../donation_box/entities/donation-box.entity";
 
 /**
- * Point of contact (POC) for a CSR donor (company).
- * Not a donor — the company in csr_donors is the donor.
+ * Point of contact (POC) for Corporate donors, Donation Boxes, or Mosques.
  */
 @Entity("csr_pocs")
 @Index(["csr_donor_id"])
+@Index(["donation_box_id"])
+@Index(["type"])
 @Index(["legacy_donor_id"], { unique: true, where: '"legacy_donor_id" IS NOT NULL' })
 export class CsrPoc extends BaseEntity {
-  @Column({ type: "int" })
-  csr_donor_id: number;
+  @Column({
+    type: "varchar",
+    length: 100,
+    default: DEFAULT_POC_TYPE,
+    nullable: true,
+  })
+  type: string;
+
+  @Column({ type: "int", nullable: true, default: null })
+  csr_donor_id: number | null;
 
   @ManyToOne(() => Organization, (org) => org.pocs, {
-    nullable: false,
+    nullable: true,
     onDelete: "CASCADE",
   })
   @JoinColumn({ name: "csr_donor_id" })
-  csr_donor: Organization;
+  csr_donor: Organization | null;
+
+  @Column({ type: "int", nullable: true, default: null })
+  donation_box_id: number | null;
+
+  @ManyToOne(() => DonationBox, {
+    nullable: true,
+    onDelete: "CASCADE",
+  })
+  @JoinColumn({ name: "donation_box_id" })
+  donation_box: DonationBox | null;
 
   @Column({ type: "varchar", length: 255 })
   name: string;

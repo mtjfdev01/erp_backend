@@ -5,6 +5,7 @@ import {
   BoxType,
   CollectionFrequency,
 } from "../../dms/donation_box/entities/donation-box.entity";
+import { DEFAULT_COLLECTION_UNIT_TYPE } from "../../dms/donation_box/constants/collection-unit.constants";
 import {
   EntityImportHandler,
   ImportBatchResult,
@@ -16,6 +17,10 @@ const HEADER_ALIASES: Record<string, string> = {
   // Excel sheet headers (after normalize)
   sr_no: "_ignore",
   serial_no: "_ignore",
+  type: "type",
+  unit_type: "type",
+  collection_type: "type",
+  entity_type: "type",
   box_id_no: "box_id_no",
   box_no: "box_id_no",
   box_id: "box_id_no",
@@ -25,6 +30,9 @@ const HEADER_ALIASES: Record<string, string> = {
   city_name: "city_name",
   frd_officer_reference: "frd_officer_reference",
   frd_officer: "frd_officer_reference",
+  name: "name",
+  unit_name: "name",
+  mosque_name: "name",
   shop_name: "shop_name",
   shopkeeper: "shopkeeper",
   cell_no: "cell_no",
@@ -58,6 +66,9 @@ export class DonationBoxImportHandler implements EntityImportHandler {
 
   getOptionalHeaders(): string[] {
     return [
+      "type",
+      "unit_type",
+      "collection_type",
       "box_id_no",
       "box_no",
       "key_no",
@@ -331,7 +342,7 @@ export class DonationBoxImportHandler implements EntityImportHandler {
     for (let i = 0; i < rows.length; i += 1) {
       const rowNumber = i + 2;
       const row = this.mapRow(rows[i]);
-      const shopName = String(row.shop_name || "").trim();
+      const shopName = String(row.name || row.shop_name || row.unit_name || "").trim();
       const keyNo = String(row.key_no || "").trim();
       const boxIdNo = String(row.box_id_no || "").trim();
 
@@ -385,7 +396,9 @@ export class DonationBoxImportHandler implements EntityImportHandler {
         coords.registration_longitude != null;
 
       const payload: Record<string, unknown> = {
+        type: row.type?.trim() || DEFAULT_COLLECTION_UNIT_TYPE,
         box_id_no: boxIdNo || null,
+        name: shopName,
         shop_name: shopName,
         key_no: keyNo || null,
         route_id,

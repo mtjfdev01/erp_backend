@@ -11,6 +11,18 @@ import { OrganizationAffiliationRole } from "../entities/donor-organization-affi
 export class UpdateCsrPocDto {
   @IsOptional()
   @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsNumber()
+  csr_donor_id?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  donation_box_id?: number | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(255)
   name?: string;
 

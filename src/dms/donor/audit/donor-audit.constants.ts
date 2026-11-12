@@ -26,6 +26,7 @@ export const DONOR_AUDIT_PATCH_FIELDS = [
   "assigned_to_user_id",
   "referrer_user_id",
   "pipeline_stage",
+  "capacity_assessment",
 ] as const;
 
 export const DONOR_AUDIT_SENSITIVE_FIELDS = new Set([

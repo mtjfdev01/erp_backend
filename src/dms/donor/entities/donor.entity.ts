@@ -182,4 +182,25 @@ export class Donor extends BaseEntity {
 
   @Column({ type: "varchar", length: 8, nullable: true, default: "PKR" })
   pipeline_amount_currency: string | null;
+
+  /**
+   * Optional Giving Capacity / Capacity Assessment details.
+   * Additive and nullable: stores net worth, salary, 5y donations, gift capacity,
+   * share portfolio valuation and shares held breakdown.
+   */
+  @Column({ type: "jsonb", nullable: true, default: null })
+  capacity_assessment: {
+    estimated_net_worth?: string | null;
+    salary?: string | null;
+    donations_past_5y?: string | null;
+    gift_capacity?: string | null;
+    total_value_of_shares?: string | null;
+    shares_held?: Array<{
+      issuer?: string;
+      ticker?: string;
+      quantity?: string | number;
+      est_value?: string;
+      source?: string;
+    }>;
+  } | null;
 }

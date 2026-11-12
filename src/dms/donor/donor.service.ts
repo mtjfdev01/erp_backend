@@ -681,6 +681,13 @@ export class DonorService {
       // Save and return
       let savedDonor = await this.donorRepository.save(donor);
 
+      if (auditUserId != null && auditUserId > 0) {
+        await this.donorRepository.query(
+          `UPDATE "donors" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+          [auditUserId, savedDonor.id],
+        );
+      }
+
       // Org link: required for CSR; optional for individual.
       if (organization_id) {
         savedDonor = await this.linkDonorToOrganization(savedDonor, {
@@ -1332,6 +1339,7 @@ export class DonorService {
     recurring_consent?: boolean;
     /** Optional staff referrer from website referral_code */
     referrer_user_id?: number | null;
+    created_by?: number | null;
   }): Promise<Donor | null> {
     try {
       const {
@@ -1345,6 +1353,7 @@ export class DonorService {
         recurring,
         recurring_consent,
         referrer_user_id,
+        created_by,
       } = donationData;
 
       let normalizedEmail: string | null;
@@ -1439,11 +1448,21 @@ export class DonorService {
         recurring_consent_at:
           recurring_consent === true ? new Date() : null,
         ...(referrerUser ? { referred_by: referrerUser } : {}),
+        ...(created_by != null && created_by > 0
+          ? { created_by: { id: created_by } as any }
+          : {}),
       });
 
       this.applyGeoSearchToDonor(donorRow);
 
       const savedDonor = await this.donorRepository.save(donorRow);
+
+      if (created_by != null && created_by > 0) {
+        await this.donorRepository.query(
+          `UPDATE "donors" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+          [created_by, savedDonor.id],
+        );
+      }
 
       console.log(
         `✅ Auto-registered donor WITHOUT password: ${normalizedEmail || normalizedPhone} (ID: ${savedDonor?.id})`,

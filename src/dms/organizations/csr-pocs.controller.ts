@@ -34,6 +34,17 @@ import {
 export class CsrPocsController {
   constructor(private readonly csrPocsService: CsrPocsService) {}
 
+  @Get("by-box/:boxId")
+  @RequiredPermissions([...CSR_POC_VIEW_GUARD])
+  async findByDonationBox(@Param("boxId") boxId: string, @Res() res: Response) {
+    try {
+      const data = await this.csrPocsService.findByDonationBox(+boxId);
+      return res.status(HttpStatus.OK).json({ success: true, data });
+    } catch (error: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: error.message, data: null });
+    }
+  }
+
   @Get("lookup")
   @RequiredPermissions([...CSR_POC_LIST_GUARD])
   async lookup(

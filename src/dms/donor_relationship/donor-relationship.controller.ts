@@ -76,13 +76,18 @@ export class DonorRelationshipController {
     @Res() res: Response,
   ) {
     try {
-      const data = csrDonorId
-        ? await this.service.getCsrDonorInteractions(
-            +csrDonorId,
-            user,
-            csrPocId ? +csrPocId : undefined,
-          )
-        : await this.service.getDonorInteractions(+donorId, user);
+      let data = [];
+      if (csrDonorId) {
+        data = await this.service.getCsrDonorInteractions(
+          +csrDonorId,
+          user,
+          csrPocId ? +csrPocId : undefined,
+        );
+      } else if (csrPocId) {
+        data = await this.service.getPocInteractions(+csrPocId, user);
+      } else if (donorId) {
+        data = await this.service.getDonorInteractions(+donorId, user);
+      }
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Interactions retrieved",
@@ -216,6 +221,14 @@ export class DonorRelationshipController {
     @Res() res: Response,
   ) {
     try {
+      if (!csrDonorId && csrPocId) {
+        const data = await this.service.getPocFollowups(+csrPocId, user);
+        return res.status(HttpStatus.OK).json({
+          success: true,
+          message: "CSR follow-ups retrieved",
+          data,
+        });
+      }
       const data = await this.service.getCsrDonorFollowups(
         +csrDonorId,
         user,

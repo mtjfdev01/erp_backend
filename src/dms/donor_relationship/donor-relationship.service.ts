@@ -48,6 +48,9 @@ export class DonorRelationshipService {
     if (dto.csr_donor_id) {
       return this.createCsrDonorInteraction(dto, user);
     }
+    if (dto.csr_poc_id) {
+      return this.createPocInteraction(dto, user);
+    }
     if (!dto.donor_id) {
       throw new BadRequestException("donor_id or csr_donor_id is required");
     }
@@ -92,6 +95,91 @@ export class DonorRelationshipService {
     }
 
     return this.findInteractionById(saved.id, user);
+  }
+
+  
+  async getPocInteractions(pocId: number, user: CurrentUser) {
+    const interactions = await this.interactionRepository.find({
+      where: {
+        csr_poc_id: pocId,
+        is_archived: false,
+      },
+      relations: ["created_by", "assigned_to", "csr_donor", "csr_poc"],
+      order: { activity_datetime: "DESC" },
+    });
+    return interactions.map((item) => ({
+      ...item,
+      stage_change: null,
+    }));
+  }
+
+  async getPocFollowups(pocId: number, user: CurrentUser) {
+    return this.followupRepository
+      .createQueryBuilder("followup")
+      .leftJoinAndSelect("followup.interaction", "interaction")
+      .leftJoinAndSelect("followup.csr_poc", "csr_poc")
+      .leftJoinAndSelect("followup.assigned_to", "assigned_to")
+      .where("followup.csr_poc_id = :pocId", { pocId })
+      .andWhere("followup.is_archived = false")
+      .orderBy("followup.due_datetime", "DESC")
+      .getMany();
+  }
+
+  private async createPocInteraction(
+    dto: CreateDonorInteractionDto,
+    user: CurrentUser,
+  ) {
+    const poc = await this.csrPocRepository.findOne({
+      where: { id: dto.csr_poc_id, is_archived: false },
+    });
+    if (!poc) {
+      throw new NotFoundException(`POC #${dto.csr_poc_id} not found`);
+    }
+
+    const activityDatetime = dto.activity_datetime
+      ? new Date(dto.activity_datetime)
+      : new Date();
+    if (Number.isNaN(activityDatetime.getTime())) {
+      throw new BadRequestException("Invalid activity_datetime");
+    }
+
+    const interaction = this.interactionRepository.create({
+      csr_donor_id: poc.csr_donor_id ?? null,
+      csr_poc_id: poc.id,
+      donor_id: null,
+      activity_type: dto.activity_type,
+      custom_activity_title: dto.custom_activity_title || null,
+      assigned_to_user_id: dto.assigned_to_user_id ?? user.id,
+      activity_datetime: activityDatetime,
+      user_action_text: dto.user_action_text,
+      donor_response_text: dto.donor_response_text || null,
+      donor_response_type: dto.donor_response_type || null,
+      next_action_text: dto.next_action_text || null,
+      next_followup_datetime: dto.next_followup_datetime
+        ? new Date(dto.next_followup_datetime)
+        : null,
+      status: dto.status || "need_followup",
+      created_by: { id: user.id } as User,
+    });
+
+    const saved = await this.interactionRepository.save(interaction);
+
+    let followup: DonorFollowup | null = null;
+    if (dto.next_followup_datetime) {
+      const due = new Date(dto.next_followup_datetime);
+      if (!Number.isNaN(due.getTime())) {
+        followup = await this.createCsrFollowupFromInteraction(
+          saved,
+          due,
+          user.id,
+        );
+      }
+    }
+
+    return {
+      interaction: saved,
+      followup,
+    };
   }
 
   private async createCsrDonorInteraction(

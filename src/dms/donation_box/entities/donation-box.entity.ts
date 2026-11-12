@@ -11,6 +11,7 @@ import { BaseEntity } from "../../../utils/base_utils/entities/baseEntity";
 import { Route } from "../../geographic/routes/entities/route.entity";
 import { City } from "../../geographic/cities/entities/city.entity";
 import { User } from "../../../users/user.entity";
+import { DEFAULT_COLLECTION_UNIT_TYPE } from "../constants/collection-unit.constants";
 
 export enum BoxType {
   SMALL = "small",
@@ -55,7 +56,10 @@ export class DonationBox extends BaseEntity {
   @Column({ nullable: true })
   city_id: number | null;
 
-  // Shop Details
+  // Unit Details (Name, Shop, etc.)
+  @Column({ type: "varchar", length: 255, nullable: true })
+  name: string;
+
   @Column()
   shop_name: string;
 
@@ -77,6 +81,15 @@ export class DonationBox extends BaseEntity {
   geo_search: string;
 
   // Box Details
+  /** Collection Unit Type (e.g. 'Donation Boxes', 'Mosques') */
+  @Column({
+    type: "varchar",
+    length: 100,
+    default: DEFAULT_COLLECTION_UNIT_TYPE,
+    nullable: true,
+  })
+  type: string;
+
   @Column({
     type: "enum",
     enum: BoxType,

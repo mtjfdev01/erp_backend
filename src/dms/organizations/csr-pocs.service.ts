@@ -8,13 +8,16 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { CsrPoc } from "./entities/csr-poc.entity";
-import { Organization } from "./entities/organization.entity";
-import { OrganizationBranch } from "./entities/organization-branch.entity";
-import { DonorOrganizationAffiliation } from "./entities/donor-organization-affiliation.entity";
-import { Donor, DonorType } from "../donor/entities/donor.entity";
 import { CreateCsrPocDto } from "./dto/create-csr-poc.dto";
 import { UpdateCsrPocDto } from "./dto/update-csr-poc.dto";
-import { OrganizationAffiliationRole } from "./entities/donor-organization-affiliation.entity";
+import { Organization } from "./entities/organization.entity";
+import { OrganizationBranch } from "./entities/organization-branch.entity";
+import {
+  DonorOrganizationAffiliation,
+  OrganizationAffiliationRole,
+} from "./entities/donor-organization-affiliation.entity";
+import { Donor, DonorType } from "../donor/entities/donor.entity";
+import { DonationBox } from "../donation_box/entities/donation-box.entity";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 import {
@@ -25,7 +28,9 @@ import {
 } from "../../utils/lookup";
 
 export interface CsrPocListParams {
+  type?: string;
   csr_donor_id?: number;
+  donation_box_id?: number;
   search?: string;
   role?: string;
   branch_id?: number;
@@ -92,14 +97,16 @@ export class CsrPocsService implements OnModuleInit {
     currentUser?: { id?: number; role?: string; department?: string },
   ): Promise<void> {
     if (!currentUser?.id) return;
-    // Always reload with created_by so ownership checks are reliable.
-    await this.assertCsrDonorIdAccess(poc.csr_donor_id, currentUser);
+    if (poc.csr_donor_id) {
+      await this.assertCsrDonorIdAccess(poc.csr_donor_id, currentUser);
+    }
   }
 
   async assertCsrDonorIdAccess(
-    csrDonorId: number,
+    csrDonorId?: number | null,
     currentUser?: { id?: number; role?: string; department?: string },
-  ): Promise<Organization> {
+  ): Promise<Organization | null> {
+    if (!csrDonorId) return null;
     const org = await this.orgRepo.findOne({
       where: { id: csrDonorId, is_archived: false },
       relations: ["created_by"],
@@ -125,6 +132,31 @@ export class CsrPocsService implements OnModuleInit {
       this.logger.warn(
         `Legacy CSR POC migration skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    try {
+      await this.pocRepo.query(`
+        INSERT INTO csr_pocs (donation_box_id, type, name, phone, role, is_primary, is_active, created_at, updated_at)
+        SELECT 
+          b.id,
+          CASE WHEN b.type = 'Mosques' THEN 'Mosques' ELSE 'Donation Boxes' END,
+          COALESCE(NULLIF(TRIM(b.shopkeeper), ''), NULLIF(TRIM(b.name), ''), NULLIF(TRIM(b.shop_name), ''), 'Contact Person'),
+          NULLIF(TRIM(b.cell_no), ''),
+          'contact',
+          true,
+          true,
+          NOW(),
+          NOW()
+        FROM donation_boxes b
+        WHERE b.is_archived = false
+          AND NOT EXISTS (
+            SELECT 1 FROM csr_pocs p 
+            WHERE p.donation_box_id = b.id 
+              AND p.is_archived = false
+          );
+      `);
+    } catch (err: any) {
+      this.logger.warn(`Collection Units POC backfill query check: ${err?.message}`);
     }
   }
 
@@ -175,10 +207,10 @@ export class CsrPocsService implements OnModuleInit {
   }
 
   private async validateBranch(
-    csrDonorId: number,
+    csrDonorId?: number | null,
     branchId?: number | null,
   ): Promise<void> {
-    if (branchId == null) return;
+    if (branchId == null || !csrDonorId) return;
     const branch = await this.branchRepo.findOne({
       where: { id: branchId, organization_id: csrDonorId, is_archived: false },
     });
@@ -189,7 +221,8 @@ export class CsrPocsService implements OnModuleInit {
     }
   }
 
-  private async clearOtherPrimary(csrDonorId: number, exceptId?: number) {
+  private async clearOtherPrimary(csrDonorId?: number | null, exceptId?: number) {
+    if (!csrDonorId) return;
     const qb = this.pocRepo
       .createQueryBuilder()
       .update(CsrPoc)
@@ -204,10 +237,12 @@ export class CsrPocsService implements OnModuleInit {
   }
 
   async create(dto: CreateCsrPocDto, user?: any): Promise<CsrPoc> {
-    await this.orgRepo.findOneOrFail({
-      where: { id: dto.csr_donor_id, is_archived: false },
-    });
-    await this.validateBranch(dto.csr_donor_id, dto.branch_id);
+    if (dto.csr_donor_id) {
+      await this.orgRepo.findOneOrFail({
+        where: { id: dto.csr_donor_id, is_archived: false },
+      });
+      await this.validateBranch(dto.csr_donor_id, dto.branch_id);
+    }
 
     const email = dto.email?.trim().toLowerCase() || null;
     const phone = dto.phone?.trim() || null;
@@ -215,13 +250,17 @@ export class CsrPocsService implements OnModuleInit {
       throw new BadRequestException("Either email or phone is required for POC");
     }
 
-    if (dto.is_primary) {
+    if (dto.is_primary && dto.csr_donor_id) {
       await this.clearOtherPrimary(dto.csr_donor_id);
     }
 
     const auditUserId = user?.id && user.id !== -1 ? user.id : null;
+    const pocType = dto.type || (dto.donation_box_id ? "Donation Boxes" : "Corporate Donors");
+
     const poc = this.pocRepo.create({
-      csr_donor_id: dto.csr_donor_id,
+      type: pocType,
+      csr_donor_id: dto.csr_donor_id ?? null,
+      donation_box_id: dto.donation_box_id ?? null,
       name: dto.name.trim(),
       email,
       phone,
@@ -256,7 +295,19 @@ export class CsrPocsService implements OnModuleInit {
       .leftJoinAndSelect("poc.legacy_donor", "legacy_donor")
       .leftJoinAndSelect("poc.csr_donor", "csr_donor")
       .leftJoinAndSelect("csr_donor.created_by", "csr_donor_created_by")
+      .leftJoinAndSelect("poc.donation_box", "donation_box")
+      .leftJoinAndSelect("donation_box.route", "donation_box_route")
       .where("poc.is_archived = false");
+
+    if (params.type && params.type !== "all" && params.type !== "All") {
+      qb.andWhere("poc.type = :pocType", { pocType: params.type });
+    }
+
+    if (params.donation_box_id) {
+      qb.andWhere("poc.donation_box_id = :donationBoxId", {
+        donationBoxId: params.donation_box_id,
+      });
+    }
 
     if (params.csr_donor_id) {
       qb.andWhere("poc.csr_donor_id = :csrDonorId", {
@@ -271,7 +322,10 @@ export class CsrPocsService implements OnModuleInit {
           OR LOWER(COALESCE(poc.email, '')) LIKE LOWER(:term)
           OR LOWER(COALESCE(poc.phone, '')) LIKE LOWER(:term)
           OR LOWER(COALESCE(poc.cnic, '')) LIKE LOWER(:term)
-          OR LOWER(COALESCE(csr_donor.name, '')) LIKE LOWER(:term))`,
+          OR LOWER(COALESCE(csr_donor.name, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(donation_box.name, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(donation_box.shop_name, '')) LIKE LOWER(:term)
+          OR LOWER(COALESCE(donation_box_route.name, '')) LIKE LOWER(:term))`,
         { term },
       );
     }
@@ -294,8 +348,8 @@ export class CsrPocsService implements OnModuleInit {
       qb.andWhere("poc.is_active = :isActive", { isActive: params.is_active });
     }
 
-    // Scope POCs by parent CSR donor ownership (fund_raising.organizations scope).
-    if (currentUser?.id) {
+    // Scope POCs by parent CSR donor ownership only if corporate donor
+    if (currentUser?.id && (!params.type || params.type === "Corporate Donors") && params.csr_donor_id) {
       const scope = await this.resolveOrganizationScope(currentUser);
       this.dataScopeService.applyToQuery(qb, "csr_donor", scope);
     }
@@ -333,10 +387,55 @@ export class CsrPocsService implements OnModuleInit {
     return result.data;
   }
 
+  async findByDonationBox(donationBoxId: number): Promise<CsrPoc | null> {
+    return this.pocRepo.findOne({
+      where: { donation_box_id: donationBoxId, is_archived: false },
+      order: { is_primary: "DESC", id: "ASC" },
+      relations: ["donation_box", "donation_box.route"],
+    });
+  }
+
+  async syncFromDonationBox(box: DonationBox): Promise<CsrPoc | null> {
+    if (!box?.id) return null;
+    const pocType = box.type === "Mosques" ? "Mosques" : "Donation Boxes";
+    const pocName = (box.shopkeeper?.trim() || box.name?.trim() || box.shop_name?.trim() || "Contact Person");
+    const pocPhone = box.cell_no?.trim() || null;
+
+    let poc = await this.pocRepo.findOne({
+      where: { donation_box_id: box.id, is_archived: false },
+      order: { is_primary: "DESC", id: "ASC" },
+    });
+
+    if (poc) {
+      poc.name = pocName;
+      poc.phone = pocPhone;
+      poc.type = pocType;
+      return this.pocRepo.save(poc);
+    } else {
+      poc = this.pocRepo.create({
+        donation_box_id: box.id,
+        type: pocType,
+        name: pocName,
+        phone: pocPhone,
+        role: "contact",
+        is_primary: true,
+        is_active: true,
+      });
+      return this.pocRepo.save(poc);
+    }
+  }
+
   async findOne(id: number): Promise<CsrPoc> {
     const row = await this.pocRepo.findOne({
       where: { id, is_archived: false },
-      relations: ["csr_donor", "csr_donor.created_by", "branch", "legacy_donor"],
+      relations: [
+        "csr_donor",
+        "csr_donor.created_by",
+        "branch",
+        "legacy_donor",
+        "donation_box",
+        "donation_box.route",
+      ],
     });
     if (!row) {
       throw new NotFoundException(`POC with ID ${id} not found`);
@@ -347,16 +446,18 @@ export class CsrPocsService implements OnModuleInit {
   async update(id: number, dto: UpdateCsrPocDto, user?: any): Promise<CsrPoc> {
     const poc = await this.findOne(id);
 
-    if (dto.branch_id !== undefined) {
+    if (dto.branch_id !== undefined && poc.csr_donor_id) {
       await this.validateBranch(poc.csr_donor_id, dto.branch_id);
     }
 
-    if (dto.is_primary === true) {
+    if (dto.is_primary === true && poc.csr_donor_id) {
       await this.clearOtherPrimary(poc.csr_donor_id, id);
     }
 
     const auditUserId = user?.id && user.id !== -1 ? user.id : null;
     Object.assign(poc, {
+      ...(dto.type !== undefined ? { type: dto.type } : {}),
+      ...(dto.donation_box_id !== undefined ? { donation_box_id: dto.donation_box_id } : {}),
       ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
       ...(dto.email !== undefined
         ? { email: dto.email ? String(dto.email).trim().toLowerCase() : null }
@@ -411,6 +512,22 @@ export class CsrPocsService implements OnModuleInit {
         : null,
       poc: {
         id: poc.id,
+        type: poc.type,
+        donation_box_id: poc.donation_box_id,
+        donation_box: poc.donation_box
+          ? {
+              id: poc.donation_box.id,
+              name: poc.donation_box.name || poc.donation_box.shop_name,
+              key_no: poc.donation_box.key_no,
+              type: poc.donation_box.type,
+              route: poc.donation_box.route
+                ? {
+                    id: poc.donation_box.route.id,
+                    name: poc.donation_box.route.name,
+                  }
+                : null,
+            }
+          : null,
         name: poc.name,
         email: poc.email,
         phone: poc.phone,
@@ -424,6 +541,22 @@ export class CsrPocsService implements OnModuleInit {
         is_active: poc.is_active,
       },
       legacy_donor_id: poc.legacy_donor_id,
+      type: poc.type,
+      donation_box_id: poc.donation_box_id,
+      donation_box: poc.donation_box
+        ? {
+            id: poc.donation_box.id,
+            name: poc.donation_box.name || poc.donation_box.shop_name,
+            key_no: poc.donation_box.key_no,
+            type: poc.donation_box.type,
+            route: poc.donation_box.route
+              ? {
+                  id: poc.donation_box.route.id,
+                  name: poc.donation_box.route.name,
+                }
+              : null,
+          }
+        : null,
       csr_donor_id: poc.csr_donor_id,
       csr_donor: poc.csr_donor
         ? {

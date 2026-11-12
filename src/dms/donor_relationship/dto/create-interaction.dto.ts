@@ -8,11 +8,11 @@ import {
 } from "class-validator";
 
 export class CreateDonorInteractionDto {
-  @ValidateIf((o) => !o.csr_donor_id)
+  @ValidateIf((o) => !o.csr_donor_id && !o.csr_poc_id)
   @IsInt()
   donor_id?: number;
 
-  @ValidateIf((o) => !o.donor_id)
+  @ValidateIf((o) => !o.donor_id && !o.csr_poc_id)
   @IsInt()
   csr_donor_id?: number;
 

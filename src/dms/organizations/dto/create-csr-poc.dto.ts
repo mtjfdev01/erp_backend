@@ -10,9 +10,17 @@ import {
 import { OrganizationAffiliationRole } from "../entities/donor-organization-affiliation.entity";
 
 export class CreateCsrPocDto {
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsOptional()
   @IsNumber()
-  @IsNotEmpty()
-  csr_donor_id: number;
+  csr_donor_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  donation_box_id?: number;
 
   @IsString()
   @IsNotEmpty()

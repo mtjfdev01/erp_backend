@@ -27,6 +27,33 @@ const PROGRAM_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+/** Intake / Beneficiary Registration — excluded from welfare overview. */
+const DATA_ENTRY_STATUSES = new Set<string>([
+  AidApplicationStatus.DRAFT,
+  AidApplicationStatus.INCOMPLETE,
+  AidApplicationStatus.INCOMPLETE_DOCS,
+]);
+
+/** Cases still in the welfare pipeline (not closed). */
+const OPEN_STATUSES = new Set<string>([
+  AidApplicationStatus.SUBMITTED,
+  AidApplicationStatus.UNDER_REVIEW,
+  AidApplicationStatus.VERIFICATION_COMPLETED,
+  AidApplicationStatus.MANAGER_REVIEW,
+  AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+  AidApplicationStatus.SUCCESSFUL,
+]);
+
+const INVESTIGATION_STUCK_STATUSES = new Set<string>([
+  AidApplicationStatus.SUBMITTED,
+  AidApplicationStatus.UNDER_REVIEW,
+]);
+
+const APPROVED_STATUSES = new Set<string>([
+  AidApplicationStatus.SUCCESSFUL,
+  AidApplicationStatus.DELIVERED,
+]);
+
 @Injectable()
 export class AidOverviewService {
   constructor(
@@ -63,7 +90,10 @@ export class AidOverviewService {
     return x;
   }
 
-  /** Resolve date / date-range filters. Default: current month → today. */
+  /**
+   * Resolve date / date-range filters.
+   * No dates → all-time (same universe as Applications listing).
+   */
   private resolveDateRange(params: {
     date?: string;
     start_date?: string;
@@ -74,9 +104,9 @@ export class AidOverviewService {
     const rangeEnd = this.parseYmd(params.end_date);
 
     const now = new Date();
-    let start: Date;
-    let end: Date;
-    let mode: "date" | "range" | "default" = "default";
+    let start: Date | null = null;
+    let end: Date | null = null;
+    let mode: "date" | "range" | "all" = "all";
 
     if (rangeStart || rangeEnd) {
       mode = "range";
@@ -93,9 +123,6 @@ export class AidOverviewService {
       mode = "date";
       start = this.startOfDay(single);
       end = this.endOfDay(single);
-    } else {
-      start = this.startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
-      end = this.endOfDay(now);
     }
 
     return { start, end, mode };
@@ -108,7 +135,12 @@ export class AidOverviewService {
     return { start: prevStart, end: prevEnd };
   }
 
-  private formatRangeLabel(start: Date, end: Date, mode: string) {
+  private formatRangeLabel(
+    start: Date | null,
+    end: Date | null,
+    mode: string,
+  ) {
+    if (mode === "all" || !start || !end) return "All time";
     const sameDay =
       start.getFullYear() === end.getFullYear() &&
       start.getMonth() === end.getMonth() &&
@@ -126,6 +158,17 @@ export class AidOverviewService {
       year: "numeric",
     };
     return `${start.toLocaleDateString("en-US", opts)} – ${end.toLocaleDateString("en-US", opts)}`;
+  }
+
+  private inRange(
+    d: Date | string | null | undefined,
+    start: Date | null,
+    end: Date | null,
+  ) {
+    if (!start || !end) return true;
+    if (!d) return false;
+    const t = new Date(d).getTime();
+    return t >= start.getTime() && t <= end.getTime();
   }
 
   private daysBetween(a?: Date | string | null, b?: Date | string | null) {
@@ -150,6 +193,34 @@ export class AidOverviewService {
     return Number.isFinite(declared) ? declared : null;
   }
 
+  private isApprovedStatus(status: string) {
+    return APPROVED_STATUSES.has(status);
+  }
+
+  /** Reached / passed investigation (visit report or later stage). */
+  private hasBeenInvestigated(app: AidApplication) {
+    if (app.verified_at) return true;
+    return [
+      AidApplicationStatus.VERIFICATION_COMPLETED,
+      AidApplicationStatus.MANAGER_REVIEW,
+      AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+      AidApplicationStatus.SUCCESSFUL,
+      AidApplicationStatus.DELIVERED,
+      AidApplicationStatus.REJECTED,
+    ].includes(app.status as AidApplicationStatus);
+  }
+
+  private isDataEntry(app: AidApplication) {
+    return DATA_ENTRY_STATUSES.has(app.status);
+  }
+
+  /** Left intake / draft-like states. */
+  private hasBeenSubmitted(app: AidApplication) {
+    if (this.isDataEntry(app)) return false;
+    if (app.submitted_at) return true;
+    return true;
+  }
+
   async getOverview(params: {
     date?: string;
     start_date?: string;
@@ -157,7 +228,6 @@ export class AidOverviewService {
     program?: string;
   }) {
     const { start, end, mode } = this.resolveDateRange(params);
-    const prev = this.prevRange(start, end);
     const program =
       params.program && params.program !== "all" ? params.program : null;
 
@@ -169,46 +239,43 @@ export class AidOverviewService {
       qb.andWhere("a.requested_aid_type = :program", { program });
     }
 
-    const all = await qb.getMany();
+    const fetched = await qb.getMany();
+    // Welfare overview ignores data-entry / drafts until they enter the pipeline.
+    const all = fetched.filter((a) => !this.isDataEntry(a));
 
-    const inPeriod = (d?: Date | null) => {
-      if (!d) return false;
-      const t = new Date(d).getTime();
-      return t >= start.getTime() && t <= end.getTime();
-    };
-    const inPrev = (d?: Date | null) => {
-      if (!d) return false;
-      const t = new Date(d).getTime();
-      return t >= prev.start.getTime() && t <= prev.end.getTime();
-    };
+    // Same base set for Applications KPI, pipeline, stuck, and program rows.
+    const scoped = all.filter((a) => this.inRange(a.created_at, start, end));
 
-    const created = all.filter((a) => inPeriod(a.created_at));
-    const createdPrev = all.filter((a) => inPrev(a.created_at));
-    const approved = all.filter(
-      (a) =>
-        (a.status === AidApplicationStatus.SUCCESSFUL ||
-          a.status === AidApplicationStatus.DELIVERED) &&
-        inPeriod(a.ceo_decided_at || a.updated_at),
-    );
-    const rejected = all.filter(
-      (a) =>
-        a.status === AidApplicationStatus.REJECTED &&
-        inPeriod(a.updated_at || a.ceo_decided_at),
-    );
-    const delivered = all.filter(
-      (a) =>
-        a.status === AidApplicationStatus.DELIVERED &&
-        inPeriod(a.delivered_at || a.updated_at),
-    );
-    const verified = all.filter((a) => inPeriod(a.verified_at));
+    const prev =
+      mode !== "all" && start && end ? this.prevRange(start, end) : null;
+    const scopedPrev = prev
+      ? all.filter((a) => this.inRange(a.created_at, prev.start, prev.end))
+      : [];
 
-    const decided = [...approved, ...rejected];
-    const disbursed = delivered.reduce((s, a) => s + this.recAmount(a), 0);
-    const approvedDisbursedFallback = approved.reduce(
+    const appsCount = scoped.length;
+    const appsPrev = scopedPrev.length;
+    const appsDeltaPct =
+      prev && appsPrev > 0
+        ? Math.round(((appsCount - appsPrev) / appsPrev) * 100)
+        : null;
+
+    // Outcomes within the same created-in-range cohort (not a separate date lens).
+    const approved = scoped.filter((a) => this.isApprovedStatus(a.status));
+    const rejected = scoped.filter(
+      (a) => a.status === AidApplicationStatus.REJECTED,
+    );
+    const delivered = scoped.filter(
+      (a) => a.status === AidApplicationStatus.DELIVERED,
+    );
+    const returned = scoped.filter(
+      (a) =>
+        a.status === AidApplicationStatus.UNDER_REVIEW && !!a.verified_at,
+    );
+
+    const disbursedTotal = delivered.reduce(
       (s, a) => s + this.recAmount(a),
       0,
     );
-    const disbursedTotal = disbursed || approvedDisbursedFallback;
 
     const familyIds = new Set<number>();
     for (const a of approved) {
@@ -216,8 +283,9 @@ export class AidOverviewService {
       else if (a.beneficiary_person_id) familyIds.add(a.beneficiary_person_id);
     }
 
+    const decidedForSla = [...approved, ...rejected];
     const decisionDays: number[] = [];
-    for (const a of decided) {
+    for (const a of decidedForSla) {
       const days = this.daysBetween(
         a.created_at,
         a.ceo_decided_at || a.verified_at || a.updated_at,
@@ -239,32 +307,18 @@ export class AidOverviewService {
           )
         : null;
 
-    const liveCreated = created.filter(
-      (a) => a.status !== AidApplicationStatus.DRAFT,
-    );
-    const appsCount = liveCreated.length;
-    const appsPrev = createdPrev.filter(
-      (a) => a.status !== AidApplicationStatus.DRAFT,
-    ).length;
-    const appsDeltaPct =
-      appsPrev > 0
-        ? Math.round(((appsCount - appsPrev) / appsPrev) * 100)
-        : null;
-
     const budgetCap = Object.entries(PROGRAM_BUDGET_PKR)
       .filter(([k]) => !program || k === program)
       .reduce((s, [, v]) => s + v, 0);
 
-    // Pipeline (period) — drafts stay on Beneficiary Registration
+    // Pipeline = cumulative reach on the same Applications cohort
     const registered = appsCount;
-    const submittedCount = liveCreated.filter(
-      (a) => a.status !== AidApplicationStatus.SUBMITTED || !!a.submitted_at,
+    const submittedCount = scoped.filter((a) => this.hasBeenSubmitted(a)).length;
+    const investigatedCount = scoped.filter((a) =>
+      this.hasBeenInvestigated(a),
     ).length;
-    const investigatedCount = verified.length;
     const approvedCount = approved.length;
-    const disbursedCount =
-      delivered.length ||
-      approved.filter((a) => this.recAmount(a) > 0).length;
+    const disbursedCount = delivered.length;
 
     const pipeline = [
       { key: "registered", label: "Registered", count: registered },
@@ -273,21 +327,9 @@ export class AidOverviewService {
       { key: "approved", label: "Approved", count: approvedCount },
       { key: "disbursed", label: "Disbursed", count: disbursedCount },
     ];
-    // Keep funnel non-increasing for display
-    let prevC = pipeline[0].count;
-    for (let i = 1; i < pipeline.length; i++) {
-      if (pipeline[i].count > prevC) pipeline[i].count = prevC;
-      prevC = pipeline[i].count;
-    }
 
     const now = new Date();
-    const open = all.filter(
-      (a) =>
-        ![
-          AidApplicationStatus.REJECTED,
-          AidApplicationStatus.DELIVERED,
-        ].includes(a.status),
-    );
+    const open = scoped.filter((a) => OPEN_STATUSES.has(a.status));
 
     const stuckApproval = open.filter((a) => {
       if (a.status !== AidApplicationStatus.CEO_APPROVAL_REQUIRED) return false;
@@ -296,16 +338,9 @@ export class AidOverviewService {
     });
 
     const stuckInvestigation = open.filter((a) => {
-      if (
-        ![
-          AidApplicationStatus.SUBMITTED,
-          AidApplicationStatus.UNDER_REVIEW,
-        ].includes(a.status)
-      ) {
-        return false;
-      }
+      if (!INVESTIGATION_STUCK_STATUSES.has(a.status)) return false;
       if (a.verified_at) return false;
-      const days = this.daysBetween(a.created_at, now);
+      const days = this.daysBetween(a.submitted_at || a.created_at, now);
       return days != null && days > 7;
     });
 
@@ -318,7 +353,7 @@ export class AidOverviewService {
       else ageBuckets.d20_plus += 1;
     }
 
-    const awaitingCeo = all.filter(
+    const awaitingCeo = scoped.filter(
       (a) => a.status === AidApplicationStatus.CEO_APPROVAL_REQUIRED,
     );
     let oldestCeoDays: number | null = null;
@@ -329,41 +364,26 @@ export class AidOverviewService {
       }
     }
 
-    // Families with 3+ successful apps since 2024
     const since2024 = new Date("2024-01-01T00:00:00Z");
     const successByPerson = new Map<number, number>();
     for (const a of all) {
-      if (
-        ![
-          AidApplicationStatus.SUCCESSFUL,
-          AidApplicationStatus.DELIVERED,
-        ].includes(a.status)
-      ) {
-        continue;
-      }
+      if (!this.isApprovedStatus(a.status)) continue;
       if (new Date(a.created_at) < since2024) continue;
       const pid = a.beneficiary_person_id;
+      if (!pid) continue;
       successByPerson.set(pid, (successByPerson.get(pid) || 0) + 1);
     }
     const multiBenefitFamilies = [...successByPerson.values()].filter(
       (n) => n >= 3,
     ).length;
 
-    const overrideAgainstAdvice = all.filter((a) => {
-      if (
-        ![
-          AidApplicationStatus.SUCCESSFUL,
-          AidApplicationStatus.DELIVERED,
-        ].includes(a.status)
-      ) {
-        return false;
-      }
+    const overrideAgainstAdvice = scoped.filter((a) => {
+      if (!this.isApprovedStatus(a.status)) return false;
       const rec = a.investigation_recommendation as Record<string, unknown> | null;
       const d = String(rec?.decision || "");
       return d === "not_recommend" || d === "reject";
     }).length;
 
-    // Duplicate CNIC: people sharing same CNIC (blocked attempts proxy)
     let duplicateCnicAttempts = 0;
     try {
       const cnicRows = await this.personRepo
@@ -384,26 +404,29 @@ export class AidOverviewService {
       duplicateCnicAttempts = 0;
     }
 
-    // Monthly apps vs approvals (last 6 months)
     const monthly: { month: string; applications: number; approved: number }[] =
       [];
     for (let i = 5; i >= 0; i--) {
       const mStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const mEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+      const mEnd = new Date(
+        now.getFullYear(),
+        now.getMonth() - i + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
       const label = mStart.toLocaleString("en-US", { month: "short" });
-      const apps = all.filter((a) => {
+      const programFiltered = program
+        ? all.filter((a) => a.requested_aid_type === program)
+        : all;
+      const apps = programFiltered.filter((a) => {
         const t = new Date(a.created_at).getTime();
         return t >= mStart.getTime() && t <= mEnd.getTime();
       }).length;
-      const appr = all.filter((a) => {
-        if (
-          ![
-            AidApplicationStatus.SUCCESSFUL,
-            AidApplicationStatus.DELIVERED,
-          ].includes(a.status)
-        ) {
-          return false;
-        }
+      const appr = programFiltered.filter((a) => {
+        if (!this.isApprovedStatus(a.status)) return false;
         const d = a.ceo_decided_at || a.updated_at;
         const t = new Date(d).getTime();
         return t >= mStart.getTime() && t <= mEnd.getTime();
@@ -411,29 +434,21 @@ export class AidOverviewService {
       monthly.push({ month: label, applications: apps, approved: appr });
     }
 
-    // Program performance
     const types = Object.values(AidRequestType).filter(
       (t) => !["cash", "medical"].includes(t),
     );
     const program_performance = types
       .map((type) => {
-        const typeApps = all.filter(
-          (a) =>
-            a.requested_aid_type === type && inPeriod(a.created_at),
+        const typeApps = scoped.filter((a) => a.requested_aid_type === type);
+        const typeApproved = typeApps.filter((a) =>
+          this.isApprovedStatus(a.status),
         );
-        const typeApproved = all.filter(
-          (a) =>
-            a.requested_aid_type === type &&
-            (a.status === AidApplicationStatus.SUCCESSFUL ||
-              a.status === AidApplicationStatus.DELIVERED) &&
-            inPeriod(a.ceo_decided_at || a.updated_at),
-        );
-        const typeDisbursed = typeApproved.reduce(
-          (s, a) => s + this.recAmount(a),
-          0,
-        );
+        const typeDisbursed = typeApproved
+          .filter((a) => a.status === AidApplicationStatus.DELIVERED)
+          .reduce((s, a) => s + this.recAmount(a), 0);
         const budget = PROGRAM_BUDGET_PKR[type] || PROGRAM_BUDGET_PKR.other;
-        const budgetUsed = budget > 0 ? Math.round((typeDisbursed / budget) * 100) : 0;
+        const budgetUsed =
+          budget > 0 ? Math.round((typeDisbursed / budget) * 100) : 0;
         const scores = typeApproved
           .map((a) => this.vulnScore(a))
           .filter((n): n is number => n != null);
@@ -459,6 +474,7 @@ export class AidOverviewService {
       .filter((r) => r.applications > 0 || r.approved > 0)
       .sort((a, b) => b.applications - a.applications);
 
+    const decidedCount = approvedCount + rejected.length + returned.length;
     const rangeLabel = this.formatRangeLabel(start, end, mode);
 
     return {
@@ -474,8 +490,10 @@ export class AidOverviewService {
         applications_delta_pct: appsDeltaPct,
         approved: approvedCount,
         approved_of_decisions_pct:
-          decided.length > 0
-            ? Math.round((approvedCount / decided.length) * 100)
+          approvedCount + rejected.length > 0
+            ? Math.round(
+                (approvedCount / (approvedCount + rejected.length)) * 100,
+              )
             : null,
         disbursed: disbursedTotal,
         budget: budgetCap,
@@ -491,19 +509,15 @@ export class AidOverviewService {
       },
       pipeline: {
         stages: pipeline,
-        decided: decided.length,
+        decided: decidedCount,
         approved: approvedCount,
         rejected: rejected.length,
-        returned: all.filter(
-          (a) =>
-            inPeriod(a.updated_at) &&
-            a.status === AidApplicationStatus.UNDER_REVIEW &&
-            !!a.verified_at,
-        ).length,
+        returned: returned.length,
       },
       stuck: {
         investigation_overdue: stuckInvestigation.length,
         approval_overdue: stuckApproval.length,
+        open_cases: open.length,
         age_of_open_cases: [
           { key: "0-5", label: "0–5 days", count: ageBuckets.d0_5 },
           { key: "6-10", label: "6–10 days", count: ageBuckets.d6_10 },

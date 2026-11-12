@@ -22,8 +22,20 @@ export const RECURRING_DONATION_DELETE_PERMISSIONS = [
   `${RECURRING}.delete`,
 ] as const;
 
+/** Staff who may set installment status to completed/failed (not pending-only). */
+export const RECURRING_DONATION_RECONCILER_PERMISSIONS = [
+  `${RECURRING}.reconciler`,
+] as const;
+
+export const RECURRING_DONATION_RECONCILER_GUARD = [
+  ...RECURRING_DONATION_RECONCILER_PERMISSIONS,
+  "super_admin",
+  "fund_raising_manager",
+] as const;
+
 export const RECURRING_DONATION_LIST_VIEW_GUARD = [
   ...RECURRING_DONATION_LIST_VIEW_PERMISSIONS,
+  ...RECURRING_DONATION_RECONCILER_PERMISSIONS,
   // Recurring Donors module may also list via the same search endpoint
   "fund_raising.recurring_donors.list_view",
   "fund_raising.recurring_donors.view",
@@ -34,6 +46,7 @@ export const RECURRING_DONATION_LIST_VIEW_GUARD = [
 
 export const RECURRING_DONATION_VIEW_GUARD = [
   ...RECURRING_DONATION_VIEW_PERMISSIONS,
+  ...RECURRING_DONATION_RECONCILER_PERMISSIONS,
   "fund_raising.recurring_donors.view",
   "fund_raising.recurring_donors.list_view",
   "super_admin",
@@ -55,17 +68,6 @@ export const RECURRING_DONATION_UPDATE_GUARD = [
 
 export const RECURRING_DONATION_DELETE_GUARD = [
   ...RECURRING_DONATION_DELETE_PERMISSIONS,
-  "super_admin",
-  "fund_raising_manager",
-] as const;
-
-/** Staff who may set installment status to completed/failed (not pending-only). */
-export const RECURRING_DONATION_RECONCILER_PERMISSIONS = [
-  `${RECURRING}.reconciler`,
-] as const;
-
-export const RECURRING_DONATION_RECONCILER_GUARD = [
-  ...RECURRING_DONATION_RECONCILER_PERMISSIONS,
   "super_admin",
   "fund_raising_manager",
 ] as const;
