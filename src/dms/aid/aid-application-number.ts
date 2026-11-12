@@ -75,3 +75,109 @@ export function formatAidProgramApplicationNo(
 ): string {
   return `${String(code).toUpperCase()}-${yearSuffix}-${String(seq).padStart(4, "0")}`;
 }
+
+/** True for legacy daily counters like AID-20261102-0002. */
+export function isLegacyAidApplicationNo(value?: string | null): boolean {
+  const no = String(value || "").trim().toUpperCase();
+  if (!no) return false;
+  if (isProgramApplicationNo(no)) return false;
+  return no.startsWith("AID-") || /^TMP-REMAP-\d+$/i.test(no);
+}
+
+/**
+ * Draft / pre-consider intake should not keep an official application number.
+ */
+export function shouldClearApplicationNoForStatus(params: {
+  status?: string | null;
+  submittedAt?: Date | string | null;
+}): boolean {
+  const status = String(params.status || "").toLowerCase();
+  const submitted = !!params.submittedAt;
+  if (status === "draft") return true;
+  if (status === "incomplete_docs" && !submitted) return true;
+  if (status === "incomplete" && !submitted) return true;
+  return false;
+}
+
+export type AidAppNoRemapRow = {
+  id: number;
+  requested_aid_type?: string | null;
+  status?: string | null;
+  submitted_at?: Date | string | null;
+  created_at?: Date | string | null;
+  application_no?: string | null;
+};
+
+export type AidAppNoRemapPlan = {
+  clearIds: number[];
+  assign: Array<{ id: number; application_no: string; code: string }>;
+};
+
+/**
+ * Build remap plan for legacy AID-* rows:
+ * - drafts / unsubmitted incomplete → clear number
+ * - considered (or other pipeline) → assign CODE-YY-#### after seed last
+ */
+export function buildAidApplicationNoRemapPlan(
+  rows: AidAppNoRemapRow[],
+  yearSuffix = aidAppNoYearSuffix(),
+  /** Highest sequence already used per code (from existing CODE-YY-#### rows). */
+  existingMaxByCode: Record<string, number> = {},
+): AidAppNoRemapPlan {
+  const clearIds: number[] = [];
+  const toAssign: AidAppNoRemapRow[] = [];
+
+  for (const row of rows) {
+    const no = row.application_no;
+    const needsTouch =
+      !no ||
+      isLegacyAidApplicationNo(no) ||
+      !isProgramApplicationNo(no);
+    if (!needsTouch) continue;
+
+    if (
+      shouldClearApplicationNoForStatus({
+        status: row.status,
+        submittedAt: row.submitted_at,
+      })
+    ) {
+      // Only clear when there is something to clear
+      if (no) clearIds.push(Number(row.id));
+      continue;
+    }
+
+    // Already a valid program number — leave alone
+    if (isProgramApplicationNo(no)) continue;
+
+    toAssign.push(row);
+  }
+
+  toAssign.sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (ta !== tb) return ta - tb;
+    return Number(a.id) - Number(b.id);
+  });
+
+  const nextByCode: Record<string, number> = {};
+  const assign: AidAppNoRemapPlan["assign"] = [];
+
+  for (const row of toAssign) {
+    const code = resolveAidProgramAppNoCode(row.requested_aid_type);
+    if (nextByCode[code] == null) {
+      const seedLast = aidAppNoSeedLast(code, yearSuffix);
+      const existingLast = Number(existingMaxByCode[code] || 0);
+      const floor = Math.max(seedLast, existingLast);
+      nextByCode[code] = floor + 1;
+    }
+    const seq = nextByCode[code];
+    nextByCode[code] = seq + 1;
+    assign.push({
+      id: Number(row.id),
+      code,
+      application_no: formatAidProgramApplicationNo(code, yearSuffix, seq),
+    });
+  }
+
+  return { clearIds, assign };
+}
