@@ -75,6 +75,13 @@ import {
   serializeAidAuditValue,
 } from "./audit/aid-audit.util";
 import type { AidAuditChange } from "./audit/aid-audit.types";
+import {
+  aidAppNoSeedLast,
+  aidAppNoYearSuffix,
+  formatAidProgramApplicationNo,
+  isProgramApplicationNo,
+  resolveAidProgramAppNoCode,
+} from "./aid-application-number";
 
 function isMarriageGiftApp(
   type?: string | null,
@@ -717,21 +724,39 @@ export class AidApplicationsService {
     };
   }
 
-  private async nextApplicationNo(): Promise<string> {
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const prefix = `AID-${day}-`;
+  /**
+   * Next main-program application number: `{CODE}-{YY}-{####}`.
+   * Uses DB max for that prefix, floored by the manual seed last number.
+   */
+  private async nextApplicationNo(
+    requestedAidType?: string | null,
+  ): Promise<string> {
+    const code = resolveAidProgramAppNoCode(requestedAidType);
+    const yy = aidAppNoYearSuffix();
+    const prefix = `${code}-${yy}-`;
+    const seedLast = aidAppNoSeedLast(code, yy);
+
     const latest = await this.appRepo
       .createQueryBuilder("a")
       .where("a.application_no LIKE :prefix", { prefix: `${prefix}%` })
       .orderBy("a.application_no", "DESC")
       .getOne();
-    let seq = 1;
+
+    let last = seedLast;
     if (latest?.application_no) {
       const part = latest.application_no.split("-").pop();
       const n = Number(part);
-      if (Number.isFinite(n)) seq = n + 1;
+      if (Number.isFinite(n) && n > last) last = n;
     }
-    return `${prefix}${String(seq).padStart(4, "0")}`;
+
+    return formatAidProgramApplicationNo(code, yy, last + 1);
+  }
+
+  /** Assign program application no on Consider if missing / still old AID-* format. */
+  private async ensureProgramApplicationNo(app: AidApplication): Promise<boolean> {
+    if (isProgramApplicationNo(app.application_no)) return false;
+    app.application_no = await this.nextApplicationNo(app.requested_aid_type);
+    return true;
   }
 
   async create(dto: CreateAidApplicationDto, user?: User) {
@@ -773,7 +798,8 @@ export class AidApplicationsService {
     const missingDocs = this.normalizeMissingDocuments(dto.missing_documents);
 
     const row = this.appRepo.create({
-      application_no: await this.nextApplicationNo(),
+      // Official number is issued on Consider (approve-draft), not at draft save.
+      application_no: null,
       beneficiary_person_id: beneficiaryId,
       writer_person_id: writerId,
       writer_relation: writerRelation,
@@ -878,11 +904,6 @@ export class AidApplicationsService {
           field: "status",
           old_value: null,
           new_value: serializeAidAuditValue(saved.status),
-        },
-        {
-          field: "application_no",
-          old_value: null,
-          new_value: serializeAidAuditValue(saved.application_no),
         },
       ],
       metadata: {
@@ -2603,10 +2624,12 @@ export class AidApplicationsService {
 
     const prevStatus = app.status;
     const prevAssignee = app.assigned_to_user_id;
+    const prevAppNo = app.application_no;
     app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
     app.submitted_at = new Date();
     app.updated_by = user || null;
+    const assignedNo = await this.ensureProgramApplicationNo(app);
     await this.appRepo.save(app);
     await this.safeAudit({
       app,
@@ -2619,7 +2642,20 @@ export class AidApplicationsService {
           old_value: serializeAidAuditValue(prevAssignee),
           new_value: serializeAidAuditValue(assigneeId),
         },
+        ...(assignedNo
+          ? [
+              {
+                field: "application_no",
+                old_value: serializeAidAuditValue(prevAppNo),
+                new_value: serializeAidAuditValue(app.application_no),
+              },
+            ]
+          : []),
       ],
+      metadata: {
+        requested_aid_type: app.requested_aid_type,
+        application_no: app.application_no,
+      },
     });
     return this.findOne(id);
   }
@@ -2702,15 +2738,28 @@ export class AidApplicationsService {
       );
     }
     const prevStatus = app.status;
+    const prevAppNo = app.application_no;
     app.status = AidApplicationStatus.SUBMITTED;
     if (!app.submitted_at) app.submitted_at = new Date();
     app.updated_by = user || null;
+    const assignedNo = await this.ensureProgramApplicationNo(app);
     await this.appRepo.save(app);
     await this.safeAudit({
       app,
       action: AID_AUDIT_ACTIONS.RESUMED,
       user,
-      changes: buildAidStatusChange(prevStatus, app.status),
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...(assignedNo
+          ? [
+              {
+                field: "application_no",
+                old_value: serializeAidAuditValue(prevAppNo),
+                new_value: serializeAidAuditValue(app.application_no),
+              },
+            ]
+          : []),
+      ],
     });
     return this.findOne(id);
   }
