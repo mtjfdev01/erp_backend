@@ -34,6 +34,8 @@ import { AidModule } from './aid/aid.module';
 import { WebsiteDonationProjectsModule } from './website_donation_projects/website-donation-projects.module';
 import { WebsiteHomeHeroModule } from './website_home_hero/website-home-hero.module';
 import { EventPledgesModule } from './event_pledges/event-pledges.module';
+import { ReconciliationWorkbenchModule } from './reconciliation_workbench/reconciliation-workbench.module';
+import { ReportsDashboardModule } from './reports_dashboard/reports-dashboard.module';
 
 @Module({
   controllers: [DmsController],
@@ -75,6 +77,8 @@ import { EventPledgesModule } from './event_pledges/event-pledges.module';
     WebsiteDonationProjectsModule,
     WebsiteHomeHeroModule,
     EventPledgesModule,
+    ReconciliationWorkbenchModule,
+    ReportsDashboardModule,
   ],
 })
 export class DmsModule {}

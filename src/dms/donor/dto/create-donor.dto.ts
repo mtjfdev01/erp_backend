@@ -131,4 +131,21 @@ export class CreateDonorDto {
   @IsOptional()
   @IsBoolean()
   recurring?: boolean;
+
+  /** Optional Giving Capacity / Capacity Assessment details */
+  @IsOptional()
+  capacity_assessment?: {
+    estimated_net_worth?: string | null;
+    salary?: string | null;
+    donations_past_5y?: string | null;
+    gift_capacity?: string | null;
+    total_value_of_shares?: string | null;
+    shares_held?: Array<{
+      issuer?: string;
+      ticker?: string;
+      quantity?: string | number;
+      est_value?: string;
+      source?: string;
+    }>;
+  } | null;
 }

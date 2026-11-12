@@ -20,4 +20,7 @@ export class UpdateDonorDto {
   @IsOptional()
   @IsBoolean()
   recurring_consent?: boolean;
+
+  @IsOptional()
+  capacity_assessment?: Record<string, any> | null;
 }

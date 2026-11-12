@@ -265,6 +265,13 @@ export class DonationBoxDonationService {
       const savedCollection =
         await this.donationBoxDonationRepository.save(collection);
 
+      if (auditUserId != null && auditUserId > 0) {
+        await this.donationBoxDonationRepository.query(
+          `UPDATE "donation_box_donations" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+          [auditUserId, savedCollection.id],
+        );
+      }
+
       // Update donation box statistics
       await this.updateDonationBoxStats(
         createDonationBoxDonationDto.donation_box_id,
@@ -584,7 +591,28 @@ export class DonationBoxDonationService {
         this.applyCollectionListDataScope(query, scope, geoScope);
       }
 
-      // Apply sorting (whitelist to prevent SQL injection)
+      // 1. Calculate SUM(collection_amount) with exact same filters, geoScope and access scope
+      // Isolated subquery over distinct donation IDs prevents join row duplication and avoids TypeORM joinAttribute issues.
+      let totalDonationAmount = 0;
+      try {
+        const idQuery = query.clone();
+        idQuery.expressionMap.orderBys = {};
+        idQuery.expressionMap.selects = [];
+        idQuery.select("DISTINCT donation_box_donation.id", "id");
+        idQuery.addSelect("donation_box_donation.collection_amount", "collection_amount");
+
+        const [sql, params] = idQuery.getQueryAndParameters();
+        const rawResult = await this.donationBoxDonationRepository.query(
+          `SELECT COALESCE(SUM(sub.collection_amount), 0) AS "totalDonationAmount" FROM (${sql}) AS sub`,
+          params,
+        );
+        totalDonationAmount = Number(rawResult?.[0]?.totalDonationAmount) || 0;
+      } catch (sumError) {
+        console.warn("Could not calculate donation box collection total amount:", sumError);
+        totalDonationAmount = 0;
+      }
+
+      // 2. Apply sorting (whitelist to prevent SQL injection)
       const allowedSortFields = [
         "collection_date",
         "collection_amount",
@@ -597,10 +625,10 @@ export class DonationBoxDonationService {
         : "collection_date";
       query.orderBy(`donation_box_donation.${safeSortField}`, sortOrder);
 
-      // Apply pagination
+      // 3. Apply pagination
       query.skip(skip).take(pageSize);
 
-      // Execute query
+      // 4. Execute query
       const [data, total] = await query.getManyAndCount();
       const totalPages = Math.ceil(total / pageSize);
 
@@ -614,6 +642,7 @@ export class DonationBoxDonationService {
           hasNext: page < totalPages,
           hasPrev: page > 1,
         },
+        totalDonationAmount,
       };
     } catch (error) {
       console.log("error", error);

@@ -11,6 +11,7 @@ import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { DonationsService } from "../donations.service";
 import { PermissionsService } from "../../permissions/permissions.service";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
 import {
   advanceByFrequency,
@@ -77,9 +78,13 @@ export class RecurringDonationsLedgerService {
     private readonly whatsAppService: WhatsAppService,
     private readonly moduleRef: ModuleRef,
     private readonly permissionsService: PermissionsService,
+    private readonly dataScopeService: DataScopeService,
   ) {}
 
-  async search(payload: Record<string, any>, user?: { id?: number } | null) {
+  async search(
+    payload: Record<string, any>,
+    user?: { id?: number; role?: string; department?: string } | null,
+  ) {
     const pagination = payload.pagination || {};
     const page = Math.max(1, Number(pagination.page) || 1);
     let pageSize = Number(pagination.pageSize);
@@ -175,6 +180,31 @@ export class RecurringDonationsLedgerService {
       qb.andWhere(isOnlineSql);
     } else if (sourceFilter === "offline") {
       qb.andWhere(`NOT ${isOnlineSql}`);
+    }
+
+    if (user?.id) {
+      const scope = await this.dataScopeService.resolveListScope({
+        userId: user.id,
+        userRole: user.role,
+        userDepartment: user.department,
+        permissionDepartment: "fund_raising",
+        module: "recurring_donations",
+        teamFilter: filters.team_filter,
+        teamFilterUserId: filters.team_filter_user_id,
+      });
+
+      if (!scope.bypass && scope.type !== "org" && scope.allowedUserIds != null) {
+        const teamFilterActive = !!(filters.team_filter && filters.team_filter !== "all");
+        if (sourceFilter === "offline" || teamFilterActive) {
+          this.dataScopeService.applyToQuery(qb, "rd", scope);
+        } else if (sourceFilter !== "online") {
+          const allowedIds = scope.allowedUserIds.length ? scope.allowedUserIds : [-1];
+          qb.andWhere(
+            `(${isOnlineSql} OR rd.created_by IN (:...recurringDataScopeUserIds))`,
+            { recurringDataScopeUserIds: allowedIds },
+          );
+        }
+      }
     }
     if (filters.donor_id) {
       qb.andWhere("rd.donor_id = :donorId", {
@@ -353,6 +383,13 @@ export class RecurringDonationsLedgerService {
 
     const total = await qb.clone().getCount();
 
+    // Get SUM(amount) with exact same filters and access scope
+    const sumResult = await qb
+      .clone()
+      .select("SUM(COALESCE(rd.amount, 0))", "totalDonationAmount")
+      .getRawOne();
+    const totalDonationAmount = Number(sumResult?.totalDonationAmount) || 0;
+
     qb.select([
       "rd.id AS id",
       "rd.initial_donation_id AS initial_donation_id",
@@ -421,6 +458,7 @@ export class RecurringDonationsLedgerService {
         total,
         totalPages,
       },
+      totalDonationAmount,
     };
   }
 
@@ -776,6 +814,13 @@ export class RecurringDonationsLedgerService {
 
     const saved = await this.recurringDonationRepo.save(row);
 
+    if (userId && userId > 0) {
+      await this.recurringDonationRepo.query(
+        `UPDATE "recurring_donations" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+        [userId, saved.id],
+      );
+    }
+
     // Staff-created ledger subscription ⇒ mark donor as recurring (if not already)
     const donorPatch: Record<string, unknown> = { recurring: true };
     const consented = dto.consent !== false;
@@ -961,8 +1006,11 @@ export class RecurringDonationsLedgerService {
         continue;
       }
 
-      await this.recurringDonationRepo.save(
+      const newInstallment = await this.recurringDonationRepo.save(
         this.recurringDonationRepo.create({
+          ...(options?.userId && options.userId > 0
+            ? { created_by: { id: options.userId } as any, updated_by: { id: options.userId } as any }
+            : {}),
           record_type: "installment",
           parent_id: subscription.id,
           initial_donation_id: subscription.initial_donation_id,
@@ -1059,8 +1107,17 @@ export class RecurringDonationsLedgerService {
           paid_at: installmentStatus === "completed" ? new Date() : null,
           period_key: periodKey,
           stripe_billing_reason: "period_due",
+          ...(userId && userId > 0
+            ? { created_by: { id: userId } as any, updated_by: { id: userId } as any }
+            : {}),
         }),
       );
+      if (userId && userId > 0 && first?.id) {
+        await this.recurringDonationRepo.query(
+          `UPDATE "recurring_donations" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+          [userId, first.id],
+        );
+      }
     } else if (
       String(first.status || "").toLowerCase() !== installmentStatus
     ) {
@@ -1438,6 +1495,7 @@ export class RecurringDonationsLedgerService {
     startDate?: string | null;
     consent?: boolean | null;
     prepaidPeriods?: number | null;
+    userId?: number | null;
   }): Promise<RecurringDonation | null> {
     if (!params.donationId) return null;
 
@@ -1533,8 +1591,18 @@ export class RecurringDonationsLedgerService {
       prepaid_periods: prepaid.prepaidPeriods,
       prepaid_start_period_key: prepaid.start,
       prepaid_end_period_key: prepaid.end,
+      ...(params.userId && params.userId > 0
+        ? { created_by: { id: params.userId } as any, updated_by: { id: params.userId } as any }
+        : {}),
     });
-    return this.recurringDonationRepo.save(row);
+    const savedSub = await this.recurringDonationRepo.save(row);
+    if (params.userId && params.userId > 0 && savedSub?.id) {
+      await this.recurringDonationRepo.query(
+        `UPDATE "recurring_donations" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+        [params.userId, savedSub.id],
+      );
+    }
+    return savedSub;
   }
 
   /**

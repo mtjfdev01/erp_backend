@@ -522,6 +522,13 @@ export class DonationsController {
         ...filters,
       };
 
+      const isOfflineList =
+        completeFilters._donation_source_not === "website" ||
+        filters._donation_source_not === "website";
+      const isOnlineList =
+        completeFilters.donation_source === "website" ||
+        filters.donation_source === "website";
+
       const dataScope = user?.id
         ? await this.donationsService.resolveDonationListScope(
             user,
@@ -530,6 +537,8 @@ export class DonationsController {
               inKindList:
                 String(completeFilters.donation_method || "").toLowerCase() ===
                 "in_kind",
+              isOfflineList,
+              isOnlineList,
             },
           )
         : null;

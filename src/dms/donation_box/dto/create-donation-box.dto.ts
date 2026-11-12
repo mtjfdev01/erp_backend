@@ -54,10 +54,14 @@ export class CreateDonationBoxDto {
   @IsOptional()
   city_id?: number | null;
 
-  // Shop Details (Required shop_name)
+  // Unit Name / Shop Details
   @IsString()
-  @IsNotEmpty({ message: "Shop name is required" })
-  shop_name: string;
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  shop_name?: string;
 
   @IsString()
   @IsOptional()
@@ -76,11 +80,15 @@ export class CreateDonationBoxDto {
   landmark_marketplace?: string;
 
   // Box Details
+  @IsString()
+  @IsOptional()
+  type?: string;
+
   @IsEnum(BoxType, {
     message: "Box type must be small, medium, large, or custom",
   })
-  @IsNotEmpty({ message: "Box type is required" })
-  box_type: BoxType;
+  @IsOptional()
+  box_type?: BoxType;
 
   @IsEnum(BoxStatus, {
     message:

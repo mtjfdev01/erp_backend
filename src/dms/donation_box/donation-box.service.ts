@@ -1,3 +1,4 @@
+import { CsrPoc } from "../organizations/entities/csr-poc.entity";
 import {
   Injectable,
   ConflictException,
@@ -32,6 +33,7 @@ import { buildDonationBoxGeoSearch } from "./utils/donation-box-geo.util";
 interface PaginationOptions {
   page: number;
   pageSize: number;
+  type?: string;
   sortField?: string;
   sortOrder?: "ASC" | "DESC";
   search?: string;
@@ -79,6 +81,8 @@ export class DonationBoxService {
     private readonly regionRepository: Repository<Region>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(CsrPoc)
+    private readonly pocRepository: Repository<CsrPoc>,
     private readonly donationBoxAuditService: DonationBoxAuditService,
     private readonly dataScopeService: DataScopeService,
     private readonly geographicScopeService: GeographicScopeService,
@@ -352,6 +356,7 @@ export class DonationBoxService {
 
       // Save and return
       const savedBox = await this.donationBoxRepository.save(donationBox);
+      await this.syncPocForBox(savedBox);
 
       return savedBox;
     } catch (error) {
@@ -882,7 +887,27 @@ export class DonationBoxService {
         this.applyDonationBoxListDataScope(query, scope, geoScope);
       }
 
-      // Apply sorting (whitelist to prevent SQL injection)
+      // 1. Calculate SUM(total_collected) with exact same filters, geoScope and access scope
+      let totalDonationAmount = 0;
+      try {
+        const idQuery = query.clone();
+        idQuery.expressionMap.orderBys = {};
+        idQuery.expressionMap.selects = [];
+        idQuery.select("DISTINCT donation_box.id", "id");
+        idQuery.addSelect("donation_box.total_collected", "total_collected");
+
+        const [sql, params] = idQuery.getQueryAndParameters();
+        const rawResult = await this.donationBoxRepository.query(
+          `SELECT COALESCE(SUM(sub.total_collected), 0) AS "totalDonationAmount" FROM (${sql}) AS sub`,
+          params,
+        );
+        totalDonationAmount = Number(rawResult?.[0]?.totalDonationAmount) || 0;
+      } catch (sumError) {
+        console.warn("Could not calculate donation box total collected amount:", sumError);
+        totalDonationAmount = 0;
+      }
+
+      // 2. Apply sorting (whitelist to prevent SQL injection)
       const safeSortField = DONATION_BOX_SORT_FIELDS.has(sortField || "")
         ? sortField!
         : "created_at";
@@ -905,10 +930,45 @@ export class DonationBoxService {
           hasNext: page < totalPages,
           hasPrev: page > 1,
         },
+        totalDonationAmount,
       };
     } catch (error) {
       console.error("Error retrieving donation boxes:", error);
       throw new Error(`Failed to retrieve donation boxes: ${error.message}`);
+    }
+  }
+
+  private async syncPocForBox(box: DonationBox): Promise<void> {
+    try {
+      if (!box?.id) return;
+      const pocType = box.type === "Mosques" ? "Mosques" : "Donation Boxes";
+      const pocName = (box.shopkeeper?.trim() || box.name?.trim() || box.shop_name?.trim() || "Contact Person");
+      const pocPhone = box.cell_no?.trim() || null;
+
+      let poc = await this.pocRepository.findOne({
+        where: { donation_box_id: box.id, is_archived: false },
+        order: { is_primary: "DESC", id: "ASC" },
+      });
+
+      if (poc) {
+        poc.name = pocName;
+        poc.phone = pocPhone;
+        poc.type = pocType;
+        await this.pocRepository.save(poc);
+      } else {
+        poc = this.pocRepository.create({
+          donation_box_id: box.id,
+          type: pocType,
+          name: pocName,
+          phone: pocPhone,
+          role: "contact",
+          is_primary: true,
+          is_active: true,
+        });
+        await this.pocRepository.save(poc);
+      }
+    } catch (err: any) {
+      console.warn("Failed to sync POC for donation box:", err?.message);
     }
   }
 
@@ -935,6 +995,12 @@ export class DonationBoxService {
       if (!donationBox) {
         throw new NotFoundException(`Donation box with ID ${id} not found`);
       }
+
+      const poc = await this.pocRepository.findOne({
+        where: { donation_box_id: id, is_archived: false },
+        order: { is_primary: "DESC", id: "ASC" },
+      });
+      (donationBox as any).poc = poc || null;
 
       return donationBox;
     } catch (error) {

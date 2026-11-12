@@ -233,7 +233,7 @@ export class DonationsService {
   async resolveDonationListScope(
     user: { id?: number; role?: string; department?: string } | null | undefined,
     sourceAccess: { online: boolean; offline: boolean; inKind?: boolean },
-    options?: { inKindList?: boolean },
+    options?: { inKindList?: boolean; isOfflineList?: boolean; isOnlineList?: boolean },
   ): Promise<ResolvedDataScope | null> {
     if (!user?.id || user.id === -1) return null;
 
@@ -265,6 +265,12 @@ export class DonationsService {
       "offline_donations",
     );
 
+    if (options?.isOfflineList) {
+      return offlineScope;
+    }
+    if (options?.isOnlineList) {
+      return onlineScope;
+    }
     if (sourceAccess.online && sourceAccess.offline) {
       return this.dataScopeService.mergeScopes(onlineScope, offlineScope);
     }
@@ -495,6 +501,7 @@ export class DonationsService {
   private buildAutoRegisterDonationPayload(
     createDonationDto: CreateDonationDto,
     referrerUserId?: number | null,
+    createdByUserId?: number | null,
   ) {
     return {
       donor_name: createDonationDto?.donor_name,
@@ -507,6 +514,7 @@ export class DonationsService {
       recurring: this.isDonationRecurring(createDonationDto),
       recurring_consent: this.hasRecurringConsent(createDonationDto),
       referrer_user_id: referrerUserId ?? null,
+      created_by: createdByUserId ?? null,
     };
   }
 
@@ -765,6 +773,7 @@ export class DonationsService {
       donation_type?: string;
     },
     donorId: number | null,
+    userId?: number | null,
   ): Promise<void> {
     const prepaidThenRecurring = this.wantsPrepaidThenRecurring(createDonationDto);
     if (!this.isDonationRecurring(createDonationDto) && !prepaidThenRecurring) {
@@ -813,6 +822,7 @@ export class DonationsService {
         startDate,
         consent: this.hasRecurringConsent(createDonationDto),
         prepaidPeriods,
+        userId: userId ?? null,
       },
     );
 
@@ -3097,10 +3107,12 @@ export class DonationsService {
             `🔍 Resolving donor from donation contact: ${createDonationDto?.donor_email || "—"} / ${createDonationDto?.donor_phone || "—"}`,
           );
 
+          const auditUserId = this.donationAuditUserId(user);
           donor = await this.donorService.autoRegisterFromDonation(
             this.buildAutoRegisterDonationPayload(
               createDonationDto,
               referrerUser?.id ?? null,
+              auditUserId,
             ),
           );
 
@@ -3172,18 +3184,25 @@ export class DonationsService {
           ...donationColumns
         } = createDonationDto as CreateDonationDto & Record<string, unknown>;
 
+        const auditUserId = this.donationAuditUserId(user);
         const donation = this.donationRepository.create({
           ...donationColumns,
           ...geoSnapshot,
           donor_id: donorId,
           campaign_id: campaignId,
-          created_by: this.donationAuditUserId(user) as any,
+          created_by: auditUserId ? ({ id: auditUserId } as any) : null,
           recurrence_id: recurringRowId,
           // Intent stored + activated while pending (for now)
           manual_recurring_intent: manualRecurringIntent,
           ...(referrerUser ? { referred_by: referrerUser } : {}),
         });
         savedDonation = await this.donationRepository.save(donation);
+        if (auditUserId != null && auditUserId > 0) {
+          await this.donationRepository.query(
+            `UPDATE "donations" SET "created_by" = $1 WHERE "id" = $2 AND ("created_by" IS NULL OR "created_by" != $1)`,
+            [auditUserId, savedDonation.id],
+          );
+        }
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
@@ -3212,6 +3231,7 @@ export class DonationsService {
           createDonationDto,
           savedDonation,
           donorId,
+          auditUserId,
         );
 
         if (!deferPostCreate) {
@@ -3833,7 +3853,8 @@ export class DonationsService {
           ProgressTracker,
           "progress_tracker",
           "progress_tracker.donation_id = donation.id AND progress_tracker.is_archived = false",
-        );
+        )
+        .where("donation.is_archived = false");
 
       // Apply same filters to keep consistent
       this.applyDonationSourceNotFilter(

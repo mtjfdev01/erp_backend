@@ -30,6 +30,7 @@ import {
   RECURRING_DONATION_CREATE_GUARD,
   RECURRING_DONATION_UPDATE_GUARD,
   RECURRING_DONATION_DELETE_GUARD,
+  RECURRING_DONATION_RECONCILER_GUARD,
 } from "../../permissions/recurring-donations-permissions.constants";
 import { CreateRecurringDonationDto } from "./dto/create-recurring-donation.dto";
 import { UpdateRecurringDonationDto } from "./dto/update-recurring-donation.dto";
@@ -229,9 +230,12 @@ export class RecurringDonationsController {
     }
   }
 
-  /** Admin: mark selected pending period dues as paid (no donor/donation deletes). */
+  /** Admin / Reconciler: mark selected pending period dues as paid (no donor/donation deletes). */
   @Post(":id/mark-installments-paid")
-  @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
+  @RequiredPermissions([
+    ...RECURRING_DONATION_VIEW_GUARD,
+    ...RECURRING_DONATION_RECONCILER_GUARD,
+  ])
   async markInstallmentsPaid(
     @Param("id") id: string,
     @Body() body: { installment_ids?: number[]; note?: string },
@@ -382,7 +386,10 @@ export class RecurringDonationsController {
 
   /** Staff: edit one installment (status / amount / period). Non-Stripe only. */
   @Patch(":id/installments/:installmentId")
-  @RequiredPermissions([...RECURRING_DONATION_UPDATE_GUARD])
+  @RequiredPermissions([
+    ...RECURRING_DONATION_UPDATE_GUARD,
+    ...RECURRING_DONATION_RECONCILER_GUARD,
+  ])
   async updateInstallment(
     @Param("id") id: string,
     @Param("installmentId") installmentId: string,
