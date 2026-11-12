@@ -29,12 +29,27 @@ export class ChatService implements OnModuleInit {
   async getChatUsers(): Promise<any[]> {
     try {
       const rawUsers = await this.messageRepo.manager.query(
-        'SELECT id, first_name, last_name, email, role, department, phone, manager_id, "isActive" FROM users WHERE "is_archived" = false OR "is_archived" IS NULL ORDER BY id ASC'
+        'SELECT id, name, email, role, status, department_id, avatar_url FROM users ORDER BY id ASC'
       );
-      return (rawUsers || []).map((u: any) => ({
-        ...u,
-        name: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : (u.email ? u.email.split('@')[0] : 'User'),
-      }));
+      return (rawUsers || []).map((u: any) => {
+        const displayName = u.name && u.name.trim() ? u.name.trim() : (u.email ? u.email.split('@')[0] : 'User');
+        const parts = displayName.split(' ');
+        const firstName = parts[0] || displayName;
+        const lastName = parts.slice(1).join(' ') || '';
+        return {
+          id: u.id,
+          name: displayName,
+          first_name: firstName,
+          last_name: lastName,
+          email: u.email,
+          role: u.role || 'user',
+          department: u.department_id || 'general',
+          department_id: u.department_id || 'general',
+          status: u.status || 'offline',
+          avatar_url: u.avatar_url || null,
+          isActive: true,
+        };
+      });
     } catch (err) {
       this.logger.warn('Could not fetch chat users: ' + err);
       return [];
