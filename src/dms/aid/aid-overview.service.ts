@@ -8,6 +8,7 @@ import { AidPerson } from "./entities/aid-person.entity";
 const PROGRAM_BUDGET_PKR: Record<string, number> = {
   ration: 1_600_000,
   education: 1_600_000,
+  community_services: 1_970_000,
   financial_assistance: 950_000,
   marriage_gift: 1_000_000,
   clean_water: 750_000,
@@ -19,6 +20,7 @@ const PROGRAM_BUDGET_PKR: Record<string, number> = {
 const PROGRAM_LABELS: Record<string, string> = {
   ration: "Ration",
   education: "Education",
+  community_services: "Community Services",
   financial_assistance: "Financial Assistance",
   marriage_gift: "Marriage",
   clean_water: "Clean Water",

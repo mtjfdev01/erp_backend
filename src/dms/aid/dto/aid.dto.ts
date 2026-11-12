@@ -935,15 +935,23 @@ export class UpdateMealReviewDto {
 
 /** Approval block on Preview tab (editable until locked). */
 export class UpdatePreviewApprovalDto {
+  /**
+   * Canonical UI: recommend | not_recommend.
+   * Legacy: approved | approved_with_changes | rejected | re_investigate.
+   */
   @IsOptional()
   @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
   @IsIn([
+    "recommend",
+    "not_recommend",
     "approved",
     "approved_with_changes",
     "rejected",
     "re_investigate",
   ])
   decision?:
+    | "recommend"
+    | "not_recommend"
     | "approved"
     | "approved_with_changes"
     | "rejected"
@@ -965,6 +973,24 @@ export class UpdatePreviewApprovalDto {
   @Type(() => Number)
   @IsNumber()
   approved_amount?: number | null;
+
+  /** Same as approved_amount — used by program-aware recommendation UI. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @Type(() => Number)
+  @IsNumber()
+  amount?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null && v !== undefined && v !== "")
+  @Type(() => Number)
+  @IsInt()
+  period_months?: number | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(["full", "half", "monthly", "alternate"], { each: true })
+  ration_options?: Array<"full" | "half" | "monthly" | "alternate">;
 
   @IsOptional()
   @IsBoolean()
@@ -1031,8 +1057,24 @@ export class InvestigationRecommendationDto {
   @IsInt()
   period_months?: number | null;
 
+  /** Required (min 3) when recommending; optional for not_recommend. */
   @IsOptional()
   @IsString()
+  @ValidateIf(
+    (o: InvestigationRecommendationDto) => {
+      const d = String(o?.decision || "").trim();
+      const opts = Array.isArray(o?.ration_options) ? o.ration_options : [];
+      const isNotRecommend = d === "not_recommend" || d === "reject";
+      const isRecommend =
+        d === "recommend" ||
+        d === "approve_as_requested" ||
+        d === "approve_with_changes" ||
+        opts.length > 0;
+      if (isNotRecommend) return false;
+      if (!isRecommend && !String(o?.remarks || "").trim()) return false;
+      return true;
+    },
+  )
   @MinLength(3)
   remarks?: string | null;
 
