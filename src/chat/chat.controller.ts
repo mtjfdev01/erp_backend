@@ -16,12 +16,17 @@ import { Response } from 'express';
 import { ChatService } from './chat.service';
 import { CreateChatMessageDto, ReactMessageDto } from './dto/create-message.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
-import { ConditionalJwtGuard } from '../auth/guards/conditional-jwt.guard';
+import { ChatJwtGuard } from './guards/chat-jwt.guard';
+import { TasksService } from '../tasks/tasks.service';
+import { Optional, Inject, forwardRef } from '@nestjs/common';
 
 @Controller('chat')
-@UseGuards(ConditionalJwtGuard)
+@UseGuards(ChatJwtGuard)
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    @Optional() @Inject(forwardRef(() => TasksService)) private readonly tasksService?: TasksService,
+  ) {}
 
   
   @Get('users')
@@ -483,6 +488,124 @@ export class ChatController {
         success: false,
         message: err?.message || 'Failed to mark all notifications read',
       });
+    }
+  }
+
+  // ==========================================
+  // AUTH PROFILE & TASKING INTEGRATION (CHATTASK)
+  // Protected with ChatJwtGuard (Bearer + Cookie)
+  // ==========================================
+
+  @Get('me')
+  async getChatProfile(@Req() req: any, @Res() res: Response) {
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      user: req?.user || null,
+    });
+  }
+
+  @Get('tasks/list')
+  async listTasks(@Query() query: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const data = await this.tasksService.findAll(query, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, ...data });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ success: false, message: err?.message, data: [] });
+    }
+  }
+
+  @Get('tasks/:id')
+  async getTask(@Param('id') id: string, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.findOne(+id, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('tasks')
+  async createTask(@Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.create(body, req.user);
+      return res.status(HttpStatus.CREATED).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Patch('tasks/:id')
+  async updateTask(@Param('id') id: string, @Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.update(+id, body, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('tasks/:id/progress')
+  @Patch('tasks/:id/progress')
+  async updateTaskProgress(@Param('id') id: string, @Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.updateProgress(+id, body, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('tasks/:id/comments')
+  async addTaskComment(@Param('id') id: string, @Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const comment = await this.tasksService.addComment(+id, body, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: comment });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('tasks/:id/approve')
+  async approveTask(@Param('id') id: string, @Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.approve(+id, body, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
+    }
+  }
+
+  @Post('tasks/:id/status-transition')
+  async transitionTaskStatus(@Param('id') id: string, @Body() body: any, @Req() req: any, @Res() res: Response) {
+    try {
+      if (!this.tasksService) {
+        return res.status(HttpStatus.NOT_FOUND).json({ success: false, message: 'TasksService not available' });
+      }
+      const task = await this.tasksService.transitionStatus(+id, body, req.user);
+      return res.status(HttpStatus.OK).json({ success: true, data: task });
+    } catch (err: any) {
+      return res.status(HttpStatus.BAD_REQUEST).json({ success: false, message: err?.message });
     }
   }
 }

@@ -8,6 +8,8 @@ import { ConversationKeyBundleEntity } from './entities/conversation-key-bundle.
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
+import { ChatJwtGuard } from './guards/chat-jwt.guard';
+import { TasksModule } from '../tasks/tasks.module';
 
 @Module({
   imports: [
@@ -20,10 +22,10 @@ import { ChatGateway } from './chat.gateway';
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-secret-key',
     }),
+    forwardRef(() => TasksModule),
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway],
-  exports: [ChatService, ChatGateway],
+  providers: [ChatService, ChatGateway, ChatJwtGuard],
+  exports: [ChatService, ChatGateway, ChatJwtGuard],
 })
 export class ChatModule {}
-

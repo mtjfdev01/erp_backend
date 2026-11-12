@@ -29,9 +29,12 @@ export class ChatService implements OnModuleInit {
   async getChatUsers(): Promise<any[]> {
     try {
       const rawUsers = await this.messageRepo.manager.query(
-        'SELECT id, first_name, last_name, email, role, department, phone, manager_id, "isActive" FROM "user" WHERE "is_archived" = false OR "is_archived" IS NULL ORDER BY id ASC'
+        'SELECT id, first_name, last_name, email, role, department, phone, manager_id, "isActive" FROM users WHERE "is_archived" = false OR "is_archived" IS NULL ORDER BY id ASC'
       );
-      return rawUsers;
+      return (rawUsers || []).map((u: any) => ({
+        ...u,
+        name: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : (u.email ? u.email.split('@')[0] : 'User'),
+      }));
     } catch (err) {
       this.logger.warn('Could not fetch chat users: ' + err);
       return [];

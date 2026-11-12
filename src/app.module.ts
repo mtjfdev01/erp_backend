@@ -39,11 +39,8 @@ import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
 import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
 import { CeoComplaintsModule } from "./ceo_complaints/ceo-complaints.module";
 import { ExternalModule } from "./external/external.module";
-<<<<<<< HEAD
 import { ChatModule } from "./chat/chat.module";
-=======
 import { ApiKeysModule } from "./api-keys/api-keys.module";
->>>>>>> db015b005dff079aec652a3b0a2f41b6c1c0ccdf
 import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.bootstrap";
 
 @Module({
@@ -107,11 +104,8 @@ import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.boots
     CeoOfficeModule,
     CeoComplaintsModule,
     ExternalModule,
-<<<<<<< HEAD
     ChatModule,
-=======
     ApiKeysModule,
->>>>>>> db015b005dff079aec652a3b0a2f41b6c1c0ccdf
   ],
   controllers: [AppController],
   providers: [AppService, PreventHardDeleteBootstrap],
