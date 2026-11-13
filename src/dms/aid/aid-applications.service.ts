@@ -44,6 +44,7 @@ import {
   DeliverAidApplicationDto,
   InvestigationRecommendationDto,
   ManagerForwardAidApplicationDto,
+  MealForwardAidApplicationDto,
   RejectAidApplicationDto,
   UpdateAidApplicationDto,
   UpdateMealReviewDto,
@@ -952,8 +953,16 @@ export class AidApplicationsService {
         });
         break;
       case "pending_approval":
+        qb.andWhere("a.status IN (:...sts)", {
+          sts: [
+            AidApplicationStatus.MEAL_APPROVAL_REQUIRED,
+            AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+          ],
+        });
+        break;
+      case "meal_approval":
         qb.andWhere("a.status = :st", {
-          st: AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+          st: AidApplicationStatus.MEAL_APPROVAL_REQUIRED,
         });
         break;
       case "approved":
@@ -1067,6 +1076,8 @@ export class AidApplicationsService {
       case AidApplicationStatus.VERIFICATION_COMPLETED:
       case AidApplicationStatus.MANAGER_REVIEW:
         return "manager_review";
+      case AidApplicationStatus.MEAL_APPROVAL_REQUIRED:
+        return "meal_approval";
       case AidApplicationStatus.CEO_APPROVAL_REQUIRED:
         return "pending_approval";
       case AidApplicationStatus.SUCCESSFUL:
@@ -1109,6 +1120,7 @@ export class AidApplicationsService {
       submitted,
       investigation,
       manager_review,
+      meal_approval,
       pending_approval,
       approved,
       returned,
@@ -1118,6 +1130,7 @@ export class AidApplicationsService {
       countFor("submitted"),
       countFor("investigation"),
       countFor("manager_review"),
+      countFor("meal_approval"),
       countFor("pending_approval"),
       countFor("approved"),
       countFor("returned"),
@@ -1129,6 +1142,7 @@ export class AidApplicationsService {
       submitted,
       investigation,
       manager_review,
+      meal_approval,
       pending_approval,
       approved,
       returned,
@@ -2950,8 +2964,9 @@ export class AidApplicationsService {
       recNorm as unknown as Record<string, unknown>,
     );
     if (skipToCeo) {
-      app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
-      app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+      // Program manager verify still goes through MEAL before CEO.
+      app.status = AidApplicationStatus.MEAL_APPROVAL_REQUIRED;
+      app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
     } else {
       app.status = AidApplicationStatus.MANAGER_REVIEW;
       app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
@@ -3020,7 +3035,7 @@ export class AidApplicationsService {
   ) {
     if (!(await this.isProgramDepartmentManager(user))) {
       throw new ForbiddenException(
-        "Only a Program department manager can forward to CEO",
+        "Only a Program department manager can forward to MEAL",
       );
     }
     const app = await this.appRepo.findOne({
@@ -3038,7 +3053,7 @@ export class AidApplicationsService {
       app.status !== AidApplicationStatus.VERIFICATION_COMPLETED
     ) {
       throw new BadRequestException(
-        "Only applications in Verification Completed or Manager Review can be forwarded to CEO",
+        "Only applications in Verification Completed or Manager Review can be forwarded to MEAL",
       );
     }
 
@@ -3086,8 +3101,8 @@ export class AidApplicationsService {
         nextRation !== prevRation);
 
     const prevStatus = app.status;
-    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
-    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    app.status = AidApplicationStatus.MEAL_APPROVAL_REQUIRED;
+    app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
     const managerSnapshot = {
       decision: recNorm.decision,
       amount: recNorm.amount,
@@ -3127,6 +3142,117 @@ export class AidApplicationsService {
         },
       ],
       metadata: { manager_override: overridden },
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * MEAL approval: meal_approval_required → ceo_approval_required.
+   */
+  async mealForward(
+    id: number,
+    dto: MealForwardAidApplicationDto,
+    user?: User,
+  ) {
+    await this.assertCanEditMeal(user);
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary"],
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
+      throw new BadRequestException(
+        "Application was rejected by CEO and cannot be forwarded",
+      );
+    }
+    if (app.status !== AidApplicationStatus.MEAL_APPROVAL_REQUIRED) {
+      throw new BadRequestException(
+        "Only applications awaiting MEAL approval can be submitted to CEO",
+      );
+    }
+
+    const prev = (app.investigation_recommendation ||
+      {}) as Record<string, unknown>;
+    const incoming = dto.recommendation;
+    const hasIncoming =
+      !!incoming &&
+      (!!incoming.decision ||
+        (Array.isArray(incoming.ration_options) &&
+          incoming.ration_options.length > 0) ||
+        String(incoming.remarks || "").trim().length > 0);
+
+    let recNorm: ReturnType<AidApplicationsService["assertRecommendationValid"]> | null =
+      null;
+    if (hasIncoming) {
+      recNorm = this.assertRecommendationValid(
+        incoming!,
+        "MEAL recommendation",
+      );
+    } else if (prev.decision) {
+      recNorm = this.assertRecommendationValid(
+        {
+          decision: prev.decision as InvestigationRecommendationDto["decision"],
+          amount: (prev.amount as number | null) ?? null,
+          period_months: (prev.period_months as number | null) ?? null,
+          remarks: (prev.remarks as string | null) ?? null,
+          found_monthly_income:
+            (prev.found_monthly_income as number | null) ?? null,
+          ration_options: Array.isArray(prev.ration_options)
+            ? (prev.ration_options as InvestigationRecommendationDto["ration_options"])
+            : undefined,
+        },
+        "MEAL recommendation",
+      );
+    }
+
+    await this.assertLeakageOverrideAllowed(
+      app,
+      dto.leakage_override_reason,
+      user,
+    );
+
+    const prevStatus = app.status;
+    app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+    app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    if (recNorm) {
+      const mealSnapshot = {
+        decision: recNorm.decision,
+        amount: recNorm.amount,
+        period_months: recNorm.period_months,
+        remarks: recNorm.remarks,
+        found_monthly_income: recNorm.found_monthly_income,
+        ration_options: recNorm.ration_options,
+      };
+      app.investigation_recommendation = this.withPreservedManagerRecommendation(
+        {
+          ...prev,
+          ...mealSnapshot,
+          meal_recommendation: mealSnapshot,
+          meal_forwarded_at: new Date().toISOString(),
+          meal_forwarded_by_id: user?.id ?? null,
+          submitted_by_role: "meal",
+        },
+        mealSnapshot,
+      );
+    } else {
+      app.investigation_recommendation = {
+        ...prev,
+        meal_forwarded_at: new Date().toISOString(),
+        meal_forwarded_by_id: user?.id ?? null,
+        submitted_by_role: "meal",
+      };
+    }
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MEAL_FORWARDED,
+      user,
+      changes: buildAidStatusChange(prevStatus, app.status),
+      metadata: {
+        meal_forwarded: true,
+        recommendation_decision: recNorm?.decision ?? prev.decision ?? null,
+      },
     });
     return this.findOne(id);
   }

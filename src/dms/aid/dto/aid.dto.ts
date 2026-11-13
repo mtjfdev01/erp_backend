@@ -1140,8 +1140,21 @@ export class CeoDecideAidApplicationDto {
   recommendation?: InvestigationRecommendationDto;
 }
 
-/** Program manager forwards manager_review → CEO, with optional override. */
+/** Program manager forwards manager_review → MEAL approval, with optional override. */
 export class ManagerForwardAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  leakage_override_reason?: string | null;
+}
+
+/** MEAL forwards meal_approval_required → CEO approval. */
+export class MealForwardAidApplicationDto {
   @IsOptional()
   @IsObject()
   @Type(() => InvestigationRecommendationDto)

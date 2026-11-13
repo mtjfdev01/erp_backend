@@ -71,6 +71,7 @@ const ACTIVE_APP_STATUSES = new Set<string>([
   AidApplicationStatus.UNDER_REVIEW,
   AidApplicationStatus.VERIFICATION_COMPLETED,
   AidApplicationStatus.MANAGER_REVIEW,
+  AidApplicationStatus.MEAL_APPROVAL_REQUIRED,
   AidApplicationStatus.CEO_APPROVAL_REQUIRED,
 ]);
 

@@ -178,6 +178,12 @@ export const AID_APPLICATIONS_MEAL_EDIT_GUARD = [
   ...STAFF,
 ] as const;
 
+/** MEAL forwards meal_approval_required → CEO (same meal_edit capability). */
+export const AID_APPLICATIONS_MEAL_FORWARD_GUARD = [
+  ...apps("meal_edit"),
+  ...STAFF,
+] as const;
+
 /**
  * Aid audit logs — separate screens only.
  * Intentionally NO program_manager / fund_raising_manager bypass:

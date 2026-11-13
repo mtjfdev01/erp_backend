@@ -591,24 +591,43 @@ export class DonationBoxDonationService {
         this.applyCollectionListDataScope(query, scope, geoScope);
       }
 
-      // 1. Calculate SUM(collection_amount) with exact same filters, geoScope and access scope
-      // Isolated subquery over distinct donation IDs prevents join row duplication and avoids TypeORM joinAttribute issues.
+      // 1. SUM(collection_amount) with same filters/scope.
+      // Resolve matching IDs first (avoids join inflation / TypeORM join select issues).
       let totalDonationAmount = 0;
       try {
         const idQuery = query.clone();
         idQuery.expressionMap.orderBys = {};
         idQuery.expressionMap.selects = [];
-        idQuery.select("DISTINCT donation_box_donation.id", "id");
-        idQuery.addSelect("donation_box_donation.collection_amount", "collection_amount");
+        idQuery.select("donation_box_donation.id", "id");
+        const rawIds = await idQuery.getRawMany();
+        const ids = [
+          ...new Set(
+            rawIds
+              .map((r) =>
+                Number(
+                  r.id ??
+                    r.donation_box_donation_id ??
+                    r.donation_box_donationId,
+                ),
+              )
+              .filter((id) => Number.isFinite(id) && id > 0),
+          ),
+        ];
 
-        const [sql, params] = idQuery.getQueryAndParameters();
-        const rawResult = await this.donationBoxDonationRepository.query(
-          `SELECT COALESCE(SUM(sub.collection_amount), 0) AS "totalDonationAmount" FROM (${sql}) AS sub`,
-          params,
-        );
-        totalDonationAmount = Number(rawResult?.[0]?.totalDonationAmount) || 0;
+        if (ids.length) {
+          const sumRow = await this.donationBoxDonationRepository
+            .createQueryBuilder("d")
+            .select("COALESCE(SUM(d.collection_amount), 0)", "total")
+            .where("d.id IN (:...ids)", { ids })
+            .andWhere("d.is_archived = :archived", { archived: false })
+            .getRawOne();
+          totalDonationAmount = Number(sumRow?.total) || 0;
+        }
       } catch (sumError) {
-        console.warn("Could not calculate donation box collection total amount:", sumError);
+        console.warn(
+          "Could not calculate donation box collection total amount:",
+          sumError,
+        );
         totalDonationAmount = 0;
       }
 
