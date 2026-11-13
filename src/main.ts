@@ -33,6 +33,8 @@ async function bootstrap() {
     "http://18.143.123.75", // EOceans IP - add protocol
     "https://18.143.123.75", // EOceans IP - HTTPS version
     "https://erp.mtjfoundation.pk",
+    "https://chattask.up.railway.app",
+    "https://mtjf-erp-backend.up.railway.app",
   ];
 
   // Normalize origin for comparison (remove trailing slash, convert to lowercase)
