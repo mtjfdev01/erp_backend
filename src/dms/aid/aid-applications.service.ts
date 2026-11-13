@@ -75,6 +75,39 @@ import {
   serializeAidAuditValue,
 } from "./audit/aid-audit.util";
 import type { AidAuditChange } from "./audit/aid-audit.types";
+import {
+  aidAppNoSeedLast,
+  aidAppNoYearSuffix,
+  formatAidProgramApplicationNo,
+  isProgramApplicationNo,
+  resolveAidProgramAppNoCode,
+} from "./aid-application-number";
+
+function isMarriageGiftApp(
+  type?: string | null,
+  program?: string | null,
+): boolean {
+  const t = String(type || "").toLowerCase();
+  const p = String(program || "").toLowerCase();
+  return (
+    t === AidRequestType.MARRIAGE_GIFT ||
+    p === "community_services_marriage_gift" ||
+    p.startsWith("marriage_gift")
+  );
+}
+
+function isFinancialAssistanceApp(
+  type?: string | null,
+  program?: string | null,
+): boolean {
+  const t = String(type || "").toLowerCase();
+  const p = String(program || "").toLowerCase();
+  return (
+    t === AidRequestType.FINANCIAL_ASSISTANCE ||
+    p === "community_services_financial_assistance" ||
+    p.includes("financial_assistance")
+  );
+}
 
 @Injectable()
 export class AidApplicationsService {
@@ -183,37 +216,39 @@ export class AidApplicationsService {
     const uniqueRation = [...new Set(ration_options)];
     const isRationPackage = uniqueRation.length > 0;
 
-    if (!rec?.decision && !isRationPackage) {
-      throw new BadRequestException(
-        `${label} is required (Recommend / Not Recommend)`,
-      );
-    }
-    const remarks = String(rec?.remarks || "").trim();
-    if (remarks.length < 3) {
-      throw new BadRequestException(
-        `${label} remarks are required (min 3 characters)`,
-      );
-    }
-
     const decision = this.normalizeRecommendationDecision(
       rec?.decision || (isRationPackage ? "recommend" : ""),
     );
     if (decision !== "recommend" && decision !== "not_recommend") {
       throw new BadRequestException(
-        `${label} must be Recommend or Not Recommend`,
+        `${label} is required (Recommend / Not Recommend)`,
+      );
+    }
+
+    const remarks = String(rec?.remarks || "").trim();
+    // Not Recommend: remarks optional. Recommend: still required.
+    if (decision === "recommend" && remarks.length < 3) {
+      throw new BadRequestException(
+        `${label} remarks are required (min 3 characters)`,
       );
     }
 
     let amount: number | null = rec?.amount ?? null;
     let period_months: number | null = rec?.period_months ?? null;
+    let finalRation = uniqueRation;
 
-    if (isRationPackage) {
-      // Manager/CEO ration picks — no amount/period required
-      amount = Number.isFinite(Number(rec?.amount)) && Number(rec?.amount) > 0
-        ? Number(rec?.amount)
-        : null;
+    if (decision === "not_recommend") {
+      amount = null;
       period_months = null;
-    } else if (decision === "recommend") {
+      finalRation = [];
+    } else if (isRationPackage) {
+      // Manager/CEO ration picks — no amount/period required
+      amount =
+        Number.isFinite(Number(rec?.amount)) && Number(rec?.amount) > 0
+          ? Number(rec?.amount)
+          : null;
+      period_months = null;
+    } else {
       const amt = Number(rec?.amount);
       if (!Number.isFinite(amt) || amt <= 0) {
         throw new BadRequestException(
@@ -224,8 +259,6 @@ export class AidApplicationsService {
       const months = Number(rec?.period_months);
       period_months =
         Number.isFinite(months) && months > 0 ? months : period_months;
-    } else {
-      amount = null;
     }
     const found = rec?.found_monthly_income;
     return {
@@ -235,7 +268,54 @@ export class AidApplicationsService {
       remarks,
       found_monthly_income:
         found != null && Number.isFinite(Number(found)) ? Number(found) : null,
-      ration_options: uniqueRation,
+      ration_options: finalRation,
+    };
+  }
+
+  /** Plain fields used for manager / final recommendation snapshots. */
+  private recommendationCoreFields(
+    src: Record<string, unknown> | null | undefined,
+  ) {
+    if (!src || typeof src !== "object") return null;
+    const hasAnything =
+      src.decision != null ||
+      src.amount != null ||
+      src.period_months != null ||
+      String(src.remarks || "").trim() !== "" ||
+      (Array.isArray(src.ration_options) && src.ration_options.length > 0);
+    if (!hasAnything) return null;
+    return {
+      decision: src.decision ?? null,
+      amount: src.amount ?? null,
+      period_months: src.period_months ?? null,
+      remarks: src.remarks ?? null,
+      found_monthly_income: src.found_monthly_income ?? null,
+      ration_options: Array.isArray(src.ration_options)
+        ? src.ration_options
+        : [],
+    };
+  }
+
+  /**
+   * Keep the first manager recommendation forever when CEO (or later edits)
+   * overwrite top-level investigation_recommendation fields.
+   */
+  private withPreservedManagerRecommendation(
+    prev: Record<string, unknown>,
+    nextCore: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const existing =
+      prev.manager_recommendation &&
+      typeof prev.manager_recommendation === "object"
+        ? (prev.manager_recommendation as Record<string, unknown>)
+        : null;
+    const snapshot =
+      this.recommendationCoreFields(existing) ||
+      this.recommendationCoreFields(prev);
+    return {
+      ...prev,
+      ...nextCore,
+      ...(snapshot ? { manager_recommendation: snapshot } : {}),
     };
   }
 
@@ -321,13 +401,20 @@ export class AidApplicationsService {
     );
   }
 
+  private async userIsSuperAdmin(user?: User): Promise<boolean> {
+    if (!user?.id) return false;
+    if (Number(user.id) === -1) return true;
+    return this.permissionsService.hasPermission(Number(user.id), "super_admin");
+  }
+
   private normalizeMealReview(
     raw: Record<string, unknown> | null | undefined,
     previous: Record<string, unknown> | null = null,
+    opts: { allowUnlock?: boolean } = {},
   ): Record<string, unknown> | null {
     if (raw == null) return null;
     const prev = previous && typeof previous === "object" ? previous : {};
-    if (prev.locked === true) {
+    if (prev.locked === true && !opts.allowUnlock) {
       throw new BadRequestException(
         "MEAL section is locked and cannot be edited",
       );
@@ -376,8 +463,11 @@ export class AidApplicationsService {
         r == null || String(r).trim() === "" ? null : String(r).trim();
     }
 
-    const locked =
-      raw.locked === true || prev.locked === true ? true : false;
+    const locked = opts.allowUnlock
+      ? raw.locked === true
+      : raw.locked === true || prev.locked === true
+        ? true
+        : false;
 
     return {
       verification_status,
@@ -394,15 +484,18 @@ export class AidApplicationsService {
   private normalizePreviewApproval(
     raw: Record<string, unknown> | null | undefined,
     previous: Record<string, unknown> | null = null,
+    opts: { allowUnlock?: boolean } = {},
   ): Record<string, unknown> | null {
     if (raw == null) return null;
     const prev = previous && typeof previous === "object" ? previous : {};
-    if (prev.locked === true) {
+    if (prev.locked === true && !opts.allowUnlock) {
       throw new BadRequestException(
         "Approval section is locked and cannot be edited",
       );
     }
     const decisionAllowed = new Set([
+      "recommend",
+      "not_recommend",
       "approved",
       "approved_with_changes",
       "rejected",
@@ -428,6 +521,21 @@ export class AidApplicationsService {
         r == null || String(r).trim() === "" ? null : String(r).trim();
     }
 
+    const allowedRation = new Set(["full", "half", "monthly", "alternate"]);
+    let ration_options: string[] = Array.isArray(prev.ration_options)
+      ? (prev.ration_options as unknown[])
+          .map((v) => String(v || "").trim().toLowerCase())
+          .filter((v) => allowedRation.has(v))
+      : [];
+    if (Object.prototype.hasOwnProperty.call(raw, "ration_options")) {
+      ration_options = (
+        Array.isArray(raw.ration_options) ? raw.ration_options : []
+      )
+        .map((v) => String(v || "").trim().toLowerCase())
+        .filter((v) => allowedRation.has(v));
+      ration_options = [...new Set(ration_options)];
+    }
+
     let approved_support: string | null =
       prev.approved_support != null ? String(prev.approved_support) : null;
     if (Object.prototype.hasOwnProperty.call(raw, "approved_support")) {
@@ -435,11 +543,20 @@ export class AidApplicationsService {
       approved_support =
         s == null || String(s).trim() === "" ? null : String(s).trim();
     }
+    if (
+      !approved_support &&
+      ration_options.length > 0 &&
+      Object.prototype.hasOwnProperty.call(raw, "ration_options")
+    ) {
+      approved_support = ration_options.join(", ");
+    }
 
     let approved_amount: number | null =
       prev.approved_amount != null && Number.isFinite(Number(prev.approved_amount))
         ? Number(prev.approved_amount)
-        : null;
+        : prev.amount != null && Number.isFinite(Number(prev.amount))
+          ? Number(prev.amount)
+          : null;
     if (Object.prototype.hasOwnProperty.call(raw, "approved_amount")) {
       const a = raw.approved_amount;
       if (a == null || a === "") approved_amount = null;
@@ -447,14 +564,51 @@ export class AidApplicationsService {
         const n = Number(a);
         approved_amount = Number.isFinite(n) ? n : null;
       }
+    } else if (Object.prototype.hasOwnProperty.call(raw, "amount")) {
+      const a = raw.amount;
+      if (a == null || a === "") approved_amount = null;
+      else {
+        const n = Number(a);
+        approved_amount = Number.isFinite(n) ? n : null;
+      }
     }
 
-    const locked =
-      raw.locked === true || prev.locked === true ? true : false;
+    let period_months: number | null =
+      prev.period_months != null && Number.isFinite(Number(prev.period_months))
+        ? Number(prev.period_months)
+        : null;
+    if (Object.prototype.hasOwnProperty.call(raw, "period_months")) {
+      const p = raw.period_months;
+      if (p == null || p === "") period_months = null;
+      else {
+        const n = Number(p);
+        period_months = Number.isFinite(n) && n > 0 ? n : null;
+      }
+    }
+
+    if (decision === "not_recommend" || decision === "rejected") {
+      ration_options = [];
+      approved_amount = null;
+      period_months = null;
+      if (Object.prototype.hasOwnProperty.call(raw, "approved_support")) {
+        /* keep explicit */
+      } else {
+        approved_support = null;
+      }
+    }
+
+    const locked = opts.allowUnlock
+      ? raw.locked === true
+      : raw.locked === true || prev.locked === true
+        ? true
+        : false;
 
     return {
       decision,
       remarks,
+      ration_options,
+      amount: approved_amount,
+      period_months,
       approved_support,
       approved_amount,
       locked,
@@ -570,21 +724,39 @@ export class AidApplicationsService {
     };
   }
 
-  private async nextApplicationNo(): Promise<string> {
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const prefix = `AID-${day}-`;
+  /**
+   * Next main-program application number: `{CODE}-{YY}-{####}`.
+   * Uses DB max for that prefix, floored by the manual seed last number.
+   */
+  private async nextApplicationNo(
+    requestedAidType?: string | null,
+  ): Promise<string> {
+    const code = resolveAidProgramAppNoCode(requestedAidType);
+    const yy = aidAppNoYearSuffix();
+    const prefix = `${code}-${yy}-`;
+    const seedLast = aidAppNoSeedLast(code, yy);
+
     const latest = await this.appRepo
       .createQueryBuilder("a")
       .where("a.application_no LIKE :prefix", { prefix: `${prefix}%` })
       .orderBy("a.application_no", "DESC")
       .getOne();
-    let seq = 1;
+
+    let last = seedLast;
     if (latest?.application_no) {
       const part = latest.application_no.split("-").pop();
       const n = Number(part);
-      if (Number.isFinite(n)) seq = n + 1;
+      if (Number.isFinite(n) && n > last) last = n;
     }
-    return `${prefix}${String(seq).padStart(4, "0")}`;
+
+    return formatAidProgramApplicationNo(code, yy, last + 1);
+  }
+
+  /** Assign program application no on Consider if missing / still old AID-* format. */
+  private async ensureProgramApplicationNo(app: AidApplication): Promise<boolean> {
+    if (isProgramApplicationNo(app.application_no)) return false;
+    app.application_no = await this.nextApplicationNo(app.requested_aid_type);
+    return true;
   }
 
   async create(dto: CreateAidApplicationDto, user?: User) {
@@ -626,7 +798,8 @@ export class AidApplicationsService {
     const missingDocs = this.normalizeMissingDocuments(dto.missing_documents);
 
     const row = this.appRepo.create({
-      application_no: await this.nextApplicationNo(),
+      // Official number is issued on Consider (approve-draft), not at draft save.
+      application_no: null,
       beneficiary_person_id: beneficiaryId,
       writer_person_id: writerId,
       writer_relation: writerRelation,
@@ -657,14 +830,18 @@ export class AidApplicationsService {
         dto.requested_aid_type === AidRequestType.RATION
           ? dto.ration_details ?? null
           : null,
-      marriage_gift_details:
-        dto.requested_aid_type === AidRequestType.MARRIAGE_GIFT
-          ? dto.marriage_gift_details ?? null
-          : null,
-      financial_assistance_details:
-        dto.requested_aid_type === AidRequestType.FINANCIAL_ASSISTANCE
-          ? dto.financial_assistance_details ?? null
-          : null,
+      marriage_gift_details: isMarriageGiftApp(
+        dto.requested_aid_type,
+        dto.aid_program,
+      )
+        ? dto.marriage_gift_details ?? null
+        : null,
+      financial_assistance_details: isFinancialAssistanceApp(
+        dto.requested_aid_type,
+        dto.aid_program,
+      )
+        ? dto.financial_assistance_details ?? null
+        : null,
       clean_water_details:
         dto.requested_aid_type === AidRequestType.CLEAN_WATER
           ? dto.clean_water_details ?? null
@@ -727,11 +904,6 @@ export class AidApplicationsService {
           field: "status",
           old_value: null,
           new_value: serializeAidAuditValue(saved.status),
-        },
-        {
-          field: "application_no",
-          old_value: null,
-          new_value: serializeAidAuditValue(saved.application_no),
         },
       ],
       metadata: {
@@ -2004,10 +2176,14 @@ export class AidApplicationsService {
         if (dto.requested_aid_type !== AidRequestType.RATION) {
           app.ration_details = null;
         }
-        if (dto.requested_aid_type !== AidRequestType.MARRIAGE_GIFT) {
+        const nextProgram =
+          dto.aid_program !== undefined
+            ? dto.aid_program?.trim() || null
+            : app.aid_program;
+        if (!isMarriageGiftApp(dto.requested_aid_type, nextProgram)) {
           app.marriage_gift_details = null;
         }
-        if (dto.requested_aid_type !== AidRequestType.FINANCIAL_ASSISTANCE) {
+        if (!isFinancialAssistanceApp(dto.requested_aid_type, nextProgram)) {
           app.financial_assistance_details = null;
         }
         if (dto.requested_aid_type !== AidRequestType.CLEAN_WATER) {
@@ -2016,7 +2192,21 @@ export class AidApplicationsService {
       }
     }
     if (dto.aid_program !== undefined) {
-      app.aid_program = dto.aid_program?.trim() || null;
+      const nextProgram = dto.aid_program?.trim() || null;
+      const nextType = dto.requested_aid_type ?? app.requested_aid_type;
+      app.aid_program = nextProgram;
+      if (
+        app.marriage_gift_details &&
+        !isMarriageGiftApp(nextType, nextProgram)
+      ) {
+        app.marriage_gift_details = null;
+      }
+      if (
+        app.financial_assistance_details &&
+        !isFinancialAssistanceApp(nextType, nextProgram)
+      ) {
+        app.financial_assistance_details = null;
+      }
     }
     if (dto.expected_amount !== undefined) {
       app.expected_amount =
@@ -2054,18 +2244,27 @@ export class AidApplicationsService {
           : null;
     }
     if (dto.marriage_gift_details !== undefined) {
-      app.marriage_gift_details =
-        (dto.requested_aid_type ?? app.requested_aid_type) ===
-        AidRequestType.MARRIAGE_GIFT
-          ? dto.marriage_gift_details
-          : null;
+      const nextType = dto.requested_aid_type ?? app.requested_aid_type;
+      const nextProgram =
+        dto.aid_program !== undefined
+          ? dto.aid_program?.trim() || null
+          : app.aid_program;
+      app.marriage_gift_details = isMarriageGiftApp(nextType, nextProgram)
+        ? dto.marriage_gift_details
+        : null;
     }
     if (dto.financial_assistance_details !== undefined) {
-      app.financial_assistance_details =
-        (dto.requested_aid_type ?? app.requested_aid_type) ===
-        AidRequestType.FINANCIAL_ASSISTANCE
-          ? dto.financial_assistance_details
-          : null;
+      const nextType = dto.requested_aid_type ?? app.requested_aid_type;
+      const nextProgram =
+        dto.aid_program !== undefined
+          ? dto.aid_program?.trim() || null
+          : app.aid_program;
+      app.financial_assistance_details = isFinancialAssistanceApp(
+        nextType,
+        nextProgram,
+      )
+        ? dto.financial_assistance_details
+        : null;
     }
     if (dto.clean_water_details !== undefined) {
       app.clean_water_details =
@@ -2110,6 +2309,7 @@ export class AidApplicationsService {
       app.meal_review = this.normalizeMealReview(
         dto.meal_review as Record<string, unknown> | null,
         (app.meal_review as Record<string, unknown> | null) || null,
+        { allowUnlock: await this.userIsSuperAdmin(user) },
       );
     }
 
@@ -2140,8 +2340,7 @@ export class AidApplicationsService {
           : prevRation.length
             ? prevRation
             : recNorm.ration_options;
-        app.investigation_recommendation = {
-          ...prev,
+        const nextCore: Record<string, unknown> = {
           decision: recNorm.decision,
           amount: recNorm.amount,
           period_months: recNorm.period_months,
@@ -2158,6 +2357,28 @@ export class AidApplicationsService {
               }
             : {}),
         };
+        // At CEO queue: keep manager snapshot. Otherwise refresh manager recommendation.
+        if (app.status === AidApplicationStatus.CEO_APPROVAL_REQUIRED) {
+          app.investigation_recommendation =
+            this.withPreservedManagerRecommendation(prev, {
+              ...nextCore,
+              ceo_edited_at: new Date().toISOString(),
+              ceo_edited_by_id: user?.id ?? null,
+            });
+        } else {
+          app.investigation_recommendation = {
+            ...prev,
+            ...nextCore,
+            manager_recommendation: {
+              decision: recNorm.decision,
+              amount: recNorm.amount,
+              period_months: recNorm.period_months,
+              remarks: recNorm.remarks,
+              found_monthly_income: recNorm.found_monthly_income,
+              ration_options,
+            },
+          };
+        }
       } else {
         app.investigation_recommendation = null;
       }
@@ -2276,9 +2497,11 @@ export class AidApplicationsService {
     if (!app) throw new NotFoundException(`Application #${id} not found`);
     await this.assertCanEditMeal(user);
     const before = (app.meal_review as Record<string, unknown> | null) || null;
+    const allowUnlock = await this.userIsSuperAdmin(user);
     app.meal_review = this.normalizeMealReview(
       dto as unknown as Record<string, unknown>,
       before,
+      { allowUnlock },
     );
     app.updated_by = user || null;
     await this.appRepo.save(app);
@@ -2323,9 +2546,11 @@ export class AidApplicationsService {
     await this.assertCanCeoEditRecommendation(user);
     const before =
       (app.preview_approval as Record<string, unknown> | null) || null;
+    const allowUnlock = await this.userIsSuperAdmin(user);
     app.preview_approval = this.normalizePreviewApproval(
       dto as unknown as Record<string, unknown>,
       before,
+      { allowUnlock },
     );
     app.updated_by = user || null;
     await this.appRepo.save(app);
@@ -2338,6 +2563,9 @@ export class AidApplicationsService {
         "remarks",
         "approved_support",
         "approved_amount",
+        "amount",
+        "period_months",
+        "ration_options",
         "locked",
       ],
     );
@@ -2396,10 +2624,12 @@ export class AidApplicationsService {
 
     const prevStatus = app.status;
     const prevAssignee = app.assigned_to_user_id;
+    const prevAppNo = app.application_no;
     app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
     app.submitted_at = new Date();
     app.updated_by = user || null;
+    const assignedNo = await this.ensureProgramApplicationNo(app);
     await this.appRepo.save(app);
     await this.safeAudit({
       app,
@@ -2412,7 +2642,20 @@ export class AidApplicationsService {
           old_value: serializeAidAuditValue(prevAssignee),
           new_value: serializeAidAuditValue(assigneeId),
         },
+        ...(assignedNo
+          ? [
+              {
+                field: "application_no",
+                old_value: serializeAidAuditValue(prevAppNo),
+                new_value: serializeAidAuditValue(app.application_no),
+              },
+            ]
+          : []),
       ],
+      metadata: {
+        requested_aid_type: app.requested_aid_type,
+        application_no: app.application_no,
+      },
     });
     return this.findOne(id);
   }
@@ -2495,15 +2738,28 @@ export class AidApplicationsService {
       );
     }
     const prevStatus = app.status;
+    const prevAppNo = app.application_no;
     app.status = AidApplicationStatus.SUBMITTED;
     if (!app.submitted_at) app.submitted_at = new Date();
     app.updated_by = user || null;
+    const assignedNo = await this.ensureProgramApplicationNo(app);
     await this.appRepo.save(app);
     await this.safeAudit({
       app,
       action: AID_AUDIT_ACTIONS.RESUMED,
       user,
-      changes: buildAidStatusChange(prevStatus, app.status),
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...(assignedNo
+          ? [
+              {
+                field: "application_no",
+                old_value: serializeAidAuditValue(prevAppNo),
+                new_value: serializeAidAuditValue(app.application_no),
+              },
+            ]
+          : []),
+      ],
     });
     return this.findOne(id);
   }
@@ -2832,14 +3088,17 @@ export class AidApplicationsService {
     const prevStatus = app.status;
     app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
     app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
-    app.investigation_recommendation = {
-      ...prev,
+    const managerSnapshot = {
       decision: recNorm.decision,
       amount: recNorm.amount,
       period_months: recNorm.period_months,
       remarks: recNorm.remarks,
       found_monthly_income: recNorm.found_monthly_income,
       ration_options: recNorm.ration_options,
+    };
+    app.investigation_recommendation = {
+      ...prev,
+      ...managerSnapshot,
       investigator_snapshot: {
         decision: prev.decision ?? null,
         amount: prev.amount ?? null,
@@ -2847,6 +3106,7 @@ export class AidApplicationsService {
         remarks: prev.remarks ?? null,
         ration_options: prev.ration_options ?? null,
       },
+      manager_recommendation: managerSnapshot,
       manager_override: overridden,
       manager_forwarded_at: new Date().toISOString(),
       manager_forwarded_by_id: user?.id ?? null,
@@ -2903,17 +3163,17 @@ export class AidApplicationsService {
         dto.recommendation,
         "CEO recommendation",
       );
-      app.investigation_recommendation = {
-        ...prev,
-        decision: recNorm.decision,
-        amount: recNorm.amount,
-        period_months: recNorm.period_months,
-        remarks: recNorm.remarks,
-        found_monthly_income: recNorm.found_monthly_income,
-        ration_options: recNorm.ration_options,
-        ceo_edited_at: new Date().toISOString(),
-        ceo_edited_by_id: user?.id ?? null,
-      };
+      app.investigation_recommendation =
+        this.withPreservedManagerRecommendation(prev, {
+          decision: recNorm.decision,
+          amount: recNorm.amount,
+          period_months: recNorm.period_months,
+          remarks: recNorm.remarks,
+          found_monthly_income: recNorm.found_monthly_income,
+          ration_options: recNorm.ration_options,
+          ceo_edited_at: new Date().toISOString(),
+          ceo_edited_by_id: user?.id ?? null,
+        });
     }
 
     app.ceo_decided_at = new Date();

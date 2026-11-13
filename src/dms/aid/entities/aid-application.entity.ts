@@ -17,8 +17,9 @@ import { AidPerson } from "./aid-person.entity";
 @Index("idx_aid_app_beneficiary", ["beneficiary_person_id"])
 @Index("idx_aid_app_assigned", ["assigned_to_user_id"])
 export class AidApplication extends BaseEntity {
-  @Column({ type: "varchar", length: 40, unique: true })
-  application_no: string;
+  /** Set on Consider (approve-draft); null while still a draft. */
+  @Column({ type: "varchar", length: 40, unique: true, nullable: true })
+  application_no: string | null;
 
   @Column({ type: "int" })
   beneficiary_person_id: number;
