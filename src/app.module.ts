@@ -39,6 +39,7 @@ import { KnowledgeBaseModule } from './knowledge_base/knowledge_base.module';
 import { CeoOfficeModule } from "./ceo_office/ceo-office.module";
 import { CeoComplaintsModule } from "./ceo_complaints/ceo-complaints.module";
 import { ExternalModule } from "./external/external.module";
+import { ChatModule } from "./chat/chat.module";
 import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.bootstrap";
 
@@ -103,6 +104,7 @@ import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.boots
     CeoOfficeModule,
     CeoComplaintsModule,
     ExternalModule,
+    ChatModule,
     ApiKeysModule,
   ],
   controllers: [AppController],

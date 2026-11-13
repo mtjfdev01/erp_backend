@@ -18,7 +18,7 @@ async function bootstrap() {
   // Define allowed origins (normalized - no trailing slashes, lowercase)
   const allowedOrigins = [
     "http://localhost:5173", // Local development
-    "http://192.168.100.212:5173", // Local LAN development alternative (for testing across local network devices)
+    "http://192.168.100.243:3002", // Local LAN development alternative (for testing across local network devices)
     "http://localhost:3001", // Special origin - bypasses JWT authentication (see ConditionalJwtGuard)
     "http://localhost:3000",
     "https://donation.mtjfoundation.org",
@@ -28,7 +28,7 @@ async function bootstrap() {
     "http://192.168.0.106:5173",
     "https://mtjf-site.vercel.app",
     "https://www.mtjfoundation.org",
-    "http://192.168.2.131:3001",
+    "http://192.168.100.243:3002",
     "https://mtjfoundation.org", // Add non-www version
     "http://18.143.123.75", // EOceans IP - add protocol
     "https://18.143.123.75", // EOceans IP - HTTPS version
@@ -83,7 +83,7 @@ async function bootstrap() {
         process.env.NODE_ENV !== "production" &&
         (normalizedOrigin.startsWith("http://localhost:") ||
           normalizedOrigin.startsWith("http://127.0.0.1:") ||
-          normalizedOrigin.startsWith("http://192.168.100.218:") || // Allow local subnet ports during development
+          normalizedOrigin.startsWith("http://192.168.100.243:") || // Allow local subnet ports during development
           normalizedOrigin.startsWith("http://192.168.2.131:"))
       ) {
         console.log("Development mode: Allowing origin:", origin);
