@@ -388,8 +388,16 @@ export class AidAuditService {
         });
         break;
       case "pending_approval":
+        qb.andWhere(`${alias}.status IN (:...sts)`, {
+          sts: [
+            AidApplicationStatus.MEAL_APPROVAL_REQUIRED,
+            AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+          ],
+        });
+        break;
+      case "meal_approval":
         qb.andWhere(`${alias}.status = :st`, {
-          st: AidApplicationStatus.CEO_APPROVAL_REQUIRED,
+          st: AidApplicationStatus.MEAL_APPROVAL_REQUIRED,
         });
         break;
       case "approved":

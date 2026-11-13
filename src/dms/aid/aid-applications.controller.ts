@@ -26,6 +26,7 @@ import {
   AID_APPLICATIONS_DELIVER_GUARD,
   AID_APPLICATIONS_LIST_GUARD,
   AID_APPLICATIONS_MEAL_EDIT_GUARD,
+  AID_APPLICATIONS_MEAL_FORWARD_GUARD,
   AID_APPLICATIONS_UPDATE_GUARD,
   AID_APPLICATIONS_VIEW_GUARD,
   AID_PEOPLE_UPDATE_GUARD,
@@ -41,6 +42,7 @@ import {
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
   ManagerForwardAidApplicationDto,
+  MealForwardAidApplicationDto,
   MarkIncompleteAidApplicationDto,
   RejectAidApplicationDto,
   SetAidAttachmentMissingDto,
@@ -498,12 +500,16 @@ export class AidApplicationsController {
       dto,
       req?.user,
     );
-    const awaitingManager = data?.status === "manager_review";
+    const status = String(data?.status || "");
+    const message =
+      status === "manager_review"
+        ? "Verification recorded — awaiting Manager Review"
+        : status === "meal_approval_required"
+          ? "Verification recorded — awaiting MEAL approval"
+          : "Verification recorded";
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: awaitingManager
-        ? "Verification recorded — awaiting Manager Review"
-        : "Verification recorded — awaiting CEO approval",
+      message,
       data,
     });
   }
@@ -523,7 +529,27 @@ export class AidApplicationsController {
     );
     return res.status(HttpStatus.OK).json({
       success: true,
-      message: "Forwarded for CEO approval",
+      message: "Forwarded for MEAL approval",
+      data,
+    });
+  }
+
+  @Post(":id/meal-forward")
+  @RequiredPermissions([...AID_APPLICATIONS_MEAL_FORWARD_GUARD])
+  async mealForward(
+    @Param("id") id: string,
+    @Body() dto: MealForwardAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.mealForward(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Submitted for CEO approval",
       data,
     });
   }

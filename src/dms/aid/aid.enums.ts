@@ -180,6 +180,11 @@ export enum AidApplicationStatus {
   /** Investigator submitted — awaiting Program manager review. */
   MANAGER_REVIEW = "manager_review",
   REJECTED = "rejected",
+  /**
+   * Program manager forwarded — awaiting MEAL approval
+   * before the case can go to CEO.
+   */
+  MEAL_APPROVAL_REQUIRED = "meal_approval_required",
   CEO_APPROVAL_REQUIRED = "ceo_approval_required",
   SUCCESSFUL = "successful",
   DELIVERED = "delivered",
