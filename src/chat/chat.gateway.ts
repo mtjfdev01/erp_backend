@@ -9,8 +9,9 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ChatService } from './chat.service';
 
 @WebSocketGateway({
   cors: {
@@ -30,7 +31,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private readonly logger = new Logger(ChatGateway.name);
   private onlineUsers = new Map<string, Set<string>>(); // userId -> Set of socketIds
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    @Inject(forwardRef(() => ChatService))
+    private readonly chatService: ChatService,
+  ) {}
 
   afterInit() {
     this.logger.log('Chat WebSocket Gateway initialized on /ws_chat');
@@ -154,6 +159,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         userId: uid,
         isTyping: data.isTyping,
       });
+    }
+  }
+
+  @SubscribeMessage('mark_read')
+  async handleMarkRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { conversationId: string; userId?: string }
+  ) {
+    const uid = data?.userId ? String(data.userId) : client.data?.userId;
+    if (data?.conversationId && uid) {
+      try {
+        await this.chatService.markConversationRead(data.conversationId, uid);
+      } catch (e: any) {
+        this.logger.warn(`mark_read error: ${e?.message}`);
+      }
+    }
+  }
+
+  @SubscribeMessage('mark_delivered')
+  async handleMarkDelivered(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { conversationId: string; userId?: string }
+  ) {
+    const uid = data?.userId ? String(data.userId) : client.data?.userId;
+    if (data?.conversationId && uid) {
+      try {
+        await this.chatService.markConversationDelivered(data.conversationId, uid);
+      } catch (e: any) {
+        this.logger.warn(`mark_delivered error: ${e?.message}`);
+      }
     }
   }
 
