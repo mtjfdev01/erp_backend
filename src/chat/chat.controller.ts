@@ -294,6 +294,20 @@ export class ChatController {
     }
   }
 
+  @Get('presence')
+  async getPresence(@Res() res: Response) {
+    try {
+      const data = this.chatService.getPresence();
+      return res.status(HttpStatus.OK).json({ success: true, data });
+    } catch (err: any) {
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        message: err?.message,
+        data: { onlineUsers: [], lastSeen: {} },
+      });
+    }
+  }
+
   @Post('messages')
   async saveMessage(
     @Body() dto: CreateChatMessageDto,

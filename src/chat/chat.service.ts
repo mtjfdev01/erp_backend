@@ -820,6 +820,13 @@ export class ChatService implements OnModuleInit {
     return bundles;
   }
 
+  getPresence() {
+    return {
+      onlineUsers: this.chatGateway.getOnlineUserIds(),
+      lastSeen: this.chatGateway.getLastSeenMap(),
+    };
+  }
+
   async reactToMessage(messageId: string, emoji: string, userId: string): Promise<any> {
     const msg = await this.messageRepo.findOne({ where: { id: messageId } });
     if (!msg) {
