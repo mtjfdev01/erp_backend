@@ -32,6 +32,8 @@ const WS_ALLOWED_ORIGINS = [
   "http://31.97.223.158:8081",
   "http://18.143.123.75",
   "https://18.143.123.75",
+  "https://chattask.up.railway.app",
+  "https://mtjf-erp-backend.up.railway.app",
 ];
 
 @WebSocketGateway({
@@ -40,15 +42,20 @@ const WS_ALLOWED_ORIGINS = [
       if (!origin) {
         return callback(null, true);
       }
+      const normalizedOrigin = origin.toLowerCase().replace(/\/$/, "");
       if (
         process.env.NODE_ENV !== "production" &&
-        (origin.startsWith("http://localhost:") ||
-          origin.startsWith("http://127.0.0.1:") ||
-          origin.startsWith("http://192.168."))
+        (normalizedOrigin.startsWith("http://localhost:") ||
+          normalizedOrigin.startsWith("http://127.0.0.1:") ||
+          normalizedOrigin.startsWith("http://192.168."))
       ) {
         return callback(null, true);
       }
-      if (WS_ALLOWED_ORIGINS.includes(origin)) {
+      if (
+        WS_ALLOWED_ORIGINS.includes(normalizedOrigin) ||
+        normalizedOrigin.endsWith(".railway.app") ||
+        normalizedOrigin.includes("chattask")
+      ) {
         return callback(null, true);
       }
       return callback(new Error("Not allowed by CORS"));

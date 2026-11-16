@@ -15,5 +15,11 @@ export const departments = [
   "ceo",
   "internal_audit",
   "crd",
-  "aas_lab", 
+  "aas_lab",
+  "reception",
+  "pathology",
+  "radiology",
+  "smd",
+  "call_center",
+  "operations",
 ];

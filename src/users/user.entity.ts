@@ -61,7 +61,13 @@ export enum Department {
   CEO = "ceo",
   INTERNAL_AUDIT = "internal_audit",
   CRD = "crd",
-  AAS_LAB = "aas_lab"
+  AAS_LAB = "aas_lab",
+  RECEPTION = "reception",
+  PATHOLOGY = "pathology",
+  RADIOLOGY = "radiology",
+  SMD = "smd",
+  CALL_CENTER = "call_center",
+  OPERATIONS = "operations",
 }
 
 @Entity()

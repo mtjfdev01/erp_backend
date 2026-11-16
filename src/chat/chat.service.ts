@@ -432,7 +432,7 @@ export class ChatService implements OnModuleInit {
           (c) =>
             !c.participant_ids ||
             c.participant_ids.length === 0 ||
-            c.participant_ids.includes(String(userId)) ||
+            (c.participant_ids || []).map(String).includes(String(userId)) ||
             c.type === 'channel'
         )
         .map((c) => c.id);
@@ -500,7 +500,7 @@ export class ChatService implements OnModuleInit {
         conv.type !== 'channel' &&
         conv.participant_ids &&
         conv.participant_ids.length > 0 &&
-        !conv.participant_ids.includes(String(userId))
+        !(conv.participant_ids || []).map(String).includes(String(userId))
       ) {
         throw new ForbiddenException('Access denied. You are not an authorized participant of this conversation.');
       }
@@ -793,7 +793,7 @@ export class ChatService implements OnModuleInit {
   async getKeyBundleForUser(conversationId: string, userId: string, keyVersion?: number): Promise<any | null> {
     // 1. Authorization: verify user is in conversation participants if conversation is tracked
     const conv = await this.conversationRepo.findOne({ where: { id: conversationId } });
-    if (conv && conv.participant_ids && conv.participant_ids.length > 0 && !conv.participant_ids.includes(String(userId))) {
+    if (conv && conv.participant_ids && conv.participant_ids.length > 0 && !(conv.participant_ids || []).map(String).includes(String(userId))) {
       throw new ForbiddenException('Access denied. You are not a participant of this conversation.');
     }
 
