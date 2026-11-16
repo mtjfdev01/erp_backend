@@ -30,6 +30,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private readonly logger = new Logger(ChatGateway.name);
   private onlineUsers = new Map<string, Set<string>>(); // userId -> Set of socketIds
+  private userLastSeen = new Map<string, string>(); // userId -> ISO timestamp
 
   constructor(
     private readonly jwtService: JwtService,
@@ -55,8 +56,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           const payload = await this.jwtService.verifyAsync(token, {
             secret: process.env.JWT_SECRET || 'your-secret-key',
           });
-          if (payload?.id) {
-            userId = String(payload.id);
+          const verifiedId = payload?.id || payload?.sub || payload?.userId;
+          if (verifiedId) {
+            userId = String(verifiedId);
           }
         } catch {
           // Token decode fallback
@@ -64,52 +66,67 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       }
 
       if (userId) {
-        client.data.userId = String(userId);
-        if (!this.onlineUsers.has(userId)) {
-          this.onlineUsers.set(userId, new Set());
+        const uid = String(userId);
+        client.data.userId = uid;
+
+        const isNewlyOnline = !this.onlineUsers.has(uid) || this.onlineUsers.get(uid)!.size === 0;
+
+        if (!this.onlineUsers.has(uid)) {
+          this.onlineUsers.set(uid, new Set());
         }
-        this.onlineUsers.get(userId)!.add(client.id);
+        this.onlineUsers.get(uid)!.add(client.id);
 
         /**
          * Real-time Room Routing:
          * Automatically join the user's dedicated personal room (`user_${userId}`).
-         * This guarantees that when another colleague sends a message, this user receives
-         * the real-time notification, message preview, and unread count badge even if
-         * they currently have a different conversation open or are viewing the Chat List.
          */
-        client.join(`user_${userId}`);
-        this.logger.log(`Client ${client.id} joined personal room user_${userId}`);
+        client.join(`user_${uid}`);
+        this.logger.log(`Client ${client.id} joined personal room user_${uid}`);
 
-        // Notify client and broadcast presence
-        this.server.emit('user_presence', {
-          userId,
-          status: 'online',
-          timestamp: new Date().toISOString(),
-        });
+        // Broadcast presence ONLY on actual offline -> online state transition
+        if (isNewlyOnline) {
+          this.server.emit('user_presence', {
+            userId: uid,
+            status: 'online',
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
+
+      const presenceSnapshot = {
+        onlineUsers: Array.from(this.onlineUsers.keys()),
+        lastSeen: Object.fromEntries(this.userLastSeen),
+      };
 
       client.emit('connected', {
         status: 'ok',
         socketId: client.id,
-        onlineUsers: Array.from(this.onlineUsers.keys()),
+        ...presenceSnapshot,
       });
+
+      client.emit('presence_sync', presenceSnapshot);
     } catch (e: any) {
       this.logger.warn(`Chat socket connection error: ${e?.message}`);
     }
   }
 
   handleDisconnect(client: Socket) {
-    const userId = client.data?.userId;
+    const userId = client.data?.userId ? String(client.data.userId) : undefined;
     if (userId && this.onlineUsers.has(userId)) {
       const set = this.onlineUsers.get(userId)!;
       set.delete(client.id);
       if (set.size === 0) {
         this.onlineUsers.delete(userId);
+        const lastSeen = new Date().toISOString();
+        this.userLastSeen.set(userId, lastSeen);
+
         this.server.emit('user_presence', {
           userId,
           status: 'offline',
-          timestamp: new Date().toISOString(),
+          lastSeen,
+          timestamp: lastSeen,
         });
+        this.logger.log(`User ${userId} went offline. Last seen: ${lastSeen}`);
       }
     }
   }
@@ -117,20 +134,46 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   /**
    * Client-side explicit personal room join.
    * Ensures that on reconnections or token refresh, the socket is joined
-   * to `user_${userId}` so real-time unread count updates are never missed.
+   * to `user_${userId}` and presence is kept accurately in sync.
    */
   @SubscribeMessage('join_user')
   handleJoinUser(@ConnectedSocket() client: Socket, @MessageBody() data: { userId: string }) {
     const uid = data?.userId ? String(data.userId) : client.data?.userId;
     if (uid) {
-      client.join(`user_${uid}`);
-      client.data.userId = String(uid);
-      if (!this.onlineUsers.has(uid)) {
-        this.onlineUsers.set(uid, new Set());
+      const userId = String(uid);
+      client.join(`user_${userId}`);
+      client.data.userId = userId;
+
+      const isNewlyOnline = !this.onlineUsers.has(userId) || this.onlineUsers.get(userId)!.size === 0;
+      if (!this.onlineUsers.has(userId)) {
+        this.onlineUsers.set(userId, new Set());
       }
-      this.onlineUsers.get(uid)!.add(client.id);
-      this.logger.log(`Client ${client.id} joined personal room user_${uid}`);
+      this.onlineUsers.get(userId)!.add(client.id);
+      this.logger.log(`Client ${client.id} joined personal room user_${userId}`);
+
+      if (isNewlyOnline) {
+        this.server.emit('user_presence', {
+          userId,
+          status: 'online',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      client.emit('presence_sync', {
+        onlineUsers: Array.from(this.onlineUsers.keys()),
+        lastSeen: Object.fromEntries(this.userLastSeen),
+      });
     }
+  }
+
+  @SubscribeMessage('get_presence')
+  handleGetPresence(@ConnectedSocket() client: Socket) {
+    const data = {
+      onlineUsers: Array.from(this.onlineUsers.keys()),
+      lastSeen: Object.fromEntries(this.userLastSeen),
+    };
+    client.emit('presence_sync', data);
+    return data;
   }
 
   @SubscribeMessage('join_conversation')
@@ -319,5 +362,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   getOnlineUserIds(): string[] {
     return Array.from(this.onlineUsers.keys());
+  }
+
+  getLastSeenMap(): Record<string, string> {
+    return Object.fromEntries(this.userLastSeen);
   }
 }
