@@ -150,15 +150,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('typing')
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; isTyping: boolean; userId?: string }
+    @MessageBody()
+    data: {
+      conversationId: string;
+      isTyping: boolean;
+      userId?: string;
+      status?: 'typing' | 'recording' | 'idle';
+      participantIds?: string[];
+    }
   ) {
-    const uid = data.userId || client.data?.userId;
+    const uid = data?.userId ? String(data.userId) : (client.data?.userId ? String(client.data.userId) : undefined);
     if (data?.conversationId && uid) {
-      client.to(data.conversationId).emit('typing_indicator', {
+      const payload = {
         conversationId: data.conversationId,
         userId: uid,
-        isTyping: data.isTyping,
-      });
+        isTyping: Boolean(data.isTyping),
+        status: data.status || (data.isTyping ? 'typing' : 'idle'),
+      };
+
+      const targetRooms: string[] = [data.conversationId];
+      if (Array.isArray(data.participantIds)) {
+        for (const pid of data.participantIds) {
+          if (String(pid) !== String(uid)) {
+            targetRooms.push(`user_${pid}`);
+          }
+        }
+      }
+
+      // Socket.IO deduplicates recipients across multiple rooms in array
+      client.to(targetRooms).emit('typing_indicator', payload);
     }
   }
 
