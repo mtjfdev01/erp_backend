@@ -887,23 +887,31 @@ export class DonationBoxService {
         this.applyDonationBoxListDataScope(query, scope, geoScope);
       }
 
-      // 1. Calculate SUM(total_collected) with exact same filters, geoScope and access scope
+      // 1. SUM(total_collected) with same filters — de-dupe joins (e.g. assignedUsers)
       let totalDonationAmount = 0;
       try {
-        const idQuery = query.clone();
-        idQuery.expressionMap.orderBys = {};
-        idQuery.expressionMap.selects = [];
-        idQuery.select("DISTINCT donation_box.id", "id");
-        idQuery.addSelect("donation_box.total_collected", "total_collected");
+        const sumQuery = query.clone();
+        sumQuery.expressionMap.orderBys = {};
+        sumQuery.expressionMap.selects = [];
+        // Avoid invalid "SELECT col, DISTINCT id" from select("DISTINCT ...")
+        sumQuery.select("donation_box.id", "id");
+        sumQuery.addSelect(
+          "MAX(donation_box.total_collected)",
+          "total_collected",
+        );
+        sumQuery.groupBy("donation_box.id");
 
-        const [sql, params] = idQuery.getQueryAndParameters();
+        const [sql, params] = sumQuery.getQueryAndParameters();
         const rawResult = await this.donationBoxRepository.query(
           `SELECT COALESCE(SUM(sub.total_collected), 0) AS "totalDonationAmount" FROM (${sql}) AS sub`,
           params,
         );
         totalDonationAmount = Number(rawResult?.[0]?.totalDonationAmount) || 0;
       } catch (sumError) {
-        console.warn("Could not calculate donation box total collected amount:", sumError);
+        console.warn(
+          "Could not calculate donation box total collected amount:",
+          sumError,
+        );
         totalDonationAmount = 0;
       }
 

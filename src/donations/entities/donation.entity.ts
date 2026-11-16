@@ -191,6 +191,17 @@ export class Donation extends BaseEntity {
   @Column({ type: "jsonb", nullable: true, default: null })
   manual_recurring_intent: Record<string, unknown> | null;
 
+  /** Set when staff reconciles (approve/reject); defaults from req.user. */
+  @Column({ type: "int", nullable: true, default: null })
+  reconciled_by: number | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  reconciled_at: Date | null;
+
+  /** approved | rejected — null until first reconcile action. */
+  @Column({ type: "varchar", length: 32, nullable: true, default: null })
+  reconciled_status: string | null;
+
   @OneToMany(() => DonationAttachment, (attachment) => attachment.donation)
   attachments: DonationAttachment[];
 }

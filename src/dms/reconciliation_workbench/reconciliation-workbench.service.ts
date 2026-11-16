@@ -901,6 +901,9 @@ export class ReconciliationWorkbenchService {
 
       await this.recurringRepo.update(id, {
         status: "active",
+        reconciled_by: userId,
+        reconciled_at: new Date(),
+        reconciled_status: "approved",
       });
 
       return {
@@ -956,6 +959,9 @@ export class ReconciliationWorkbenchService {
     if (type === "recurring_installment") {
       await this.recurringRepo.update(id, {
         status: "failed",
+        reconciled_by: userId,
+        reconciled_at: new Date(),
+        reconciled_status: "rejected",
       });
       return {
         success: true,
@@ -967,6 +973,9 @@ export class ReconciliationWorkbenchService {
     if (type === "recurring_subscription") {
       await this.recurringRepo.update(id, {
         status: "cancelled",
+        reconciled_by: userId,
+        reconciled_at: new Date(),
+        reconciled_status: "rejected",
       });
       return {
         success: true,

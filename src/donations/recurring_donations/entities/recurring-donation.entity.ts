@@ -144,6 +144,17 @@ export class RecurringDonation extends BaseEntity {
   @Column({ type: "varchar", length: 40, nullable: true, default: null })
   period_key: string | null;
 
+  /** Set when staff reconciles (approve/reject); defaults from req.user. */
+  @Column({ type: "int", nullable: true, default: null })
+  reconciled_by: number | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  reconciled_at: Date | null;
+
+  /** approved | rejected — null until first reconcile action. */
+  @Column({ type: "varchar", length: 32, nullable: true, default: null })
+  reconciled_status: string | null;
+
   @OneToMany(
     () => RecurringDonationAttachment,
     (attachment) => attachment.recurring_donation,

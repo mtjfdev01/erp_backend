@@ -4482,6 +4482,19 @@ export class DonationsService {
       if (auditUserId != null) {
         statusPatch.updated_by = auditUserId;
       }
+      const nextLower = String(newStatus || "").toLowerCase();
+      if (
+        nextLower === "completed" ||
+        nextLower === "failed" ||
+        nextLower === "cancelled" ||
+        nextLower === "canceled" ||
+        nextLower === "rejected"
+      ) {
+        statusPatch.reconciled_by = auditUserId ?? null;
+        statusPatch.reconciled_at = new Date();
+        statusPatch.reconciled_status =
+          nextLower === "completed" ? "approved" : "rejected";
+      }
       const auditChanges = buildDonationStatusChange(donation.status, newStatus);
       await this.donationRepository.update(donationId, statusPatch as any);
       if (auditChanges.length > 0) {
