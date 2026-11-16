@@ -50,7 +50,7 @@ import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.boots
     }),
     S3StorageModule,
     TypeOrmModule.forRoot({
-      // type: "postgres",
+      type: "postgres",
       // host: process.env.DB_HOST,
       // port: parseInt(process.env.DB_PORT),
       // username: process.env.DB_USERNAME,
