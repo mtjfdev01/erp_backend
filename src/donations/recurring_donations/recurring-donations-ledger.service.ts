@@ -2411,12 +2411,18 @@ export class RecurringDonationsLedgerService {
         stripe_billing_reason: noteSuffix
           ? `manual_mark_paid:${noteSuffix}`
           : "manual_mark_paid",
+        reconciled_by: userId ?? null,
+        reconciled_at: paidAt,
+        reconciled_status: "approved",
       });
     }
 
     if (subscription.status !== "active") {
       await this.recurringDonationRepo.update(subscription.id, {
         status: "active",
+        reconciled_by: userId ?? null,
+        reconciled_at: paidAt,
+        reconciled_status: "approved",
       });
     }
 

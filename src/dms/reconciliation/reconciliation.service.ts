@@ -1031,6 +1031,12 @@ export class ReconciliationService {
 
       currency: "PKR",
 
+      reconciled_by: userId ?? null,
+
+      reconciled_at: new Date(),
+
+      reconciled_status: "approved",
+
       ...(userId ? { created_by: { id: userId } as any } : {}),
 
     });

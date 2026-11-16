@@ -36,6 +36,7 @@ import { WebsiteHomeHeroModule } from './website_home_hero/website-home-hero.mod
 import { EventPledgesModule } from './event_pledges/event-pledges.module';
 import { ReconciliationWorkbenchModule } from './reconciliation_workbench/reconciliation-workbench.module';
 import { ReportsDashboardModule } from './reports_dashboard/reports-dashboard.module';
+import { TargetsModule } from './targets/targets.module';
 
 @Module({
   controllers: [DmsController],
@@ -79,6 +80,7 @@ import { ReportsDashboardModule } from './reports_dashboard/reports-dashboard.mo
     EventPledgesModule,
     ReconciliationWorkbenchModule,
     ReportsDashboardModule,
+    TargetsModule,
   ],
 })
 export class DmsModule {}

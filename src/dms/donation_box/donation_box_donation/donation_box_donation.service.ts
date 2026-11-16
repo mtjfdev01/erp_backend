@@ -782,6 +782,19 @@ export class DonationBoxDonationService {
           patch.verified_by_id = auditUserId;
           patch.verified_at = new Date();
         }
+        if (
+          nextStatus === "verified" ||
+          nextStatus === "deposited" ||
+          nextStatus === "cancelled" ||
+          nextStatus === "canceled"
+        ) {
+          patch.reconciled_by = auditUserId ?? null;
+          patch.reconciled_at = new Date();
+          patch.reconciled_status =
+            nextStatus === "verified" || nextStatus === "deposited"
+              ? "approved"
+              : "rejected";
+        }
       }
       if (auditUserId != null) {
         patch.updated_by = auditUserId;
