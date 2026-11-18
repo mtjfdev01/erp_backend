@@ -10,6 +10,7 @@ import {
   IsInt,
   IsArray,
   ValidateNested,
+  MaxLength,
 } from "class-validator";
 import { Type } from "class-transformer";
 import { DonationMethod } from "src/utils/enums";
@@ -78,6 +79,31 @@ export class CreateDonationDto {
   @IsOptional()
   @IsString()
   donation_source?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_source?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_medium?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_campaign?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_term?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_content?: string;
 
   @IsOptional()
   @IsString()

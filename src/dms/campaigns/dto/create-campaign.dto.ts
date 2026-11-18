@@ -16,6 +16,7 @@ import { CampaignStatus } from "../entities/campaign.entity";
 import { CampaignTargetFrequency } from "../utils/campaign-recurring.constants";
 import { CampaignCommunicationTemplatesDto } from "./campaign-communication-templates.dto";
 import { CreateCampaignDonationItemDto } from "./campaign-donation-item.dto";
+import { CreateCampaignAdSpendDto } from "./campaign-ad-spend.dto";
 
 export class CreateCampaignDto {
   @IsString()
@@ -40,6 +41,18 @@ export class CreateCampaignDto {
   @Min(0)
   @Type(() => Number)
   goal_amount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  budget_amount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  spent_amount?: number;
 
   @IsOptional()
   @IsString()
@@ -110,4 +123,11 @@ export class CreateCampaignDto {
   @ValidateNested({ each: true })
   @Type(() => CreateCampaignDonationItemDto)
   donation_items?: CreateCampaignDonationItemDto[];
+
+  /** Itemized advertising expenses; spent_amount is derived from these rows. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateCampaignAdSpendDto)
+  ad_spends?: CreateCampaignAdSpendDto[];
 }

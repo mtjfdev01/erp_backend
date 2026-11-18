@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
-import { ModuleRef } from "@nestjs/core";
 import { InjectRepository } from "@nestjs/typeorm";
 import { In, Repository } from "typeorm";
 import { RecurringDonation } from "./entities/recurring-donation.entity";
@@ -9,7 +8,6 @@ import { Donation } from "../entities/donation.entity";
 import { Donor } from "src/dms/donor/entities/donor.entity";
 import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
-import { DonationsService } from "../donations.service";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
 import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
@@ -76,7 +74,6 @@ export class RecurringDonationsLedgerService {
     private readonly recurringDonationAttachmentRepo: Repository<RecurringDonationAttachment>,
     private readonly emailService: EmailService,
     private readonly whatsAppService: WhatsAppService,
-    private readonly moduleRef: ModuleRef,
     private readonly permissionsService: PermissionsService,
     private readonly dataScopeService: DataScopeService,
   ) {}
@@ -833,7 +830,8 @@ export class RecurringDonationsLedgerService {
     await this.donorRepository.update(donorId, donorPatch);
 
     if (prepaid.prepaidPeriods && prepaid.prepaidPeriods >= 2) {
-      // Lump-sum paid for N periods → N completed installments; reminders skipped
+      // Lump-sum paid for N periods → N completed installments; reminders skipped.
+      // Reconciler completion does not send a donor thanks message.
       await this.ensureStaffPrepaidPaidInstallments(saved, {
         totalAmount: totalAmount ?? amount * prepaid.prepaidPeriods,
         userId,
@@ -841,11 +839,7 @@ export class RecurringDonationsLedgerService {
       const refreshed = await this.recurringDonationRepo.findOne({
         where: { id: saved.id },
       });
-      if (refreshed) {
-        await this.sendThanksForCompletedStaffInstallment(refreshed);
-        return refreshed;
-      }
-      return saved;
+      return refreshed || saved;
     }
 
     // Auto-create first installment (subscription row stays record_type=subscription)
@@ -1045,7 +1039,7 @@ export class RecurringDonationsLedgerService {
 
   /**
    * Ensures the current-period installment exists, then applies staff-chosen status.
-   * When installment_status is completed, donor gets thanks WhatsApp + email.
+   * Completing an installment does not send a donor thanks message.
    */
   private async createFirstInstallmentForStaffSubscription(
     subscription: RecurringDonation,
@@ -1127,71 +1121,6 @@ export class RecurringDonationsLedgerService {
       });
     }
 
-    if (installmentStatus === "completed") {
-      await this.sendThanksForCompletedStaffInstallment(subscription);
-    }
-  }
-
-  /** Ensure a completed donation exists, then reuse DonationsService.sendDonationThanksOnce. */
-  private async sendThanksForCompletedStaffInstallment(
-    subscription: RecurringDonation,
-  ): Promise<void> {
-    if (!subscription?.donor_id) return;
-
-    let donationId = subscription.initial_donation_id ?? null;
-    if (donationId) {
-      const existing = await this.donationRepository.findOne({
-        where: { id: donationId, is_archived: false },
-      });
-      if (existing) {
-        const st = String(existing.status || "").toLowerCase();
-        if (!["completed", "paid", "success"].includes(st)) {
-          await this.donationRepository.update(existing.id, {
-            status: "completed",
-          });
-        }
-      } else {
-        donationId = null;
-      }
-    }
-
-    if (!donationId) {
-      const created = await this.donationRepository.save(
-        this.donationRepository.create({
-          donor_id: subscription.donor_id,
-          campaign_id: subscription.campaign_id ?? null,
-          project_id: subscription.project_id ?? null,
-          amount: Number(subscription.amount) || 0,
-          currency: subscription.currency || "PKR",
-          donation_type: subscription.donation_type || "general",
-          donation_method: subscription.donation_method || "manual",
-          donation_source: "recurring_staff_create",
-          status: "completed",
-          on_behalf_names: subscription.on_behalf_names || null,
-          note: `First installment for subscription #${subscription.id}`,
-          manual_recurring_intent: {
-            recurring_subscription_id: subscription.id,
-            staff_first_installment: true,
-          },
-        }),
-      );
-      donationId = created.id;
-      await this.recurringDonationRepo.update(subscription.id, {
-        initial_donation_id: donationId,
-      });
-      await this.applySubscriptionReferrerToDonation(subscription, donationId);
-    }
-
-    try {
-      const donationsService = this.moduleRef.get(DonationsService, {
-        strict: false,
-      });
-      await donationsService.sendDonationThanksOnce(donationId);
-    } catch (err: any) {
-      this.logger.warn(
-        `Staff recurring thanks failed donation=${donationId}: ${err?.message || err}`,
-      );
-    }
   }
 
   /**

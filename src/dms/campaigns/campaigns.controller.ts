@@ -11,7 +11,12 @@ import {
   Req,
   HttpStatus,
   Res,
+  UploadedFile,
+  UseInterceptors,
+  BadRequestException,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { Response } from "express";
 import { CampaignsService } from "./campaigns.service";
 import { CreateCampaignDto } from "./dto/create-campaign.dto";
@@ -23,15 +28,70 @@ import {
   CreateCampaignDonationItemDto,
   UpdateCampaignDonationItemDto,
 } from "./dto/campaign-donation-item.dto";
+import {
+  CreateCampaignAdSpendDto,
+  UpdateCampaignAdSpendDto,
+} from "./dto/campaign-ad-spend.dto";
 import { ConditionalJwtGuard } from "../../auth/guards/conditional-jwt.guard";
 import { PermissionsGuard } from "../../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../../permissions";
+import { S3StorageService } from "../../utils/storage/s3-storage.service";
+import { S3_BUCKET_PROFILE } from "../../utils/storage/s3-bucket-profile";
+
+const adSpendAttachmentUploadOptions = {
+  storage: memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+};
 
 @Controller("campaigns")
 export class CampaignsController {
-  constructor(private readonly campaignsService: CampaignsService) {}
+  constructor(
+    private readonly campaignsService: CampaignsService,
+    private readonly s3Storage: S3StorageService,
+  ) {}
 
   // —— Admin CRUD ——
+
+  @Post("upload/ad-spend-attachment")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions([
+    "dms.campaigns.create",
+    "dms.campaigns.update",
+    "super_admin",
+  ])
+  @UseInterceptors(
+    FileInterceptor("file", adSpendAttachmentUploadOptions),
+  )
+  async uploadAdSpendAttachment(
+    @UploadedFile() file: Express.Multer.File,
+    @Res() res: Response,
+  ) {
+    try {
+      if (!file) throw new BadRequestException("File is required");
+      const uploaded = await this.s3Storage.uploadFile(
+        S3_BUCKET_PROFILE.DONATIONS,
+        file,
+        ["campaigns", "ad-spends"],
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Attachment uploaded successfully",
+        data: {
+          ...uploaded,
+          file_name: file.originalname,
+          file_type: file.mimetype,
+        },
+      });
+    } catch (error: any) {
+      const status =
+        error.status || error.statusCode || HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
 
   @Post()
   @UseGuards(ConditionalJwtGuard, PermissionsGuard)
@@ -255,6 +315,103 @@ export class CampaignsController {
         ? HttpStatus.NOT_FOUND
         : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Get(":id/ad-spends")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(["dms.campaigns.view", "super_admin"])
+  async listAdSpends(@Param("id") id: string, @Res() res: Response) {
+    try {
+      const data = await this.campaignsService.listAdSpends(+id);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Campaign ad spends retrieved",
+        data,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: [],
+      });
+    }
+  }
+
+  @Post(":id/ad-spends")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(["dms.campaigns.update", "super_admin"])
+  async createAdSpend(
+    @Param("id") id: string,
+    @Body() dto: CreateCampaignAdSpendDto,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.campaignsService.createAdSpend(+id, dto);
+      return res.status(HttpStatus.CREATED).json({
+        success: true,
+        message: "Campaign ad spend created",
+        data,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Patch(":id/ad-spends/:spendId")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(["dms.campaigns.update", "super_admin"])
+  async updateAdSpend(
+    @Param("id") id: string,
+    @Param("spendId") spendId: string,
+    @Body() dto: UpdateCampaignAdSpendDto,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.campaignsService.updateAdSpend(
+        +id,
+        +spendId,
+        dto,
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Campaign ad spend updated",
+        data,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Delete(":id/ad-spends/:spendId")
+  @UseGuards(ConditionalJwtGuard, PermissionsGuard)
+  @RequiredPermissions(["dms.campaigns.update", "super_admin"])
+  async removeAdSpend(
+    @Param("id") id: string,
+    @Param("spendId") spendId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.campaignsService.removeAdSpend(+id, +spendId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Campaign ad spend removed",
+        data: null,
+      });
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
         success: false,
         message: error.message,
         data: null,

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber } from "class-validator";
+import { IsOptional, IsString, IsNumber, MaxLength } from "class-validator";
 
 /**
  * Partial update for donation core fields. In-kind line items are not updated via this DTO.
@@ -32,6 +32,31 @@ export class UpdateDonationDto {
   @IsOptional()
   @IsString()
   donation_source?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_source?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_medium?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_campaign?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_term?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  utm_content?: string | null;
 
   @IsOptional()
   @IsString()

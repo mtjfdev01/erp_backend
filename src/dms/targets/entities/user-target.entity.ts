@@ -13,6 +13,13 @@ export enum UserTargetType {
   DONATION_BOX_COLLECTION = "donation_box_collection",
 }
 
+export enum UserTargetPeriodType {
+  MONTHLY = "monthly",
+  QUARTERLY = "quarterly",
+  SIX_MONTHS = "six_months",
+  YEARLY = "yearly",
+}
+
 @Entity("user_targets")
 @Index("idx_user_targets_user", ["user_id"])
 @Index("idx_user_targets_period", ["period_year", "period_month"])
@@ -43,6 +50,19 @@ export class UserTarget extends BaseEntity {
   /** 1–12 */
   @Column({ type: "int" })
   period_month: number;
+
+  @Column({
+    type: "varchar",
+    length: 30,
+    default: UserTargetPeriodType.MONTHLY,
+  })
+  period_type: UserTargetPeriodType;
+
+  @Column({ type: "date", nullable: true, default: null })
+  period_start: Date | string | null;
+
+  @Column({ type: "date", nullable: true, default: null })
+  period_end: Date | string | null;
 
   @Column({ type: "text", nullable: true, default: null })
   notes: string | null;

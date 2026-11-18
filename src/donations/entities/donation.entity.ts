@@ -51,6 +51,7 @@ export class Donation extends BaseEntity {
   csr_poc: CsrPoc | null;
 
   @Column({ type: "bigint", nullable: true, default: null })
+  @Index()
   campaign_id: number | null;
 
   @Column({ type: "bigint", nullable: true, default: null })
@@ -89,6 +90,25 @@ export class Donation extends BaseEntity {
 
   @Column({ type: "varchar", nullable: true, default: null })
   donation_source: string;
+
+  /** Marketing attribution captured from the donor's landing URL. */
+  @Index()
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  utm_source: string | null;
+
+  @Index()
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  utm_medium: string | null;
+
+  @Index()
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  utm_campaign: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  utm_term: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  utm_content: string | null;
 
   /**
    * Staff who referred this gift (from website ?referral_code=).

@@ -14,6 +14,8 @@ import { DonorRetentionRecurringController } from "./donor-retention-recurring.c
 import { DonorRetentionRecurringService } from "./donor-retention-recurring.service";
 import { DonorProfilesDemographicsController } from "./donor-profiles-demographics.controller";
 import { DonorProfilesDemographicsService } from "./donor-profiles-demographics.service";
+import { CampaignRoiController } from "./campaign-roi.controller";
+import { CampaignRoiService } from "./campaign-roi.service";
 import { PermissionsModule } from "../../permissions/permissions.module";
 
 @Module({
@@ -32,6 +34,7 @@ import { PermissionsModule } from "../../permissions/permissions.module";
     FieldTeamDonationBoxesController,
     DonorRetentionRecurringController,
     DonorProfilesDemographicsController,
+    CampaignRoiController,
   ],
   providers: [
     ReportsDashboardService,
@@ -41,6 +44,7 @@ import { PermissionsModule } from "../../permissions/permissions.module";
     FieldTeamDonationBoxesService,
     DonorRetentionRecurringService,
     DonorProfilesDemographicsService,
+    CampaignRoiService,
   ],
   exports: [
     ReportsDashboardService,
@@ -50,6 +54,7 @@ import { PermissionsModule } from "../../permissions/permissions.module";
     FieldTeamDonationBoxesService,
     DonorRetentionRecurringService,
     DonorProfilesDemographicsService,
+    CampaignRoiService,
   ],
 })
 export class ReportsDashboardModule {}

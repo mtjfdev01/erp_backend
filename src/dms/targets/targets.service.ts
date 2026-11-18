@@ -11,6 +11,7 @@ import { CreateUserTargetDto } from "./dto/create-user-target.dto";
 import { UpdateUserTargetDto } from "./dto/update-user-target.dto";
 import {
   UserTarget,
+  UserTargetPeriodType,
   UserTargetType,
 } from "./entities/user-target.entity";
 
@@ -22,6 +23,7 @@ export interface TargetsListQuery {
   target_type?: string;
   period_year?: number;
   period_month?: number;
+  period_type?: string;
 }
 
 @Injectable()
@@ -37,6 +39,85 @@ export class TargetsService {
     const num = Number(n);
     if (!Number.isFinite(num)) return "0.00";
     return num.toFixed(2);
+  }
+
+  private resolvePeriod(
+    year: number,
+    month: number,
+    type: UserTargetPeriodType = UserTargetPeriodType.MONTHLY,
+  ) {
+    const allowedStarts: Partial<Record<UserTargetPeriodType, number[]>> = {
+      [UserTargetPeriodType.QUARTERLY]: [1, 4, 7, 10],
+      [UserTargetPeriodType.SIX_MONTHS]: [1, 7],
+      [UserTargetPeriodType.YEARLY]: [1],
+    };
+    const normalizedMonth =
+      type === UserTargetPeriodType.YEARLY ? 1 : Number(month);
+    if (
+      allowedStarts[type] &&
+      !allowedStarts[type]!.includes(normalizedMonth)
+    ) {
+      throw new BadRequestException(`Invalid start month for ${type} target`);
+    }
+    const durationMonths = {
+      [UserTargetPeriodType.MONTHLY]: 1,
+      [UserTargetPeriodType.QUARTERLY]: 3,
+      [UserTargetPeriodType.SIX_MONTHS]: 6,
+      [UserTargetPeriodType.YEARLY]: 12,
+    }[type];
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const endDate = new Date(
+      Date.UTC(year, normalizedMonth - 1 + durationMonths, 0),
+    );
+    return {
+      period_year: year,
+      period_month: normalizedMonth,
+      period_type: type,
+      period_start: `${year}-${pad(normalizedMonth)}-01`,
+      period_end: `${endDate.getUTCFullYear()}-${pad(
+        endDate.getUTCMonth() + 1,
+      )}-${pad(endDate.getUTCDate())}`,
+    };
+  }
+
+  private async assertNoOverlap(
+    input: {
+      user_id: number;
+      target_type: UserTargetType;
+      period_start: string;
+      period_end: string;
+    },
+    excludeId?: number,
+  ) {
+    const qb = this.targetRepo
+      .createQueryBuilder("target")
+      .where("target.is_archived = false")
+      .andWhere("target.user_id = :userId", { userId: input.user_id })
+      .andWhere("target.target_type = :targetType", {
+        targetType: input.target_type,
+      })
+      .andWhere(
+        `(
+          (target.period_start IS NOT NULL
+            AND target.period_start <= :periodEnd
+            AND target.period_end >= :periodStart)
+          OR
+          (target.period_start IS NULL
+            AND make_date(target.period_year, target.period_month, 1) <= :periodEnd
+            AND make_date(target.period_year, target.period_month, 1)
+              + INTERVAL '1 month' - INTERVAL '1 day' >= :periodStart)
+        )`,
+        {
+          periodStart: input.period_start,
+          periodEnd: input.period_end,
+        },
+      );
+    if (excludeId) qb.andWhere("target.id != :excludeId", { excludeId });
+    if (await qb.getOne()) {
+      throw new ConflictException(
+        "An overlapping target already exists for this user and target type",
+      );
+    }
   }
 
   private async assertUser(userId: number) {
@@ -56,27 +137,23 @@ export class TargetsService {
       throw new BadRequestException("Invalid target_type");
     }
 
-    const existing = await this.targetRepo.findOne({
-      where: {
-        user_id: dto.user_id,
-        target_type: dto.target_type,
-        period_year: dto.period_year,
-        period_month: dto.period_month,
-        is_archived: false,
-      },
+    const period = this.resolvePeriod(
+      dto.period_year,
+      dto.period_month,
+      dto.period_type || UserTargetPeriodType.MONTHLY,
+    );
+    await this.assertNoOverlap({
+      user_id: dto.user_id,
+      target_type: dto.target_type,
+      period_start: period.period_start,
+      period_end: period.period_end,
     });
-    if (existing) {
-      throw new ConflictException(
-        "A target already exists for this user, type, and month",
-      );
-    }
 
     const row = this.targetRepo.create({
       user_id: dto.user_id,
       target_type: dto.target_type,
       target_amount: this.formatAmount(dto.target_amount),
-      period_year: dto.period_year,
-      period_month: dto.period_month,
+      ...period,
       notes: dto.notes?.trim() || null,
       ...(actorId ? { created_by: { id: actorId } as any } : {}),
     });
@@ -106,6 +183,11 @@ export class TargetsService {
     }
     if (query.period_month) {
       qb.andWhere("t.period_month = :month", { month: query.period_month });
+    }
+    if (query.period_type) {
+      qb.andWhere("t.period_type = :periodType", {
+        periodType: query.period_type,
+      });
     }
     if (query.search?.trim()) {
       const q = `%${query.search.trim().toLowerCase()}%`;
@@ -157,8 +239,19 @@ export class TargetsService {
       .createQueryBuilder("t")
       .leftJoinAndSelect("t.user", "user")
       .where("t.is_archived = false")
-      .andWhere("t.period_year = :year", { year: params.period_year })
-      .andWhere("t.period_month = :month", { month: params.period_month });
+      .andWhere(
+        `(
+          (t.period_start IS NOT NULL
+            AND t.period_start <= make_date(:year, :month, 1)
+              + INTERVAL '1 month' - INTERVAL '1 day'
+            AND t.period_end >= make_date(:year, :month, 1))
+          OR
+          (t.period_start IS NULL
+            AND t.period_year = :year
+            AND t.period_month = :month)
+        )`,
+        { year: params.period_year, month: params.period_month },
+      );
 
     if (params.target_type) {
       qb.andWhere("t.target_type = :type", { type: params.target_type });
@@ -183,24 +276,27 @@ export class TargetsService {
     if (dto.target_amount != null) {
       row.target_amount = this.formatAmount(dto.target_amount);
     }
-    if (dto.period_year != null) row.period_year = dto.period_year;
-    if (dto.period_month != null) row.period_month = dto.period_month;
+    const period = this.resolvePeriod(
+      dto.period_year ?? row.period_year,
+      dto.period_month ?? row.period_month,
+      dto.period_type ?? row.period_type ?? UserTargetPeriodType.MONTHLY,
+    );
+    row.period_year = period.period_year;
+    row.period_month = period.period_month;
+    row.period_type = period.period_type;
+    row.period_start = period.period_start;
+    row.period_end = period.period_end;
     if (dto.notes !== undefined) row.notes = dto.notes?.trim() || null;
 
-    const clash = await this.targetRepo.findOne({
-      where: {
+    await this.assertNoOverlap(
+      {
         user_id: row.user_id,
         target_type: row.target_type,
-        period_year: row.period_year,
-        period_month: row.period_month,
-        is_archived: false,
+        period_start: period.period_start,
+        period_end: period.period_end,
       },
-    });
-    if (clash && clash.id !== row.id) {
-      throw new ConflictException(
-        "A target already exists for this user, type, and month",
-      );
-    }
+      row.id,
+    );
 
     if (actorId) {
       row.updated_by = { id: actorId } as any;

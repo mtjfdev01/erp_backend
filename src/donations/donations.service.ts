@@ -75,7 +75,10 @@ import {
 } from "./audit/donation-audit.util";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
 import { PermissionsService } from "../permissions/permissions.service";
-import { assertDonationReconciler } from "../permissions/reconciler-permissions";
+import {
+  assertDonationReconciler,
+  resolveDonationReconcileChannel,
+} from "../permissions/reconciler-permissions";
 import { ResolvedDataScope } from "../permissions/data-scope/data-scope.types";
 import { GeographicScopeService } from "../permissions/geographic-scope/geographic-scope.service";
 import { ResolvedGeographicScope } from "../permissions/geographic-scope/geographic-scope.types";
@@ -89,6 +92,14 @@ import {
   ManualRecurringFrequency,
   PledgeMode,
 } from "../dms/manual_recurring/utils/manual-recurring.constants";
+
+type DonationUtmAttribution = {
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_term: string | null;
+  utm_content: string | null;
+};
 
 @Injectable()
 export class DonationsService {
@@ -496,6 +507,70 @@ export class DonationsService {
     const email = createDonationDto?.donor_email?.trim();
     const phone = createDonationDto?.donor_phone?.trim();
     return !!(email || phone);
+  }
+
+  private normalizeUtmValue(
+    value: unknown,
+    lowercase = false,
+  ): string | null {
+    const normalized = String(value ?? "").trim().slice(0, 255);
+    if (!normalized) return null;
+    return lowercase ? normalized.toLowerCase() : normalized;
+  }
+
+  private extractUtmAttribution(
+    input: Partial<Record<keyof DonationUtmAttribution, unknown>>,
+  ): DonationUtmAttribution {
+    return {
+      utm_source: this.normalizeUtmValue(input.utm_source, true),
+      utm_medium: this.normalizeUtmValue(input.utm_medium, true),
+      utm_campaign: this.normalizeUtmValue(input.utm_campaign, true),
+      utm_term: this.normalizeUtmValue(input.utm_term),
+      utm_content: this.normalizeUtmValue(input.utm_content),
+    };
+  }
+
+  private hasUtmAttribution(attribution: DonationUtmAttribution): boolean {
+    return Object.values(attribution).some((value) => value != null);
+  }
+
+  /**
+   * First touch is immutable; latest touch advances on every attributed attempt.
+   * A single SQL statement keeps concurrent checkout updates consistent.
+   */
+  private async applyUtmAttributionToDonor(
+    donorId: number | null | undefined,
+    attribution: DonationUtmAttribution,
+  ): Promise<void> {
+    if (!donorId || !this.hasUtmAttribution(attribution)) return;
+    const values = [
+      attribution.utm_source,
+      attribution.utm_medium,
+      attribution.utm_campaign,
+      attribution.utm_term,
+      attribution.utm_content,
+      donorId,
+    ];
+    await this.donorRepository.query(
+      `
+      UPDATE "donors"
+      SET
+        "first_utm_source" = CASE WHEN "first_utm_attributed_at" IS NULL THEN $1 ELSE "first_utm_source" END,
+        "first_utm_medium" = CASE WHEN "first_utm_attributed_at" IS NULL THEN $2 ELSE "first_utm_medium" END,
+        "first_utm_campaign" = CASE WHEN "first_utm_attributed_at" IS NULL THEN $3 ELSE "first_utm_campaign" END,
+        "first_utm_term" = CASE WHEN "first_utm_attributed_at" IS NULL THEN $4 ELSE "first_utm_term" END,
+        "first_utm_content" = CASE WHEN "first_utm_attributed_at" IS NULL THEN $5 ELSE "first_utm_content" END,
+        "first_utm_attributed_at" = COALESCE("first_utm_attributed_at", NOW()),
+        "latest_utm_source" = $1,
+        "latest_utm_medium" = $2,
+        "latest_utm_campaign" = $3,
+        "latest_utm_term" = $4,
+        "latest_utm_content" = $5,
+        "latest_utm_attributed_at" = NOW()
+      WHERE "id" = $6
+      `,
+      values,
+    );
   }
 
   private buildAutoRegisterDonationPayload(
@@ -1151,9 +1226,11 @@ export class DonationsService {
   /**
    * Side-effects when a donation becomes paid/completed:
    * prepaid pledge activation + non-Stripe recurring installment + thanks (once).
+   * skipThanks: reconciler completing an offline donation must not message the donor.
    */
   private async afterSuccessfulDonationPayment(
     donationId: number,
+    opts?: { skipThanks?: boolean },
   ): Promise<void> {
     await this.activateManualRecurringAfterSuccessfulPayment(donationId);
     try {
@@ -1166,12 +1243,14 @@ export class DonationsService {
       );
     }
 
-    try {
-      await this.sendDonationThanksOnce(donationId);
-    } catch (err: any) {
-      this.logger.error(
-        `sendDonationThanksOnce failed for ${donationId}: ${err?.message || err}`,
-      );
+    if (!opts?.skipThanks) {
+      try {
+        await this.sendDonationThanksOnce(donationId);
+      } catch (err: any) {
+        this.logger.error(
+          `sendDonationThanksOnce failed for ${donationId}: ${err?.message || err}`,
+        );
+      }
     }
 
     await this.advanceDonorPipelineIfDonationCompleted(donationId);
@@ -1597,6 +1676,10 @@ export class DonationsService {
         where: { id: savedDonation.donor_id },
       });
     }
+    await this.applyUtmAttributionToDonor(
+      donor?.id ?? savedDonation.donor_id,
+      this.extractUtmAttribution(savedDonation),
+    );
 
     const trackers =
       await this.progressTrackersService.findTrackersByDonationId(donationId);
@@ -3167,6 +3250,7 @@ export class DonationsService {
 
         const manualRecurringIntent =
           this.buildManualRecurringIntent(createDonationDto);
+        const utmAttribution = this.extractUtmAttribution(createDonationDto);
 
         // Do not spread website-only / nested DTO fields onto the donation row
         const {
@@ -3188,6 +3272,7 @@ export class DonationsService {
         const donation = this.donationRepository.create({
           ...donationColumns,
           ...geoSnapshot,
+          ...utmAttribution,
           donor_id: donorId,
           campaign_id: campaignId,
           created_by: auditUserId ? ({ id: auditUserId } as any) : null,
@@ -3206,6 +3291,7 @@ export class DonationsService {
         console.log(
           `💾 Donation saved with donor_id: ${donorId || "null"} (Donation ID: ${savedDonation.id})`,
         );
+        await this.applyUtmAttributionToDonor(donorId, utmAttribution);
         if (referrerUser?.id) {
           // Force FK write — create()+save can omit relation column in some TypeORM paths.
           await this.donationRepository.query(
@@ -4226,6 +4312,26 @@ export class DonationsService {
       if (Object.keys(patch).length > 0) {
         await this.donationRepository.update(id, patch as any);
       }
+      const utmTouched = Object.keys(patch).some((key) =>
+        key.startsWith("utm_"),
+      );
+      if (utmTouched) {
+        const patchedOrExisting = (key: keyof DonationUtmAttribution) =>
+          Object.prototype.hasOwnProperty.call(patch, key)
+            ? patch[key]
+            : donation[key];
+        const attribution = this.extractUtmAttribution({
+          utm_source: patchedOrExisting("utm_source"),
+          utm_medium: patchedOrExisting("utm_medium"),
+          utm_campaign: patchedOrExisting("utm_campaign"),
+          utm_term: patchedOrExisting("utm_term"),
+          utm_content: patchedOrExisting("utm_content"),
+        });
+        await this.applyUtmAttributionToDonor(
+          Number(patch.donor_id ?? donation.donor_id) || null,
+          attribution,
+        );
+      }
       if (auditChanges.length > 0) {
         const action = auditChanges.some((c) => c.field === "status")
           ? DonationAuditAction.STATUS_CHANGED
@@ -4328,6 +4434,11 @@ export class DonationsService {
       "donation_type",
       "donation_method",
       "donation_source",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
       "status",
       "country",
       "city",
@@ -4374,6 +4485,15 @@ export class DonationsService {
       if (key === "on_behalf_names") {
         const v = d[key];
         patch[key] = v === "" || v === null ? null : String(v);
+        continue;
+      }
+      if (key.startsWith("utm_")) {
+        patch[key] = this.normalizeUtmValue(
+          d[key],
+          key === "utm_source" ||
+            key === "utm_medium" ||
+            key === "utm_campaign",
+        );
         continue;
       }
       if (key === "country" || key === "city" || key === "address") {
@@ -4530,7 +4650,13 @@ export class DonationsService {
       }
 
       if (this.isSuccessfulDonationStatus(newStatus)) {
-        await this.afterSuccessfulDonationPayment(donationId);
+        const channel = resolveDonationReconcileChannel({
+          donation_method: donation.donation_method,
+          donation_source: donation.donation_source,
+        });
+        await this.afterSuccessfulDonationPayment(donationId, {
+          skipThanks: channel === "offline",
+        });
       }
 
       console.log(
