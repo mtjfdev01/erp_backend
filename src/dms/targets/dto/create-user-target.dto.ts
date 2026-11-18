@@ -7,7 +7,10 @@ import {
   Max,
   Min,
 } from "class-validator";
-import { UserTargetType } from "../entities/user-target.entity";
+import {
+  UserTargetPeriodType,
+  UserTargetType,
+} from "../entities/user-target.entity";
 
 export class CreateUserTargetDto {
   @IsInt()
@@ -29,6 +32,10 @@ export class CreateUserTargetDto {
   @Min(1)
   @Max(12)
   period_month: number;
+
+  @IsOptional()
+  @IsEnum(UserTargetPeriodType)
+  period_type?: UserTargetPeriodType;
 
   @IsOptional()
   @IsString()

@@ -15,6 +15,11 @@ import {
   CreateCampaignDonationItemDto,
   UpdateCampaignDonationItemDto,
 } from "./dto/campaign-donation-item.dto";
+import {
+  CreateCampaignAdSpendDto,
+  UpdateCampaignAdSpendDto,
+} from "./dto/campaign-ad-spend.dto";
+import { CampaignAdSpend } from "./entities/campaign-ad-spend.entity";
 import { CampaignTargetFrequency } from "./utils/campaign-recurring.constants";
 import {
   normalizeCommunicationTemplates,
@@ -42,6 +47,7 @@ type SubProgramSummary = {
 export type CampaignWithProgram = Campaign & {
   program?: ProgramSummary | null;
   sub_program?: SubProgramSummary | null;
+  pending_budget: number | null;
 };
 
 /** Allow new donations to ended campaigns by default */
@@ -55,6 +61,8 @@ export class CampaignsService {
     private campaignRepo: Repository<Campaign>,
     @InjectRepository(CampaignDonationItem)
     private donationItemRepo: Repository<CampaignDonationItem>,
+    @InjectRepository(CampaignAdSpend)
+    private adSpendRepo: Repository<CampaignAdSpend>,
     @InjectRepository(Donation)
     private donationRepo: Repository<Donation>,
     @InjectRepository(ProgramEntity)
@@ -186,6 +194,10 @@ export class CampaignsService {
 
     return campaigns.map((campaign) => ({
       ...campaign,
+      pending_budget:
+        campaign.budget_amount == null
+          ? null
+          : Number(campaign.budget_amount) - Number(campaign.spent_amount || 0),
       program: this.toProgramSummary(
         campaign.program_id != null
           ? programMap.get(Number(campaign.program_id))
@@ -298,6 +310,42 @@ export class CampaignsService {
     return this.donationItemRepo.save(entities);
   }
 
+  private async createAdSpendsBulk(
+    campaignId: number,
+    spends: CreateCampaignAdSpendDto[],
+  ): Promise<CampaignAdSpend[]> {
+    const validSpends = spends.filter(
+      (row) => row?.platform?.trim() && Number(row.amount) > 0,
+    );
+    if (!validSpends.length) return [];
+    return this.adSpendRepo.save(
+      validSpends.map((row) =>
+        this.adSpendRepo.create({
+          campaign_id: campaignId,
+          platform: row.platform.trim(),
+          amount: Number(row.amount),
+          spend_date: row.spend_date || null,
+          notes: row.notes?.trim() || null,
+          attachment_url: row.attachment_url?.trim() || null,
+          attachment_name: row.attachment_name?.trim() || null,
+          attachment_type: row.attachment_type?.trim() || null,
+        }),
+      ),
+    );
+  }
+
+  private async refreshCampaignSpentAmount(campaignId: number): Promise<number> {
+    const row = await this.adSpendRepo
+      .createQueryBuilder("spend")
+      .select("COALESCE(SUM(spend.amount), 0)", "total")
+      .where("spend.campaign_id = :campaignId", { campaignId })
+      .andWhere("spend.is_archived = false")
+      .getRawOne();
+    const total = Number(row?.total || 0);
+    await this.campaignRepo.update(campaignId, { spent_amount: total });
+    return total;
+  }
+
   async create(
     dto: CreateCampaignDto,
     createdBy: number | null,
@@ -326,6 +374,14 @@ export class CampaignsService {
       description: dto.description ?? null,
       status: dto.status ?? CampaignStatus.DRAFT,
       goal_amount: dto.goal_amount ?? null,
+      budget_amount: dto.budget_amount ?? null,
+      spent_amount:
+        dto.ad_spends?.length
+          ? dto.ad_spends.reduce(
+              (sum, row) => sum + Math.max(0, Number(row.amount) || 0),
+              0,
+            )
+          : dto.spent_amount ?? 0,
       currency: dto.currency ?? "PKR",
       start_at: dto.start_at ? new Date(dto.start_at) : null,
       end_at: dto.end_at ? new Date(dto.end_at) : null,
@@ -356,7 +412,12 @@ export class CampaignsService {
       );
     }
 
-    return this.enrichCampaign(saved);
+    if (dto.ad_spends?.length) {
+      await this.createAdSpendsBulk(saved.id, dto.ad_spends);
+      await this.refreshCampaignSpentAmount(saved.id);
+    }
+
+    return this.findOne(saved.id);
   }
 
   async findAll(filters?: CampaignFiltersDto): Promise<CampaignWithProgram[]> {
@@ -453,6 +514,10 @@ export class CampaignsService {
     if (dto.description !== undefined) campaign.description = dto.description;
     if (dto.status !== undefined) campaign.status = dto.status;
     if (dto.goal_amount !== undefined) campaign.goal_amount = dto.goal_amount;
+    if (dto.budget_amount !== undefined)
+      campaign.budget_amount = dto.budget_amount;
+    if (dto.spent_amount !== undefined)
+      campaign.spent_amount = dto.spent_amount;
     if (dto.currency !== undefined) campaign.currency = dto.currency;
     if (dto.project_id !== undefined) campaign.project_id = dto.project_id;
     if (dto.program_id !== undefined || dto.sub_program_id !== undefined) {
@@ -517,6 +582,13 @@ export class CampaignsService {
     campaign.updated_by =
       updatedBy != null ? ({ id: updatedBy } as any) : undefined;
     const saved = await this.campaignRepo.save(campaign);
+    const itemizedSpendCount = await this.adSpendRepo.count({
+      where: { campaign_id: id, is_archived: false },
+    });
+    if (itemizedSpendCount > 0) {
+      await this.refreshCampaignSpentAmount(id);
+      return this.findOne(id);
+    }
     return this.enrichCampaign(saved);
   }
 
@@ -844,5 +916,75 @@ export class CampaignsService {
     item.is_archived = true;
     item.is_active = false;
     await this.donationItemRepo.save(item);
+  }
+
+  async listAdSpends(campaignId: number): Promise<CampaignAdSpend[]> {
+    await this.findOne(campaignId);
+    return this.adSpendRepo.find({
+      where: { campaign_id: campaignId, is_archived: false },
+      order: { spend_date: "DESC", id: "DESC" },
+    });
+  }
+
+  async createAdSpend(
+    campaignId: number,
+    dto: CreateCampaignAdSpendDto,
+  ): Promise<CampaignAdSpend> {
+    await this.findOne(campaignId);
+    const saved = await this.adSpendRepo.save(
+      this.adSpendRepo.create({
+        campaign_id: campaignId,
+        platform: dto.platform.trim(),
+        amount: Number(dto.amount),
+        spend_date: dto.spend_date || null,
+        notes: dto.notes?.trim() || null,
+        attachment_url: dto.attachment_url?.trim() || null,
+        attachment_name: dto.attachment_name?.trim() || null,
+        attachment_type: dto.attachment_type?.trim() || null,
+      }),
+    );
+    await this.refreshCampaignSpentAmount(campaignId);
+    return saved;
+  }
+
+  async updateAdSpend(
+    campaignId: number,
+    spendId: number,
+    dto: UpdateCampaignAdSpendDto,
+  ): Promise<CampaignAdSpend> {
+    await this.findOne(campaignId);
+    const spend = await this.adSpendRepo.findOne({
+      where: { id: spendId, campaign_id: campaignId, is_archived: false },
+    });
+    if (!spend) {
+      throw new NotFoundException(
+        `Ad spend #${spendId} not found on campaign #${campaignId}`,
+      );
+    }
+    spend.platform = dto.platform.trim();
+    spend.amount = Number(dto.amount);
+    spend.spend_date = dto.spend_date || null;
+    spend.notes = dto.notes?.trim() || null;
+    spend.attachment_url = dto.attachment_url?.trim() || null;
+    spend.attachment_name = dto.attachment_name?.trim() || null;
+    spend.attachment_type = dto.attachment_type?.trim() || null;
+    const saved = await this.adSpendRepo.save(spend);
+    await this.refreshCampaignSpentAmount(campaignId);
+    return saved;
+  }
+
+  async removeAdSpend(campaignId: number, spendId: number): Promise<void> {
+    await this.findOne(campaignId);
+    const spend = await this.adSpendRepo.findOne({
+      where: { id: spendId, campaign_id: campaignId, is_archived: false },
+    });
+    if (!spend) {
+      throw new NotFoundException(
+        `Ad spend #${spendId} not found on campaign #${campaignId}`,
+      );
+    }
+    spend.is_archived = true;
+    await this.adSpendRepo.save(spend);
+    await this.refreshCampaignSpentAmount(campaignId);
   }
 }

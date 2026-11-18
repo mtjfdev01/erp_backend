@@ -129,8 +129,20 @@ export class FieldTeamDonationBoxesService {
       FROM user_targets
       WHERE COALESCE(is_archived, false) = false
         AND target_type = 'donation_box_collection'
-        AND period_year = $1
-        AND period_month = $2
+        AND (
+          (
+            period_start IS NOT NULL
+            AND period_start <= make_date($1, $2, 1)
+              + INTERVAL '1 month' - INTERVAL '1 day'
+            AND period_end >= make_date($1, $2, 1)
+          )
+          OR
+          (
+            period_start IS NULL
+            AND period_year = $1
+            AND period_month = $2
+          )
+        )
       `,
       [bounds.year, bounds.monthIndex + 1],
     );
@@ -196,6 +208,31 @@ export class FieldTeamDonationBoxesService {
       [bounds.start, bounds.end],
     );
 
+    // Average collection amount by donation box size for the selected month
+    const averageBySizeRows = await this.q(
+      `
+      SELECT
+        LOWER(COALESCE(b.box_type::text, '')) AS size,
+        COALESCE(AVG(NULLIF(d.collection_amount, 0)), 0) AS average_amount
+      FROM donation_box_donations d
+      INNER JOIN donation_boxes b ON b.id = d.donation_box_id
+      WHERE COALESCE(d.is_archived, false) = false
+        AND COALESCE(b.is_archived, false) = false
+        AND LOWER(COALESCE(d.status::text, '')) <> 'cancelled'
+        AND d.collection_date >= $1::date
+        AND d.collection_date <= $2::date
+        AND LOWER(COALESCE(b.box_type::text, '')) IN ('small', 'medium', 'large')
+      GROUP BY LOWER(COALESCE(b.box_type::text, ''))
+      `,
+      [bounds.start, bounds.end],
+    );
+    const averageBySizeMap = new Map(
+      averageBySizeRows.map((row) => [
+        String(row.size),
+        toNumber(row.average_amount),
+      ]),
+    );
+
     return {
       sample_data: false,
       badge: "Live DMS collections & boxes",
@@ -253,6 +290,19 @@ export class FieldTeamDonationBoxesService {
           size: String(r.size || "—"),
           collected_formatted: formatRsCompact(toNumber(r.collected)),
         })),
+      },
+      average_per_collection_by_size: {
+        title: "Average per collection by size",
+        subtitle: "Decides which size to place where",
+        items: ["small", "medium", "large"].map((size) => {
+          const amount = averageBySizeMap.get(size) || 0;
+          return {
+            size,
+            label: size[0].toUpperCase() + size.slice(1),
+            amount,
+            amount_formatted: `Rs ${formatCount(amount)}`,
+          };
+        }),
       },
       meta: {
         generated_at: new Date().toISOString(),

@@ -38,6 +38,24 @@ export class Campaign extends BaseEntity {
   @Column({ type: "decimal", precision: 14, scale: 2, nullable: true })
   goal_amount: number | null;
 
+  @Column({
+    type: "decimal",
+    precision: 14,
+    scale: 2,
+    nullable: true,
+    default: null,
+  })
+  budget_amount: number | null;
+
+  @Column({
+    type: "decimal",
+    precision: 14,
+    scale: 2,
+    nullable: false,
+    default: 0,
+  })
+  spent_amount: number;
+
   @Column({ type: "varchar", length: 10, default: "PKR" })
   currency: string;
 

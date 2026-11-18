@@ -11,12 +11,14 @@ import { ProgramEntity } from "../../program/programs/entities/program.entity";
 import { ProgramSubprogram } from "../../program/subprograms/entities/subprogram.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { User } from "../../users/user.entity";
+import { CampaignAdSpend } from "./entities/campaign-ad-spend.entity";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Campaign,
       CampaignDonationItem,
+      CampaignAdSpend,
       Donation,
       User,
       ProgramEntity,

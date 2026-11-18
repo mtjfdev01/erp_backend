@@ -73,6 +73,7 @@ export class TargetsController {
     @Query("target_type") target_type?: string,
     @Query("period_year") period_year?: string,
     @Query("period_month") period_month?: string,
+    @Query("period_type") period_type?: string,
     @Res() res?: Response,
   ) {
     try {
@@ -84,6 +85,7 @@ export class TargetsController {
         target_type,
         period_year: period_year ? parseInt(period_year, 10) : undefined,
         period_month: period_month ? parseInt(period_month, 10) : undefined,
+        period_type,
       });
       return res.status(HttpStatus.OK).json({
         success: true,

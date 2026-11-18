@@ -79,6 +79,44 @@ export class Donor extends BaseEntity {
   @Column({ nullable: true, default: "website" })
   source: string;
 
+  /** First known marketing touch. Set once and never overwritten. */
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  first_utm_source: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  first_utm_medium: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  first_utm_campaign: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  first_utm_term: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  first_utm_content: string | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  first_utm_attributed_at: Date | null;
+
+  /** Most recent marketing touch associated with a donation attempt. */
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  latest_utm_source: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  latest_utm_medium: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  latest_utm_campaign: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  latest_utm_term: string | null;
+
+  @Column({ type: "varchar", length: 255, nullable: true, default: null })
+  latest_utm_content: string | null;
+
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  latest_utm_attributed_at: Date | null;
+
   @Column({ nullable: true })
   address: string;
 
