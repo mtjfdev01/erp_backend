@@ -485,7 +485,12 @@ export class TasksService implements OnModuleInit {
     const isApprover = approvers.includes(currentUserId);
     const isManagement = isAdmin || isCreator || isReporter;
 
-    const rawReason = (options?.reason || options?.notes || "").trim();
+    const rawReason = (
+      options?.reason ||
+      options?.notes ||
+      (options as any)?.note ||
+      ""
+    ).trim();
 
     // 1. Handle Administrative Override
     if (options?.admin_override) {
@@ -527,6 +532,7 @@ export class TasksService implements OnModuleInit {
         [TaskStatus.PENDING_APPROVAL]: [
           TaskStatus.APPROVED,
           TaskStatus.REJECTED,
+          TaskStatus.IN_PROGRESS,
         ],
         [TaskStatus.REJECTED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
         [TaskStatus.APPROVED]: [TaskStatus.COMPLETED, TaskStatus.CANCELLED],
@@ -575,10 +581,12 @@ export class TasksService implements OnModuleInit {
       }
     }
 
-    // B. Approving / Rejecting (PENDING_APPROVAL -> APPROVED or REJECTED)
+    // B. Approving / Rejecting (PENDING_APPROVAL -> APPROVED, REJECTED, or IN_PROGRESS via rejection)
     if (
       oldStatus === TaskStatus.PENDING_APPROVAL &&
-      (nextStatus === TaskStatus.APPROVED || nextStatus === TaskStatus.REJECTED)
+      (nextStatus === TaskStatus.APPROVED ||
+        nextStatus === TaskStatus.REJECTED ||
+        nextStatus === TaskStatus.IN_PROGRESS)
     ) {
       const canApprove =
         isAdmin || isApprover || (approvers.length === 0 && (isCreator || isReporter));
@@ -587,7 +595,10 @@ export class TasksService implements OnModuleInit {
           "Only authorized approvers or administrators can approve or reject tasks.",
         );
       }
-      if (nextStatus === TaskStatus.REJECTED && !rawReason) {
+      if (
+        (nextStatus === TaskStatus.REJECTED || nextStatus === TaskStatus.IN_PROGRESS) &&
+        !rawReason
+      ) {
         throw new BadRequestException(
           "A mandatory rejection reason is required when rejecting a task.",
         );
@@ -646,9 +657,9 @@ export class TasksService implements OnModuleInit {
 
     // H. Closing (COMPLETED -> CLOSED)
     if (nextStatus === TaskStatus.CLOSED) {
-      if (!isManagement) {
+      if (!isCreator && !isAdmin) {
         throw new ForbiddenException(
-          "Only the creator, manager, or administrator can formally close completed tasks.",
+          "Only the task creator or administrator can formally close completed tasks.",
         );
       }
     }
@@ -659,9 +670,9 @@ export class TasksService implements OnModuleInit {
         (nextStatus === TaskStatus.IN_PROGRESS || nextStatus === TaskStatus.OPEN)) ||
       (oldStatus === TaskStatus.COMPLETED && nextStatus === TaskStatus.IN_PROGRESS)
     ) {
-      if (!isManagement) {
+      if (!isCreator && !isAdmin) {
         throw new ForbiddenException(
-          "Only authorized creators, managers, or administrators can reopen tasks.",
+          "Only the task creator or administrator can reopen tasks.",
         );
       }
       if (!rawReason) {
@@ -867,6 +878,12 @@ export class TasksService implements OnModuleInit {
       approvalStatus = task.status;
     } else if (task.status === TaskStatus.CLOSED) {
       approvalStatus = existing?.approval_status ?? null;
+    } else if (
+      task.status === TaskStatus.IN_PROGRESS &&
+      ((task.rejected_by_id && task.rejected_by_id.length > 0) ||
+        existing?.approval_status === TaskStatus.REJECTED)
+    ) {
+      approvalStatus = TaskStatus.REJECTED;
     } else {
       approvalStatus = null;
     }
@@ -3632,9 +3649,15 @@ export class TasksService implements OnModuleInit {
         Number(currentUser.id),
       );
       const statusChanged = dto.status !== undefined && dto.status !== task.status;
+      const statusOptions = {
+        reason: (dto as any).reason,
+        notes: (dto as any).notes || (dto as any).note,
+        admin_override: (dto as any).admin_override,
+        force_complete: (dto as any).force_complete,
+      };
       if (statusChanged) {
         // Protect direct PATCH requests as well as the dedicated transition endpoint.
-        this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
+        this.assertTaskStatusChangeAllowed(task, currentUser, dto.status, statusOptions);
       }
       const isApprovalSubmission =
         dto.status === TaskStatus.PENDING_APPROVAL &&
@@ -3642,13 +3665,22 @@ export class TasksService implements OnModuleInit {
         isCurrentUserAssignee;
       const isAuthorizedStatusOnlyChange =
         statusChanged &&
-        Object.keys(dto).every((key) => key === "status") &&
+        Object.keys(dto).every((key) =>
+          [
+            "status",
+            "reason",
+            "notes",
+            "note",
+            "admin_override",
+            "force_complete",
+          ].includes(key),
+        ) &&
         ((isCurrentUserAssignee &&
           (perms.canUpdate ||
             perms.canComplete ||
             (isApprovalSubmission && perms.canView))) ||
           (dto.status === TaskStatus.CLOSED &&
-            this.canChangeTaskStatus(task, currentUser, dto.status)));
+            this.canChangeTaskStatus(task, currentUser, dto.status, statusOptions)));
 
       if (!isApprovalSubmission && !isAuthorizedStatusOnlyChange) {
         this.assertTaskMutationAllowed(task, currentUser, "update", perms);
@@ -3667,23 +3699,16 @@ export class TasksService implements OnModuleInit {
           currentUser.role === UserRole.SUPER_ADMIN ||
           currentUser.role === UserRole.ADMIN;
 
-        if (!isCreator && !isReporter && !isAdmin) {
+        if (!isCreator && !isAdmin) {
           throw new ForbiddenException(
-            "Only the creator, assigner, or an Admin can close this task.",
+            "Only the task creator or administrator can close this task.",
           );
         }
       }
 
       const oldStatus = task.status;
 
-      if (dto.status && dto.status !== oldStatus) {
-        this.validateStatusTransition(task, dto.status, currentUser, {
-          reason: (dto as any).reason,
-          notes: (dto as any).notes,
-          admin_override: (dto as any).admin_override,
-          force_complete: (dto as any).force_complete,
-        });
-      } else {
+      if (!statusChanged) {
         if (
           oldStatus === TaskStatus.CLOSED ||
           oldStatus === TaskStatus.CANCELLED
@@ -3735,8 +3760,10 @@ export class TasksService implements OnModuleInit {
       }
       if (
         isApprovalWorkflow &&
-        oldStatus === TaskStatus.REJECTED &&
-        nextStatus === TaskStatus.IN_PROGRESS
+        ((oldStatus === TaskStatus.REJECTED && nextStatus === TaskStatus.IN_PROGRESS) ||
+          (nextStatus === TaskStatus.PENDING_APPROVAL &&
+            (oldStatus === TaskStatus.IN_PROGRESS ||
+              (task.rejected_by_id && task.rejected_by_id.length > 0))))
       ) {
         shouldResetApprovalsForRework = true;
       }
@@ -3989,10 +4016,16 @@ export class TasksService implements OnModuleInit {
     const isApprovalWorkflow =
       task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED;
 
+    let targetStatus = dto.status;
+    const isRejection = dto.status === TaskStatus.REJECTED;
+    if (isRejection && isApprovalWorkflow) {
+      targetStatus = TaskStatus.IN_PROGRESS;
+    }
+
     const updated = await this.update(
       id,
       {
-        status: dto.status,
+        status: targetStatus,
         reason: dto.reason || dto.notes,
         notes: dto.notes,
         admin_override: dto.admin_override,
@@ -4027,7 +4060,7 @@ export class TasksService implements OnModuleInit {
 
     if (
       isApprovalWorkflow &&
-      dto.status === TaskStatus.REJECTED &&
+      (dto.status === TaskStatus.REJECTED || isRejection) &&
       transitionReason
     ) {
       const approval = await this.taskApprovalRepo.findOne({
@@ -4043,8 +4076,12 @@ export class TasksService implements OnModuleInit {
           decided_at: new Date(),
         };
         approval.rejected_note = [...existingNotes, noteEntry];
+        approval.approval_status = TaskStatus.REJECTED;
+        approval.rejected_by_id = [Number(currentUser.id)];
         await this.taskApprovalRepo.save(approval);
       }
+      updated.rejected_by_id = [Number(currentUser.id)];
+      await this.taskRepo.save(updated);
     }
 
     if (
@@ -4348,6 +4385,16 @@ export class TasksService implements OnModuleInit {
             "You are not configured as an approver for this task",
           );
         }
+      } else if (approvers.length === 0 && !isAdminRole) {
+        const reporterIds = this.getReporterIds(task);
+        const isManagement =
+          Number(task.created_by_id) === Number(currentUser.id) ||
+          reporterIds.includes(Number(currentUser.id));
+        if (!isManagement) {
+          throw new ForbiddenException(
+            "Only configured approvers or task managers can approve or reject this task",
+          );
+        }
       }
 
       const now = new Date();
@@ -4406,7 +4453,7 @@ export class TasksService implements OnModuleInit {
           if (allApproved) {
             newStatus = TaskStatus.APPROVED;
           } else if (anyRejected) {
-            newStatus = TaskStatus.REJECTED;
+            newStatus = TaskStatus.IN_PROGRESS;
           } else {
             newStatus = TaskStatus.PENDING_APPROVAL;
           }
@@ -4414,7 +4461,7 @@ export class TasksService implements OnModuleInit {
           newStatus = TaskStatus.APPROVED;
         }
       } else {
-        newStatus = TaskStatus.REJECTED;
+        newStatus = TaskStatus.IN_PROGRESS;
       }
 
       const oldStatus = task.status;
@@ -4428,13 +4475,13 @@ export class TasksService implements OnModuleInit {
         task.approved_by_id =
           approvedUserIds.length > 0 ? approvedUserIds : null;
         task.rejected_by_id = null;
-      } else if (newStatus === TaskStatus.REJECTED) {
+      } else if (!dto.approve || updatedMeta.some((m) => m.decision === "rejected")) {
         const rejectedUserIds = updatedMeta
           .filter((m) => m && m.decision === "rejected")
           .map((m) => Number(m.user_id))
           .filter((n) => Number.isInteger(n) && n > 0);
         task.rejected_by_id =
-          rejectedUserIds.length > 0 ? rejectedUserIds : null;
+          rejectedUserIds.length > 0 ? rejectedUserIds : [Number(currentUser.id)];
       }
       const saved = await this.taskRepo.save(task);
       await this.setTaskApprovalMeta(task.id, normalizedMetaForSave);
@@ -4474,7 +4521,13 @@ export class TasksService implements OnModuleInit {
         saved,
         currentUser,
         dto.approve ? "approved" : "rejected",
-        { note: approvalNote, reason: approvalNote },
+        {
+          note: approvalNote,
+          reason: approvalNote,
+          action: dto.approve
+            ? "Approved deliverables"
+            : "Rejected deliverables and returned task to In Progress for corrections",
+        },
       );
       await this.sendStatusUpdateNotifications(
         saved,

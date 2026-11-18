@@ -202,7 +202,15 @@ export class TasksController {
   }
 
   @Get(":id/approval")
-  @RequiredPermissions(["tasking.tasks.view", "tasks.view", "super_admin"])
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+  ])
   async getApprovalState(
     @Param("id") id: string,
     @CurrentUser() user: User,
