@@ -425,33 +425,12 @@ export class TasksService implements OnModuleInit {
     return [...assignedIds, ...metaIds].includes(Number(userId));
   }
 
-  private canChangeTaskStatus(
-    task: Task,
-    currentUser: User,
-    nextStatus: TaskStatus,
-  ): boolean {
-    if (this.isTaskAssignee(task, Number(currentUser.id))) return true;
-    // Closing is the sole non-assignee exception; normal workflow transitions stay assignee-only.
-    if (nextStatus !== TaskStatus.CLOSED) return false;
-
-    const currentUserId = Number(currentUser.id);
-    const role = String(currentUser.role || "").toLowerCase();
-    const reporterIds = this.getReporterIds(task);
-    const isReporter = reporterIds.includes(currentUserId);
-    return (
-      Number(task.created_by_id) === currentUserId ||
-      isReporter ||
-      role === UserRole.SUPER_ADMIN.toLowerCase() ||
-      role === UserRole.ADMIN.toLowerCase()
-    );
-  }
-
   /**
    * Helper to extract all valid reporting manager IDs from a task.
    * Checks `task.reported_to` (array), `task.reported_to_ids` (array), or legacy `task.reported_to_id`.
    * Returns a deduplicated array of positive integers.
    */
-  private getReporterIds(task: Task): number[] {
+  public getReporterIds(task: Task): number[] {
     const raw =
       Array.isArray(task.reported_to) && task.reported_to.length > 0
         ? task.reported_to
@@ -469,16 +448,289 @@ export class TasksService implements OnModuleInit {
     );
   }
 
-  private assertTaskStatusChangeAllowed(
+  /**
+   * Centralized Task Workflow State Machine & Transition Validator.
+   * Enforces sequence rules, role permissions, mandatory reasons, and administrative overrides.
+   */
+  public validateStatusTransition(
+    task: Task,
+    nextStatus: TaskStatus,
+    currentUser: User,
+    options?: {
+      reason?: string;
+      notes?: string;
+      admin_override?: boolean;
+      force_complete?: boolean;
+    },
+  ): { isOverride: boolean; transitionReason?: string } {
+    const oldStatus = task.status;
+    if (oldStatus === nextStatus) {
+      return { isOverride: false };
+    }
+
+    const currentUserId = Number(currentUser.id);
+    const role = String(currentUser.role || "").toLowerCase();
+    const isAdmin =
+      role === UserRole.SUPER_ADMIN.toLowerCase() ||
+      role === UserRole.ADMIN.toLowerCase();
+    const isAssignee = this.isTaskAssignee(task, currentUserId);
+    const isCreator = Number(task.created_by_id) === currentUserId;
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(currentUserId);
+    const approvers = Array.isArray(task.approval_required_user_ids)
+      ? task.approval_required_user_ids
+          .map((v) => Number(v))
+          .filter((v) => !isNaN(v))
+      : [];
+    const isApprover = approvers.includes(currentUserId);
+    const isManagement = isAdmin || isCreator || isReporter;
+
+    const rawReason = (options?.reason || options?.notes || "").trim();
+
+    // 1. Handle Administrative Override
+    if (options?.admin_override) {
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          "Administrative status overrides can only be performed by administrators.",
+        );
+      }
+      if (!rawReason) {
+        throw new BadRequestException(
+          "A mandatory reason is required for administrative status overrides.",
+        );
+      }
+      return { isOverride: true, transitionReason: rawReason };
+    }
+
+    // 2. Allowed Transitions Map by Workflow Type
+    const isApprovalWorkflow =
+      task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED;
+
+    let allowedTransitions: Record<TaskStatus, TaskStatus[]>;
+
+    if (isApprovalWorkflow) {
+      // Approval-Based Workflow:
+      // Assigned (Open) -> In Progress -> Pending Approval -> Approved -> Completed -> Closed
+      // Rejection: Pending Approval -> Rejected -> In Progress -> Pending Approval
+      // Blocked: In Progress -> Blocked -> In Progress
+      // Reopening: Closed -> In Progress (or Open)
+      // Cancellation: Active states -> Cancelled
+      allowedTransitions = {
+        [TaskStatus.DRAFT]: [TaskStatus.OPEN],
+        [TaskStatus.OPEN]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+        [TaskStatus.IN_PROGRESS]: [
+          TaskStatus.PENDING_APPROVAL,
+          TaskStatus.BLOCKED,
+          TaskStatus.CANCELLED,
+        ],
+        [TaskStatus.BLOCKED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+        [TaskStatus.PENDING_APPROVAL]: [
+          TaskStatus.APPROVED,
+          TaskStatus.REJECTED,
+        ],
+        [TaskStatus.REJECTED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+        [TaskStatus.APPROVED]: [TaskStatus.COMPLETED, TaskStatus.CANCELLED],
+        [TaskStatus.COMPLETED]: [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS],
+        [TaskStatus.CLOSED]: [TaskStatus.IN_PROGRESS, TaskStatus.OPEN],
+        [TaskStatus.CANCELLED]: [],
+      };
+    } else {
+      // Standard Workflow:
+      // Assigned (Open) -> In Progress -> Completed -> Closed
+      // Blocked: In Progress -> Blocked -> In Progress
+      // Reopening: Closed -> In Progress (or Open)
+      // Cancellation: Active states -> Cancelled
+      allowedTransitions = {
+        [TaskStatus.DRAFT]: [TaskStatus.OPEN],
+        [TaskStatus.OPEN]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+        [TaskStatus.IN_PROGRESS]: [
+          TaskStatus.COMPLETED,
+          TaskStatus.BLOCKED,
+          TaskStatus.CANCELLED,
+        ],
+        [TaskStatus.BLOCKED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
+        [TaskStatus.COMPLETED]: [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS],
+        [TaskStatus.CLOSED]: [TaskStatus.IN_PROGRESS, TaskStatus.OPEN],
+        [TaskStatus.CANCELLED]: [],
+        [TaskStatus.PENDING_APPROVAL]: [],
+        [TaskStatus.APPROVED]: [],
+        [TaskStatus.REJECTED]: [],
+      };
+    }
+
+    const validNextList = allowedTransitions[oldStatus] || [];
+    if (!validNextList.includes(nextStatus)) {
+      throw new ConflictException(
+        `Invalid status transition from '${oldStatus}' to '${nextStatus}' in ${task.workflow_type} workflow.`,
+      );
+    }
+
+    // 3. Permission checks per transition
+    // A. Submitting for Approval (IN_PROGRESS -> PENDING_APPROVAL)
+    if (nextStatus === TaskStatus.PENDING_APPROVAL) {
+      if (!isAssignee && !isAdmin) {
+        throw new ForbiddenException(
+          "Only assignees assigned to this task can submit it for approval.",
+        );
+      }
+    }
+
+    // B. Approving / Rejecting (PENDING_APPROVAL -> APPROVED or REJECTED)
+    if (
+      oldStatus === TaskStatus.PENDING_APPROVAL &&
+      (nextStatus === TaskStatus.APPROVED || nextStatus === TaskStatus.REJECTED)
+    ) {
+      const canApprove =
+        isAdmin || isApprover || (approvers.length === 0 && (isCreator || isReporter));
+      if (!canApprove) {
+        throw new ForbiddenException(
+          "Only authorized approvers or administrators can approve or reject tasks.",
+        );
+      }
+      if (nextStatus === TaskStatus.REJECTED && !rawReason) {
+        throw new BadRequestException(
+          "A mandatory rejection reason is required when rejecting a task.",
+        );
+      }
+    }
+
+    // C. Approved to Completed (APPROVED -> COMPLETED)
+    if (oldStatus === TaskStatus.APPROVED && nextStatus === TaskStatus.COMPLETED) {
+      if (!isAssignee && !isApprover && !isManagement) {
+        throw new ForbiddenException(
+          "Only assignees, approvers, creators, or administrators can move an approved task to completed.",
+        );
+      }
+    }
+
+    // D. In Progress to Completed in Standard Workflow
+    if (oldStatus === TaskStatus.IN_PROGRESS && nextStatus === TaskStatus.COMPLETED) {
+      if (!isAssignee && !isManagement) {
+        throw new ForbiddenException(
+          "Only assignees or task managers can mark tasks as completed.",
+        );
+      }
+    }
+
+    // E. Rejection to In Progress (REJECTED -> IN_PROGRESS)
+    if (oldStatus === TaskStatus.REJECTED && nextStatus === TaskStatus.IN_PROGRESS) {
+      if (!isAssignee && !isApprover && !isManagement) {
+        throw new ForbiddenException(
+          "Only assignees or authorized personnel can return a rejected task to In Progress.",
+        );
+      }
+    }
+
+    // F. Blocking (IN_PROGRESS -> BLOCKED)
+    if (nextStatus === TaskStatus.BLOCKED) {
+      if (!isAssignee && !isManagement) {
+        throw new ForbiddenException(
+          "Only assignees or task managers can block this task.",
+        );
+      }
+      if (!rawReason) {
+        throw new BadRequestException(
+          "A mandatory blocking reason is required to block a task.",
+        );
+      }
+    }
+
+    // G. Unblocking (BLOCKED -> IN_PROGRESS)
+    if (oldStatus === TaskStatus.BLOCKED && nextStatus === TaskStatus.IN_PROGRESS) {
+      if (!isAssignee && !isManagement) {
+        throw new ForbiddenException(
+          "Only authorized assignees, creators, or managers can unblock this task.",
+        );
+      }
+    }
+
+    // H. Closing (COMPLETED -> CLOSED)
+    if (nextStatus === TaskStatus.CLOSED) {
+      if (!isManagement) {
+        throw new ForbiddenException(
+          "Only the creator, manager, or administrator can formally close completed tasks.",
+        );
+      }
+    }
+
+    // I. Reopening (CLOSED -> IN_PROGRESS / OPEN, or COMPLETED -> IN_PROGRESS)
+    if (
+      (oldStatus === TaskStatus.CLOSED &&
+        (nextStatus === TaskStatus.IN_PROGRESS || nextStatus === TaskStatus.OPEN)) ||
+      (oldStatus === TaskStatus.COMPLETED && nextStatus === TaskStatus.IN_PROGRESS)
+    ) {
+      if (!isManagement) {
+        throw new ForbiddenException(
+          "Only authorized creators, managers, or administrators can reopen tasks.",
+        );
+      }
+      if (!rawReason) {
+        throw new BadRequestException(
+          "A mandatory reopening reason is required to reopen a task.",
+        );
+      }
+    }
+
+    // J. Cancellation (Any active -> CANCELLED)
+    if (nextStatus === TaskStatus.CANCELLED) {
+      if (!isManagement) {
+        throw new ForbiddenException(
+          "Only creators, managers, or administrators can cancel tasks.",
+        );
+      }
+      if (!rawReason) {
+        throw new BadRequestException(
+          "A mandatory cancellation reason is required to cancel a task.",
+        );
+      }
+    }
+
+    // 4. MoV completeness check when transitioning to COMPLETED
+    if (nextStatus === TaskStatus.COMPLETED && !options?.force_complete) {
+      const completion = this.getMovCompletionSummary(task);
+      if (completion.incompleteAssigneeCount > 0) {
+        throw new ConflictException({
+          code: "INCOMPLETE_MOV_CONFIRMATION_REQUIRED",
+          message: `${completion.incompleteAssigneeCount} assignees still have incomplete MOVs.`,
+          incomplete_assignee_count: completion.incompleteAssigneeCount,
+        });
+      }
+    }
+
+    return { isOverride: false, transitionReason: rawReason || undefined };
+  }
+
+  public canChangeTaskStatus(
     task: Task,
     currentUser: User,
     nextStatus: TaskStatus,
-  ): void {
-    if (!this.canChangeTaskStatus(task, currentUser, nextStatus)) {
-      throw new ForbiddenException(
-        "Only users assigned to this task can change its status, except authorized task closure.",
-      );
+    options?: {
+      reason?: string;
+      notes?: string;
+      admin_override?: boolean;
+      force_complete?: boolean;
+    },
+  ): boolean {
+    try {
+      this.validateStatusTransition(task, nextStatus, currentUser, options);
+      return true;
+    } catch {
+      return false;
     }
+  }
+
+  public assertTaskStatusChangeAllowed(
+    task: Task,
+    currentUser: User,
+    nextStatus: TaskStatus,
+    options?: {
+      reason?: string;
+      notes?: string;
+      admin_override?: boolean;
+      force_complete?: boolean;
+    },
+  ): { isOverride: boolean; transitionReason?: string } {
+    return this.validateStatusTransition(task, nextStatus, currentUser, options);
   }
 
   private async getTaskScope(
@@ -1404,7 +1656,6 @@ export class TasksService implements OnModuleInit {
     const completedStatuses = [
       TaskStatus.COMPLETED,
       TaskStatus.CLOSED,
-      TaskStatus.APPROVED,
     ];
 
     if (category === "pending") {
@@ -2329,7 +2580,7 @@ export class TasksService implements OnModuleInit {
           day.status_counts[status] = (day.status_counts[status] || 0) + 1;
 
           // Categorize completed/terminal positive statuses for completion rate metrics
-          if ([TaskStatus.COMPLETED, TaskStatus.CLOSED, TaskStatus.APPROVED].includes(status as TaskStatus)) {
+          if ([TaskStatus.COMPLETED, TaskStatus.CLOSED].includes(status as TaskStatus)) {
             day.completed_tasks += 1;
           }
           if (status === TaskStatus.IN_PROGRESS) {
@@ -2615,7 +2866,6 @@ export class TasksService implements OnModuleInit {
             TaskStatus.COMPLETED,
             TaskStatus.CLOSED,
             TaskStatus.CANCELLED,
-            TaskStatus.APPROVED,
           ],
         })
         .getCount();
@@ -2626,7 +2876,6 @@ export class TasksService implements OnModuleInit {
           completedStatuses: [
             TaskStatus.CLOSED,
             TaskStatus.COMPLETED,
-            TaskStatus.APPROVED,
           ],
         })
         .getCount();
@@ -3020,8 +3269,7 @@ export class TasksService implements OnModuleInit {
               }
               if (
                 t.status === TaskStatus.CLOSED ||
-                t.status === TaskStatus.COMPLETED ||
-                t.status === TaskStatus.APPROVED
+                t.status === TaskStatus.COMPLETED
               ) {
                 userCountsMap[userId].completed_count++;
               }
@@ -3066,8 +3314,7 @@ export class TasksService implements OnModuleInit {
           }
           if (
             t.status === TaskStatus.CLOSED ||
-            t.status === TaskStatus.COMPLETED ||
-            t.status === TaskStatus.APPROVED
+            t.status === TaskStatus.COMPLETED
           ) {
             userCountsMap[label].completed_count++;
           }
@@ -3430,43 +3677,18 @@ export class TasksService implements OnModuleInit {
       const oldStatus = task.status;
 
       if (dto.status && dto.status !== oldStatus) {
-        const allowedTransitions: Record<string, TaskStatus[]> = {
-          [TaskStatus.DRAFT]: [TaskStatus.OPEN],
-          [TaskStatus.OPEN]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
-          [TaskStatus.IN_PROGRESS]: [
-            TaskStatus.COMPLETED,
-            TaskStatus.CANCELLED,
-            TaskStatus.BLOCKED,
-          ],
-          [TaskStatus.BLOCKED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
-          [TaskStatus.COMPLETED]:
-            task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED
-              ? [TaskStatus.PENDING_APPROVAL, TaskStatus.IN_PROGRESS]
-              : [TaskStatus.CLOSED, TaskStatus.IN_PROGRESS],
-          [TaskStatus.PENDING_APPROVAL]: [
-            TaskStatus.APPROVED,
-            TaskStatus.REJECTED,
-            TaskStatus.CLOSED,
-            TaskStatus.IN_PROGRESS,
-          ],
-          [TaskStatus.APPROVED]: [TaskStatus.CLOSED],
-          [TaskStatus.REJECTED]: [TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED],
-          [TaskStatus.CLOSED]: [],
-          [TaskStatus.CANCELLED]: [],
-        };
-
-        const validNext = allowedTransitions[oldStatus] || [];
-        if (!validNext.includes(dto.status)) {
-          throw new ConflictException(
-            `Invalid status transition from ${oldStatus} to ${dto.status}`,
-          );
-        }
+        this.validateStatusTransition(task, dto.status, currentUser, {
+          reason: (dto as any).reason,
+          notes: (dto as any).notes,
+          admin_override: (dto as any).admin_override,
+          force_complete: (dto as any).force_complete,
+        });
       } else {
         if (
           oldStatus === TaskStatus.CLOSED ||
           oldStatus === TaskStatus.CANCELLED
         ) {
-          throw new ConflictException("Cannot edit Closed/Cancelled tasks");
+          throw new ConflictException("Cannot edit Closed/Cancelled tasks without reopening");
         }
       }
 
@@ -3494,14 +3716,8 @@ export class TasksService implements OnModuleInit {
             ? dto.workflow_type
             : task.workflow_type;
 
-        if (workflowType === TaskWorkflowType.STANDARD) {
-          if (dto.status === TaskStatus.COMPLETED) {
-            newCompletedDate = newCompletedDate ?? new Date();
-          }
-        } else if (workflowType === TaskWorkflowType.APPROVAL_REQUIRED) {
-          if (dto.status === TaskStatus.APPROVED) {
-            newCompletedDate = newCompletedDate ?? new Date();
-          }
+        if (dto.status === TaskStatus.COMPLETED) {
+          newCompletedDate = newCompletedDate ?? new Date();
         }
       }
 
@@ -3760,85 +3976,37 @@ export class TasksService implements OnModuleInit {
     currentUser: User,
   ): Promise<Task> {
     const task = await this.findOne(id, currentUser, { filterMov: false });
-    const perms = await this.getTaskPermissionsForUser(currentUser);
-    const assignedIds = Array.isArray(task.assigned_user_ids)
-      ? task.assigned_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
-      : [];
-    const metaIds = Array.isArray(task.assigned_users_meta)
-      ? (task.assigned_users_meta
-          .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
-          .filter((v) => v !== null && !isNaN(v as number)) as number[])
-      : [];
-    const allAssignedIds = [...assignedIds, ...metaIds];
-    const currentUserId = Number(currentUser.id);
-    const isAssignee = allAssignedIds.includes(currentUserId);
-    // Enforce assignment at the API boundary; client drag guards are not authorization.
-    this.assertTaskStatusChangeAllowed(task, currentUser, dto.status);
-    const isCreator = Number(task.created_by_id) === currentUserId;
-    const reporterIds = this.getReporterIds(task);
-    const isReporter = reporterIds.includes(currentUserId);
-    const approvers = Array.isArray(task.approval_required_user_ids)
-      ? task.approval_required_user_ids.map((v) => Number(v)).filter((v) => !isNaN(v))
-      : [];
-    const isConfiguredApprover = approvers.includes(currentUserId);
+    
+    // Centralized validation for transition, permissions, mandatory reasons, and overrides
+    const validation = this.validateStatusTransition(
+      task,
+      dto.status,
+      currentUser,
+      dto,
+    );
 
-    if (!perms.canUpdate) {
-      if (!perms.canView || (!isAssignee && !isCreator && !isReporter && !isConfiguredApprover)) {
-        throw new ForbiddenException(
-          "Insufficient permissions to change task status",
-        );
-      }
-    }
-    const workflowType = task.workflow_type;
-    const nextStatus = dto.status;
-    const isApprovalWorkflow =
-      workflowType === TaskWorkflowType.APPROVAL_REQUIRED;
-    const isAdminRole =
-      currentUser.role === UserRole.SUPER_ADMIN ||
-      currentUser.role === UserRole.ADMIN;
-    if (
-      isApprovalWorkflow &&
-      [TaskStatus.CLOSED, TaskStatus.APPROVED, TaskStatus.REJECTED].includes(
-        nextStatus,
-      )
-    ) {
-      if (!perms.canApprove && !isAdminRole && !isCreator && !isReporter && !isConfiguredApprover) {
-        throw new ForbiddenException(
-          "Only approvers, admins, creators, or assigners can update this status",
-        );
-      }
-    }
-    if (
-      nextStatus === TaskStatus.CLOSED &&
-      !perms.canUpdate &&
-      !isAdminRole &&
-      !perms.canApprove &&
-      !isCreator &&
-      !isReporter &&
-      !isConfiguredApprover
-    ) {
-      throw new ForbiddenException("Only authorized staff can close tasks");
-    }
     const oldStatus = task.status;
-    if (nextStatus === TaskStatus.COMPLETED && !dto.force_complete) {
-      const completion = this.getMovCompletionSummary(task);
-      if (completion.incompleteAssigneeCount > 0) {
-        throw new ConflictException({
-          code: "INCOMPLETE_MOV_CONFIRMATION_REQUIRED",
-          message: `${completion.incompleteAssigneeCount} assignees still have incomplete MOVs.`,
-          incomplete_assignee_count: completion.incompleteAssigneeCount,
-        });
-      }
-    }
+    const isApprovalWorkflow =
+      task.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED;
+
     const updated = await this.update(
       id,
-      { status: dto.status } as UpdateTaskDto,
+      {
+        status: dto.status,
+        reason: dto.reason || dto.notes,
+        notes: dto.notes,
+        admin_override: dto.admin_override,
+        force_complete: dto.force_complete,
+      } as any,
       currentUser,
     );
+
+    const transitionReason = dto.reason || dto.notes;
+
     if (
       isApprovalWorkflow &&
       dto.status === TaskStatus.PENDING_APPROVAL &&
-      dto.notes
+      transitionReason
     ) {
       const approval = await this.taskApprovalRepo.findOne({
         where: { task_id: updated.id },
@@ -3849,18 +4017,65 @@ export class TasksService implements OnModuleInit {
           : [];
         const noteEntry = {
           user_id: Number(currentUser.id),
-          note: dto.notes.slice(0, 500),
+          note: transitionReason.slice(0, 500),
           created_at: new Date(),
         };
         approval.submission_note = [...existingNotes, noteEntry];
         await this.taskApprovalRepo.save(approval);
       }
     }
+
+    if (
+      isApprovalWorkflow &&
+      dto.status === TaskStatus.REJECTED &&
+      transitionReason
+    ) {
+      const approval = await this.taskApprovalRepo.findOne({
+        where: { task_id: updated.id },
+      });
+      if (approval) {
+        const existingNotes = Array.isArray(approval.rejected_note)
+          ? approval.rejected_note
+          : [];
+        const noteEntry = {
+          user_id: Number(currentUser.id),
+          note: transitionReason.slice(0, 500),
+          decided_at: new Date(),
+        };
+        approval.rejected_note = [...existingNotes, noteEntry];
+        await this.taskApprovalRepo.save(approval);
+      }
+    }
+
+    if (
+      isApprovalWorkflow &&
+      dto.status === TaskStatus.APPROVED
+    ) {
+      const approval = await this.taskApprovalRepo.findOne({
+        where: { task_id: updated.id },
+      });
+      if (approval) {
+        const existingNotes = Array.isArray(approval.approved_note)
+          ? approval.approved_note
+          : [];
+        const noteEntry = {
+          user_id: Number(currentUser.id),
+          note: (transitionReason || "Approved").slice(0, 500),
+          decided_at: new Date(),
+        };
+        approval.approved_note = [...existingNotes, noteEntry];
+        await this.taskApprovalRepo.save(approval);
+      }
+    }
+
     await this.logActivity(updated, currentUser, "status_transition", {
       from_status: oldStatus,
       to_status: updated.status,
-      notes: dto.notes ? dto.notes.slice(0, 500) : undefined,
+      notes: transitionReason ? transitionReason.slice(0, 500) : undefined,
+      reason: transitionReason,
+      admin_override: validation.isOverride,
     });
+
     const terminalStatuses = [
       TaskStatus.COMPLETED,
       TaskStatus.CLOSED,
@@ -4111,6 +4326,13 @@ export class TasksService implements OnModuleInit {
       if (task.workflow_type !== TaskWorkflowType.APPROVAL_REQUIRED) {
         throw new ConflictException("Task does not require approval");
       }
+      if (task.status !== TaskStatus.PENDING_APPROVAL) {
+        throw new ConflictException("Only tasks in 'pending_approval' status can be approved or rejected.");
+      }
+      const rejectionReason = (dto.reason || dto.note || "").trim();
+      if (!dto.approve && !rejectionReason) {
+        throw new BadRequestException("A mandatory rejection reason is required when rejecting a task.");
+      }
       const approvers = Array.isArray(task.approval_required_user_ids)
         ? task.approval_required_user_ids
             .map((v) => Number(v))
@@ -4169,7 +4391,7 @@ export class TasksService implements OnModuleInit {
         };
       });
 
-      let newStatus = task.status;
+      let newStatus: TaskStatus = task.status;
       if (dto.approve) {
         if (approvers.length > 0) {
           const approverMeta = updatedMeta.filter((e) =>
@@ -4205,7 +4427,6 @@ export class TasksService implements OnModuleInit {
           .filter((n) => Number.isInteger(n) && n > 0);
         task.approved_by_id =
           approvedUserIds.length > 0 ? approvedUserIds : null;
-        task.completed_date = task.completed_date ?? now;
         task.rejected_by_id = null;
       } else if (newStatus === TaskStatus.REJECTED) {
         const rejectedUserIds = updatedMeta
@@ -4218,12 +4439,13 @@ export class TasksService implements OnModuleInit {
       const saved = await this.taskRepo.save(task);
       await this.setTaskApprovalMeta(task.id, normalizedMetaForSave);
       await this.upsertTaskApprovalState(saved);
-      if (dto.note) {
+      const approvalNote = (dto.reason || dto.note || "").trim();
+      if (approvalNote) {
         const approvalRecord = await this.taskApprovalRepo.findOne({
           where: { task_id: task.id },
         });
         if (approvalRecord) {
-          const trimmed = dto.note.slice(0, 500);
+          const trimmed = approvalNote.slice(0, 500);
           if (dto.approve) {
             const existingApproved = Array.isArray(approvalRecord.approved_note)
               ? approvalRecord.approved_note
@@ -4252,7 +4474,7 @@ export class TasksService implements OnModuleInit {
         saved,
         currentUser,
         dto.approve ? "approved" : "rejected",
-        { note: dto.note },
+        { note: approvalNote, reason: approvalNote },
       );
       await this.sendStatusUpdateNotifications(
         saved,
@@ -4273,9 +4495,7 @@ export class TasksService implements OnModuleInit {
       this.assertTaskStatusChangeAllowed(task, currentUser, TaskStatus.COMPLETED);
       const oldStatus = task.status;
       task.status = TaskStatus.COMPLETED;
-      if (task.workflow_type === TaskWorkflowType.STANDARD) {
-        task.completed_date = task.completed_date ?? new Date();
-      }
+      task.completed_date = task.completed_date ?? new Date();
       const saved = await this.taskRepo.save(task);
       await this.deleteDueRemindersForTask(saved.id);
       await this.logActivity(saved, currentUser, "completed", {});
@@ -4660,7 +4880,9 @@ export class TasksService implements OnModuleInit {
     const completion = this.getMovCompletionSummary(task, mergedNotes);
     let nextStatus = oldStatus;
     if (completion.hasAssignedMovs && completion.allMovsCompleted) {
-      nextStatus = TaskStatus.COMPLETED;
+      if (task.workflow_type === TaskWorkflowType.STANDARD) {
+        nextStatus = TaskStatus.COMPLETED;
+      }
     }
     if (
       value > 0 &&

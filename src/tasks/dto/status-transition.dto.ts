@@ -10,6 +10,14 @@ export class StatusTransitionDto {
   notes?: string;
 
   @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @IsOptional()
   @IsBoolean()
   force_complete?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  admin_override?: boolean;
 }
