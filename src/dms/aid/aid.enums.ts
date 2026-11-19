@@ -181,6 +181,11 @@ export enum AidApplicationStatus {
   MANAGER_REVIEW = "manager_review",
   REJECTED = "rejected",
   /**
+   * Verification stopped — beneficiary / case is outside the service area.
+   * Terminal for the verification pipeline (shown on applications list).
+   */
+  OUT_OF_AREA = "out_of_area",
+  /**
    * Program manager forwarded — awaiting MEAL approval
    * before the case can go to CEO.
    */

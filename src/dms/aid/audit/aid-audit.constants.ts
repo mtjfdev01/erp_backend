@@ -6,6 +6,7 @@ export const AID_AUDIT_ACTIONS = {
   DRAFT_APPROVED: "draft_approved",
   ASSIGNEE_CHANGED: "assignee_changed",
   MARKED_INCOMPLETE: "marked_incomplete",
+  MARKED_OUT_OF_AREA: "marked_out_of_area",
   RESUMED: "resumed",
   REJECTED: "rejected",
   VERIFIED: "verified",
