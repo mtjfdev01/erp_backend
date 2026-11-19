@@ -117,6 +117,10 @@ export class CreateTaskDto {
   approval_required_user_ids?: number[];
 
   @IsOptional()
+  @IsDateString()
+  approval_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   mov_checklist?: {
     text: string;

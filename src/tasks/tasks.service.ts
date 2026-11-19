@@ -281,6 +281,40 @@ export class TasksService implements OnModuleInit {
         extraMetadata: { from_status: oldStatus, to_status: newStatus },
         excludeUserIds: stakeholderIds, // already notified above if also stakeholder
       });
+      await this.sendApprovalRequestEmailsToApprovers(task, actor);
+    }
+  }
+
+  private async sendApprovalRequestEmailsToApprovers(
+    task: Task,
+    submitter?: User | null,
+  ): Promise<void> {
+    try {
+      const approverIds = this.normalizeUserIds(task.approval_required_user_ids);
+      if (!approverIds.length) return;
+
+      const approvers = await this.userRepo.findBy({
+        id: In(approverIds),
+      });
+
+      const sentEmails = new Set<string>();
+
+      for (const approver of approvers) {
+        if (!approver?.email) continue;
+        const normalizedEmail = approver.email.trim().toLowerCase();
+        if (sentEmails.has(normalizedEmail)) continue;
+
+        sentEmails.add(normalizedEmail);
+        await this.emailService.sendTaskApprovalRequestEmail(
+          approver,
+          task,
+          submitter,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to send task approval request emails for task ${task.id}: ${err?.message || err}`,
+      );
     }
   }
 
@@ -896,6 +930,7 @@ export class TasksService implements OnModuleInit {
       task.approval_required_user_ids ??
       record.approval_required_user_ids ??
       null;
+    record.approval_due_date = task.approval_due_date ?? null;
     record.approved_by_id =
       task.approved_by_id ?? record.approved_by_id ?? null;
     record.rejected_by_id =
@@ -1523,10 +1558,18 @@ export class TasksService implements OnModuleInit {
         )
           ? dto.approval_required_user_ids
           : null,
+        approval_due_date:
+          dto.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED &&
+          dto.approval_due_date
+            ? new Date(dto.approval_due_date)
+            : null,
         mov_items: movItemsFromDto.length > 0 ? movItemsFromDto : null,
       });
 
       const saved = await this.taskRepo.save(task);
+      if (saved.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
+        await this.upsertTaskApprovalState(saved);
+      }
       await this.logActivity(saved, currentUser, "created", {
         title: saved.title,
       });
@@ -3888,6 +3931,12 @@ export class TasksService implements OnModuleInit {
         )
           ? dto.approval_required_user_ids
           : task.approval_required_user_ids,
+        approval_due_date:
+          (dto.workflow_type && dto.workflow_type !== TaskWorkflowType.APPROVAL_REQUIRED)
+            ? null
+            : dto.approval_due_date !== undefined
+              ? (dto.approval_due_date ? new Date(dto.approval_due_date) : null)
+              : task.approval_due_date,
         approved_by_id: updatedApprovedByIds,
         rejected_by_id: updatedRejectedByIds,
         updated_by_id: currentUser?.id ?? task.updated_by_id,

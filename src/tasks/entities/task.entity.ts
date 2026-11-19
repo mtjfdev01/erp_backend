@@ -105,6 +105,9 @@ export class Task {
   due_date: Date;
 
   @Column({ type: "date", nullable: true })
+  approval_due_date: Date;
+
+  @Column({ type: "date", nullable: true })
   completed_date: Date;
 
   @Column({ type: "int", array: true, nullable: true })

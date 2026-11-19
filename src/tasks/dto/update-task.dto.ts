@@ -119,6 +119,10 @@ export class UpdateTaskDto {
   approval_required_user_ids?: number[];
 
   @IsOptional()
+  @IsDateString()
+  approval_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   mov_items?: string[];
