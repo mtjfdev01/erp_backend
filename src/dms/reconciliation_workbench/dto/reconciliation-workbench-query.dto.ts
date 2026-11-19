@@ -3,8 +3,8 @@ import { Type } from "class-transformer";
 
 export class ReconciliationWorkbenchQueryDto {
   @IsOptional()
-  @IsIn(["all", "online", "offline", "donation_box", "recurring"])
-  tab?: "all" | "online" | "offline" | "donation_box" | "recurring" = "all";
+  @IsIn(["all", "offline", "donation_box", "recurring", "in_kind"])
+  tab?: "all" | "offline" | "donation_box" | "recurring" | "in_kind" = "all";
 
   @IsOptional()
   @IsIn(["installments", "subscriptions"])

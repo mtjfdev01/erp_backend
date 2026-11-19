@@ -29,6 +29,7 @@ export const RECONCILIATION_WORKBENCH_ACCESS_GUARD = [
   "fund_raising.offline_donations.reconciler",
   "fund_raising.donation_box_donations.reconciler",
   "fund_raising.recurring_donations.reconciler",
+  "fund_raising.in_kind_donations.reconciler",
 ];
 
 @Controller("reconciliation-workbench")

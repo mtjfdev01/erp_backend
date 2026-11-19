@@ -136,12 +136,12 @@ export class ManagementOverviewService {
           COUNT(*)::int AS all_plans,
           COALESCE(SUM(
             CASE WHEN LOWER(COALESCE(status, '')) = 'active'
-              THEN COALESCE(amount, paid_amount, 0) ELSE 0 END
+              THEN COALESCE(amount, 0) ELSE 0 END
           ), 0) AS active_amount,
-          COALESCE(SUM(COALESCE(amount, paid_amount, 0)), 0) AS committed_amount,
+          COALESCE(SUM(COALESCE(amount, 0)), 0) AS committed_amount,
           COUNT(*) FILTER (
             WHERE LOWER(COALESCE(status, '')) = 'active'
-              AND COALESCE(paid_amount, 0) > 0
+              AND COALESCE(amount, 0) > 0
           )::int AS paying_plans
         FROM recurring_donations
         WHERE is_archived = false
@@ -156,12 +156,12 @@ export class ManagementOverviewService {
             COUNT(*)::int AS all_plans,
             COALESCE(SUM(
               CASE WHEN LOWER(COALESCE(status, '')) = 'active'
-                THEN COALESCE(amount, paid_amount, 0) ELSE 0 END
+                THEN COALESCE(amount, 0) ELSE 0 END
             ), 0) AS active_amount,
-            COALESCE(SUM(COALESCE(amount, paid_amount, 0)), 0) AS committed_amount,
+            COALESCE(SUM(COALESCE(amount, 0)), 0) AS committed_amount,
             COUNT(*) FILTER (
               WHERE LOWER(COALESCE(status, '')) = 'active'
-                AND COALESCE(paid_amount, 0) > 0
+                AND COALESCE(amount, 0) > 0
             )::int AS paying_plans
           FROM recurring_donations
           WHERE is_archived = false

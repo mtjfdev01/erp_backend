@@ -3,8 +3,21 @@ import { Type } from "class-transformer";
 
 export class ReconciliationWorkbenchActionDto {
   @IsNotEmpty()
-  @IsIn(["offline", "online", "donation_box", "recurring_subscription", "recurring_installment"])
-  type: "offline" | "online" | "donation_box" | "recurring_subscription" | "recurring_installment";
+  @IsIn([
+    "offline",
+    "online",
+    "donation_box",
+    "recurring_subscription",
+    "recurring_installment",
+    "in_kind",
+  ])
+  type:
+    | "offline"
+    | "online"
+    | "donation_box"
+    | "recurring_subscription"
+    | "recurring_installment"
+    | "in_kind";
 
   @IsNotEmpty()
   @IsNumber()
@@ -21,8 +34,21 @@ export class ReconciliationWorkbenchActionDto {
 
 export class BulkActionItemDto {
   @IsNotEmpty()
-  @IsIn(["offline", "online", "donation_box", "recurring_subscription", "recurring_installment"])
-  type: "offline" | "online" | "donation_box" | "recurring_subscription" | "recurring_installment";
+  @IsIn([
+    "offline",
+    "online",
+    "donation_box",
+    "recurring_subscription",
+    "recurring_installment",
+    "in_kind",
+  ])
+  type:
+    | "offline"
+    | "online"
+    | "donation_box"
+    | "recurring_subscription"
+    | "recurring_installment"
+    | "in_kind";
 
   @IsNotEmpty()
   @IsNumber()

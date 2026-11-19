@@ -23,10 +23,17 @@ import {
   ReconciliationWorkbenchActionDto,
   BulkActionItemDto,
 } from "./dto/reconciliation-workbench-action.dto";
+import { reconciliationStamp } from "./reconciliation-stamp.util";
 
 export interface NormalizedWorkbenchItem {
   id: number;
-  type: "offline" | "online" | "donation_box" | "recurring_subscription" | "recurring_installment";
+  type:
+    | "offline"
+    | "online"
+    | "donation_box"
+    | "recurring_subscription"
+    | "recurring_installment"
+    | "in_kind";
   reference: string;
   logged_at: string;
   created_at: Date | string;
@@ -60,6 +67,17 @@ export interface WorkbenchKpiData {
   age_over_15: { count: number; total_amount: number };
 }
 
+export interface WorkbenchChannelStat {
+  id: string;
+  label: string;
+  pending: number;
+  completed: number;
+  rejected: number;
+  pending_amount: number;
+  completed_amount: number;
+  rejected_amount: number;
+}
+
 @Injectable()
 export class ReconciliationWorkbenchService {
   private readonly logger = new Logger(ReconciliationWorkbenchService.name);
@@ -90,6 +108,7 @@ export class ReconciliationWorkbenchService {
     currentUser: any,
   ): Promise<{
     kpis: WorkbenchKpiData;
+    channel_breakdown: WorkbenchChannelStat[];
     items: NormalizedWorkbenchItem[];
     pagination: {
       page: number;
@@ -109,23 +128,27 @@ export class ReconciliationWorkbenchService {
     const allPendingItems: NormalizedWorkbenchItem[] = [];
 
     const shouldLoadOffline = tab === "all" || tab === "offline";
-    const shouldLoadOnline = tab === "all" || tab === "online";
     const shouldLoadBox = tab === "all" || tab === "donation_box";
     const shouldLoadRecurring = tab === "all" || tab === "recurring";
+    const shouldLoadInKind = tab === "all" || tab === "in_kind";
 
     if (shouldLoadOffline) {
       const offlineItems = await this.fetchOfflineDonations(search, query.start_date, query.end_date);
       allPendingItems.push(...offlineItems);
     }
 
-    if (shouldLoadOnline) {
-      const onlineItems = await this.fetchOnlineDonations(search, query.start_date, query.end_date);
-      allPendingItems.push(...onlineItems);
-    }
-
     if (shouldLoadBox) {
       const boxItems = await this.fetchDonationBoxDonations(search, query.start_date, query.end_date);
       allPendingItems.push(...boxItems);
+    }
+
+    if (shouldLoadInKind) {
+      const inKindItems = await this.fetchInKindDonations(
+        search,
+        query.start_date,
+        query.end_date,
+      );
+      allPendingItems.push(...inKindItems);
     }
 
     if (shouldLoadRecurring) {
@@ -196,7 +219,10 @@ export class ReconciliationWorkbenchService {
       filteredItems = allPendingItems.filter((i) => i.age_days > 15);
     }
 
-    // 4. Paginate
+    // 4. Channel segregation (independent of age/tab list filters)
+    const channel_breakdown = await this.fetchChannelBreakdown();
+
+    // 5. Paginate
     const total = filteredItems.length;
     const totalPages = Math.ceil(total / limit) || 1;
     const startIndex = (page - 1) * limit;
@@ -204,6 +230,7 @@ export class ReconciliationWorkbenchService {
 
     return {
       kpis,
+      channel_breakdown,
       items: paginatedItems,
       pagination: {
         page,
@@ -217,6 +244,144 @@ export class ReconciliationWorkbenchService {
   private incrementOver15(kpis: WorkbenchKpiData, amt: number) {
     kpis.age_over_15.count += 1;
     kpis.age_over_15.total_amount += amt;
+  }
+
+  /**
+   * Pending / completed / rejected counts by channel (offline / in-kind / recurring).
+   * Rejected = reconciliation stamp only (reconciled_status = 'rejected'),
+   * not donation/collection failed/cancelled outcomes.
+   * Additive only — does not affect list filtering or aging KPIs.
+   */
+  private async fetchChannelBreakdown(): Promise<WorkbenchChannelStat[]> {
+    const rows: Array<{
+      channel: string;
+      pending_cnt: string | number;
+      completed_cnt: string | number;
+      rejected_cnt: string | number;
+      pending_amount: string | number;
+      completed_amount: string | number;
+      rejected_amount: string | number;
+    }> = await this.dataSource.query(`
+      SELECT
+        channel,
+        pending_cnt,
+        completed_cnt,
+        rejected_cnt,
+        pending_amount,
+        completed_amount,
+        rejected_amount
+      FROM (
+        SELECT
+          'offline'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'completed', 'success', 'paid', 'verified', 'deposited'
+            )
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'completed', 'success', 'paid', 'verified', 'deposited'
+            )
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM donations
+        WHERE (is_archived IS FALSE OR is_archived IS NULL)
+          AND LOWER(COALESCE(donation_source, '')) != 'website'
+          AND LOWER(COALESCE(donation_method, '')) != 'in_kind'
+
+        UNION ALL
+
+        SELECT
+          'in_kind'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'completed', 'success', 'paid', 'verified', 'deposited'
+            )
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'completed', 'success', 'paid', 'verified', 'deposited'
+            )
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM donations
+        WHERE (is_archived IS FALSE OR is_archived IS NULL)
+          AND LOWER(COALESCE(donation_method, '')) = 'in_kind'
+
+        UNION ALL
+
+        SELECT
+          'recurring'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'active', 'completed', 'paid', 'success', 'verified'
+            )
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'active', 'completed', 'paid', 'success', 'verified'
+            )
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM recurring_donations
+        WHERE (is_archived IS FALSE OR is_archived IS NULL)
+      ) channel_stats
+    `);
+
+    const labels: Record<string, string> = {
+      offline: "Offline",
+      in_kind: "In Kind",
+      recurring: "Recurring",
+    };
+    const order = ["offline", "in_kind", "recurring"];
+    const map = new Map((rows || []).map((r) => [String(r.channel), r]));
+
+    return order.map((id) => {
+      const row = map.get(id);
+      return {
+        id,
+        label: labels[id] || id,
+        pending: Number(row?.pending_cnt) || 0,
+        completed: Number(row?.completed_cnt) || 0,
+        rejected: Number(row?.rejected_cnt) || 0,
+        pending_amount: Number(row?.pending_amount) || 0,
+        completed_amount: Number(row?.completed_amount) || 0,
+        rejected_amount: Number(row?.rejected_amount) || 0,
+      };
+    });
   }
 
   private calculateAgeDays(dateVal: Date | string | null | undefined): number {
@@ -337,9 +502,9 @@ export class ReconciliationWorkbenchService {
   }
 
   /**
-   * Fetch Pending Online Donations
+   * Fetch Pending In-Kind Donations (donation_method = in_kind)
    */
-  private async fetchOnlineDonations(
+  private async fetchInKindDonations(
     search?: string,
     startDate?: string,
     endDate?: string,
@@ -351,7 +516,9 @@ export class ReconciliationWorkbenchService {
       .leftJoinAndSelect("d.created_by", "creator")
       .where("LOWER(COALESCE(d.status, '')) = :st", { st: "pending" })
       .andWhere("(d.is_archived IS FALSE OR d.is_archived IS NULL)")
-      .andWhere("d.donation_source = 'website'");
+      .andWhere("LOWER(COALESCE(d.donation_method, '')) = :method", {
+        method: "in_kind",
+      });
 
     if (startDate) {
       qb.andWhere("d.created_at >= :start", { start: startDate });
@@ -362,7 +529,7 @@ export class ReconciliationWorkbenchService {
 
     if (search) {
       qb.andWhere(
-        "(donor.name ILIKE :s OR donor.phone ILIKE :s OR donor.email ILIKE :s OR d.orderId ILIKE :s OR CAST(d.id AS TEXT) ILIKE :s)",
+        "(donor.name ILIKE :s OR donor.phone ILIKE :s OR donor.email ILIKE :s OR d.cheque_number ILIKE :s OR d.orderId ILIKE :s OR CAST(d.id AS TEXT) ILIKE :s)",
         { s: `%${search}%` },
       );
     }
@@ -370,12 +537,13 @@ export class ReconciliationWorkbenchService {
     const rows = await qb.getMany();
 
     return rows.map((r) => {
-      const donorName = r.donor?.name || "Online Donor";
+      const donorName = r.donor?.name || "Anonymous Donor";
       const donorPhone = r.donor?.phone || "";
       const donorEmail = r.donor?.email || "";
-      const contact = [donorPhone, donorEmail].filter(Boolean).join(" • ") || "—";
+      const contact =
+        [donorPhone, donorEmail].filter(Boolean).join(" • ") || "—";
       const ageDays = this.calculateAgeDays(r.created_at);
-      const createdByName = r.created_by ? this.formatUserName(r.created_by) : "Website / Online";
+      const createdByName = this.formatUserName(r.created_by);
 
       const attachments: NormalizedWorkbenchItem["attachments"] = [];
       if (r.attachments && r.attachments.length > 0) {
@@ -391,18 +559,25 @@ export class ReconciliationWorkbenchService {
         }
       }
 
-      const bankRef = [
-        r.bank_name || r.bank || "Online Gateway",
-        r.orderId ? `Order: ${r.orderId}` : r.tran_seq_no ? `Seq: ${r.tran_seq_no}` : null,
-      ]
-        .filter(Boolean)
-        .join(" - ") || "Online Transaction";
+      const bankRef =
+        [
+          r.bank_name || r.bank,
+          r.cheque_number
+            ? `Cheque: ${r.cheque_number}`
+            : r.orderId
+              ? `Ref: ${r.orderId}`
+              : null,
+        ]
+          .filter(Boolean)
+          .join(" - ") || "In-Kind Donation";
 
       return {
         id: r.id,
-        type: "online",
+        type: "in_kind" as const,
         reference: `DN-${r.id}`,
-        logged_at: r.created_at ? new Date(r.created_at).toISOString().split("T")[0] : "",
+        logged_at: r.created_at
+          ? new Date(r.created_at).toISOString().split("T")[0]
+          : "",
         created_at: r.created_at,
         donor_id: r.donor_id || r.donor?.id || null,
         donor_name: donorName,
@@ -411,7 +586,7 @@ export class ReconciliationWorkbenchService {
         donor_email: donorEmail,
         amount: Number(r.amount) || 0,
         currency: r.currency || "PKR",
-        context_info: r.donation_method ? r.donation_method.toUpperCase() : "Online Donation",
+        context_info: "IN KIND",
         bank_reference: bankRef,
         created_by_name: createdByName,
         attachments,
@@ -426,8 +601,10 @@ export class ReconciliationWorkbenchService {
           donation_method: r.donation_method,
           donation_source: r.donation_source,
           bank_name: r.bank_name || r.bank,
+          cheque_number: r.cheque_number,
           orderId: r.orderId,
           note: r.note,
+          notes: r.note,
           status: r.status,
           created_by_name: createdByName,
           created_at: r.created_at,
@@ -448,7 +625,8 @@ export class ReconciliationWorkbenchService {
       .createQueryBuilder("dbd")
       .leftJoinAndSelect("dbd.donation_box", "box")
       .leftJoinAndSelect("dbd.created_by", "creator")
-      .where("LOWER(COALESCE(dbd.status, '')) = :st", { st: CollectionStatus.PENDING });
+      // Compare enum directly — COALESCE(..., '') is invalid for PG enums
+      .where("dbd.status = :st", { st: CollectionStatus.PENDING });
 
     if (startDate) {
       qb.andWhere("dbd.created_at >= :start", { start: startDate });
@@ -835,7 +1013,7 @@ export class ReconciliationWorkbenchService {
     const { type, id, notes } = dto;
     const userId = currentUser?.id ? Number(currentUser.id) : null;
 
-    if (type === "offline" || type === "online") {
+    if (type === "offline" || type === "online" || type === "in_kind") {
       const result = await this.donationsService.updateStatusAction(
         id,
         "completed",
@@ -927,10 +1105,11 @@ export class ReconciliationWorkbenchService {
     const rejectionReason = reason || notes || "Rejected in reconciliation workbench";
     const userId = currentUser?.id ? Number(currentUser.id) : null;
 
-    if (type === "offline" || type === "online") {
+    if (type === "offline" || type === "online" || type === "in_kind") {
+      // status=rejected (not failed) + reconciled_status stamped inside updateStatusAction
       const result = await this.donationsService.updateStatusAction(
         id,
-        "failed",
+        "rejected",
         currentUser,
       );
       return {
@@ -944,7 +1123,7 @@ export class ReconciliationWorkbenchService {
       const result = await this.donationBoxDonationService.update(
         id,
         {
-          status: CollectionStatus.CANCELLED,
+          status: CollectionStatus.REJECTED,
           discrepancy_notes: rejectionReason,
         } as any,
         userId || undefined,
@@ -958,29 +1137,25 @@ export class ReconciliationWorkbenchService {
 
     if (type === "recurring_installment") {
       await this.recurringRepo.update(id, {
-        status: "failed",
-        reconciled_by: userId,
-        reconciled_at: new Date(),
-        reconciled_status: "rejected",
+        status: "rejected",
+        ...reconciliationStamp(userId, "rejected"),
       });
       return {
         success: true,
-        message: "Recurring installment marked as failed",
-        data: { id, status: "failed" },
+        message: "Recurring installment rejected in reconciliation",
+        data: { id, status: "rejected", reconciled_status: "rejected" },
       };
     }
 
     if (type === "recurring_subscription") {
       await this.recurringRepo.update(id, {
-        status: "cancelled",
-        reconciled_by: userId,
-        reconciled_at: new Date(),
-        reconciled_status: "rejected",
+        status: "rejected",
+        ...reconciliationStamp(userId, "rejected"),
       });
       return {
         success: true,
-        message: "Recurring subscription cancelled",
-        data: { id, status: "cancelled" },
+        message: "Recurring subscription rejected in reconciliation",
+        data: { id, status: "rejected", reconciled_status: "rejected" },
       };
     }
 
