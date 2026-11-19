@@ -607,36 +607,36 @@ export class TasksService implements OnModuleInit {
 
     // C. Approved to Completed (APPROVED -> COMPLETED)
     if (oldStatus === TaskStatus.APPROVED && nextStatus === TaskStatus.COMPLETED) {
-      if (!isAssignee && !isApprover && !isManagement) {
+      if (!isAssignee && !isAdmin) {
         throw new ForbiddenException(
-          "Only assignees, approvers, creators, or administrators can move an approved task to completed.",
+          "Only the assigned user or an administrator can move an approved task to completed.",
         );
       }
     }
 
     // D. In Progress to Completed in Standard Workflow
     if (oldStatus === TaskStatus.IN_PROGRESS && nextStatus === TaskStatus.COMPLETED) {
-      if (!isAssignee && !isManagement) {
+      if (!isAssignee && !isAdmin) {
         throw new ForbiddenException(
-          "Only assignees or task managers can mark tasks as completed.",
+          "Only the assigned user or an administrator can mark tasks as completed.",
         );
       }
     }
 
     // E. Rejection to In Progress (REJECTED -> IN_PROGRESS)
     if (oldStatus === TaskStatus.REJECTED && nextStatus === TaskStatus.IN_PROGRESS) {
-      if (!isAssignee && !isApprover && !isManagement) {
+      if (!isAssignee && !isAdmin) {
         throw new ForbiddenException(
-          "Only assignees or authorized personnel can return a rejected task to In Progress.",
+          "Only the assigned user or an administrator can return a rejected task to In Progress.",
         );
       }
     }
 
     // F. Blocking (IN_PROGRESS -> BLOCKED)
     if (nextStatus === TaskStatus.BLOCKED) {
-      if (!isAssignee && !isManagement) {
+      if (!isAssignee && !isAdmin) {
         throw new ForbiddenException(
-          "Only assignees or task managers can block this task.",
+          "Only the assigned user or an administrator can block this task.",
         );
       }
       if (!rawReason) {
@@ -648,9 +648,9 @@ export class TasksService implements OnModuleInit {
 
     // G. Unblocking (BLOCKED -> IN_PROGRESS)
     if (oldStatus === TaskStatus.BLOCKED && nextStatus === TaskStatus.IN_PROGRESS) {
-      if (!isAssignee && !isManagement) {
+      if (!isAssignee && !isAdmin) {
         throw new ForbiddenException(
-          "Only authorized assignees, creators, or managers can unblock this task.",
+          "Only the assigned user or an administrator can unblock this task.",
         );
       }
     }
