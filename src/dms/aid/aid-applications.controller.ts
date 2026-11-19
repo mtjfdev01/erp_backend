@@ -44,6 +44,7 @@ import {
   ManagerForwardAidApplicationDto,
   MealForwardAidApplicationDto,
   MarkIncompleteAidApplicationDto,
+  MarkOutOfAreaAidApplicationDto,
   RejectAidApplicationDto,
   SetAidAttachmentMissingDto,
   SetAidMissingDocumentsDto,
@@ -445,6 +446,26 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Application marked incomplete",
+      data,
+    });
+  }
+
+  @Post(":id/out-of-area")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async markOutOfArea(
+    @Param("id") id: string,
+    @Body() dto: MarkOutOfAreaAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.markOutOfArea(
+      Number(id),
+      dto || {},
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Application marked Out of Area",
       data,
     });
   }

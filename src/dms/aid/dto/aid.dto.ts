@@ -1011,6 +1011,14 @@ export class MarkIncompleteAidApplicationDto {
   reason?: string | null;
 }
 
+/** Skip verification — case is outside the service area. */
+export class MarkOutOfAreaAidApplicationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reason?: string | null;
+}
+
 /** Field Process → verification_completed (checklist required; recommendation not). */
 export class CompleteVerificationAidApplicationDto {
   @IsOptional()

@@ -1085,6 +1085,7 @@ export class AidApplicationsService {
       case AidApplicationStatus.DELIVERED:
         return "approved";
       case AidApplicationStatus.REJECTED:
+      case AidApplicationStatus.OUT_OF_AREA:
         return "returned";
       default:
         return "submitted";
@@ -2708,6 +2709,7 @@ export class AidApplicationsService {
         AidApplicationStatus.SUCCESSFUL,
         AidApplicationStatus.DELIVERED,
         AidApplicationStatus.REJECTED,
+        AidApplicationStatus.OUT_OF_AREA,
       ].includes(app.status)
     ) {
       throw new BadRequestException(
@@ -2791,6 +2793,62 @@ export class AidApplicationsService {
     return this.findOne(id);
   }
 
+  /**
+   * Skip verification — mark Out of Area and leave the active pipeline.
+   * Allowed from verification / review statuses (same window as Mark Incomplete).
+   */
+  async markOutOfArea(
+    id: number,
+    dto: { reason?: string | null },
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      [
+        AidApplicationStatus.DRAFT,
+        AidApplicationStatus.INCOMPLETE,
+        AidApplicationStatus.INCOMPLETE_DOCS,
+        AidApplicationStatus.SUCCESSFUL,
+        AidApplicationStatus.DELIVERED,
+        AidApplicationStatus.REJECTED,
+        AidApplicationStatus.OUT_OF_AREA,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "This application cannot be marked Out of Area in its current status",
+      );
+    }
+    const reason = String(dto?.reason || "").trim();
+    const prevStatus = app.status;
+    app.status = AidApplicationStatus.OUT_OF_AREA;
+    if (reason) {
+      app.verification_notes = reason;
+    }
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.MARKED_OUT_OF_AREA,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        ...(reason
+          ? [
+              {
+                field: "verification_notes",
+                old_value: null,
+                new_value: reason,
+              } as AidAuditChange,
+            ]
+          : []),
+      ],
+    });
+    return this.findOne(id);
+  }
+
   async reject(id: number, dto: RejectAidApplicationDto, user?: User) {
     const app = await this.appRepo.findOne({ where: { id, is_archived: false } });
     if (!app) throw new NotFoundException(`Application #${id} not found`);
@@ -2799,8 +2857,16 @@ export class AidApplicationsService {
         "Approve or edit the draft instead of rejecting it from verification",
       );
     }
-    if (app.status === AidApplicationStatus.SUCCESSFUL || app.status === AidApplicationStatus.DELIVERED) {
+    if (
+      app.status === AidApplicationStatus.SUCCESSFUL ||
+      app.status === AidApplicationStatus.DELIVERED
+    ) {
       throw new BadRequestException("Cannot reject after success");
+    }
+    if (app.status === AidApplicationStatus.OUT_OF_AREA) {
+      throw new BadRequestException(
+        "Application is already marked Out of Area",
+      );
     }
     const reason = String(dto.rejection_reason || "").trim();
     if (reason.length < 2) {
