@@ -8,6 +8,8 @@ export enum CollectionStatus {
   VERIFIED = "verified",
   DEPOSITED = "deposited",
   CANCELLED = "cancelled",
+  /** Rejected in reconciliation workbench (distinct from cancelled). */
+  REJECTED = "rejected",
 }
 
 export enum PaymentMethod {

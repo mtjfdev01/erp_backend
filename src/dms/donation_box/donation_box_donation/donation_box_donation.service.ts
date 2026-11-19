@@ -786,7 +786,8 @@ export class DonationBoxDonationService {
           nextStatus === "verified" ||
           nextStatus === "deposited" ||
           nextStatus === "cancelled" ||
-          nextStatus === "canceled"
+          nextStatus === "canceled" ||
+          nextStatus === "rejected"
         ) {
           patch.reconciled_by = auditUserId ?? null;
           patch.reconciled_at = new Date();

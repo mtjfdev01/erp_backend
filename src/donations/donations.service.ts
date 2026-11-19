@@ -4632,7 +4632,9 @@ export class DonationsService {
             review_action:
               String(newStatus).toLowerCase() === "completed"
                 ? "approve"
-                : String(newStatus).toLowerCase() === "failed"
+                : ["failed", "rejected", "cancelled", "canceled"].includes(
+                      String(newStatus).toLowerCase(),
+                    )
                   ? "reject"
                   : "status_change",
           },

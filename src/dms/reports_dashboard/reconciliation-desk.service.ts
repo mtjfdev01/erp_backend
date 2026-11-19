@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import {
+  COMPLETED_DONATION_STATUSES,
   FAILED_DONATION_STATUSES,
   PENDING_DONATION_STATUSES,
   formatCount,
@@ -35,6 +36,132 @@ export class ReconciliationDeskService {
       day: "numeric",
       month: "short",
       year: "numeric",
+    });
+    const completedIn = COMPLETED_DONATION_STATUSES.map((s) => `'${s}'`).join(
+      ",",
+    );
+
+    // Channel segregation: offline / in-kind / recurring
+    // Rejected = reconciliation stamp only (reconciled_status), not failed/cancelled outcomes
+    const channelRows = await this.q(`
+      SELECT
+        channel,
+        pending_cnt,
+        completed_cnt,
+        rejected_cnt,
+        pending_amount,
+        completed_amount,
+        rejected_amount
+      FROM (
+        SELECT
+          'offline'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${pendingIn})
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${completedIn})
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${pendingIn})
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${completedIn})
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM donations
+        WHERE is_archived = false
+          AND LOWER(COALESCE(donation_source, '')) != 'website'
+          AND LOWER(COALESCE(donation_method, '')) != 'in_kind'
+
+        UNION ALL
+
+        SELECT
+          'in_kind'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${pendingIn})
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${completedIn})
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${pendingIn})
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (${completedIn})
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(paid_amount, amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM donations
+        WHERE is_archived = false
+          AND LOWER(COALESCE(donation_method, '')) = 'in_kind'
+
+        UNION ALL
+
+        SELECT
+          'recurring'::text AS channel,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          )::int AS pending_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'active', 'completed', 'paid', 'success', 'verified'
+            )
+          )::int AS completed_cnt,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          )::int AS rejected_cnt,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) = 'pending'
+          ), 0) AS pending_amount,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(status, '')) IN (
+              'active', 'completed', 'paid', 'success', 'verified'
+            )
+          ), 0) AS completed_amount,
+          COALESCE(SUM(COALESCE(amount, 0)) FILTER (
+            WHERE LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+          ), 0) AS rejected_amount
+        FROM recurring_donations
+        WHERE is_archived = false
+      ) channel_stats
+    `);
+
+    const channelLabels: Record<string, string> = {
+      offline: "Offline",
+      in_kind: "In Kind",
+      recurring: "Recurring",
+    };
+    const channelOrder = ["offline", "in_kind", "recurring"];
+    const channelMap = new Map(
+      (channelRows || []).map((r) => [String(r.channel), r]),
+    );
+    const channelBreakdownItems = channelOrder.map((id) => {
+      const row = channelMap.get(id) || {};
+      return {
+        id,
+        label: channelLabels[id] || id,
+        pending: toNumber(row.pending_cnt),
+        completed: toNumber(row.completed_cnt),
+        rejected: toNumber(row.rejected_cnt),
+        pending_amount_formatted: formatPkrCompact(
+          toNumber(row.pending_amount),
+        ),
+        completed_amount_formatted: formatPkrCompact(
+          toNumber(row.completed_amount),
+        ),
+        rejected_amount_formatted: formatPkrCompact(
+          toNumber(row.rejected_amount),
+        ),
+      };
     });
 
     // Pending donations (online + offline)
@@ -87,13 +214,13 @@ export class ReconciliationDeskService {
         COUNT(*) FILTER (WHERE created_at < NOW() - INTERVAL '31 days')::int AS age_30_plus
       FROM donation_box_donations
       WHERE is_archived = false
-        AND LOWER(COALESCE(status, '')) = 'pending'
+        AND status = 'pending'
     `);
 
     const recurringPending = await this.q(`
       SELECT
         COUNT(*)::int AS cnt,
-        COALESCE(SUM(COALESCE(amount, paid_amount, 0)), 0) AS total,
+        COALESCE(SUM(COALESCE(amount, 0)), 0) AS total,
         COUNT(*) FILTER (WHERE created_at < NOW() - INTERVAL '7 days')::int AS older_7
       FROM recurring_donations
       WHERE is_archived = false
@@ -124,7 +251,7 @@ export class ReconciliationDeskService {
         ) + (
           SELECT COUNT(*)::int FROM donation_box_donations
           WHERE is_archived = false
-            AND LOWER(COALESCE(status, '')) IN ('verified', 'deposited')
+            AND status IN ('verified', 'deposited')
             AND DATE(COALESCE(verified_at, updated_at, created_at)) = CURRENT_DATE
         ) AS cnt,
         (
@@ -135,25 +262,33 @@ export class ReconciliationDeskService {
         ) + (
           SELECT COALESCE(SUM(COALESCE(collection_amount, 0)), 0) FROM donation_box_donations
           WHERE is_archived = false
-            AND LOWER(COALESCE(status, '')) IN ('verified', 'deposited')
+            AND status IN ('verified', 'deposited')
             AND DATE(COALESCE(verified_at, updated_at, created_at)) = CURRENT_DATE
         ) AS total
     `);
 
-    // Rejected / cancelled / failed this month
+    // Reconciliation rejects this month (stamp only — not failed/cancelled outcomes)
     const rejectedMonth = await this.q(
       `
       SELECT
         (
           SELECT COUNT(*)::int FROM donations
           WHERE is_archived = false
-            AND LOWER(COALESCE(status, '')) IN ('failed', 'cancelled', 'canceled', 'rejected')
-            AND date >= $1::date AND date <= $2::date
+            AND LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+            AND COALESCE(reconciled_at::date, date, created_at::date) >= $1::date
+            AND COALESCE(reconciled_at::date, date, created_at::date) <= $2::date
         ) + (
           SELECT COUNT(*)::int FROM donation_box_donations
           WHERE is_archived = false
-            AND LOWER(COALESCE(status, '')) = 'cancelled'
-            AND collection_date >= $1::date AND collection_date <= $2::date
+            AND LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+            AND COALESCE(reconciled_at::date, collection_date, created_at::date) >= $1::date
+            AND COALESCE(reconciled_at::date, collection_date, created_at::date) <= $2::date
+        ) + (
+          SELECT COUNT(*)::int FROM recurring_donations
+          WHERE is_archived = false
+            AND LOWER(COALESCE(reconciled_status, '')) = 'rejected'
+            AND COALESCE(reconciled_at::date, created_at::date) >= $1::date
+            AND COALESCE(reconciled_at::date, created_at::date) <= $2::date
         ) AS cnt
       `,
       [bounds.start, bounds.end],
@@ -287,6 +422,21 @@ export class ReconciliationDeskService {
             oldest_tone: this.oldestTone(days),
           };
         }),
+      },
+      channel_breakdown: {
+        title: "By channel",
+        subtitle:
+          "Offline, in-kind and recurring — pending, completed and rejected",
+        columns: [
+          "Channel",
+          "Pending",
+          "Completed",
+          "Rejected",
+          "Pending amount",
+          "Completed amount",
+          "Rejected amount",
+        ],
+        items: channelBreakdownItems,
       },
       payfast_outcome: {
         title: "PayFast checkout outcome",
