@@ -869,6 +869,7 @@ export class AidApplicationsService {
       // Assignment is done by the draft approver (program user), not at intake
       assigned_to_user_id: null,
       submitted_at: null,
+      considered_at: null,
       created_by: user || null,
       updated_by: user || null,
     });
@@ -2639,9 +2640,15 @@ export class AidApplicationsService {
     const prevStatus = app.status;
     const prevAssignee = app.assigned_to_user_id;
     const prevAppNo = app.application_no;
+    const prevConsideredAt = app.considered_at;
+    const considerationDate = new Date();
     app.assigned_to_user_id = assigneeId;
     app.status = AidApplicationStatus.SUBMITTED;
-    app.submitted_at = new Date();
+    // Keep original application date (created_at). Record consideration separately.
+    app.considered_at = considerationDate;
+    if (!app.submitted_at) {
+      app.submitted_at = considerationDate;
+    }
     app.updated_by = user || null;
     const assignedNo = await this.ensureProgramApplicationNo(app);
     await this.appRepo.save(app);
@@ -2656,6 +2663,11 @@ export class AidApplicationsService {
           old_value: serializeAidAuditValue(prevAssignee),
           new_value: serializeAidAuditValue(assigneeId),
         },
+        {
+          field: "considered_at",
+          old_value: serializeAidAuditValue(prevConsideredAt),
+          new_value: serializeAidAuditValue(app.considered_at),
+        },
         ...(assignedNo
           ? [
               {
@@ -2669,6 +2681,7 @@ export class AidApplicationsService {
       metadata: {
         requested_aid_type: app.requested_aid_type,
         application_no: app.application_no,
+        considered_at: app.considered_at,
       },
     });
     return this.findOne(id);

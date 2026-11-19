@@ -21,6 +21,7 @@ import { AppealsBenificiariesModule } from './appeals_benificiaries/appeals_beni
 import { AppealUpdatesModule } from './appeal_updates/appeal_updates.module';
 import { AppealMediaModule } from './appeal_media/appeal_media.module';
 import { SocialMediaModule } from './social_media/social_media.module';
+import { UploadPostModule } from './upload_post/upload_post.module';
 import { OfflineSyncModule } from './offline-sync/offline-sync.module';
 import { ReceiptTemplatesModule } from './receipt_templates/receipt_templates.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
@@ -67,6 +68,7 @@ import { TargetsModule } from './targets/targets.module';
     AppealUpdatesModule,
     AppealMediaModule,
     SocialMediaModule,
+    UploadPostModule,
     OfflineSyncModule,
     ReceiptTemplatesModule,
     ReconciliationModule,

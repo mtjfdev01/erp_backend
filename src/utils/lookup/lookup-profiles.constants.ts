@@ -84,6 +84,13 @@ export const LOOKUP_PROFILES = {
     defaultLimit: 100,
     maxLimit: 200,
   },
+  upload_posts: {
+    valueField: "id",
+    labelField: "title",
+    fields: ["id", "title", "upload_post_user", "status", "platforms"],
+    defaultLimit: 100,
+    maxLimit: 200,
+  },
   progress_trackers: {
     valueField: "id",
     labelField: "id",

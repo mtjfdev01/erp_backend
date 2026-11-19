@@ -268,4 +268,8 @@ export class AidApplication extends BaseEntity {
 
   @Column({ type: "timestamptz", nullable: true, default: null })
   submitted_at: Date | null;
+
+  /** Set when a program manager Considers the draft/incomplete application. */
+  @Column({ type: "timestamptz", nullable: true, default: null })
+  considered_at: Date | null;
 }
