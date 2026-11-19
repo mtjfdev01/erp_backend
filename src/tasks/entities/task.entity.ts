@@ -13,6 +13,7 @@ import { TaskAttachment } from "./task-attachment.entity";
 import { TaskComment } from "./task-comment.entity";
 import { TaskActivity } from "./task-activity.entity";
 import { TaskTimeEntry } from "./task-time-entry.entity";
+import { TaskDueDateExtension } from "./task-due-date-extension.entity";
 
 export enum TaskPriority {
   LOW = "low",
@@ -100,6 +101,9 @@ export class Task {
 
   @Column({ type: "date", nullable: true })
   start_date: Date;
+
+  @Column({ type: "date", nullable: true })
+  original_due_date: Date;
 
   @Column({ type: "date", nullable: true })
   due_date: Date;
@@ -198,6 +202,12 @@ export class Task {
   @Column({ type: "boolean", default: false })
   overdue_email_sent: boolean;
 
+  @Column({ type: "timestamp", nullable: true })
+  last_escalated_at: Date;
+
+  @Column({ type: "int", default: 0 })
+  last_escalation_level: number;
+
   @Column({ type: "text", nullable: true })
   last_progress_notes: string;
 
@@ -218,6 +228,9 @@ export class Task {
 
   @OneToMany(() => TaskTimeEntry, (e) => e.task, { cascade: true })
   time_entries: TaskTimeEntry[];
+
+  @OneToMany(() => TaskDueDateExtension, (ext) => ext.task, { cascade: true })
+  due_date_extensions: TaskDueDateExtension[];
 
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   created_at: Date;

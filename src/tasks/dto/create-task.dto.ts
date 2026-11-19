@@ -47,6 +47,10 @@ export class CreateTaskDto {
   due_date?: string;
 
   @IsOptional()
+  @IsDateString()
+  original_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   assigned_users?: number[];

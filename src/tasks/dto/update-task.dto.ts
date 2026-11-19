@@ -54,6 +54,10 @@ export class UpdateTaskDto {
   due_date?: string;
 
   @IsOptional()
+  @IsDateString()
+  original_due_date?: string;
+
+  @IsOptional()
   @IsString()
   project_id?: string;
 

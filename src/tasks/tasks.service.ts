@@ -33,6 +33,7 @@ import { AddCommentDto } from "./dto/add-comment.dto";
 import { StatusTransitionDto } from "./dto/status-transition.dto";
 import { User, UserRole, Department } from "../users/user.entity";
 import { EmailService } from "../email/email.service";
+import { TaskExtensionNotificationService } from "../email/taskExtensionNotification.service";
 import { applyCommonFilters } from "../utils/filters/common-filter.util";
 import { PermissionsService } from "../permissions/permissions.service";
 import { DataScopeService } from "../permissions/data-scope/data-scope.service";
@@ -42,7 +43,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { TaskApproval } from "./entities/task-approval.entity";
 import { TaskDueReminder } from "./entities/task-due-reminder.entity";
+import {
+  TaskDueDateExtension,
+  TaskDueDateExtensionStatus,
+} from "./entities/task-due-date-extension.entity";
 import { CreateTaskDueReminderDto } from "./dto/create-task-due-reminder.dto";
+import { RequestDueDateExtensionDto } from "./dto/request-due-date-extension.dto";
+import { ReviewDueDateExtensionDto } from "./dto/review-due-date-extension.dto";
 import {
   computeRemindOnDate,
   dueDateToPktDateString,
@@ -135,7 +142,10 @@ export class TasksService implements OnModuleInit {
     private readonly taskApprovalRepo: Repository<TaskApproval>,
     @InjectRepository(TaskDueReminder)
     private readonly dueReminderRepo: Repository<TaskDueReminder>,
+    @InjectRepository(TaskDueDateExtension)
+    private readonly extensionRepo: Repository<TaskDueDateExtension>,
     private readonly emailService: EmailService,
+    private readonly taskExtensionNotificationService: TaskExtensionNotificationService,
     private readonly permissionsService: PermissionsService,
     private readonly dataScopeService: DataScopeService,
     private readonly notificationsService: NotificationsService,
@@ -1525,6 +1535,11 @@ export class TasksService implements OnModuleInit {
         task_type: dto.task_type || TaskType.ONE_TIME,
         start_date: dto.start_date ? new Date(dto.start_date) : null,
         due_date: dto.due_date ? new Date(dto.due_date) : null,
+        original_due_date: dto.original_due_date
+          ? new Date(dto.original_due_date)
+          : dto.due_date
+            ? new Date(dto.due_date)
+            : null,
         project_id: dto.project_id || null,
         project_name: dto.project_name || null,
         recurrence_rule: dto.recurrence_rule || null,
@@ -3619,6 +3634,12 @@ export class TasksService implements OnModuleInit {
         this.filterMovItemsForUser(task, currentUser);
       }
 
+      task.due_date_extensions = await this.extensionRepo.find({
+        where: { task_id: task.id },
+        relations: ["requested_by", "reviewed_by"],
+        order: { created_at: "DESC" },
+      });
+
       return task;
     } catch (e) {
       throw e;
@@ -3885,8 +3906,36 @@ export class TasksService implements OnModuleInit {
       const oldDueDate = task.due_date ? new Date(task.due_date).getTime() : null;
       const newDueDate = dto.due_date ? new Date(dto.due_date).getTime() : oldDueDate;
 
-      if (newDueDate !== oldDueDate) {
+      if (dto.due_date !== undefined && newDueDate !== oldDueDate) {
+        const isAdminRole =
+          currentUser.role === UserRole.SUPER_ADMIN ||
+          currentUser.role === UserRole.ADMIN;
+        const isCreator =
+          task.created_by_id != null &&
+          Number(task.created_by_id) === Number(currentUser.id);
+        const reporterIds = this.getReporterIds(task);
+        const isReporter = reporterIds.includes(Number(currentUser.id));
+
+        if (!isAdminRole && !isCreator && !isReporter && isCurrentUserAssignee) {
+          throw new ForbiddenException(
+            "Assignees cannot directly modify the due date. Please request a deadline extension via Quick Actions.",
+          );
+        }
+
+        // Preserve original_due_date permanently
+        if (!task.original_due_date && task.due_date) {
+          task.original_due_date = task.due_date;
+        }
+
         task.overdue_email_sent = false;
+        task.last_escalated_at = null;
+        task.last_escalation_level = 0;
+
+        await this.logActivity(task, currentUser, "due_date_changed", {
+          previous_due_date: task.due_date,
+          new_due_date: new Date(dto.due_date),
+          original_due_date: task.original_due_date || task.due_date,
+        });
       }
 
       const { reported_to_ids, reported_to_id } =
@@ -5177,31 +5226,357 @@ export class TasksService implements OnModuleInit {
     return `${noteText} [indices:${mergedIndices.join(',')}]${ownership ? `[ownership:${ownership}]` : ''}`;
   }
 
+  async requestDueDateExtension(
+    taskId: number,
+    dto: RequestDueDateExtensionDto,
+    currentUser: User,
+  ): Promise<TaskDueDateExtension> {
+    const task = await this.findOne(taskId, currentUser);
+
+    const userId = Number(currentUser.id);
+    const assignedIds = Array.isArray(task.assigned_user_ids)
+      ? task.assigned_user_ids.map(Number)
+      : [];
+    const metaIds = Array.isArray(task.assigned_users_meta)
+      ? task.assigned_users_meta
+          .map((m: any) => (m && m.user_id != null ? Number(m.user_id) : null))
+          .filter(Boolean)
+      : [];
+    const isAssignee = [...assignedIds, ...metaIds].includes(userId);
+    const isAdminRole =
+      currentUser.role === UserRole.SUPER_ADMIN ||
+      currentUser.role === UserRole.ADMIN;
+    const isCreator =
+      task.created_by_id != null && Number(task.created_by_id) === userId;
+
+    if (!isAssignee && !isAdminRole && !isCreator) {
+      throw new ForbiddenException(
+        "Only assigned users, creator, or administrator can request a deadline extension.",
+      );
+    }
+
+    if (
+      task.status === TaskStatus.COMPLETED ||
+      task.status === TaskStatus.CLOSED ||
+      task.status === TaskStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        "Cannot request a deadline extension for completed, closed, or cancelled tasks.",
+      );
+    }
+
+    const existingPending = await this.extensionRepo.findOne({
+      where: {
+        task_id: task.id,
+        status: TaskDueDateExtensionStatus.PENDING,
+      },
+    });
+
+    if (existingPending) {
+      throw new BadRequestException(
+        "There is already a pending deadline extension request for this task.",
+      );
+    }
+
+    const proposedDate = new Date(dto.proposed_due_date);
+    if (isNaN(proposedDate.getTime())) {
+      throw new BadRequestException("Invalid proposed due date.");
+    }
+
+    // Preserve original_due_date permanently
+    if (!task.original_due_date && task.due_date) {
+      task.original_due_date = task.due_date;
+      await this.taskRepo.save(task);
+    }
+
+    const extension = this.extensionRepo.create({
+      task_id: task.id,
+      requested_by_id: userId,
+      current_due_date: task.due_date || new Date(),
+      proposed_due_date: proposedDate,
+      reason: dto.reason.trim(),
+      status: TaskDueDateExtensionStatus.PENDING,
+    });
+
+    const savedExtension = await this.extensionRepo.save(extension);
+
+    await this.logActivity(task, currentUser, "due_date_extension_requested", {
+      extension_id: savedExtension.id,
+      current_due_date: extension.current_due_date,
+      proposed_due_date: extension.proposed_due_date,
+      reason: extension.reason,
+    });
+
+    const notifyUserIds = this.normalizeUserIds([
+      task.created_by_id,
+      ...this.getReporterIds(task),
+    ]).filter((id) => id !== userId);
+
+    if (notifyUserIds.length > 0) {
+      await this.sendTaskAppNotification({
+        task,
+        userIds: notifyUserIds,
+        title: "Deadline Extension Requested",
+        message: `${currentUser.first_name || "Assignee"} requested a deadline extension for task "${task.title}".`,
+        event: "due_date_extension_requested",
+        actor: currentUser,
+        extraMetadata: {
+          extension_id: savedExtension.id,
+          proposed_due_date: savedExtension.proposed_due_date,
+          reason: savedExtension.reason,
+        },
+      });
+
+      const recipientUsers = await this.userRepo.find({
+        where: { id: In(notifyUserIds) },
+        select: ["id", "email", "first_name", "last_name"],
+      });
+
+      for (const rec of recipientUsers) {
+        if (rec.email) {
+          await this.taskExtensionNotificationService.sendTaskExtensionRequestEmail(
+            rec,
+            task,
+            savedExtension,
+            currentUser,
+          );
+        }
+      }
+    }
+
+    return savedExtension;
+  }
+
+  async reviewDueDateExtension(
+    taskId: number,
+    dto: ReviewDueDateExtensionDto,
+    currentUser: User,
+  ): Promise<TaskDueDateExtension> {
+    const task = await this.findOne(taskId, currentUser);
+
+    const userId = Number(currentUser.id);
+    const isAdminRole =
+      currentUser.role === UserRole.SUPER_ADMIN ||
+      currentUser.role === UserRole.ADMIN;
+    const isCreator =
+      task.created_by_id != null && Number(task.created_by_id) === userId;
+    const reporterIds = this.getReporterIds(task);
+    const isReporter = reporterIds.includes(userId);
+    const isDeptHead =
+      currentUser.role === UserRole.DEPT_HEAD &&
+      Boolean(currentUser.department && currentUser.department === task.department);
+
+    if (!isAdminRole && !isCreator && !isReporter && !isDeptHead) {
+      throw new ForbiddenException(
+        "Only the task creator, reporting manager, department head, or administrator can review deadline extension requests.",
+      );
+    }
+
+    let extension: TaskDueDateExtension | null = null;
+    if (dto.extension_id) {
+      extension = await this.extensionRepo.findOne({
+        where: { id: dto.extension_id, task_id: task.id },
+      });
+    } else {
+      extension = await this.extensionRepo.findOne({
+        where: {
+          task_id: task.id,
+          status: TaskDueDateExtensionStatus.PENDING,
+        },
+        order: { created_at: "DESC" },
+      });
+    }
+
+    if (!extension) {
+      throw new NotFoundException(
+        "Pending deadline extension request not found for this task.",
+      );
+    }
+
+    if (extension.status !== TaskDueDateExtensionStatus.PENDING) {
+      throw new BadRequestException(
+        `This extension request has already been ${extension.status}.`,
+      );
+    }
+
+    const decision = dto.decision;
+    extension.status =
+      decision === "approved"
+        ? TaskDueDateExtensionStatus.APPROVED
+        : TaskDueDateExtensionStatus.REJECTED;
+    extension.reviewed_by_id = userId;
+    extension.review_note = dto.note ? dto.note.trim() : null;
+    extension.reviewed_at = new Date();
+
+    const savedExtension = await this.extensionRepo.save(extension);
+
+    if (decision === "approved") {
+      if (!task.original_due_date && task.due_date) {
+        task.original_due_date = task.due_date;
+      }
+      task.due_date = new Date(savedExtension.proposed_due_date);
+      task.overdue_email_sent = false;
+      task.last_escalated_at = null;
+      task.last_escalation_level = 0;
+
+      await this.taskRepo.save(task);
+
+      await this.logActivity(task, currentUser, "due_date_extension_approved", {
+        extension_id: savedExtension.id,
+        new_due_date: task.due_date,
+        original_due_date: task.original_due_date,
+        note: extension.review_note,
+      });
+    } else {
+      await this.logActivity(task, currentUser, "due_date_extension_rejected", {
+        extension_id: savedExtension.id,
+        current_due_date: task.due_date,
+        note: extension.review_note,
+      });
+    }
+
+    const notifyUserIds = this.normalizeUserIds([
+      savedExtension.requested_by_id,
+      ...(Array.isArray(task.assigned_user_ids) ? task.assigned_user_ids : []),
+    ]).filter((id) => id !== userId);
+
+    if (notifyUserIds.length > 0) {
+      const decisionTitle =
+        decision === "approved" ? "Extension Approved" : "Extension Rejected";
+      await this.sendTaskAppNotification({
+        task,
+        userIds: notifyUserIds,
+        title: `Deadline ${decisionTitle}`,
+        message: `Deadline extension request for "${task.title}" was ${decision} by ${currentUser.first_name || "Manager"}.`,
+        event: `due_date_extension_${decision}`,
+        actor: currentUser,
+        extraMetadata: {
+          extension_id: savedExtension.id,
+          decision,
+          effective_due_date: task.due_date,
+          review_note: savedExtension.review_note,
+        },
+      });
+
+      const recipientUsers = await this.userRepo.find({
+        where: { id: In(notifyUserIds) },
+        select: ["id", "email", "first_name", "last_name"],
+      });
+
+      for (const rec of recipientUsers) {
+        if (rec.email) {
+          await this.taskExtensionNotificationService.sendTaskExtensionDecisionEmail(
+            rec,
+            task,
+            savedExtension,
+            decision,
+            currentUser,
+          );
+        }
+      }
+    }
+
+    return savedExtension;
+  }
+
+  async getTaskExtensions(
+    taskId: number,
+    currentUser: User,
+  ): Promise<TaskDueDateExtension[]> {
+    await this.findOne(taskId, currentUser);
+    return this.extensionRepo.find({
+      where: { task_id: taskId },
+      relations: ["requested_by", "reviewed_by"],
+      order: { created_at: "DESC" },
+    });
+  }
+
   async overdueEscalation(): Promise<number> {
     try {
-      const qb: SelectQueryBuilder<Task> = this.taskRepo
+      const tasks = await this.taskRepo
         .createQueryBuilder("task")
         .where("task.due_date IS NOT NULL")
         .andWhere("task.due_date < CURRENT_DATE")
-        .andWhere("task.overdue_email_sent = :sent", { sent: false })
         .andWhere(`task.status NOT IN (:...statuses)`, {
           statuses: [
             TaskStatus.COMPLETED,
             TaskStatus.CLOSED,
             TaskStatus.CANCELLED,
           ],
-        });
-      const tasks = await qb.getMany();
+        })
+        .getMany();
+
+      const todayPktStr = dueDateToPktDateString(new Date());
+      let escalatedCount = 0;
+
       for (const t of tasks) {
-        const escalationLevel = 1;
-        const recipientIds = this.normalizeUserIds([
-          ...(Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : []),
-          t.created_by_id,
-        ]);
+        if (!t.due_date) continue;
+
+        const duePktStr = dueDateToPktDateString(t.due_date);
+        const diffMs =
+          new Date(todayPktStr).getTime() - new Date(duePktStr).getTime();
+        const overdueDays = Math.max(
+          1,
+          Math.floor(diffMs / (1000 * 60 * 60 * 24)),
+        );
+
+        // Day 1 & 2: Level 1 (Reporting Manager)
+        // Day 3+: Level 2 (Department Head)
+        const targetLevel = overdueDays >= 3 ? 2 : 1;
+
+        const lastEscalatedDateStr = t.last_escalated_at
+          ? dueDateToPktDateString(t.last_escalated_at)
+          : null;
+        const alreadyEscalatedToday =
+          lastEscalatedDateStr === todayPktStr &&
+          (t.last_escalation_level ?? 0) >= targetLevel;
+
+        if (alreadyEscalatedToday) {
+          continue;
+        }
+
+        const reporterIds = this.getReporterIds(t);
+        const assigneeIds = this.normalizeUserIds(
+          Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : [],
+        );
+
+        let deptHeadIds: number[] = [];
+        if (targetLevel >= 2 && t.department) {
+          const deptHeads = await this.userRepo.find({
+            where: [
+              { department: t.department, role: UserRole.DEPT_HEAD },
+              { department: t.department, role: UserRole.MANAGER },
+            ],
+            select: ["id", "email", "first_name", "last_name", "role"],
+          });
+          deptHeadIds = deptHeads.map((u) => u.id);
+
+          if (deptHeadIds.length === 0) {
+            const admins = await this.userRepo.find({
+              where: [{ role: UserRole.SUPER_ADMIN }, { role: UserRole.ADMIN }],
+              select: ["id"],
+            });
+            deptHeadIds = admins.map((u) => u.id);
+          }
+        }
+
+        const recipientIds =
+          targetLevel >= 2
+            ? this.normalizeUserIds([
+                ...deptHeadIds,
+                ...reporterIds,
+                ...assigneeIds,
+                t.created_by_id,
+              ])
+            : this.normalizeUserIds([
+                ...reporterIds,
+                ...assigneeIds,
+                t.created_by_id,
+              ]);
 
         if (recipientIds.length === 0) {
           this.logger.warn(
-            `Overdue task #${t.id} has no assignee or creator to notify`,
+            `Overdue task #${t.id} has no recipients to notify for level ${targetLevel}`,
           );
           continue;
         }
@@ -5219,13 +5594,6 @@ export class TasksService implements OnModuleInit {
           ),
         ];
 
-        if (emails.length === 0) {
-          this.logger.warn(
-            `Overdue task #${t.id}: assignee(s)/creator have no email`,
-          );
-          continue;
-        }
-
         const nameById = new Map(
           users.map((u) => [
             u.id,
@@ -5234,14 +5602,13 @@ export class TasksService implements OnModuleInit {
               `User #${u.id}`,
           ]),
         );
-        const assigneeIds = this.normalizeUserIds(
-          Array.isArray(t.assigned_user_ids) ? t.assigned_user_ids : [],
-        );
         const assignedNames = assigneeIds
           .map((id) => nameById.get(id))
           .filter(Boolean);
+
         const taskForEmail = {
           ...t,
+          overdue_days: overdueDays,
           assigned_to_display:
             assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned",
         };
@@ -5251,23 +5618,47 @@ export class TasksService implements OnModuleInit {
           const success = await this.emailService.sendTaskOverdueNotification(
             email,
             taskForEmail,
-            escalationLevel,
+            targetLevel,
           );
           if (success) anySuccess = true;
         }
 
         if (anySuccess) {
           t.overdue_email_sent = true;
+          t.last_escalated_at = new Date();
+          t.last_escalation_level = targetLevel;
           await this.taskRepo.save(t);
+
+          const targetLevelName =
+            targetLevel >= 2
+              ? "Level 2 (Department Head)"
+              : "Level 1 (Reporting Manager)";
+
           await this.logActivity(t, null as any, "overdue_escalated", {
-            escalation_level: escalationLevel,
+            escalation_level: targetLevel,
+            overdue_days: overdueDays,
+            level_name: targetLevelName,
             notified_emails: emails,
-            notes:
-              "Overdue notification sent to assignee(s) and creator. Duplicate daily emails suppressed.",
+            notes: `Task overdue by ${overdueDays} day(s). Escalated to ${targetLevelName}. Daily notification sent; duplicate same-day notifications suppressed.`,
           });
+
+          await this.sendTaskAppNotification({
+            task: t,
+            userIds: recipientIds,
+            title: `Task Overdue Escalation (${targetLevelName})`,
+            message: `Task "${t.title}" is ${overdueDays} day(s) overdue and has reached ${targetLevelName} escalation.`,
+            event: "overdue_escalated",
+            extraMetadata: {
+              escalation_level: targetLevel,
+              overdue_days: overdueDays,
+            },
+          });
+
+          escalatedCount++;
         }
       }
-      return tasks.length;
+
+      return escalatedCount;
     } catch (e) {
       throw e;
     }
