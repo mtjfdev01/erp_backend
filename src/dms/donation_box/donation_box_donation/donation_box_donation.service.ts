@@ -152,20 +152,47 @@ export class DonationBoxDonationService {
   }
 
   /**
-   * Access Scope on created_by OR collected_by.
-   * Applied even when geographic filters are active (geo is additive).
+   * List visibility is Access Scope / reporting team only (no geographic filter).
+   * Row is visible when created_by / collected_by is in scope, OR the parent
+   * donation box is assigned to a scoped user.
    */
   private applyCollectionListDataScope(
     query: SelectQueryBuilder<DonationBoxDonation>,
     dataScope: ResolvedDataScope | null,
-    _geoScope?: ResolvedGeographicScope | null,
   ): void {
     if (!dataScope) return;
-    this.dataScopeService.applyToQuery(
-      query,
-      "donation_box_donation",
-      dataScope,
-      { assignedToColumn: "donation_box_donation.collected_by_id" },
+    if (
+      dataScope.bypass ||
+      dataScope.type === "org" ||
+      dataScope.allowedUserIds == null
+    ) {
+      return;
+    }
+
+    const ids = Array.from(
+      new Set(
+        (dataScope.allowedUserIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    if (!ids.length) {
+      query.andWhere("1 = 0");
+      return;
+    }
+
+    query.andWhere(
+      `(
+        donation_box_donation.created_by IN (:...collectionListScopeUserIds)
+        OR donation_box_donation.collected_by_id IN (:...collectionListScopeUserIds)
+        OR EXISTS (
+          SELECT 1
+          FROM donation_box_users dbu_scope
+          WHERE dbu_scope.donation_box_id = donation_box_donation.donation_box_id
+            AND dbu_scope.user_id IN (:...collectionListScopeUserIds)
+        )
+      )`,
+      { collectionListScopeUserIds: ids },
     );
   }
 
@@ -568,16 +595,8 @@ export class DonationBoxDonationService {
         applyHybridFilters(query, hybridFilters, "donation_box_donation");
       }
 
-      if (geoScope) {
-        this.geographicScopeService.applyToQuery(
-          query,
-          "donation_box_donations",
-          "donation_box_donation",
-          geoScope,
-          { donationBoxAlias: "donation_box" },
-        );
-      }
-
+      // Listing: Access Scope / team only — geographic filter intentionally skipped.
+      // Registration / single-record geo checks remain unchanged elsewhere.
       if (currentUser?.id) {
         const scope = await this.dataScopeService.resolveListScope({
           userId: currentUser.id,
@@ -588,7 +607,7 @@ export class DonationBoxDonationService {
           teamFilter: team_filter,
           teamFilterUserId: team_filter_user_id,
         });
-        this.applyCollectionListDataScope(query, scope, geoScope);
+        this.applyCollectionListDataScope(query, scope);
       }
 
       // 1. SUM(collection_amount) with same filters/scope.

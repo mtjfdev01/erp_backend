@@ -149,19 +149,47 @@ export class DonationBoxService {
     this.assertDonationBoxRecordAccess(dataScope, box);
   }
 
+  /**
+   * List visibility is Access Scope / reporting team only (no geographic filter).
+   * Row is visible when created_by is in scope OR box is assigned to a scoped user.
+   */
   private applyDonationBoxListDataScope(
     query: SelectQueryBuilder<DonationBox>,
     dataScope: ResolvedDataScope | null,
-    geoScope?: ResolvedGeographicScope | null,
   ): void {
     if (!dataScope) return;
     if (
-      geoScope &&
-      this.geographicScopeService.isGeographicFilterActive(geoScope)
+      dataScope.bypass ||
+      dataScope.type === "org" ||
+      dataScope.allowedUserIds == null
     ) {
       return;
     }
-    this.dataScopeService.applyToQuery(query, "donation_box", dataScope);
+
+    const ids = Array.from(
+      new Set(
+        (dataScope.allowedUserIds || [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    if (!ids.length) {
+      query.andWhere("1 = 0");
+      return;
+    }
+
+    query.andWhere(
+      `(
+        donation_box.created_by IN (:...boxListScopeUserIds)
+        OR EXISTS (
+          SELECT 1
+          FROM donation_box_users dbu_scope
+          WHERE dbu_scope.donation_box_id = donation_box.id
+            AND dbu_scope.user_id IN (:...boxListScopeUserIds)
+        )
+      )`,
+      { boxListScopeUserIds: ids },
+    );
   }
 
   private async resolveCityName(cityId?: number | null): Promise<string | null> {
@@ -865,15 +893,8 @@ export class DonationBoxService {
         end_date,
       });
 
-      if (geoScope) {
-        this.geographicScopeService.applyToQuery(
-          query,
-          "donation_boxes",
-          "donation_box",
-          geoScope,
-        );
-      }
-
+      // Listing: Access Scope / team only — geographic filter intentionally skipped.
+      // Registration / single-record geo checks remain unchanged elsewhere.
       if (currentUser?.id) {
         const scope = await this.dataScopeService.resolveListScope({
           userId: currentUser.id,
@@ -884,7 +905,7 @@ export class DonationBoxService {
           teamFilter: team_filter,
           teamFilterUserId: team_filter_user_id,
         });
-        this.applyDonationBoxListDataScope(query, scope, geoScope);
+        this.applyDonationBoxListDataScope(query, scope);
       }
 
       // 1. SUM(total_collected) with same filters — de-dupe joins (e.g. assignedUsers)
