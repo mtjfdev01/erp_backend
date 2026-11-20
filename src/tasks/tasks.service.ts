@@ -5289,7 +5289,6 @@ export class TasksService implements OnModuleInit {
 
     const notifyUserIds = this.normalizeUserIds([
       task.created_by_id,
-      ...this.getReporterIds(task),
     ]).filter((id) => id !== userId);
 
     if (notifyUserIds.length > 0) {
@@ -5340,15 +5339,10 @@ export class TasksService implements OnModuleInit {
       currentUser.role === UserRole.ADMIN;
     const isCreator =
       task.created_by_id != null && Number(task.created_by_id) === userId;
-    const reporterIds = this.getReporterIds(task);
-    const isReporter = reporterIds.includes(userId);
-    const isDeptHead =
-      currentUser.role === UserRole.DEPT_HEAD &&
-      Boolean(currentUser.department && currentUser.department === task.department);
 
-    if (!isAdminRole && !isCreator && !isReporter && !isDeptHead) {
+    if (!isAdminRole && !isCreator) {
       throw new ForbiddenException(
-        "Only the task creator, reporting manager, department head, or administrator can review deadline extension requests.",
+        "Only the task creator (assigner) or administrator can review deadline extension requests.",
       );
     }
 

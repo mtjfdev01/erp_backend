@@ -513,7 +513,28 @@ export class TasksController {
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
 
-  @Post(":id/extend-due-date")
+    @Post(":id/extend-due-date")
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+  ])
+  async extendDueDate(
+    @Param("id") id: string,
+    @Body() dto: RequestDueDateExtensionDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    return this.requestDueDateExtension(id, dto, user, res);
+  }
+
+  @Post(":id/request-extension")
   @RequiredPermissions([
     UserRole.SUPER_ADMIN,
     UserRole.ADMIN,
