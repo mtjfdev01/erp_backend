@@ -187,15 +187,7 @@ export class DonationBoxDonationController {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
 
-      const geoScope = currentUser?.id
-        ? await this.geographicScopeService.resolveForUser(
-            currentUser.id,
-            currentUser.role,
-            currentUser,
-            "donation_box_donations",
-          )
-        : null;
-
+      // List APIs use Access Scope / reporting team only (no geographic filter).
       const result = await this.donationBoxDonationService.findAll(
         {
           page: pageNum,
@@ -220,7 +212,7 @@ export class DonationBoxDonationController {
           team_filter,
           team_filter_user_id,
         },
-        geoScope,
+        null,
         currentUser,
       );
 
@@ -273,23 +265,7 @@ export class DonationBoxDonationController {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
 
-      // Geographic access check on the parent donation box
-      await this.checkGeographicAccessByBoxId(
-        currentUser?.id,
-        +boxId,
-        currentUser?.role,
-        currentUser,
-      );
-
-      const geoScope = currentUser?.id
-        ? await this.geographicScopeService.resolveForUser(
-            currentUser.id,
-            currentUser.role,
-            currentUser,
-            "donation_box_donations",
-          )
-        : null;
-
+      // List-by-box: Access Scope / team only (no geographic gate).
       const result = await this.donationBoxDonationService.findAll(
         {
           page: pageNum,
@@ -312,7 +288,7 @@ export class DonationBoxDonationController {
           team_filter,
           team_filter_user_id,
         },
-        geoScope,
+        null,
         currentUser,
       );
       return res.status(HttpStatus.OK).json({

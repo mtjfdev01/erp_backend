@@ -206,14 +206,7 @@ export class DonationBoxController {
       const pageNum = page ? parseInt(page) : 1;
       const pageSizeNum = pageSize ? parseInt(pageSize) : 10;
 
-      const geoScope = currentUser?.id
-        ? await this.geographicScopeService.resolveForUser(
-            currentUser.id,
-            currentUser.role,
-            currentUser,
-          )
-        : null;
-
+      // List APIs use Access Scope / reporting team only (no geographic filter).
       const result = await this.donationBoxService.findAll(
         {
           page: pageNum,
@@ -238,7 +231,7 @@ export class DonationBoxController {
           team_filter,
           team_filter_user_id,
         },
-        geoScope,
+        null,
         currentUser,
       );
 

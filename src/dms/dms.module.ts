@@ -38,6 +38,7 @@ import { EventPledgesModule } from './event_pledges/event-pledges.module';
 import { ReconciliationWorkbenchModule } from './reconciliation_workbench/reconciliation-workbench.module';
 import { ReportsDashboardModule } from './reports_dashboard/reports-dashboard.module';
 import { TargetsModule } from './targets/targets.module';
+import { ReportingHierarchyModule } from './reporting_hierarchy/reporting-hierarchy.module';
 
 @Module({
   controllers: [DmsController],
@@ -83,6 +84,7 @@ import { TargetsModule } from './targets/targets.module';
     ReconciliationWorkbenchModule,
     ReportsDashboardModule,
     TargetsModule,
+    ReportingHierarchyModule,
   ],
 })
 export class DmsModule {}
