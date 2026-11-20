@@ -217,19 +217,19 @@ export class Task {
   @Column({ type: "jsonb", nullable: true })
   mov_assignments: { mov_index: number; user_id: number | null }[];
 
-  @OneToMany(() => TaskAttachment, (att) => att.task, { cascade: true })
+  @OneToMany(() => TaskAttachment, (att) => att.task)
   attachments: TaskAttachment[];
 
-  @OneToMany(() => TaskComment, (c) => c.task, { cascade: true })
+  @OneToMany(() => TaskComment, (c) => c.task)
   comments: TaskComment[];
 
-  @OneToMany(() => TaskActivity, (a) => a.task, { cascade: true })
+  @OneToMany(() => TaskActivity, (a) => a.task)
   activities: TaskActivity[];
 
-  @OneToMany(() => TaskTimeEntry, (e) => e.task, { cascade: true })
+  @OneToMany(() => TaskTimeEntry, (e) => e.task)
   time_entries: TaskTimeEntry[];
 
-  @OneToMany(() => TaskDueDateExtension, (ext) => ext.task, { cascade: true })
+  @OneToMany(() => TaskDueDateExtension, (ext) => ext.task)
   due_date_extensions: TaskDueDateExtension[];
 
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })

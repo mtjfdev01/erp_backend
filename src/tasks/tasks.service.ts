@@ -1223,17 +1223,17 @@ export class TasksService implements OnModuleInit {
       return;
     }
 
+    if (viewType === "all") {
+      // "All Tasks": view all tasks within the user's role access scope
+      return;
+    }
+
     if (viewType === "other_tasks") {
-      // "Assigned by Me": tasks created by the current user, except those
-      // assigned to their direct reports — those belong to the Team tab
-      // (classification is based on the actual reporting relationship).
+      // "Assigned by Me": tasks created by the current user
       qb.andWhere("task.created_by_id = :currentUserId", {
         currentUserId: currentUser.id,
       });
-      const excludedReportIds =
-        directReportIds ??
-        (await this.dataScopeService.getDirectReportIds(currentUser.id));
-      this.applyNotAssignedToUsersFilter(qb, excludedReportIds, "View");
+      return;
     }
   }
 
@@ -1581,6 +1581,11 @@ export class TasksService implements OnModuleInit {
         mov_items: movItemsFromDto.length > 0 ? movItemsFromDto : null,
       });
 
+      delete (task as any).activities;
+      delete (task as any).attachments;
+      delete (task as any).comments;
+      delete (task as any).time_entries;
+      delete (task as any).due_date_extensions;
       const saved = await this.taskRepo.save(task);
       if (saved.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED) {
         await this.upsertTaskApprovalState(saved);
@@ -1975,7 +1980,8 @@ export class TasksService implements OnModuleInit {
         teamFilter &&
         teamFilter.mode &&
         teamFilter.mode !== "all" &&
-        currentUser?.id
+        currentUser?.id &&
+        viewTypeFilter !== "other_tasks"
       ) {
         // Team filter narrows assignees within reporting tree (list UI).
         // Access-scope ceiling is applied separately via role/visibility filters.
@@ -2158,33 +2164,7 @@ export class TasksService implements OnModuleInit {
         );
       }
 
-      if (
-        teamFilter &&
-        teamFilter.mode &&
-        teamFilter.mode !== "all" &&
-        currentUser?.id
-      ) {
-        const baseScope = {
-          bypass: false,
-          type: "org" as const,
-          allowedUserIds: null as number[] | null,
-          userId: Number(currentUser.id),
-          userDepartment: currentUser.department,
-        };
-        const narrowed = await this.dataScopeService.narrowScopeWithTeamFilter(
-          baseScope,
-          teamFilter,
-        );
-        this.dataScopeService.applyUserIdsFilter(
-          countQb,
-          narrowed.allowedUserIds || [],
-          {
-            intArrayColumn: "task.assigned_user_ids",
-            jsonbUserIdsColumn: "task.assigned_users_meta",
-            paramKey: "taskTeamFilterCount",
-          },
-        );
-      }
+      
 
       // Apply all the same filters to countQb as we did to qb
       // Mirror the scheduled/due date matching on countQb so pagination totals match filtered rows
@@ -2338,17 +2318,11 @@ export class TasksService implements OnModuleInit {
           assignedToTeamCount = await assignedToTeamQb.getCount();
         }
 
-        // Calculate other_tasks count (assigned by me = created by current user,
-        // excluding tasks assigned to direct reports which count under the Team tab)
+        // Calculate other_tasks count (assigned by me = created by current user)
         const otherTasksQb = countQb.clone();
         otherTasksQb.andWhere("task.created_by_id = :currentUserId", {
           currentUserId: currentUser.id,
         });
-        this.applyNotAssignedToUsersFilter(
-          otherTasksQb,
-          directReportIds,
-          "CountOtherTasks",
-        );
         otherTasksCount = await otherTasksQb.getCount();
 
         // Calculate approval_tasks count (where current user is required approver)
@@ -2372,11 +2346,12 @@ export class TasksService implements OnModuleInit {
           hasPrev: pageSize === -1 ? false : page > 1,
         },
         categoryCounts: {
-          assigned_to_me: assignedToMeCount,
-          assigned_to_team: assignedToTeamCount,
-          other_tasks: otherTasksCount,
-          approval_tasks: approvalTasksCount,
-        },
+            assigned_to_me: assignedToMeCount,
+            assigned_to_team: assignedToTeamCount,
+            other_tasks: otherTasksCount,
+            approval_tasks: approvalTasksCount,
+            all: currentUser ? await countQb.getCount() : total,
+          },
       };
     } catch (e) {
       throw e;
@@ -3994,6 +3969,11 @@ export class TasksService implements OnModuleInit {
           : task.mov_items,
         mov_assignments: movAssignments,
       });
+      delete (task as any).activities;
+      delete (task as any).attachments;
+      delete (task as any).comments;
+      delete (task as any).time_entries;
+      delete (task as any).due_date_extensions;
       const saved = await this.taskRepo.save(task);
 
       if (saved.progress !== oldProgress) {
