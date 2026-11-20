@@ -22,6 +22,9 @@ export class TaskApproval {
   @Column({ type: "int", array: true, nullable: true })
   approval_required_user_ids: number[];
 
+  @Column({ type: "date", nullable: true })
+  approval_due_date: Date;
+
   @Column({ type: "jsonb", nullable: true })
   approvals_meta: {
     user_id: number;

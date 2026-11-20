@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import { ConfigService } from "@nestjs/config";
 import { generateTaskOverdueTemplate } from "./taskOverdueEmailTemplate";
 import { generateComplaintOverdueTemplate } from "./complaintOverdueEmailTemplate";
+import { generateTaskApprovalTemplate } from "./taskApprovalTemplate";
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -1537,7 +1538,7 @@ export class EmailService implements OnModuleInit {
           <p><strong>Priority:</strong> ${task.priority}</p>
           <p><strong>Due Date:</strong> ${task.due_date ? new Date(task.due_date).toLocaleDateString() : "N/A"}</p>
           ${recurrenceInfo} 
-          <a href="https://erp.mtjfoundation.pk/" target="_blank" rel="noopener noreferrer">Log in and View Task Details</a>
+          <a href="https://erp.mtjfoundation.pk/" target="_blank" rel="noopener noreferrer">https://erp.mtjfoundation.pk</a>
         `,
       });
 
@@ -1552,6 +1553,55 @@ export class EmailService implements OnModuleInit {
       return success;
     } catch (e: any) {
       this.logger.error(`Failed to send task assignment email: ${e.message}`);
+      return false;
+    }
+  }
+
+  async sendTaskApprovalRequestEmail(
+    approver: any,
+    task: any,
+    submitter?: any,
+  ): Promise<boolean> {
+    try {
+      const fromEmail = this.configService.get<string>(
+        "RESEND_FROM_EMAIL",
+        "info@mtjfoundation.com",
+      );
+      const senderName = this.configService.get<string>(
+        "SENDER_NAME",
+        "MTJ Foundation",
+      );
+
+      if (!this.resend) {
+        this.logger.error("Resend is not configured - cannot send email");
+        return false;
+      }
+
+      if (!approver?.email) {
+        this.logger.warn("Approver email is missing - cannot send email");
+        return false;
+      }
+
+      const result = await this.resend.emails.send({
+        from: `${senderName} <${fromEmail}>`,
+        to: [approver.email],
+        subject: `Task Submitted for Approval: ${task?.title || "Task"}`,
+        html: generateTaskApprovalTemplate(approver, task, submitter),
+      });
+
+      const success = result.error === null && !!result.data?.id;
+      if (success) {
+        this.logger.log(
+          `Task approval request email sent successfully to ${approver.email} (id: ${result.data?.id})`,
+        );
+      } else if (result.error) {
+        this.logger.warn(`Resend error: ${JSON.stringify(result.error)}`);
+      }
+      return success;
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send task approval request email to ${approver?.email}: ${e?.message}`,
+      );
       return false;
     }
   }

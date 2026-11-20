@@ -47,6 +47,10 @@ export class CreateTaskDto {
   due_date?: string;
 
   @IsOptional()
+  @IsDateString()
+  original_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   assigned_users?: number[];
@@ -115,6 +119,10 @@ export class CreateTaskDto {
   @IsArray()
   @IsInt({ each: true })
   approval_required_user_ids?: number[];
+
+  @IsOptional()
+  @IsDateString()
+  approval_due_date?: string;
 
   @IsOptional()
   @IsArray()

@@ -601,7 +601,7 @@ export class ChatService implements OnModuleInit {
 
     // Update conversation last_message & increment unread_counts for recipients
     const displaySnippet = isEncrypted
-      ? '🔒 End-to-end encrypted message'
+      ? ''
       : (text || (dto.voiceDuration ? 'Voice message' : 'Shared an attachment'));
 
     /**
@@ -1021,7 +1021,14 @@ export class ChatService implements OnModuleInit {
 
     if (conv) {
       if (conv.last_message && String(conv.last_message.senderId) !== String(userId)) {
-        conv.last_message.status = 'read';
+        conv.last_message = {
+          ...conv.last_message,
+          status: 'read',
+          readBy: {
+            ...(conv.last_message.readBy || {}),
+            [userId]: nowIso,
+          },
+        };
       }
       await this.conversationRepo.save(conv);
     }
@@ -1043,10 +1050,16 @@ export class ChatService implements OnModuleInit {
     );
 
     this.chatGateway.broadcastReceiptUpdate(conversationId, {
+      conversationId,
+      chatId: conversationId,
       status: 'read',
       userId,
       timestamp: nowIso,
     });
+
+    if (conv) {
+      this.chatGateway.broadcastConversationUpdate(this.mapConversation(conv));
+    }
 
     return { success: true, conversationId, readCount: toUpdate.length };
   }
