@@ -1579,6 +1579,8 @@ export class TasksService implements OnModuleInit {
             ? new Date(dto.approval_due_date)
             : null,
         mov_items: movItemsFromDto.length > 0 ? movItemsFromDto : null,
+        source: dto.source || null,
+        source_id: dto.source_id != null ? Number(dto.source_id) : null,
       });
 
       delete (task as any).activities;

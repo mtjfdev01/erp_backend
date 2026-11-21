@@ -128,9 +128,9 @@ export class CreateTaskDto {
   @IsArray()
   mov_checklist?: {
     text: string;
-    checked: boolean;
-    checked_by_id: number;
-    checked_at: Date;
+    checked?: boolean;
+    checked_by_id?: number | null;
+    checked_at?: Date | string | null;
   }[];
 
   @IsOptional()
@@ -139,4 +139,11 @@ export class CreateTaskDto {
     mov_index: number;
     user_id: number | null;
   }[];
+
+  @IsOptional()
+  @IsString()
+  source?: string;
+
+  @IsOptional()
+  source_id?: number;
 }
