@@ -301,20 +301,49 @@ export class PublicDonationsController {
     }
   }
 
-  // Public endpoint — lookup by donation_public_id only (opaque hex)
+  /**
+   * Website checkout / payment-link prefill — opaque donation_public_id only.
+   * GET /donations/public/checkout/:publicId
+   */
+  @Get("checkout/:publicId")
+  async getPublicCheckout(
+    @Param("publicId") publicId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const data =
+        await this.donationsService.getPublicCheckoutByPublicId(publicId);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Checkout donation retrieved successfully",
+        data,
+      });
+    } catch (error: any) {
+      const status = String(error?.message || "").includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Failed to load checkout donation",
+        data: null,
+      });
+    }
+  }
+
+  // Alias for payment-retry links — same public checkout DTO (not numeric findOne)
   @Get("failed-transaction/:publicId")
   async getFailedTransaction(
     @Param("publicId") publicId: string,
     @Res() res: Response,
   ) {
     try {
-      const donation =
-        await this.donationsService.findOneByDonationPublicId(publicId);
+      const data =
+        await this.donationsService.getPublicCheckoutByPublicId(publicId);
 
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Failed transaction retrieved successfully",
-        data: donation,
+        data,
       });
     } catch (error) {
       const status = error.message.includes("not found")

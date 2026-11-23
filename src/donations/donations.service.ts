@@ -2814,7 +2814,58 @@ export class DonationsService {
         `Donation with donation_public_id ${normalized} not found`,
       );
     }
-    return this.enrichDonationCsrPocFromLegacyDonor(donation);
+    await this.enrichDonationCsrPocFromLegacyDonor(donation);
+    if (!donation.referred_by && donation.donor?.referred_by) {
+      (donation as any).referred_by = donation.donor.referred_by;
+    }
+    return donation;
+  }
+
+  /**
+   * Website payment-link / retry checkout payload.
+   * Opaque donation_public_id only — never expose staff/internal relations.
+   */
+  async getPublicCheckoutByPublicId(publicId: string): Promise<Record<string, unknown>> {
+    const donation = await this.findOneByDonationPublicId(publicId);
+    const donor = donation.donor;
+    const intent = (donation.manual_recurring_intent || {}) as Record<
+      string,
+      unknown
+    >;
+    const intentFrequency =
+      typeof intent.frequency === "string" ? intent.frequency : null;
+
+    return {
+      donation_public_id: donation.donation_public_id,
+      amount: donation.amount,
+      paid_amount: donation.paid_amount,
+      currency: donation.currency || "PKR",
+      donation_type: donation.donation_type || "general",
+      donation_method: donation.donation_method,
+      donation_source: donation.donation_source,
+      status: donation.status,
+      project_id: donation.project_id,
+      project_name: donation.project_name,
+      campaign_id: donation.campaign_id,
+      appeal_id: donation.appeal_id,
+      country: donation.country,
+      city: donation.city,
+      address: donation.address,
+      on_behalf_names: donation.on_behalf_names,
+      donor_id: donation.donor_id,
+      donation_frequency: intentFrequency || "once",
+      donor: donor
+        ? {
+            id: donor.id,
+            name: donor.name,
+            email: donor.email,
+            phone: donor.phone,
+            country: (donor as any).country ?? null,
+            city: (donor as any).city ?? null,
+            address: (donor as any).address ?? null,
+          }
+        : null,
+    };
   }
 
   /**
