@@ -13,6 +13,7 @@ import { TaskAttachment } from "./task-attachment.entity";
 import { TaskComment } from "./task-comment.entity";
 import { TaskActivity } from "./task-activity.entity";
 import { TaskTimeEntry } from "./task-time-entry.entity";
+import { TaskDueDateExtension } from "./task-due-date-extension.entity";
 
 export enum TaskPriority {
   LOW = "low",
@@ -102,7 +103,13 @@ export class Task {
   start_date: Date;
 
   @Column({ type: "date", nullable: true })
+  original_due_date: Date;
+
+  @Column({ type: "date", nullable: true })
   due_date: Date;
+
+  @Column({ type: "date", nullable: true })
+  approval_due_date: Date;
 
   @Column({ type: "date", nullable: true })
   completed_date: Date;
@@ -195,6 +202,12 @@ export class Task {
   @Column({ type: "boolean", default: false })
   overdue_email_sent: boolean;
 
+  @Column({ type: "timestamp", nullable: true })
+  last_escalated_at: Date;
+
+  @Column({ type: "int", default: 0 })
+  last_escalation_level: number;
+
   @Column({ type: "text", nullable: true })
   last_progress_notes: string;
 
@@ -204,17 +217,20 @@ export class Task {
   @Column({ type: "jsonb", nullable: true })
   mov_assignments: { mov_index: number; user_id: number | null }[];
 
-  @OneToMany(() => TaskAttachment, (att) => att.task, { cascade: true })
+  @OneToMany(() => TaskAttachment, (att) => att.task)
   attachments: TaskAttachment[];
 
-  @OneToMany(() => TaskComment, (c) => c.task, { cascade: true })
+  @OneToMany(() => TaskComment, (c) => c.task)
   comments: TaskComment[];
 
-  @OneToMany(() => TaskActivity, (a) => a.task, { cascade: true })
+  @OneToMany(() => TaskActivity, (a) => a.task)
   activities: TaskActivity[];
 
-  @OneToMany(() => TaskTimeEntry, (e) => e.task, { cascade: true })
+  @OneToMany(() => TaskTimeEntry, (e) => e.task)
   time_entries: TaskTimeEntry[];
+
+  @OneToMany(() => TaskDueDateExtension, (ext) => ext.task)
+  due_date_extensions: TaskDueDateExtension[];
 
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   created_at: Date;

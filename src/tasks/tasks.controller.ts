@@ -30,6 +30,8 @@ import { TimeEntryDto } from "./dto/time-entry.dto";
 import { UpdateTaskProgressDto } from "./dto/update-task-progress.dto";
 import { StatusTransitionDto } from "./dto/status-transition.dto";
 import { TaskApprovalStateDto } from "./dto/task-approval-response.dto";
+import { RequestDueDateExtensionDto } from "./dto/request-due-date-extension.dto";
+import { ReviewDueDateExtensionDto } from "./dto/review-due-date-extension.dto";
 import { JwtGuard } from "../auth/jwt.guard";
 import { PermissionsGuard } from "../permissions/guards/permissions.guard";
 import { RequiredPermissions } from "../permissions";
@@ -202,7 +204,15 @@ export class TasksController {
   }
 
   @Get(":id/approval")
-  @RequiredPermissions(["tasking.tasks.view", "tasks.view", "super_admin"])
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+  ])
   async getApprovalState(
     @Param("id") id: string,
     @CurrentUser() user: User,
@@ -500,6 +510,100 @@ export class TasksController {
       +reminderId,
       user,
     );
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+    @Post(":id/extend-due-date")
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+  ])
+  async extendDueDate(
+    @Param("id") id: string,
+    @Body() dto: RequestDueDateExtensionDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    return this.requestDueDateExtension(id, dto, user, res);
+  }
+
+  @Post(":id/request-extension")
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+  ])
+  async requestDueDateExtension(
+    @Param("id") id: string,
+    @Body() dto: RequestDueDateExtensionDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.requestDueDateExtension(
+      +id,
+      dto,
+      user,
+    );
+    return res.status(HttpStatus.CREATED).json({ success: true, data: result });
+  }
+
+  @Post(":id/review-extension")
+  @RequiredPermissions([
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+  ])
+  async reviewDueDateExtension(
+    @Param("id") id: string,
+    @Body() dto: ReviewDueDateExtensionDto,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.reviewDueDateExtension(
+      +id,
+      dto,
+      user,
+    );
+    return res.status(HttpStatus.OK).json({ success: true, data: result });
+  }
+
+  @Get(":id/extensions")
+  @RequiredPermissions([
+    "tasking.tasks.view",
+    "tasks.view",
+    "tasking.tasks.update",
+    "tasks.update",
+    UserRole.SUPER_ADMIN,
+    UserRole.ADMIN,
+    UserRole.DEPT_HEAD,
+    UserRole.MANAGER,
+    UserRole.USER,
+  ])
+  async getTaskExtensions(
+    @Param("id") id: string,
+    @CurrentUser() user: User,
+    @Res() res: Response,
+  ) {
+    const result = await this.tasksService.getTaskExtensions(+id, user);
     return res.status(HttpStatus.OK).json({ success: true, data: result });
   }
 

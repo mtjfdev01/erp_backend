@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsArray,
   IsInt,
+  IsBoolean,
 } from "class-validator";
 import {
   TaskPriority,
@@ -51,6 +52,10 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsDateString()
   due_date?: string;
+
+  @IsOptional()
+  @IsDateString()
+  original_due_date?: string;
 
   @IsOptional()
   @IsString()
@@ -118,6 +123,10 @@ export class UpdateTaskDto {
   approval_required_user_ids?: number[];
 
   @IsOptional()
+  @IsDateString()
+  approval_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   mov_items?: string[];
@@ -128,4 +137,20 @@ export class UpdateTaskDto {
     mov_index: number;
     user_id: number | null;
   }[];
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  admin_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  force_complete?: boolean;
 }

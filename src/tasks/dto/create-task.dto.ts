@@ -47,6 +47,10 @@ export class CreateTaskDto {
   due_date?: string;
 
   @IsOptional()
+  @IsDateString()
+  original_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   assigned_users?: number[];
@@ -117,12 +121,16 @@ export class CreateTaskDto {
   approval_required_user_ids?: number[];
 
   @IsOptional()
+  @IsDateString()
+  approval_due_date?: string;
+
+  @IsOptional()
   @IsArray()
   mov_checklist?: {
     text: string;
-    checked: boolean;
-    checked_by_id: number;
-    checked_at: Date;
+    checked?: boolean;
+    checked_by_id?: number | null;
+    checked_at?: Date | string | null;
   }[];
 
   @IsOptional()
@@ -131,4 +139,11 @@ export class CreateTaskDto {
     mov_index: number;
     user_id: number | null;
   }[];
+
+  @IsOptional()
+  @IsString()
+  source?: string;
+
+  @IsOptional()
+  source_id?: number;
 }

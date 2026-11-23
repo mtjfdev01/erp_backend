@@ -334,11 +334,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   broadcastReceiptUpdate(
     conversationId: string,
-    payload: { messageId?: string; status: string; userId: string; timestamp: string }
+    payload: { conversationId?: string; chatId?: string; messageId?: string; status: string; userId: string; timestamp: string }
   ) {
     if (this.server) {
-      this.server.to(conversationId).emit('receipt_update', payload);
-      this.server.emit('receipt_update', payload);
+      const fullPayload = { conversationId, chatId: conversationId, ...payload };
+      this.server.to(conversationId).emit('receipt_update', fullPayload);
+      this.server.emit('receipt_update', fullPayload);
     }
   }
 

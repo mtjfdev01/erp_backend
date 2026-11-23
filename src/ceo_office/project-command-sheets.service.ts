@@ -209,26 +209,45 @@ export class ProjectCommandSheetsService {
     };
 
     const createTaskDto: CreateTaskDto = {
-      title: convertToTaskDto.task_title || actionItem.text,
+      title: convertToTaskDto.title || convertToTaskDto.task_title || actionItem.text,
       description:
+        convertToTaskDto.description ||
         convertToTaskDto.task_description ||
         `From project command sheet: ${sheet.project_name}`,
-      department: convertToTaskDto.task_department || Department.ADMIN,
-      priority: convertToTaskDto.task_priority || TaskPriority.MEDIUM,
+      department: convertToTaskDto.department || convertToTaskDto.task_department || Department.ADMIN,
+      priority: convertToTaskDto.priority || convertToTaskDto.task_priority || TaskPriority.MEDIUM,
       due_date:
-        convertToTaskDto.task_due_date || formatDate(actionItem.due_date),
+        convertToTaskDto.due_date || convertToTaskDto.task_due_date || formatDate(actionItem.due_date),
+      start_date: convertToTaskDto.start_date || undefined,
       assigned_users:
         convertToTaskDto.assigned_users ||
         (actionItem.assigned_to_id ? [actionItem.assigned_to_id] : []),
-      workflow_type: TaskWorkflowType.STANDARD,
-      task_type: TaskType.ONE_TIME,
-      mov_checklist: convertToTaskDto.mov_items?.map(item => ({
-        text: item,
-        checked: false,
-        checked_by_id: null,
-        checked_at: null
-      })) || undefined,
+      assigned_users_meta: convertToTaskDto.assigned_users_meta,
+      workflow_type: convertToTaskDto.workflow_type || TaskWorkflowType.STANDARD,
+      task_type: convertToTaskDto.task_type || TaskType.ONE_TIME,
+      approval_required: convertToTaskDto.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED || !!convertToTaskDto.approval_required,
+      approval_due_date: convertToTaskDto.approval_due_date,
+      approval_required_user_ids: convertToTaskDto.approval_required_user_ids,
+      project_name: convertToTaskDto.project_name || sheet.project_name,
+      recurrence_rule: convertToTaskDto.recurrence_rule,
+      recurrence_next_date: convertToTaskDto.recurrence_next_date,
+      recurrence_end_type: convertToTaskDto.recurrence_end_type,
+      recurrence_end_date: convertToTaskDto.recurrence_end_date,
+      recurrence_end_occurrences: convertToTaskDto.recurrence_end_occurrences,
+      mov_checklist: convertToTaskDto.mov_checklist || (
+        Array.isArray(convertToTaskDto.mov_items)
+          ? convertToTaskDto.mov_items.map((item: any) => ({
+              text: typeof item === 'string' ? item : item?.text || '',
+              checked: false,
+              checked_by_id: null,
+              checked_at: null,
+            }))
+          : undefined
+      ),
       mov_assignments: convertToTaskDto.mov_assignments,
+      reported_to_ids: convertToTaskDto.reported_to_ids,
+      source: "project_command_sheet_action_item",
+      source_id: sheetId,
     };
 
     const task = await this.tasksService.create(createTaskDto, currentUser);
@@ -291,22 +310,42 @@ export class ProjectCommandSheetsService {
     }
 
     const createTaskDto: CreateTaskDto = {
-      title: convertToTaskDto.task_title || sheet.project_name,
+      title: convertToTaskDto.title || convertToTaskDto.task_title || sheet.project_name,
       description:
+        convertToTaskDto.description ||
         convertToTaskDto.task_description ||
         `From project command sheet: ${sheet.project_name}`,
-      department: convertToTaskDto.task_department || Department.ADMIN,
-      priority: convertToTaskDto.task_priority || TaskPriority.MEDIUM,
-      due_date: convertToTaskDto.task_due_date || null,
+      department: convertToTaskDto.department || convertToTaskDto.task_department || Department.ADMIN,
+      priority: convertToTaskDto.priority || convertToTaskDto.task_priority || TaskPriority.MEDIUM,
+      due_date: convertToTaskDto.due_date || convertToTaskDto.task_due_date || null,
+      start_date: convertToTaskDto.start_date || undefined,
       assigned_users: convertToTaskDto.assigned_users || [],
-      workflow_type: TaskWorkflowType.STANDARD,
-      task_type: TaskType.ONE_TIME,
-      mov_checklist: convertToTaskDto.mov_items?.map(item => ({
-        text: item,
-        checked: false,
-        checked_by_id: null,
-        checked_at: null
-      })) || undefined,
+      assigned_users_meta: convertToTaskDto.assigned_users_meta,
+      workflow_type: convertToTaskDto.workflow_type || TaskWorkflowType.STANDARD,
+      task_type: convertToTaskDto.task_type || TaskType.ONE_TIME,
+      approval_required: convertToTaskDto.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED || !!convertToTaskDto.approval_required,
+      approval_due_date: convertToTaskDto.approval_due_date,
+      approval_required_user_ids: convertToTaskDto.approval_required_user_ids,
+      project_name: convertToTaskDto.project_name || sheet.project_name,
+      recurrence_rule: convertToTaskDto.recurrence_rule,
+      recurrence_next_date: convertToTaskDto.recurrence_next_date,
+      recurrence_end_type: convertToTaskDto.recurrence_end_type,
+      recurrence_end_date: convertToTaskDto.recurrence_end_date,
+      recurrence_end_occurrences: convertToTaskDto.recurrence_end_occurrences,
+      mov_checklist: convertToTaskDto.mov_checklist || (
+        Array.isArray(convertToTaskDto.mov_items)
+          ? convertToTaskDto.mov_items.map((item: any) => ({
+              text: typeof item === 'string' ? item : item?.text || '',
+              checked: false,
+              checked_by_id: null,
+              checked_at: null,
+            }))
+          : undefined
+      ),
+      mov_assignments: convertToTaskDto.mov_assignments,
+      reported_to_ids: convertToTaskDto.reported_to_ids,
+      source: "project_command_sheet",
+      source_id: sheetId,
     };
 
     const task = await this.tasksService.create(createTaskDto, currentUser);

@@ -7,4 +7,8 @@ export class ApproveTaskDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

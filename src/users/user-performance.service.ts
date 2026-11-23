@@ -19,7 +19,6 @@ import { DonationBoxDonation } from "../dms/donation_box/donation_box_donation/e
 const COMPLETED_TASK_STATUSES = [
   TaskStatus.COMPLETED,
   TaskStatus.CLOSED,
-  TaskStatus.APPROVED,
 ];
 
 const TERMINAL_TASK_STATUSES = [

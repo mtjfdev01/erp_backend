@@ -456,19 +456,37 @@ export class VisitorsService {
     const createTaskDto: CreateTaskDto = {
       title,
       description,
-      department: convertToTaskDto.task_department || Department.ADMIN,
-      priority: convertToTaskDto.task_priority || TaskPriority.MEDIUM,
-      due_date: convertToTaskDto.task_due_date || null,
+      department: convertToTaskDto.department || convertToTaskDto.task_department || Department.ADMIN,
+      priority: convertToTaskDto.priority || convertToTaskDto.task_priority || TaskPriority.MEDIUM,
+      due_date: convertToTaskDto.due_date || convertToTaskDto.task_due_date || null,
+      start_date: convertToTaskDto.start_date || undefined,
       assigned_users: convertToTaskDto.assigned_users || [],
-      workflow_type: TaskWorkflowType.STANDARD,
-      task_type: TaskType.ONE_TIME,
-      mov_checklist: convertToTaskDto.mov_items?.map(item => ({
-        text: item,
-        checked: false,
-        checked_by_id: null,
-        checked_at: null
-      })) || undefined,
+      assigned_users_meta: convertToTaskDto.assigned_users_meta,
+      workflow_type: convertToTaskDto.workflow_type || TaskWorkflowType.STANDARD,
+      task_type: convertToTaskDto.task_type || TaskType.ONE_TIME,
+      approval_required: convertToTaskDto.workflow_type === TaskWorkflowType.APPROVAL_REQUIRED || !!convertToTaskDto.approval_required,
+      approval_due_date: convertToTaskDto.approval_due_date,
+      approval_required_user_ids: convertToTaskDto.approval_required_user_ids,
+      project_name: convertToTaskDto.project_name,
+      recurrence_rule: convertToTaskDto.recurrence_rule,
+      recurrence_next_date: convertToTaskDto.recurrence_next_date,
+      recurrence_end_type: convertToTaskDto.recurrence_end_type,
+      recurrence_end_date: convertToTaskDto.recurrence_end_date,
+      recurrence_end_occurrences: convertToTaskDto.recurrence_end_occurrences,
+      mov_checklist: convertToTaskDto.mov_checklist || (
+        Array.isArray(convertToTaskDto.mov_items)
+          ? convertToTaskDto.mov_items.map((item: any) => ({
+              text: typeof item === 'string' ? item : item?.text || '',
+              checked: false,
+              checked_by_id: null,
+              checked_at: null,
+            }))
+          : undefined
+      ),
       mov_assignments: convertToTaskDto.mov_assignments,
+      reported_to_ids: convertToTaskDto.reported_to_ids,
+      source: "visitor",
+      source_id: id,
     };
 
     const task = await this.tasksService.create(createTaskDto, currentUser);

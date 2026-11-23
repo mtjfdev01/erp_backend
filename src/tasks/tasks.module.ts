@@ -10,6 +10,7 @@ import { TaskActivity } from "./entities/task-activity.entity";
 import { TaskTimeEntry } from "./entities/task-time-entry.entity";
 import { TaskApproval } from "./entities/task-approval.entity";
 import { TaskDueReminder } from "./entities/task-due-reminder.entity";
+import { TaskDueDateExtension } from "./entities/task-due-date-extension.entity";
 import { User } from "../users/user.entity";
 import { PermissionsModule } from "../permissions";
 import { JwtModule } from "@nestjs/jwt";
@@ -29,6 +30,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
       TaskTimeEntry,
       TaskApproval,
       TaskDueReminder,
+      TaskDueDateExtension,
       User,
     ]),
     JwtModule.register({
