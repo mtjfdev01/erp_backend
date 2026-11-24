@@ -25,6 +25,7 @@ import { EmailModule } from "./email/email.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { GoldSilverPriceModule } from "./zakat/gold_silver_price/gold_silver_price.module";
 import { ScheduleModule } from "@nestjs/schedule";
+import { areCronJobsEnabled } from "./crons/cron-env";
 import { QrCodeModule } from "./qr_code/qr_code.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { TasksModule } from "./tasks/tasks.module";
@@ -69,7 +70,8 @@ import { PreventHardDeleteBootstrap } from "./database/prevent-hard-delete.boots
         statement_timeout: 180000,
       },
     }),
-    ScheduleModule.forRoot(), // Enable cron jobs globally
+    // Crons off in development (set ENABLE_CRONS=true to force-enable locally)
+    ScheduleModule.forRoot({ cronJobs: areCronJobsEnabled() }),
     StoreModule,
     ProcurementsModule,
     ProgramModule,

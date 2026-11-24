@@ -4,9 +4,18 @@ import { AppModule } from "./app.module";
 import { IoAdapter } from "@nestjs/platform-socket.io";
 import * as cookieParser from "cookie-parser";
 import * as bodyParser from "body-parser";
+import { areCronJobsEnabled } from "./crons/cron-env";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  if (areCronJobsEnabled()) {
+    console.log("⏰ Cron jobs: ENABLED");
+  } else {
+    console.log(
+      "⏰ Cron jobs: DISABLED (non-production). Set ENABLE_CRONS=true to enable.",
+    );
+  }
 
   // Configure WebSocket adapter for Socket.IO
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
