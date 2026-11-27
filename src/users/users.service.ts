@@ -923,11 +923,22 @@ export class UsersService implements OnModuleInit {
     //   queryBuilder.andWhere('user.isActive = :isActive', { isActive: options.activeOnly });
     // }
 
-    // Filter by department if specified
+    // Filter by department(s) if specified — supports comma-separated list
+    // e.g. "program,health"
     if (options?.department) {
-      queryBuilder.andWhere("user.department = :department", {
-        department: options.department,
-      });
+      const departments = String(options.department)
+        .split(",")
+        .map((d) => d.trim())
+        .filter(Boolean);
+      if (departments.length === 1) {
+        queryBuilder.andWhere("user.department = :department", {
+          department: departments[0],
+        });
+      } else if (departments.length > 1) {
+        queryBuilder.andWhere("user.department IN (:...departments)", {
+          departments,
+        });
+      }
     }
 
     // Search functionality - search across name and email fields

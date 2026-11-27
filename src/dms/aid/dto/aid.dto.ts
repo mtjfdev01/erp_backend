@@ -1030,7 +1030,7 @@ export class CompleteVerificationAidApplicationDto {
   verification_notes?: string | null;
 }
 
-/** Approve draft → submitted; must assign a program-department user. */
+/** Approve draft → submitted; must assign a program or health department user. */
 export class ApproveDraftAidApplicationDto {
   @Type(() => Number)
   @IsInt()

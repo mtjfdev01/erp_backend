@@ -2604,7 +2604,7 @@ export class AidApplicationsService {
 
   /**
    * Registration approval: draft/incomplete → submitted (enters Verification Process).
-   * Requires assigning a program-department user as case owner.
+   * Requires assigning a Program or Health department user as case owner.
    */
   async approveDraft(
     id: number,
@@ -2628,13 +2628,18 @@ export class AidApplicationsService {
     const assigneeId = Number(dto?.assigned_to_user_id);
     if (!Number.isFinite(assigneeId) || assigneeId <= 0) {
       throw new BadRequestException(
-        "assigned_to_user_id is required (program department user)",
+        "assigned_to_user_id is required (program or health department user)",
       );
     }
     const assignee = await this.usersService.findOne(assigneeId);
-    if (String(assignee.department || "").toLowerCase() !== Department.PROGRAM) {
+    const assigneeDept = String(assignee.department || "").toLowerCase();
+    const allowedAssigneeDepts = new Set([
+      Department.PROGRAM,
+      Department.HEALTH,
+    ]);
+    if (!allowedAssigneeDepts.has(assigneeDept as Department)) {
       throw new BadRequestException(
-        "Assignee must be a user in the program department",
+        "Assignee must be a user in the program or health department",
       );
     }
 
