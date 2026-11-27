@@ -39,6 +39,7 @@ import { ReconciliationWorkbenchModule } from './reconciliation_workbench/reconc
 import { ReportsDashboardModule } from './reports_dashboard/reports-dashboard.module';
 import { TargetsModule } from './targets/targets.module';
 import { ReportingHierarchyModule } from './reporting_hierarchy/reporting-hierarchy.module';
+import { OperationalQueriesModule } from './operational_queries/operational-queries.module';
 
 @Module({
   controllers: [DmsController],
@@ -85,6 +86,7 @@ import { ReportingHierarchyModule } from './reporting_hierarchy/reporting-hierar
     ReportsDashboardModule,
     TargetsModule,
     ReportingHierarchyModule,
+    OperationalQueriesModule,
   ],
 })
 export class DmsModule {}

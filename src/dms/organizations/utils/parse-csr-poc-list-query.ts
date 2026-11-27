@@ -15,6 +15,7 @@ export function parseCsrPocListQuery(
 
   return {
     type: query.type?.trim() || undefined,
+    scope: query.scope?.trim() || undefined,
     donation_box_id:
       donationBoxId && Number.isInteger(donationBoxId) && donationBoxId > 0
         ? donationBoxId

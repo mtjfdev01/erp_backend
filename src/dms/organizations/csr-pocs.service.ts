@@ -29,6 +29,8 @@ import {
 
 export interface CsrPocListParams {
   type?: string;
+  /** When set, limits rows to Donation Boxes + Mosques (collection-unit contacts). */
+  scope?: "collection_units" | "corporate" | string;
   csr_donor_id?: number;
   donation_box_id?: number;
   search?: string;
@@ -299,7 +301,13 @@ export class CsrPocsService implements OnModuleInit {
       .leftJoinAndSelect("donation_box.route", "donation_box_route")
       .where("poc.is_archived = false");
 
-    if (params.type && params.type !== "all" && params.type !== "All") {
+    if (params.scope === "collection_units") {
+      qb.andWhere("poc.type IN (:...unitTypes)", {
+        unitTypes: ["Donation Boxes", "Mosques"],
+      });
+    } else if (params.scope === "corporate") {
+      qb.andWhere("poc.type = :pocType", { pocType: "Corporate Donors" });
+    } else if (params.type && params.type !== "all" && params.type !== "All") {
       qb.andWhere("poc.type = :pocType", { pocType: params.type });
     }
 

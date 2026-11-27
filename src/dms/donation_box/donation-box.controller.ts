@@ -298,6 +298,99 @@ export class DonationBoxController {
     }
   }
 
+  @Get("history/by-poc/:pocId")
+  @RequiredPermissions([
+    "fund_raising.donation_box.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async getPlacementHistoryByPoc(
+    @Param("pocId") pocId: string,
+    @Query("start_date") startDate: string,
+    @Query("end_date") endDate: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const data = await this.donationBoxService.getPlacementHistoryForPoc(
+        +pocId,
+        { start_date: startDate, end_date: endDate },
+      );
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "POC placement history retrieved successfully",
+        data,
+      });
+    } catch (error) {
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
+  @Get(":id/placement-history")
+  @RequiredPermissions([
+    "fund_raising.donation_box.view",
+    "super_admin",
+    "fund_raising_manager",
+    "fund_raising_user",
+  ])
+  async getPlacementHistory(
+    @Param("id") id: string,
+    @Query("start_date") startDate: string,
+    @Query("end_date") endDate: string,
+    @Res() res: Response,
+    @CurrentUser() currentUser?: any,
+  ) {
+    try {
+      const existing = await this.donationBoxService.findOne(+id);
+      const scope =
+        await this.donationBoxService.resolveDonationBoxScope(currentUser);
+      const geoScope = currentUser?.id
+        ? await this.geographicScopeService.resolveForUser(
+            currentUser.id,
+            currentUser.role,
+            currentUser,
+          )
+        : null;
+      this.donationBoxService.assertDonationBoxViewAccess(
+        scope,
+        existing,
+        geoScope,
+      );
+      const data = await this.donationBoxService.getPlacementHistoryForBox(+id, {
+        start_date: startDate,
+        end_date: endDate,
+      });
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        message: "Collection unit placement history retrieved successfully",
+        data,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        return res.status(HttpStatus.FORBIDDEN).json({
+          success: false,
+          message: error.message,
+          data: null,
+        });
+      }
+      const status = error.message?.includes("not found")
+        ? HttpStatus.NOT_FOUND
+        : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
+        success: false,
+        message: error.message,
+        data: null,
+      });
+    }
+  }
+
   @Get(":id/audit-history")
   @RequiredPermissions([
     "fund_raising.donation_box.view",

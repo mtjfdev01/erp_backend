@@ -7,8 +7,9 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, In, ILike, SelectQueryBuilder } from "typeorm";
+import { Repository, In, ILike, IsNull, SelectQueryBuilder } from "typeorm";
 import { BoxStatus, DonationBox } from "./entities/donation-box.entity";
+import { DonationBoxPlacement } from "./entities/donation-box-placement.entity";
 import { CreateDonationBoxDto } from "./dto/create-donation-box.dto";
 import { UpdateDonationBoxDto } from "./dto/update-donation-box.dto";
 import {
@@ -29,6 +30,10 @@ import { GeographicScopeService } from "../../permissions/geographic-scope/geogr
 import { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
 import { DonationBoxGeoRecord } from "../../permissions/geographic-scope/geographic-scope.types";
 import { buildDonationBoxGeoSearch } from "./utils/donation-box-geo.util";
+import {
+  CollectionStatus,
+  DonationBoxDonation,
+} from "./donation_box_donation/entities/donation_box_donation.entity";
 
 interface PaginationOptions {
   page: number;
@@ -73,6 +78,10 @@ export class DonationBoxService {
   constructor(
     @InjectRepository(DonationBox)
     private readonly donationBoxRepository: Repository<DonationBox>,
+    @InjectRepository(DonationBoxPlacement)
+    private readonly placementRepository: Repository<DonationBoxPlacement>,
+    @InjectRepository(DonationBoxDonation)
+    private readonly donationBoxDonationRepository: Repository<DonationBoxDonation>,
     @InjectRepository(Route)
     private readonly routeRepository: Repository<Route>,
     @InjectRepository(City)
@@ -384,7 +393,18 @@ export class DonationBoxService {
 
       // Save and return
       const savedBox = await this.donationBoxRepository.save(donationBox);
-      await this.syncPocForBox(savedBox);
+      const poc = await this.syncPocForBox(savedBox);
+      await this.openPlacement({
+        donationBoxId: savedBox.id,
+        pocId: poc?.id ?? null,
+        shopName: savedBox.shop_name,
+        shopkeeper: savedBox.shopkeeper || poc?.name,
+        cellNo: savedBox.cell_no || poc?.phone,
+        cityId: savedBox.city_id,
+        routeId: savedBox.route_id,
+        startedAt: savedBox.active_since || savedBox.created_at,
+        userId: auditUserId,
+      });
 
       return savedBox;
     } catch (error) {
@@ -967,9 +987,34 @@ export class DonationBoxService {
     }
   }
 
-  private async syncPocForBox(box: DonationBox): Promise<void> {
+  private toDateOnly(value?: string | Date | null): string {
+    if (!value) {
+      return new Date().toISOString().slice(0, 10);
+    }
+    if (value instanceof Date) {
+      return value.toISOString().slice(0, 10);
+    }
+    const raw = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      return raw.slice(0, 10);
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      return new Date().toISOString().slice(0, 10);
+    }
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  private dayBefore(value: string | Date): string {
+    const base = this.toDateOnly(value);
+    const d = new Date(`${base}T12:00:00`);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+
+  private async syncPocForBox(box: DonationBox): Promise<CsrPoc | null> {
     try {
-      if (!box?.id) return;
+      if (!box?.id) return null;
       const pocType = box.type === "Mosques" ? "Mosques" : "Donation Boxes";
       const pocName = (box.shopkeeper?.trim() || box.name?.trim() || box.shop_name?.trim() || "Contact Person");
       const pocPhone = box.cell_no?.trim() || null;
@@ -983,22 +1028,367 @@ export class DonationBoxService {
         poc.name = pocName;
         poc.phone = pocPhone;
         poc.type = pocType;
-        await this.pocRepository.save(poc);
-      } else {
-        poc = this.pocRepository.create({
-          donation_box_id: box.id,
-          type: pocType,
-          name: pocName,
-          phone: pocPhone,
-          role: "contact",
-          is_primary: true,
-          is_active: true,
-        });
-        await this.pocRepository.save(poc);
+        return await this.pocRepository.save(poc);
       }
+
+      poc = this.pocRepository.create({
+        donation_box_id: box.id,
+        type: pocType,
+        name: pocName,
+        phone: pocPhone,
+        role: "contact",
+        is_primary: true,
+        is_active: true,
+      });
+      return await this.pocRepository.save(poc);
     } catch (err: any) {
       console.warn("Failed to sync POC for donation box:", err?.message);
+      return null;
     }
+  }
+
+  private async createPocForBox(box: DonationBox): Promise<CsrPoc | null> {
+    try {
+      if (!box?.id) return null;
+      const pocType = box.type === "Mosques" ? "Mosques" : "Donation Boxes";
+      const pocName =
+        box.shopkeeper?.trim() ||
+        box.name?.trim() ||
+        box.shop_name?.trim() ||
+        "Contact Person";
+      const poc = this.pocRepository.create({
+        donation_box_id: box.id,
+        type: pocType,
+        name: pocName,
+        phone: box.cell_no?.trim() || null,
+        role: "contact",
+        is_primary: true,
+        is_active: true,
+      });
+      return await this.pocRepository.save(poc);
+    } catch (err: any) {
+      console.warn("Failed to create POC for donation box:", err?.message);
+      return null;
+    }
+  }
+
+  private async findOpenPlacement(
+    donationBoxId: number,
+  ): Promise<DonationBoxPlacement | null> {
+    return this.placementRepository.findOne({
+      where: {
+        donation_box_id: donationBoxId,
+        ended_at: IsNull(),
+        is_archived: false,
+      },
+      order: { id: "DESC" },
+    });
+  }
+
+  private async openPlacement(params: {
+    donationBoxId: number;
+    pocId?: number | null;
+    shopName?: string | null;
+    shopkeeper?: string | null;
+    cellNo?: string | null;
+    cityId?: number | null;
+    routeId?: number | null;
+    startedAt?: string | Date | null;
+    note?: string | null;
+    userId?: number | null;
+  }): Promise<DonationBoxPlacement> {
+    const placement = this.placementRepository.create({
+      donation_box_id: params.donationBoxId,
+      csr_poc_id: params.pocId ?? null,
+      shop_name: params.shopName?.trim() || null,
+      shopkeeper: params.shopkeeper?.trim() || null,
+      cell_no: params.cellNo?.trim() || null,
+      city_id: params.cityId ?? null,
+      route_id: params.routeId ?? null,
+      started_at: this.toDateOnly(params.startedAt) as any,
+      ended_at: null,
+      note: params.note?.trim() || null,
+      ...(params.userId != null
+        ? { created_by: { id: params.userId } as any }
+        : {}),
+    });
+    return this.placementRepository.save(placement);
+  }
+
+  private async closeOpenPlacementsForBox(
+    donationBoxId: number,
+    endedAt: string | Date,
+    userId?: number | null,
+  ): Promise<void> {
+    const openRows = await this.placementRepository.find({
+      where: {
+        donation_box_id: donationBoxId,
+        ended_at: IsNull(),
+        is_archived: false,
+      },
+    });
+    if (!openRows.length) return;
+    const requestedEnd = this.toDateOnly(endedAt);
+    for (const row of openRows) {
+      const started = this.toDateOnly(row.started_at);
+      row.ended_at = (requestedEnd < started ? started : requestedEnd) as any;
+      if (userId != null) {
+        row.updated_by = { id: userId } as any;
+      }
+      await this.placementRepository.save(row);
+    }
+  }
+
+  private async closeOpenPlacementsForPoc(
+    pocId: number,
+    endedAt: string | Date,
+    exceptBoxId?: number,
+    userId?: number | null,
+  ): Promise<void> {
+    const qb = this.placementRepository
+      .createQueryBuilder("p")
+      .where("p.csr_poc_id = :pocId", { pocId })
+      .andWhere("p.ended_at IS NULL")
+      .andWhere("p.is_archived = false");
+    if (exceptBoxId != null) {
+      qb.andWhere("p.donation_box_id != :exceptBoxId", { exceptBoxId });
+    }
+    const openRows = await qb.getMany();
+    if (!openRows.length) return;
+    const requestedEnd = this.toDateOnly(endedAt);
+    for (const row of openRows) {
+      const started = this.toDateOnly(row.started_at);
+      row.ended_at = (requestedEnd < started ? started : requestedEnd) as any;
+      if (userId != null) {
+        row.updated_by = { id: userId } as any;
+      }
+      await this.placementRepository.save(row);
+    }
+  }
+
+  /** Ensure the box has an open placement snapshot (backfill from current fields). */
+  private async ensureOpenPlacement(
+    box: DonationBox,
+    userId?: number | null,
+  ): Promise<DonationBoxPlacement> {
+    const existing = await this.findOpenPlacement(box.id);
+    if (existing) return existing;
+
+    const poc = await this.pocRepository.findOne({
+      where: { donation_box_id: box.id, is_archived: false },
+      order: { is_primary: "DESC", id: "ASC" },
+    });
+
+    return this.openPlacement({
+      donationBoxId: box.id,
+      pocId: poc?.id ?? null,
+      shopName: box.shop_name,
+      shopkeeper: box.shopkeeper || poc?.name,
+      cellNo: box.cell_no || poc?.phone,
+      cityId: box.city_id,
+      routeId: box.route_id,
+      startedAt: box.active_since || box.created_at,
+      userId,
+    });
+  }
+
+  private async sumCollectionsForPeriod(params: {
+    donationBoxId: number;
+    startedAt: string | Date;
+    endedAt?: string | Date | null;
+    rangeStart?: string | null;
+    rangeEnd?: string | null;
+  }): Promise<{ collection_amount: number; collection_count: number }> {
+    const periodStart = this.toDateOnly(params.startedAt);
+    const periodEnd = params.endedAt ? this.toDateOnly(params.endedAt) : null;
+    const rangeStart = params.rangeStart
+      ? this.toDateOnly(params.rangeStart)
+      : null;
+    const rangeEnd = params.rangeEnd ? this.toDateOnly(params.rangeEnd) : null;
+
+    const start =
+      rangeStart && rangeStart > periodStart ? rangeStart : periodStart;
+    let end = periodEnd;
+    if (rangeEnd) {
+      end = !end || rangeEnd < end ? rangeEnd : end;
+    }
+
+    if (end && end < start) {
+      return { collection_amount: 0, collection_count: 0 };
+    }
+
+    const qb = this.donationBoxDonationRepository
+      .createQueryBuilder("c")
+      .select("COALESCE(SUM(c.collection_amount), 0)", "total")
+      .addSelect("COUNT(c.id)", "count")
+      .where("c.donation_box_id = :boxId", { boxId: params.donationBoxId })
+      .andWhere("c.is_archived = false")
+      .andWhere("c.status != :cancelled", {
+        cancelled: CollectionStatus.CANCELLED,
+      })
+      .andWhere("c.collection_date >= :start", { start });
+
+    if (end) {
+      // Inclusive end date for closed periods and filter ranges
+      qb.andWhere("c.collection_date <= :end", { end });
+    }
+
+    const raw = await qb.getRawOne();
+    return {
+      collection_amount: Number(raw?.total || 0),
+      collection_count: Number(raw?.count || 0),
+    };
+  }
+
+  private async mapPlacementHistory(
+    placements: DonationBoxPlacement[],
+    rangeStart?: string | null,
+    rangeEnd?: string | null,
+  ) {
+    const rows = [];
+    let totalAmount = 0;
+    let totalCount = 0;
+
+    for (const placement of placements) {
+      const stats = await this.sumCollectionsForPeriod({
+        donationBoxId: placement.donation_box_id,
+        startedAt: placement.started_at,
+        endedAt: placement.ended_at,
+        rangeStart,
+        rangeEnd,
+      });
+      totalAmount += stats.collection_amount;
+      totalCount += stats.collection_count;
+      rows.push({
+        id: placement.id,
+        donation_box_id: placement.donation_box_id,
+        csr_poc_id: placement.csr_poc_id,
+        shop_name: placement.shop_name,
+        shopkeeper: placement.shopkeeper,
+        cell_no: placement.cell_no,
+        city_id: placement.city_id,
+        route_id: placement.route_id,
+        started_at: placement.started_at,
+        ended_at: placement.ended_at,
+        note: placement.note,
+        is_current: placement.ended_at == null,
+        collection_amount: stats.collection_amount,
+        collection_count: stats.collection_count,
+        donation_box: placement.donation_box
+          ? {
+              id: placement.donation_box.id,
+              box_id_no: placement.donation_box.box_id_no,
+              key_no: placement.donation_box.key_no,
+              shop_name: placement.donation_box.shop_name,
+              name: placement.donation_box.name,
+              type: placement.donation_box.type,
+            }
+          : null,
+        poc: placement.csr_poc
+          ? {
+              id: placement.csr_poc.id,
+              name: placement.csr_poc.name,
+              phone: placement.csr_poc.phone,
+              email: placement.csr_poc.email,
+              type: placement.csr_poc.type,
+            }
+          : null,
+        city: placement.city
+          ? { id: placement.city.id, name: placement.city.name }
+          : null,
+        route: placement.route
+          ? { id: placement.route.id, name: placement.route.name }
+          : null,
+      });
+    }
+
+    return {
+      placements: rows,
+      summary: {
+        placement_count: rows.length,
+        collection_amount: totalAmount,
+        collection_count: totalCount,
+        range_start: rangeStart || null,
+        range_end: rangeEnd || null,
+      },
+    };
+  }
+
+  async getPlacementHistoryForBox(
+    donationBoxId: number,
+    opts?: { start_date?: string; end_date?: string },
+  ) {
+    const box = await this.findOne(donationBoxId);
+    await this.ensureOpenPlacement(box);
+
+    const qb = this.placementRepository
+      .createQueryBuilder("p")
+      .leftJoinAndSelect("p.csr_poc", "poc")
+      .leftJoinAndSelect("p.donation_box", "box")
+      .leftJoinAndSelect("p.city", "city")
+      .leftJoinAndSelect("p.route", "route")
+      .where("p.donation_box_id = :donationBoxId", { donationBoxId })
+      .andWhere("p.is_archived = false")
+      .orderBy("p.started_at", "DESC")
+      .addOrderBy("p.id", "DESC");
+
+    const start = opts?.start_date ? this.toDateOnly(opts.start_date) : null;
+    const end = opts?.end_date ? this.toDateOnly(opts.end_date) : null;
+    if (start) {
+      qb.andWhere("(p.ended_at IS NULL OR p.ended_at >= :start)", { start });
+    }
+    if (end) {
+      qb.andWhere("p.started_at <= :end", { end });
+    }
+
+    const placements = await qb.getMany();
+    return this.mapPlacementHistory(placements, start, end);
+  }
+
+  async getPlacementHistoryForPoc(
+    pocId: number,
+    opts?: { start_date?: string; end_date?: string },
+  ) {
+    const poc = await this.pocRepository.findOne({
+      where: { id: pocId, is_archived: false },
+    });
+    if (!poc) {
+      throw new NotFoundException(`POC with ID ${pocId} not found`);
+    }
+
+    const qb = this.placementRepository
+      .createQueryBuilder("p")
+      .leftJoinAndSelect("p.csr_poc", "poc")
+      .leftJoinAndSelect("p.donation_box", "box")
+      .leftJoinAndSelect("p.city", "city")
+      .leftJoinAndSelect("p.route", "route")
+      .where("p.csr_poc_id = :pocId", { pocId })
+      .andWhere("p.is_archived = false")
+      .orderBy("p.started_at", "DESC")
+      .addOrderBy("p.id", "DESC");
+
+    const start = opts?.start_date ? this.toDateOnly(opts.start_date) : null;
+    const end = opts?.end_date ? this.toDateOnly(opts.end_date) : null;
+    if (start) {
+      qb.andWhere("(p.ended_at IS NULL OR p.ended_at >= :start)", { start });
+    }
+    if (end) {
+      qb.andWhere("p.started_at <= :end", { end });
+    }
+
+    const placements = await qb.getMany();
+    const history = await this.mapPlacementHistory(placements, start, end);
+    return {
+      poc: {
+        id: poc.id,
+        name: poc.name,
+        phone: poc.phone,
+        email: poc.email,
+        type: poc.type,
+        donation_box_id: poc.donation_box_id,
+      },
+      ...history,
+    };
   }
 
   /**
@@ -1188,7 +1578,11 @@ export class DonationBoxService {
   }
 
   /**
-   * Relocate box to a new shop (optional GPS). Logs shop_relocated audit entry.
+   * Relocate box to a new shop (optional GPS). Logs shop_relocated audit entry
+   * and maintains POC/box placement history periods.
+   *
+   * Optional `poc_id` attaches an existing POC to this placement.
+   * Without it, a new POC is created from shopkeeper/cell fields.
    */
   async relocate(
     id: number,
@@ -1203,26 +1597,136 @@ export class DonationBoxService {
       throw new NotFoundException(`Donation box with ID ${id} not found`);
     }
 
+    const auditUserId = this.donationBoxAuditUserId(currentUser?.id);
+    const previousPoc = await this.pocRepository.findOne({
+      where: { donation_box_id: id, is_archived: false },
+      order: { is_primary: "DESC", id: "ASC" },
+    });
+
     const previous_shop = {
       shop_name: existing.shop_name,
       shopkeeper: existing.shopkeeper,
+      poc_id: previousPoc?.id ?? null,
       route_name: existing.route?.name ?? null,
       city_name:
         existing.city?.name ??
         (await this.resolveCityName(existing.city_id)),
     };
 
-    const { relocation_note, ...updateDto } = dto;
+    const {
+      relocation_note,
+      poc_id: rawPocId,
+      ...updateDto
+    } = dto;
+
     if (!updateDto.shop_name || !String(updateDto.shop_name).trim()) {
       throw new Error("Shop name is required to relocate the box");
     }
 
+    const selectedPocId =
+      rawPocId != null && String(rawPocId).trim() !== ""
+        ? Number(rawPocId)
+        : null;
+    if (selectedPocId != null && !Number.isFinite(selectedPocId)) {
+      throw new BadRequestException("Invalid poc_id");
+    }
+
+    let selectedPoc: CsrPoc | null = null;
+    if (selectedPocId != null) {
+      selectedPoc = await this.pocRepository.findOne({
+        where: { id: selectedPocId, is_archived: false },
+      });
+      if (!selectedPoc) {
+        throw new NotFoundException(`POC with ID ${selectedPocId} not found`);
+      }
+      if (
+        !updateDto.shopkeeper &&
+        selectedPoc.name
+      ) {
+        updateDto.shopkeeper = selectedPoc.name;
+      }
+      if (!updateDto.cell_no && selectedPoc.phone) {
+        updateDto.cell_no = selectedPoc.phone;
+      }
+    }
+
+    const placementStartAt =
+      (updateDto.active_since as string | Date | undefined) ||
+      new Date();
+    const newStart = this.toDateOnly(placementStartAt);
+    // Close previous period the day before the new placement starts so
+    // same-day collections belong to the new POC/shop.
+    const previousEnd = this.dayBefore(newStart);
+
+    await this.ensureOpenPlacement(existing, auditUserId);
+    await this.closeOpenPlacementsForBox(id, previousEnd, auditUserId);
+
     await this.update(id, updateDto, currentUser);
-    const updated = await this.findOne(id);
+    let updated = await this.findOne(id);
+
+    // Detach previous POC from this box when switching contact
+    if (previousPoc && previousPoc.id !== selectedPocId) {
+      previousPoc.donation_box_id = null;
+      previousPoc.is_primary = false;
+      await this.pocRepository.save(previousPoc);
+    }
+
+    let nextPoc: CsrPoc | null = null;
+    if (selectedPoc) {
+      if (
+        selectedPoc.donation_box_id &&
+        selectedPoc.donation_box_id !== id
+      ) {
+        await this.closeOpenPlacementsForPoc(
+          selectedPoc.id,
+          previousEnd,
+          id,
+          auditUserId,
+        );
+      }
+      selectedPoc.donation_box_id = id;
+      selectedPoc.is_primary = true;
+      selectedPoc.is_active = true;
+      if (updateDto.shopkeeper) {
+        selectedPoc.name = String(updateDto.shopkeeper).trim() || selectedPoc.name;
+      }
+      if (updateDto.cell_no !== undefined) {
+        selectedPoc.phone = updateDto.cell_no
+          ? String(updateDto.cell_no).trim()
+          : selectedPoc.phone;
+      }
+      const pocType = updated.type === "Mosques" ? "Mosques" : "Donation Boxes";
+      if (
+        selectedPoc.type === "Donation Boxes" ||
+        selectedPoc.type === "Mosques" ||
+        !selectedPoc.type
+      ) {
+        selectedPoc.type = pocType;
+      }
+      nextPoc = await this.pocRepository.save(selectedPoc);
+    } else {
+      nextPoc = await this.createPocForBox(updated);
+    }
+
+    await this.openPlacement({
+      donationBoxId: id,
+      pocId: nextPoc?.id ?? null,
+      shopName: updated.shop_name,
+      shopkeeper: updated.shopkeeper || nextPoc?.name,
+      cellNo: updated.cell_no || nextPoc?.phone,
+      cityId: updated.city_id,
+      routeId: updated.route_id,
+      startedAt: updated.active_since || newStart,
+      note: relocation_note ? String(relocation_note).trim() || null : null,
+      userId: auditUserId,
+    });
+
+    updated = await this.findOne(id);
 
     const new_shop = {
       shop_name: updated.shop_name,
       shopkeeper: updated.shopkeeper,
+      poc_id: nextPoc?.id ?? null,
       route_name: updated.route?.name ?? null,
       city_name:
         updated.city?.name ?? (await this.resolveCityName(updated.city_id)),
@@ -1239,10 +1743,12 @@ export class DonationBoxService {
           new_value: new_shop.shop_name ?? null,
         },
       ],
-      performedByUserId: this.donationBoxAuditUserId(currentUser?.id),
+      performedByUserId: auditUserId,
       metadata: {
         previous_shop,
         new_shop,
+        poc_id: nextPoc?.id ?? null,
+        previous_poc_id: previousPoc?.id ?? null,
         relocation_note: relocation_note
           ? String(relocation_note).trim() || null
           : null,

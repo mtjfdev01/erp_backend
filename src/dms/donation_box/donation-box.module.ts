@@ -5,6 +5,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { DonationBoxService } from "./donation-box.service";
 import { DonationBoxController } from "./donation-box.controller";
 import { DonationBox } from "./entities/donation-box.entity";
+import { DonationBoxPlacement } from "./entities/donation-box-placement.entity";
 import { PermissionsModule } from "../../permissions/permissions.module";
 import { DonationBoxDonationModule } from "./donation_box_donation/donation_box_donation.module";
 import { DonationBoxDonation } from "./donation_box_donation/entities/donation_box_donation.entity";
@@ -23,6 +24,7 @@ import { DonationBoxCollectionMonitorService } from "./collection-monitor/donati
     DonationBoxAuditModule,
     TypeOrmModule.forFeature([
       DonationBox,
+      DonationBoxPlacement,
       Route,
       City,
       Region,
