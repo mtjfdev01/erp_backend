@@ -66,7 +66,11 @@ export class RecurringDonationsController {
         pagination: result.pagination,
       });
     } catch (error: any) {
-      return res.status(HttpStatus.BAD_REQUEST).json({
+      const status =
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : HttpStatus.BAD_REQUEST;
+      return res.status(status).json({
         success: false,
         message: error?.message || "Failed to fetch recurring donations",
         data: [],
@@ -150,9 +154,13 @@ export class RecurringDonationsController {
 
   @Get(":id")
   @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
-  async findOne(@Param("id") id: string, @Res() res: Response) {
+  async findOne(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
-      const data = await this.ledgerService.findOne(+id);
+      const data = await this.ledgerService.findOne(+id, req?.user ?? null);
       return res.status(HttpStatus.OK).json({
         success: true,
         message: "Recurring donation fetched successfully",
@@ -160,7 +168,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to fetch recurring donation",
@@ -179,6 +191,7 @@ export class RecurringDonationsController {
   ) {
     try {
       const user = req?.user ?? null;
+      await this.ledgerService.assertStaffCanAccessSubscription(user, +id);
       if (body?.donor_id != null) {
         await this.donorService.assertStaffCanLinkDonor(user, Number(body.donor_id));
       }
@@ -211,8 +224,16 @@ export class RecurringDonationsController {
   /** Same installment payment link the cron sends (email + WhatsApp). */
   @Post(":id/send-installment-link")
   @RequiredPermissions([...RECURRING_DONATION_VIEW_GUARD])
-  async sendInstallmentLink(@Param("id") id: string, @Res() res: Response) {
+  async sendInstallmentLink(
+    @Param("id") id: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const data = await this.ledgerService.sendInstallmentPaymentLink(+id);
       return res.status(HttpStatus.OK).json({
         success: true,
@@ -221,7 +242,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to send installment payment link",
@@ -243,6 +268,10 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const userId = req?.user?.id > 0 ? req.user.id : null;
       const data = await this.ledgerService.markInstallmentsPaid(
         +id,
@@ -281,6 +310,10 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const userId = req?.user?.id > 0 ? req.user.id : null;
       const data = await this.ledgerService.archiveStaffSubscription(
         +id,
@@ -293,7 +326,11 @@ export class RecurringDonationsController {
       });
     } catch (error: any) {
       const status =
-        error?.status === 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        error?.status === 403
+          ? HttpStatus.FORBIDDEN
+          : error?.status === 404
+            ? HttpStatus.NOT_FOUND
+            : HttpStatus.BAD_REQUEST;
       return res.status(status).json({
         success: false,
         message: error?.message || "Failed to archive recurring donation",
@@ -321,6 +358,10 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const userId = req?.user?.id > 0 ? req.user.id : null;
       const count = Number(countRaw);
       if (!Number.isFinite(count) || count < 1) {
@@ -404,6 +445,10 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const userId = req?.user?.id > 0 ? req.user.id : null;
       const data = await this.ledgerService.updateStaffInstallment(
         +id,
@@ -449,6 +494,7 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(user, +id);
       if (!file) {
         throw new BadRequestException("File is required");
       }
@@ -526,9 +572,14 @@ export class RecurringDonationsController {
   async removeAttachment(
     @Param("id") id: string,
     @Param("attachmentId") attachmentId: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const result = await this.ledgerService.removeAttachment(
         +id,
         +attachmentId,
@@ -559,6 +610,10 @@ export class RecurringDonationsController {
     @Res() res: Response,
   ) {
     try {
+      await this.ledgerService.assertStaffCanAccessSubscription(
+        req?.user ?? null,
+        +id,
+      );
       const userId = req?.user?.id > 0 ? req.user.id : null;
       const data = await this.ledgerService.archiveStaffInstallment(
         +id,

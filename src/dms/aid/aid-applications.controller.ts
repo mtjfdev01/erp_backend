@@ -38,6 +38,7 @@ import { AidAttachmentContext } from "./aid.enums";
 import { AidApplicationsService } from "./aid-applications.service";
 import {
   ApproveDraftAidApplicationDto,
+  ConsiderSkipVerificationDto,
   CeoDecideAidApplicationDto,
   CreateAidApplicationDto,
   DeliverAidApplicationDto,
@@ -52,6 +53,7 @@ import {
   UpdateAidApplicationDto,
   UpdateMealReviewDto,
   UpdatePreviewApprovalDto,
+  VerificationNotRequiredAidApplicationDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 
@@ -94,21 +96,25 @@ export class AidApplicationsController {
     @Query("pageSize") pageSize: string,
     @Query("sortField") sortField: string,
     @Query("sortOrder") sortOrder: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const result = await this.applicationsService.findAll({
-      search,
-      status,
-      stage,
-      requested_aid_type,
-      district,
-      assigned_to_user_id,
-      queue,
-      page: page ? Number(page) : 1,
-      pageSize: pageSize ? Number(pageSize) : 20,
-      sortField,
-      sortOrder,
-    });
+    const result = await this.applicationsService.findAll(
+      {
+        search,
+        status,
+        stage,
+        requested_aid_type,
+        district,
+        assigned_to_user_id,
+        queue,
+        page: page ? Number(page) : 1,
+        pageSize: pageSize ? Number(pageSize) : 20,
+        sortField,
+        sortOrder,
+      },
+      req?.user ?? null,
+    );
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Applications retrieved",
@@ -410,6 +416,35 @@ export class AidApplicationsController {
     });
   }
 
+  /**
+   * Consider draft while skipping Verification + Field Process.
+   * Forwards to CEO or a manager (appears on Approvals).
+   */
+  @Post(":id/consider-skip-verification")
+  @RequiredPermissions([...AID_APPLICATIONS_APPROVE_DRAFT_GUARD])
+  async considerSkipVerification(
+    @Param("id") id: string,
+    @Body() dto: ConsiderSkipVerificationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.considerSkipVerification(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    const forwardTo = String(dto?.forward_to || "").toLowerCase();
+    const message =
+      forwardTo === "ceo"
+        ? "Considered with verification skipped — forwarded to CEO approvals"
+        : "Considered with verification skipped — forwarded to manager / MEAL approvals";
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message,
+      data,
+    });
+  }
+
   @Post(":id/reject")
   @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
   async reject(
@@ -551,6 +586,27 @@ export class AidApplicationsController {
     return res.status(HttpStatus.OK).json({
       success: true,
       message: "Forwarded for MEAL approval",
+      data,
+    });
+  }
+
+  /** Program manager: skip field investigation and send to MEAL. */
+  @Post(":id/verification-not-required")
+  @RequiredPermissions([...AID_APPLICATIONS_UPDATE_GUARD])
+  async verificationNotRequired(
+    @Param("id") id: string,
+    @Body() dto: VerificationNotRequiredAidApplicationDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const data = await this.applicationsService.markVerificationNotRequired(
+      Number(id),
+      dto,
+      req?.user,
+    );
+    return res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Verification marked as not required — forwarded for MEAL approval",
       data,
     });
   }

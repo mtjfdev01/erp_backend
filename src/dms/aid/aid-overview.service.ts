@@ -200,7 +200,7 @@ export class AidOverviewService {
     return APPROVED_STATUSES.has(status);
   }
 
-  /** Reached / passed investigation (visit report or later stage). */
+  /** Reached / passed investigation (visit report, skip at consideration, or later stage). */
   private hasBeenInvestigated(app: AidApplication) {
     if (app.verified_at) return true;
     return [
@@ -212,6 +212,22 @@ export class AidOverviewService {
       AidApplicationStatus.DELIVERED,
       AidApplicationStatus.REJECTED,
     ].includes(app.status as AidApplicationStatus);
+  }
+
+  /** Verification / field process skipped (usually at consideration). */
+  private isVerificationSkipped(app: AidApplication) {
+    const checklist = app.verification_checklist as
+      | Record<string, unknown>
+      | null;
+    const rec = app.investigation_recommendation as
+      | Record<string, unknown>
+      | null;
+    return !!(
+      checklist?._verification_not_required ||
+      checklist?._field_process_skipped ||
+      rec?.verification_not_required ||
+      rec?.field_process_skipped
+    );
   }
 
   private isDataEntry(app: AidApplication) {
@@ -321,13 +337,20 @@ export class AidOverviewService {
     const investigatedCount = scoped.filter((a) =>
       this.hasBeenInvestigated(a),
     ).length;
+    const verificationSkippedCount = scoped.filter((a) =>
+      this.isVerificationSkipped(a),
+    ).length;
     const approvedCount = approved.length;
     const disbursedCount = delivered.length;
 
     const pipeline = [
       { key: "registered", label: "Registered", count: registered },
       { key: "submitted", label: "Submitted", count: submittedCount },
-      { key: "investigated", label: "Investigated", count: investigatedCount },
+      {
+        key: "investigated",
+        label: "Verified / cleared",
+        count: investigatedCount,
+      },
       { key: "approved", label: "Approved", count: approvedCount },
       { key: "disbursed", label: "Disbursed", count: disbursedCount },
     ];
@@ -517,6 +540,7 @@ export class AidOverviewService {
         approved: approvedCount,
         rejected: rejected.length,
         returned: returned.length,
+        verification_skipped: verificationSkippedCount,
       },
       stuck: {
         investigation_overdue: stuckInvestigation.length,

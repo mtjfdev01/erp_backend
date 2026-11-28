@@ -1037,6 +1037,26 @@ export class ApproveDraftAidApplicationDto {
   assigned_to_user_id: number;
 }
 
+/**
+ * Consider draft while skipping field verification / field process.
+ * Forwards directly to CEO or a manager (MEAL queue).
+ */
+export class ConsiderSkipVerificationDto {
+  /** Person who should act next (CEO or manager). */
+  @Type(() => Number)
+  @IsInt()
+  assigned_to_user_id: number;
+
+  /** Where to land in Approvals after skip. */
+  @IsIn(["ceo", "manager"])
+  forward_to: "ceo" | "manager";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  verification_notes?: string | null;
+}
+
 export class InvestigationRecommendationDto {
   /**
    * Program manager recommendation.
@@ -1154,6 +1174,27 @@ export class ManagerForwardAidApplicationDto {
   @IsObject()
   @Type(() => InvestigationRecommendationDto)
   recommendation?: InvestigationRecommendationDto;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  leakage_override_reason?: string | null;
+}
+
+/**
+ * Program manager: skip field investigation (checklist not required)
+ * and send the case straight to MEAL approval.
+ */
+export class VerificationNotRequiredAidApplicationDto {
+  @IsOptional()
+  @IsObject()
+  @Type(() => InvestigationRecommendationDto)
+  recommendation?: InvestigationRecommendationDto;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  verification_notes?: string | null;
 
   @IsOptional()
   @IsString()

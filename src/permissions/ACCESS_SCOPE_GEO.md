@@ -111,7 +111,11 @@ Matching uses city / country / address / `geo_search` (donation boxes use city/r
 | Donor view | Yes | Offline: ownership; website: skip ownership | Yes, unless donor is assigned |
 | Donation / recurring **create·update** (link donor) | Yes | Online + offline if owned/assigned; unassigned website OK | Yes, unless donor is assigned |
 | Donation list | Yes | Offline always; online often skipped unless Team filter | Yes (AND) |
+| Recurring donations / recurring donors **list** (`POST /recurring-donations/search`) | Yes | Widest of `recurring_donations` + `recurring_donors`; offline always; online skipped unless Team filter; mixed = online OR `rd.created_by` | Yes on linked **donor** (AND) |
+| Recurring subscription **view / update / delete / installments** | Yes | Offline ownership on `rd.created_by`; online signals skip ownership | Yes on linked donor, unless donor is assigned |
+| Aid **Verification Process** list (`GET /aid/applications` no `queue`) | Yes | `program.aid_verification` scope on **`assigned_to_user_id`** (self = only my cases) | No (not wired) |
 | `GET /donors/lookup` · `GET /donors/picker` | Auth only | **No** | **No** |
+| `GET /recurring-donations/lookup` | Auth + list perm | **No** | **No** |
 
 ---
 
@@ -162,7 +166,8 @@ POST/PATCH donations  or  recurring-donations
 | Donor list / view / link | `dms/donor/donor.service.ts` (`assertDonorViewAccess`, `assertStaffCanLinkDonor`, `assertDonorLinkAccess`) |
 | Donor lookup / picker | `dms/donor/donor.controller.ts` (`GET lookup`, `GET picker`) |
 | Donation create / update | `donations/donations.service.ts` (calls `assertStaffCanLinkDonor`) |
-| Recurring create / update | `donations/recurring_donations/recurring-donations.controller.ts` |
+| Recurring list / view / mutate | `donations/recurring_donations/recurring-donations-ledger.service.ts` (`search`, `assertStaffCanAccessSubscription`) |
+| Recurring create / update (link donor) | `donations/recurring_donations/recurring-donations.controller.ts` |
 
 ---
 

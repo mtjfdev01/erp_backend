@@ -8,6 +8,8 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { PermissionsService } from "../../permissions/permissions.service";
+import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import type { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
 import { Department, User } from "../../users/user.entity";
 import { UsersService } from "../../users/users.service";
 import { S3StorageService } from "../../utils/storage/s3-storage.service";
@@ -49,6 +51,8 @@ import {
   UpdateAidApplicationDto,
   UpdateMealReviewDto,
   UpdatePreviewApprovalDto,
+  ConsiderSkipVerificationDto,
+  VerificationNotRequiredAidApplicationDto,
   VerifyAidApplicationDto,
 } from "./dto/aid.dto";
 import { AidApplication } from "./entities/aid-application.entity";
@@ -124,9 +128,44 @@ export class AidApplicationsService {
     private readonly peopleService: AidPeopleService,
     private readonly usersService: UsersService,
     private readonly permissionsService: PermissionsService,
+    private readonly dataScopeService: DataScopeService,
     private readonly s3: S3StorageService,
     private readonly aidAudit: AidAuditService,
   ) {}
+
+  /**
+   * Verification Process Access Scope — filters by investigator assignee
+   * (`assigned_to_user_id`), not created_by.
+   * self → only cases assigned to me; team/department → assigned to allowed users;
+   * org / view_all / super_admin → no assignee filter.
+   */
+  private async resolveVerificationDataScope(
+    user?: User | null,
+  ): Promise<ResolvedDataScope | null> {
+    if (!user?.id || Number(user.id) === -1) return null;
+    return this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "program",
+      "aid_verification",
+    );
+  }
+
+  private applyVerificationAssigneeScope(
+    qb: ReturnType<Repository<AidApplication>["createQueryBuilder"]>,
+    scope: ResolvedDataScope | null,
+    paramKey = "aidVerifyScopeUserIds",
+  ): void {
+    if (!scope) return;
+    if (scope.bypass || scope.type === "org" || scope.allowedUserIds == null) {
+      return;
+    }
+    this.dataScopeService.applyUserIdsFilter(qb, scope.allowedUserIds, {
+      columns: ["a.assigned_to_user_id"],
+      paramKey,
+    });
+  }
 
   private async safeAudit(params: {
     app: Pick<AidApplication, "id" | "application_no">;
@@ -1092,12 +1131,15 @@ export class AidApplicationsService {
     }
   }
 
-  private async buildStageCounts(params: {
-    search?: string;
-    requested_aid_type?: string;
-    district?: string;
-    assigned_to_user_id?: number | string;
-  }) {
+  private async buildStageCounts(
+    params: {
+      search?: string;
+      requested_aid_type?: string;
+      district?: string;
+      assigned_to_user_id?: number | string;
+    },
+    verificationScope?: ResolvedDataScope | null,
+  ) {
     const base = () => {
       const qb = this.appRepo
         .createQueryBuilder("a")
@@ -1107,6 +1149,11 @@ export class AidApplicationsService {
         .leftJoin("household.head_person", "hh_head")
         .where("a.is_archived = :archived", { archived: false });
       this.applyListFilters(qb, params);
+      this.applyVerificationAssigneeScope(
+        qb,
+        verificationScope ?? null,
+        "aidVerifyStageScopeUserIds",
+      );
       return qb;
     };
 
@@ -1259,30 +1306,33 @@ export class AidApplicationsService {
     };
   }
 
-  async findAll(params: {
-    search?: string;
-    status?: string;
-    /** Pipeline stage for data-entry board cards */
-    stage?: string;
-    requested_aid_type?: string;
-    district?: string;
-    assigned_to_user_id?: number | string;
-    interacted_by_user_id?: number | string;
-    date?: string;
-    start_date?: string;
-    end_date?: string;
-    /**
-     * approvals = verified & not rejected (CEO queue + decided non-rejects)
-     * entry = Beneficiary Registration board (excludes drafts)
-     * drafts = Drafts board (status = draft or incomplete_docs)
-     * audit = Aid Audit Logs (all statuses; optional status/stage)
-     */
-    queue?: string;
-    page?: number;
-    pageSize?: number;
-    sortField?: string;
-    sortOrder?: string;
-  }) {
+  async findAll(
+    params: {
+      search?: string;
+      status?: string;
+      /** Pipeline stage for data-entry board cards */
+      stage?: string;
+      requested_aid_type?: string;
+      district?: string;
+      assigned_to_user_id?: number | string;
+      interacted_by_user_id?: number | string;
+      date?: string;
+      start_date?: string;
+      end_date?: string;
+      /**
+       * approvals = verified & not rejected (CEO queue + decided non-rejects)
+       * entry = Beneficiary Registration board (excludes drafts)
+       * drafts = Drafts board (status = draft or incomplete_docs)
+       * audit = Aid Audit Logs (all statuses; optional status/stage)
+       */
+      queue?: string;
+      page?: number;
+      pageSize?: number;
+      sortField?: string;
+      sortOrder?: string;
+    },
+    user?: User | null,
+  ) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
     const qb = this.appRepo
@@ -1315,6 +1365,14 @@ export class AidApplicationsService {
 
     const isEntryBoard = params.queue === "entry";
     const isDraftsBoard = params.queue === "drafts";
+    // Verification Process screen (no queue) — enforce aid_verification assignee scope
+    const isVerificationBoard = !params.queue;
+    const verificationScope = isVerificationBoard
+      ? await this.resolveVerificationDataScope(user)
+      : null;
+    if (isVerificationBoard) {
+      this.applyVerificationAssigneeScope(qb, verificationScope);
+    }
 
     if (params.queue === "approvals") {
       qb.andWhere("a.verified_at IS NOT NULL");
@@ -1408,7 +1466,10 @@ export class AidApplicationsService {
       return this.summarizeListRow(app, members, kinshipHeads);
     });
 
-    const stage_counts = await this.buildStageCounts(params);
+    const stage_counts = await this.buildStageCounts(
+      params,
+      isVerificationBoard ? verificationScope : null,
+    );
 
     const districtRows = await this.appRepo
       .createQueryBuilder("a")
@@ -2694,6 +2755,181 @@ export class AidApplicationsService {
   }
 
   /**
+   * Consider draft/incomplete while skipping Verification + Field Process.
+   * Lands in Approvals: CEO queue or MEAL/manager queue based on forward_to.
+   */
+  async considerSkipVerification(
+    id: number,
+    dto: ConsiderSkipVerificationDto,
+    user?: User,
+  ) {
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (
+      app.status !== AidApplicationStatus.DRAFT &&
+      app.status !== AidApplicationStatus.INCOMPLETE &&
+      app.status !== AidApplicationStatus.INCOMPLETE_DOCS
+    ) {
+      throw new BadRequestException(
+        "Only draft or incomplete applications can be considered with skip verification",
+      );
+    }
+
+    const forwardTo = String(dto?.forward_to || "").toLowerCase();
+    if (forwardTo !== "ceo" && forwardTo !== "manager") {
+      throw new BadRequestException('forward_to must be "ceo" or "manager"');
+    }
+
+    /** Fixed production CEO user — FE never picks a CEO person. */
+    const CEO_USER_ID = 43;
+    let assigneeId = Number(dto?.assigned_to_user_id);
+    if (forwardTo === "ceo") {
+      assigneeId = CEO_USER_ID;
+    } else if (!Number.isFinite(assigneeId) || assigneeId <= 0) {
+      throw new BadRequestException(
+        "assigned_to_user_id is required (manager to forward to)",
+      );
+    }
+
+    if (forwardTo !== "ceo") {
+      const assignee = await this.usersService.findOne(assigneeId);
+      const assigneeRole = String(assignee.role || "").toLowerCase();
+      const assigneeDept = String(assignee.department || "").toLowerCase();
+      const managerRoles = new Set([
+        "manager",
+        "assistant_manager",
+        "ceo",
+        "pa",
+        "super_admin",
+        "admin",
+      ]);
+      const managerDepts = new Set([
+        Department.PROGRAM,
+        Department.HEALTH,
+        Department.MEAL,
+        Department.ADMIN,
+        Department.EXECUTIVE_OFFICE,
+        Department.CEO,
+      ]);
+      const looksManager =
+        managerRoles.has(assigneeRole) ||
+        managerDepts.has(assigneeDept as Department);
+      if (!looksManager) {
+        throw new BadRequestException(
+          "Forward to manager requires selecting a manager (program / health / MEAL / admin)",
+        );
+      }
+    } else {
+      // Ensure fixed CEO exists
+      await this.usersService.findOne(CEO_USER_ID);
+    }
+
+    const prevStatus = app.status;
+    const prevAssignee = app.assigned_to_user_id;
+    const prevAppNo = app.application_no;
+    const prevConsideredAt = app.considered_at;
+    const considerationDate = new Date();
+    const notes =
+      String(dto.verification_notes || "").trim() ||
+      "Verification not required — field process skipped at consideration";
+
+    app.assigned_to_user_id = assigneeId;
+    app.considered_at = considerationDate;
+    if (!app.submitted_at) {
+      app.submitted_at = considerationDate;
+    }
+    app.verified_at = considerationDate;
+    app.verified_by_id = user?.id ?? null;
+    app.verification_notes = notes;
+    app.verification_checklist = {
+      _verification_not_required: true,
+      _field_process_skipped: true,
+      _skipped_at_consideration: true,
+      _verification_not_required_at: considerationDate.toISOString(),
+      _verification_not_required_by_id: user?.id ?? null,
+      _forward_to: forwardTo,
+    };
+    app.investigation_recommendation = {
+      ...(typeof app.investigation_recommendation === "object" &&
+      app.investigation_recommendation
+        ? (app.investigation_recommendation as Record<string, unknown>)
+        : {}),
+      verification_not_required: true,
+      field_process_skipped: true,
+      skipped_at_consideration: true,
+      forward_to: forwardTo,
+      submitted_at: considerationDate.toISOString(),
+      submitted_by_role: "consider_skip",
+      submitted_by_id: user?.id ?? null,
+    };
+
+    if (forwardTo === "ceo") {
+      app.status = AidApplicationStatus.CEO_APPROVAL_REQUIRED;
+      app.ceo_approval_status = AidCeoApprovalStatus.PENDING;
+    } else {
+      app.status = AidApplicationStatus.MEAL_APPROVAL_REQUIRED;
+      app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
+    }
+
+    app.updated_by = user || null;
+    const assignedNo = await this.ensureProgramApplicationNo(app);
+    await this.appRepo.save(app);
+
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFICATION_NOT_REQUIRED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "assigned_to_user_id",
+          old_value: serializeAidAuditValue(prevAssignee),
+          new_value: serializeAidAuditValue(assigneeId),
+        },
+        {
+          field: "considered_at",
+          old_value: serializeAidAuditValue(prevConsideredAt),
+          new_value: serializeAidAuditValue(app.considered_at),
+        },
+        {
+          field: "verification_not_required",
+          old_value: null,
+          new_value: true,
+        },
+        {
+          field: "field_process_skipped",
+          old_value: null,
+          new_value: true,
+        },
+        {
+          field: "forward_to",
+          old_value: null,
+          new_value: forwardTo,
+        },
+        ...(assignedNo
+          ? [
+              {
+                field: "application_no",
+                old_value: serializeAidAuditValue(prevAppNo),
+                new_value: serializeAidAuditValue(app.application_no),
+              },
+            ]
+          : []),
+      ],
+      metadata: {
+        skipped_at_consideration: true,
+        field_process_skipped: true,
+        forward_to: forwardTo,
+        assigned_to_user_id: assigneeId,
+        application_no: app.application_no,
+      },
+    });
+    return this.findOne(id);
+  }
+
+  /**
    * Mark application incomplete (missing details / needs completion).
    * Allowed from active pipeline statuses (not draft/successful/delivered/rejected).
    */
@@ -3104,6 +3340,139 @@ export class AidApplicationsService {
       metadata: {
         skip_to_ceo: skipToCeo,
         vulnerability_after_visit: vulnerability.after_visit?.total ?? null,
+      },
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Program manager: mark field verification as not required and send to MEAL.
+   * Skips investigation checklist / site-visit GPS requirements.
+   */
+  async markVerificationNotRequired(
+    id: number,
+    dto: VerificationNotRequiredAidApplicationDto,
+    user?: User,
+  ) {
+    if (!(await this.isProgramDepartmentManager(user))) {
+      throw new ForbiddenException(
+        "Only a Program department manager can mark verification as not required",
+      );
+    }
+    const app = await this.appRepo.findOne({
+      where: { id, is_archived: false },
+      relations: ["beneficiary", "writer"],
+    });
+    if (!app) throw new NotFoundException(`Application #${id} not found`);
+    if (app.ceo_approval_status === AidCeoApprovalStatus.REJECTED) {
+      throw new BadRequestException(
+        "Application was rejected by CEO and cannot be forwarded",
+      );
+    }
+    if (
+      ![
+        AidApplicationStatus.SUBMITTED,
+        AidApplicationStatus.UNDER_REVIEW,
+        AidApplicationStatus.VERIFICATION_COMPLETED,
+        AidApplicationStatus.MANAGER_REVIEW,
+      ].includes(app.status)
+    ) {
+      throw new BadRequestException(
+        "Verification Not Required is only available before MEAL / CEO stages",
+      );
+    }
+
+    const prev = (app.investigation_recommendation ||
+      {}) as Record<string, unknown>;
+    const incoming = dto.recommendation;
+    const hasIncoming =
+      !!incoming &&
+      (!!incoming.decision ||
+        (Array.isArray(incoming.ration_options) &&
+          incoming.ration_options.length > 0) ||
+        String(incoming.remarks || "").trim().length > 0);
+    const recSource: InvestigationRecommendationDto = hasIncoming
+      ? incoming!
+      : {
+          decision: prev.decision as InvestigationRecommendationDto["decision"],
+          amount: (prev.amount as number | null) ?? null,
+          period_months: (prev.period_months as number | null) ?? null,
+          remarks: (prev.remarks as string | null) ?? null,
+          found_monthly_income:
+            (prev.found_monthly_income as number | null) ?? null,
+          ration_options: Array.isArray(prev.ration_options)
+            ? (prev.ration_options as InvestigationRecommendationDto["ration_options"])
+            : undefined,
+        };
+    const recNorm = this.assertRecommendationValid(
+      recSource,
+      "Recommendation",
+    );
+
+    await this.assertLeakageOverrideAllowed(
+      app,
+      dto.leakage_override_reason,
+      user,
+    );
+
+    const notes =
+      String(dto.verification_notes || "").trim() ||
+      String(recNorm.remarks || "").trim() ||
+      "Verification not required — field investigation skipped by Program manager";
+
+    const prevStatus = app.status;
+    const prevChecklist =
+      (app.verification_checklist as Record<string, unknown> | null) || null;
+
+    app.status = AidApplicationStatus.MEAL_APPROVAL_REQUIRED;
+    app.ceo_approval_status = AidCeoApprovalStatus.NOT_REQUIRED;
+    app.verification_notes = notes;
+    app.verification_checklist = {
+      ...(prevChecklist || {}),
+      _verification_not_required: true,
+      _verification_not_required_at: new Date().toISOString(),
+      _verification_not_required_by_id: user?.id ?? null,
+    };
+    app.investigation_recommendation = {
+      ...prev,
+      decision: recNorm.decision,
+      amount: recNorm.amount,
+      period_months: recNorm.period_months,
+      remarks: recNorm.remarks,
+      found_monthly_income: recNorm.found_monthly_income,
+      ration_options: recNorm.ration_options,
+      verification_not_required: true,
+      submitted_at: new Date().toISOString(),
+      submitted_by_role: "program_manager",
+      submitted_by_id: user?.id ?? null,
+      manager_forwarded_at: new Date().toISOString(),
+      manager_forwarded_by_id: user?.id ?? null,
+    };
+    app.verified_at = new Date();
+    app.verified_by_id = user?.id ?? null;
+    app.updated_by = user || null;
+    await this.appRepo.save(app);
+
+    await this.safeAudit({
+      app,
+      action: AID_AUDIT_ACTIONS.VERIFICATION_NOT_REQUIRED,
+      user,
+      changes: [
+        ...buildAidStatusChange(prevStatus, app.status),
+        {
+          field: "verification_not_required",
+          old_value: null,
+          new_value: true,
+        },
+        {
+          field: "recommendation.decision",
+          old_value: serializeAidAuditValue(prev.decision ?? null),
+          new_value: serializeAidAuditValue(recNorm.decision),
+        },
+      ],
+      metadata: {
+        verification_not_required: true,
+        note: notes,
       },
     });
     return this.findOne(id);

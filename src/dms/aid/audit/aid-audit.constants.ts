@@ -11,6 +11,7 @@ export const AID_AUDIT_ACTIONS = {
   REJECTED: "rejected",
   VERIFIED: "verified",
   VERIFICATION_COMPLETED: "verification_completed",
+  VERIFICATION_NOT_REQUIRED: "verification_not_required",
   MANAGER_FORWARDED: "manager_forwarded",
   MEAL_FORWARDED: "meal_forwarded",
   CEO_DECIDED: "ceo_decided",

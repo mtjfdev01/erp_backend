@@ -10,6 +10,9 @@ import { EmailService } from "../../email/email.service";
 import { WhatsAppService } from "../../utils/services/whatsapp.service";
 import { PermissionsService } from "../../permissions/permissions.service";
 import { DataScopeService } from "../../permissions/data-scope/data-scope.service";
+import type { ResolvedDataScope } from "../../permissions/data-scope/data-scope.types";
+import { GeographicScopeService } from "../../permissions/geographic-scope/geographic-scope.service";
+import type { ResolvedGeographicScope } from "../../permissions/geographic-scope/geographic-scope.types";
 import { assertRecurringReconciler } from "../../permissions/reconciler-permissions";
 import {
   advanceByFrequency,
@@ -76,7 +79,162 @@ export class RecurringDonationsLedgerService {
     private readonly whatsAppService: WhatsAppService,
     private readonly permissionsService: PermissionsService,
     private readonly dataScopeService: DataScopeService,
+    private readonly geographicScopeService: GeographicScopeService,
   ) {}
+
+  /**
+   * Widest of recurring_donations + recurring_donors Access Scope, then Team filter.
+   * Recurring Donors UI shares this ledger search endpoint.
+   */
+  private async resolveRecurringListDataScope(
+    user: { id?: number; role?: string; department?: string },
+    filters: Record<string, any>,
+  ): Promise<ResolvedDataScope> {
+    const donationsScope = await this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      "recurring_donations",
+    );
+    const donorsScope = await this.dataScopeService.resolveScope(
+      user.id,
+      user.role,
+      user.department,
+      "fund_raising",
+      "recurring_donors",
+    );
+    let scope = this.dataScopeService.mergeScopes(donationsScope, donorsScope);
+    const teamFilter = this.dataScopeService.parseTeamFilter(
+      filters?.team_filter,
+      filters?.team_filter_user_id,
+    );
+    if (teamFilter) {
+      scope = await this.dataScopeService.narrowScopeWithTeamFilter(
+        scope,
+        teamFilter,
+      );
+    }
+    return scope;
+  }
+
+  private isOnlineSubscriptionRecord(
+    subscription: RecurringDonation,
+    initialDonation?: Donation | null,
+    donor?: Donor | null,
+  ): boolean {
+    if (subscription.stripe_subscription_id) return true;
+    const method = String(subscription.donation_method || "")
+      .trim()
+      .toLowerCase();
+    if (["online", "stripe", "stripe_embed"].includes(method)) return true;
+    if (
+      String(initialDonation?.donation_source || "")
+        .trim()
+        .toLowerCase() === "website"
+    ) {
+      return true;
+    }
+    if (String(donor?.source || "").trim().toLowerCase() === "website") {
+      return true;
+    }
+    return false;
+  }
+
+  private getAssignedToUserId(
+    donor: Donor | null | undefined,
+  ): number | null {
+    if (!donor) return null;
+    const assigned = (donor as any).assigned_to as
+      | { id?: number }
+      | number
+      | null
+      | undefined;
+    if (assigned == null) return null;
+    const id = typeof assigned === "object" ? assigned.id : assigned;
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  /**
+   * View/mutate gate: data scope on subscription created_by (offline / non-online),
+   * geographic on linked donor (skipped when donor is assigned).
+   */
+  async assertStaffCanAccessSubscription(
+    user: { id?: number; role?: string; department?: string } | null | undefined,
+    subscriptionId: number,
+  ): Promise<RecurringDonation> {
+    const subscription = await this.recurringDonationRepo.findOne({
+      where: {
+        id: subscriptionId,
+        record_type: "subscription",
+        is_archived: false,
+      },
+      relations: ["created_by"],
+    });
+    if (!subscription) {
+      throw new NotFoundException("Recurring donation subscription not found");
+    }
+    if (!user?.id || user.id === -1) {
+      return subscription;
+    }
+
+    const [initialDonation, donor] = await Promise.all([
+      subscription.initial_donation_id
+        ? this.donationRepository.findOne({
+            where: { id: subscription.initial_donation_id },
+          })
+        : Promise.resolve(null),
+      subscription.donor_id
+        ? this.donorRepository.findOne({
+            where: { id: subscription.donor_id },
+            relations: ["assigned_to", "created_by"],
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const dataScope = await this.resolveRecurringListDataScope(user, {});
+    const isOnline = this.isOnlineSubscriptionRecord(
+      subscription,
+      initialDonation,
+      donor,
+    );
+    if (!isOnline) {
+      this.dataScopeService.assertRecordAccess(dataScope, {
+        created_by: subscription.created_by as any,
+      });
+    }
+
+    const skipGeoBecauseAssigned = this.getAssignedToUserId(donor) != null;
+    if (!skipGeoBecauseAssigned && donor) {
+      const geoScope = await this.geographicScopeService.resolveForUser(
+        user.id,
+        user.role,
+        user as any,
+        "donors",
+      );
+      if (this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+        const matches = this.geographicScopeService.recordMatches(
+          geoScope,
+          "donors",
+          {
+            city: donor.city,
+            country: donor.country,
+            address: donor.address,
+            geo_search: (donor as any).geo_search,
+            created_by: donor.created_by as any,
+          },
+        );
+        if (!matches) {
+          throw new ForbiddenException(
+            "You do not have geographic access to this record",
+          );
+        }
+      }
+    }
+
+    return subscription;
+  }
 
   async search(
     payload: Record<string, any>,
@@ -180,22 +338,38 @@ export class RecurringDonationsLedgerService {
     }
 
     if (user?.id) {
-      const scope = await this.dataScopeService.resolveListScope({
-        userId: user.id,
-        userRole: user.role,
-        userDepartment: user.department,
-        permissionDepartment: "fund_raising",
-        module: "recurring_donations",
-        teamFilter: filters.team_filter,
-        teamFilterUserId: filters.team_filter_user_id,
-      });
+      // Layer 3 — geographic (linked donor territory), AND with data scope
+      const geoScope: ResolvedGeographicScope =
+        await this.geographicScopeService.resolveForUser(
+          user.id,
+          user.role,
+          user as any,
+          "donors",
+        );
+      if (this.geographicScopeService.isGeographicFilterActive(geoScope)) {
+        this.geographicScopeService.applyToQuery(
+          qb,
+          "donors",
+          "donor",
+          geoScope,
+        );
+      }
+
+      // Layer 2 — Access Scope (widest of recurring_donations + recurring_donors)
+      const scope = await this.resolveRecurringListDataScope(user, filters);
 
       if (!scope.bypass && scope.type !== "org" && scope.allowedUserIds != null) {
-        const teamFilterActive = !!(filters.team_filter && filters.team_filter !== "all");
+        const teamFilterActive = !!(
+          filters.team_filter && filters.team_filter !== "all"
+        );
+        // Same pattern as donations: offline always; online skip unless Team filter;
+        // mixed = online OR owned.
         if (sourceFilter === "offline" || teamFilterActive) {
           this.dataScopeService.applyToQuery(qb, "rd", scope);
         } else if (sourceFilter !== "online") {
-          const allowedIds = scope.allowedUserIds.length ? scope.allowedUserIds : [-1];
+          const allowedIds = scope.allowedUserIds.length
+            ? scope.allowedUserIds
+            : [-1];
           qb.andWhere(
             `(${isOnlineSql} OR rd.created_by IN (:...recurringDataScopeUserIds))`,
             { recurringDataScopeUserIds: allowedIds },
@@ -459,7 +633,14 @@ export class RecurringDonationsLedgerService {
     };
   }
 
-  async findOne(id: number) {
+  async findOne(
+    id: number,
+    user?: { id?: number; role?: string; department?: string } | null,
+  ) {
+    if (user?.id && user.id !== -1) {
+      await this.assertStaffCanAccessSubscription(user, id);
+    }
+
     const subscription = await this.recurringDonationRepo.findOne({
       where: {
         id,
